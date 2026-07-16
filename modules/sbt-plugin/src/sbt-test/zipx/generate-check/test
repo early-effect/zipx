@@ -1,0 +1,7 @@
+# Verify zipx generates a correct workflow and the generate/check round-trip is idempotent.
+> zipxGraph
+> zipxWorkflowGenerate
+$ exists .github/workflows/ci.yml
+> assertGraph
+# Freshly generated file must pass the check (determinism / idempotence).
+> zipxWorkflowCheck
