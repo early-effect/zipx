@@ -8,8 +8,8 @@ You declare your modules and their `dependsOn` edges once, in `build.sbt`, as yo
 - **publishes in true dependency order** (upstream artifacts before downstream), gated on release tags;
 - **runs only affected modules on pull requests** (changed modules + their transitive dependents);
 - **caches sbt's build state** with a commit-stable key so mid-PR pushes stay warm (local or remote);
-- **builds & publishes docker images** for services via sbt-native-packager — the image is described by the build, not a Dockerfile;
-- **deploys to multiple environments** (staging/production) with per-environment config and **human-in-the-loop approval** for production via GitHub Environments;
+- **builds & publishes docker images** for services via sbt-native-packager — so that the image can be described by the build;
+- **deploys to multiple environments** (staging/production etc) with per-environment config allowing **human-in-the-loop approval** for production via GitHub Environments;
 - **extends to anything** — deploys, multi-registry pushes, lint gates, and stages you invent are all pluggable capabilities;
 - **checks itself in CI**: a committed workflow that drifts from the build fails the build.
 
@@ -18,6 +18,17 @@ You declare your modules and their `dependsOn` edges once, in `build.sbt`, as yo
 The common approach to CI for a Scala monorepo is a hand-written `.github/workflows/*.yml` (often plus an external config file and a resolver script) that re-declares the module set, their dependencies, and per-module test/publish/deploy recipes. That duplicates what `build.sbt` already knows, and the two drift: a new module, a renamed project, or a changed dependency edge silently desyncs CI from the build. Publish ordering is usually not modeled at all — modules publish in parallel and rely on artifacts already existing in the registry.
 
 zipx makes the sbt build the single source of truth. The build graph *is* the CI topology.
+
+## Why sbt 2.0 (the unlock)
+
+zipx isn't just a nicer way to write CI — it's something **sbt 2.0 makes newly possible**. Four sbt 2.0 changes are load-bearing:
+
+- **A machine-wide, content-addressed build cache (Bazel-style "action cache").** This is the big one. Fanning a monorepo out into one job per module is only *fast* if those jobs don't each recompile the world. sbt 2.0's action cache is content-addressed and shared across the machine, so a per-module job restores upstream compilation instead of redoing it. zipx's parallel fan-out and its **commit-stable cache key** (reuse across a whole PR, roll on release) are built directly on this — in sbt 1.x there was nothing to key a cross-job cache on.
+- **A real remote cache over the Bazel gRPC protocol** (`sbt-remote-cache`, which zipx bundles). This is what lets caching span *runners*, not just jobs on one machine — `BazelRemoteSidecar` and `ManagedRemote` exist because sbt 2.0 shipped the transport.
+- **Scala 3 plugin authoring.** sbt 2.0 plugins are Scala 3, so zipx's heart — `zipx-core` and `zipx-workflow` — are ordinary, exhaustively-testable Scala 3 libraries with a clean typed model (`Capability`, `Target`, the module graph, `ModuleGraph => Workflow`). The whole planner is verified with zero sbt on the classpath. Under sbt 1.x that logic would be Scala 2.12 tangled into the plugin.
+- **Common settings.** sbt 2.0's model — a bare `foo := x` in `build.sbt` applies to every module and each can override — is exactly the ergonomics zipx wants: derive everything, let a bare `zipxTestTask := "testFull"` set a build-wide default, and let any module override it. No `ThisBuild /` ceremony.
+
+In short: sbt 2.0 turned "fast, cached, parallel monorepo CI" from an external-tooling problem into a *build* problem — and zipx is the build describing the solution.
 
 ## Quick start
 
@@ -208,6 +219,19 @@ zipxCapabilities += Capability.test.copy(needsCapabilities = List("fmt"))  // ev
 ```
 
 Custom capabilities can also override runners (`runsOn = Some(List("self-hosted", "linux"))` renders a list runner) and set `permissions` — the same knobs the built-ins use.
+
+### Typed task keys (`zipxTasks`)
+
+The `command` above is a string because it's ultimately what runs at the sbt shell in CI — and it must express things a single key can't (the cross `+`, command aliases, compound `a; b`). For the common "one task" case, `zipxTasks` offers the same constructors taking a real `TaskKey`/`InputKey` instead, so you get **code completion and compile-time checking** (a renamed or removed task fails at build load, not in CI):
+
+```scala
+val promote = taskKey[Unit]("promote the image")
+// …
+zipxCapabilities += zipxTasks.once("fmt", scalafmtCheckAll)                 // renders `scalafmtCheckAll`
+zipxCapabilities += zipxTasks.deploy(_.id == "service", promote, targets)   // renders `service/promote`
+```
+
+A key renders to `<module>/<label>` (or its bare `<label>` for a `Once` gate) — identical to the string form. `zipxTasks` mirrors `once` / `custom` / `deploy`; reach for the plain string when you need scoping/args/`+`/aliases the type can't carry.
 
 ## Self-checking
 

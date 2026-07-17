@@ -38,6 +38,9 @@ object ZipxPlugin extends AutoPlugin:
     // The workflow Step type, so extraSteps can be written in build.sbt.
     type Step = zipx.workflow.Step
     val Step = zipx.workflow.Step
+    // Typed, IDE-friendly capability constructors that take a real TaskKey/InputKey instead of a command string:
+    //   zipxTasks.once("fmt", scalafmtCheckAll)   zipxTasks.deploy(_.id == "svc", promote, targets = ...)
+    val zipxTasks = zipx.sbt.CapabilityTasks
 
     // Build-level configuration.
     val zipxCapabilities =

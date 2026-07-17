@@ -30,6 +30,12 @@ lazy val root = (project in file("."))
   .aggregate(schema, api, client, service)
   .settings(publish / skip := true)
 
+// A real build-wide task, referenced as a TYPED key (not a string) via zipxTasks.once — proves the typed,
+// IDE-friendly capability API renders to the same `<label>` command.
+val lintAll = taskKey[Unit]("a build-wide lint gate")
+lintAll := ()
+zipxCapabilities += zipxTasks.once("lint", lintAll)
+
 // Assertions run inside the scripted test.
 val assertGraph = taskKey[Unit]("assert the graph and generated workflow are correct")
 assertGraph := {
@@ -73,4 +79,7 @@ assertGraph := {
   assert(!content.contains("++${{ matrix.scala }} +"), "publish must not combine matrix leg with +publish")
   // No module here enables DockerPlugin, so no docker stage should leak in.
   assert(!content.contains("docker-"), "docker stage must be absent when no module opts in")
+  // The typed `zipxTasks.once(..., lintAll)` renders a single build-wide job running the key's label.
+  assert(content.contains("lint:"), "typed once-capability should emit a build-wide `lint` job")
+  assert(content.contains("sbt 'lintAll'"), "typed key should render to its bare label command")
 }

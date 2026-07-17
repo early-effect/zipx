@@ -97,9 +97,11 @@ zipxCapabilities += Capability.custom(
 // Deploy targets are defined in project/Deploy.scala (a typed Scala list — the replacement for an
 // external YAML config + resolver script). zipx knows nothing about clouds/tiers — it just fans out
 // one job per target, binds the GitHub Environment, injects the env, and wires needs.
-zipxCapabilities += Capability.deploy(
+// Note: the deploy command is given as the real `promote` TaskKey (not a string) via `zipxTasks.deploy` — so it's
+// code-completed and compile-checked. zipx renders it to `<module>/promote`. It reads the injected TIER env (Gap 2).
+zipxCapabilities += zipxTasks.deploy(
   participates = _.id == "service",
-  command = n => s"${n.id}/promote", // a real sbt task that reads the injected TIER env (Gap 2)
+  command = promote,
   targets = _ =>
     DeployEnv.all.map(e =>
       Target(
