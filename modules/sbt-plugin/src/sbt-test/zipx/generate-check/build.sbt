@@ -44,6 +44,15 @@ zipxCapabilities += zipxTasks.custom(
   gate = Gate.Always,
 )
 
+// The cmd"…" interpolator: literal command syntax (`+ `) + a typed key splice, module-scoped → +<module>/publish.
+// cmd produces a ModuleNode => String, so it's passed to the core Capability.custom (which takes that function).
+zipxCapabilities += Capability.custom(
+  name = "crossPublishCheck",
+  command = cmd"+ ${publish}",
+  participates = _.id == "schema",
+  gate = Gate.Always,
+)
+
 // Assertions run inside the scripted test.
 val assertGraph = taskKey[Unit]("assert the graph and generated workflow are correct")
 assertGraph := {
@@ -92,4 +101,6 @@ assertGraph := {
   assert(content.contains("sbt 'lintAll'"), "typed key should render to its bare label command")
   // A config-scoped typed key renders the config axis: <module>/Compile/compile.
   assert(content.contains("sbt 'schema/Compile/compile'"), "typed config-scoped key should render its config axis")
+  // The cmd"…" interpolator: literal `+ ` syntax + a module-scoped typed key splice.
+  assert(content.contains("sbt '+ schema/publish'"), "cmd interpolator should emit literal syntax + module-scoped key")
 }

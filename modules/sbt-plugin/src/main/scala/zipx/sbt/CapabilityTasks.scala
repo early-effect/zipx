@@ -38,6 +38,32 @@ object CapabilityTasks:
   def crossModuleCommand(key: Scoped): ModuleNode => String =
     n => if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/${scopedLabel(key)}" else s"${n.id}/${scopedLabel(key)}"
 
+  /** The `cmd"…"` interpolator: write command *syntax* as literal text and splice typed keys with `${key}`.
+    *
+    * Literal parts are emitted verbatim (so you carry `+`, `++<ver>`, compound `;`, and args), while each `${key}`
+    * splice is a real `TaskKey`/`InputKey` — compile-checked and config-aware — rendered **module-scoped** as
+    * `<moduleId>/[<Config>/]<label>`, exactly like the built-ins. The result is a `ModuleNode => String` you pass as a
+    * capability `command`:
+    *
+    * {{{
+    * cmd"+ \${testFull}"                       // n => s"+\${n.id}/testFull"
+    * cmd"++2.13.16; \${legacyClient / publish}" // literal version switch + a module-scoped typed key
+    * cmd"\${Docker / publish}"                  // config axis preserved → <id>/Docker/publish
+    * }}}
+    *
+    * Splices are always module-scoped; for an explicitly cross-*project* command, use a plain string/lambda. No macro
+    * is involved — the typed splices are just `Scoped` varargs, so a renamed or removed key is a compile error.
+    */
+  extension (sc: StringContext)
+    def cmd(keys: Scoped*): ModuleNode => String =
+      n =>
+        val rendered = keys.map(k => s"${n.id}/${scopedLabel(k)}")
+        // Interleave: part0 splice0 part1 splice1 … partN  (StringContext guarantees parts.size == keys.size + 1).
+        sc.parts.iterator
+          .zipAll(rendered.iterator, "", "")
+          .foldLeft(new StringBuilder) { case (sb, (part, splice)) => sb.append(part).append(splice) }
+          .toString
+
   // ---- Typed constructors mirroring Capability.{deploy,custom,once} but taking a key for the command ----
 
   /** [[Capability.deploy]] with the deploy command given as a task key (rendered `<module>/<label>`). */

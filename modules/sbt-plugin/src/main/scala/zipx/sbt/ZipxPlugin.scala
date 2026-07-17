@@ -41,6 +41,8 @@ object ZipxPlugin extends AutoPlugin:
     // Typed, IDE-friendly capability constructors that take a real TaskKey/InputKey instead of a command string:
     //   zipxTasks.once("fmt", scalafmtCheckAll)   zipxTasks.deploy(_.id == "svc", promote, targets = ...)
     val zipxTasks = zipx.sbt.CapabilityTasks
+    // The cmd"…" interpolator: literal command syntax + typed key splices, e.g. cmd"+ ${testFull}".
+    export zipx.sbt.CapabilityTasks.cmd
 
     // Build-level configuration.
     val zipxCapabilities =
