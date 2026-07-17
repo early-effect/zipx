@@ -231,7 +231,7 @@ zipxCapabilities += zipxTasks.once("fmt", scalafmtCheckAll)                 // r
 zipxCapabilities += zipxTasks.deploy(_.id == "service", promote, targets)   // renders `service/promote`
 ```
 
-A key renders to `<module>/<label>` (or its bare `<label>` for a `Once` gate) — identical to the string form. `zipxTasks` mirrors `once` / `custom` / `deploy`; reach for the plain string when you need scoping/args/`+`/aliases the type can't carry.
+A key renders to `<module>/<label>`, config-scoped keys keep their config axis (`Docker / publish` → `<module>/Docker/publish`), and a `Once` gate renders the bare `<label>` — all identical to the string form. `zipxTasks` mirrors `once` / `custom` / `deploy`; reach for the plain string only when you need the cross `+`, command aliases, compound `a; b`, or task/args scoping the type can't carry.
 
 ## Self-checking
 

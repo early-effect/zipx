@@ -65,15 +65,17 @@ lazy val root = (project in file("."))
   .settings(publish / skip := true)
 
 // A build-wide format gate that every test job waits on (Gap 3: run-once capability). One job, not per-module.
-zipxCapabilities += Capability.once("fmt", "scalafmtCheckAll")
+// The command is the real `scalafmtCheckAll` task key (typed, not a string) — from sbt-scalafmt.
+zipxCapabilities += zipxTasks.once("fmt", scalafmtCheckAll)
 zipxCapabilities += Capability.test.copy(needsCapabilities = List("fmt"))
 
 // Multi-registry image publish (Gap 1). Overrides the built-in single-target `docker` capability (same name ⇒
 // replace) to push the service image to N registries, each with its own credentials — the same targets+extraSteps
-// machinery deploy uses. Registries are a typed Scala list (project/Deploy.scala).
-zipxCapabilities += Capability.custom(
+// machinery deploy uses. Registries are a typed Scala list (project/Deploy.scala). The command is the real
+// config-scoped `Docker / publish` key (not a string) — zipx renders it to `<module>/Docker/publish`.
+zipxCapabilities += zipxTasks.custom(
   name = "docker",
-  command = n => s"${n.id}/Docker/publish",
+  command = Docker / publish,
   participates = _.docker,
   phase = Phase.Publish,
   targets = _ =>

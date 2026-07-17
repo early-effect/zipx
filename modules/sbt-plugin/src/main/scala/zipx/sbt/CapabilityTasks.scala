@@ -20,12 +20,23 @@ object CapabilityTasks:
   /** The sbt CLI label of a key (its attribute-key name), e.g. `scalafmtCheckAll`, `publish`, `test`. */
   private def label(key: Scoped): String = key.key.label
 
-  /** A per-module command from a task key: `<moduleId>/<label>`. Use as a `command` for per-module capabilities. */
-  def moduleCommand(key: Scoped): ModuleNode => String = n => s"${n.id}/${label(key)}"
+  /** The config-axis prefix of a key, if any, rendered for the sbt CLI: `Docker / publish` → `"Docker/"`,
+    * `Compile / test` → `"Compile/"`, an unscoped key → `""`. sbt's slash syntax capitalizes the config name.
+    */
+  private def configPrefix(key: Scoped): String =
+    key.scope.config match
+      case sbt.Select(configKey) => configKey.name.capitalize + "/"
+      case _                     => "" // This / Zero — no explicit config axis
 
-  /** A per-module command that cross-publishes when the module is cross-built (a single `+<id>/<label>` leg). */
+  /** The CLI suffix for a key on a module: `<label>` or `<Config>/<label>`. */
+  private def scopedLabel(key: Scoped): String = s"${configPrefix(key)}${label(key)}"
+
+  /** A per-module command from a task key: `<moduleId>/[<Config>/]<label>` (e.g. `service/Docker/publish`). */
+  def moduleCommand(key: Scoped): ModuleNode => String = n => s"${n.id}/${scopedLabel(key)}"
+
+  /** A per-module command that cross-publishes when the module is cross-built (a single `+<id>/…` leg). */
   def crossModuleCommand(key: Scoped): ModuleNode => String =
-    n => if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/${label(key)}" else s"${n.id}/${label(key)}"
+    n => if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/${scopedLabel(key)}" else s"${n.id}/${scopedLabel(key)}"
 
   // ---- Typed constructors mirroring Capability.{deploy,custom,once} but taking a key for the command ----
 
@@ -67,6 +78,6 @@ object CapabilityTasks:
     runsOn: Option[List[String]] = None,
     extraSteps: StepContext => List[Step] = _ => Nil,
   ): Capability =
-    Capability.once(name, label(command), phase, gate, runsOn, extraSteps)
+    Capability.once(name, scopedLabel(command), phase, gate, runsOn, extraSteps)
 
 end CapabilityTasks

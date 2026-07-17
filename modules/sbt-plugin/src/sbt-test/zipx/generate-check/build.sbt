@@ -36,6 +36,14 @@ val lintAll = taskKey[Unit]("a build-wide lint gate")
 lintAll := ()
 zipxCapabilities += zipxTasks.once("lint", lintAll)
 
+// A typed CONFIG-SCOPED key (`Compile / compile`) — proves zipxTasks renders the config axis: <module>/Compile/compile.
+zipxCapabilities += zipxTasks.custom(
+  name = "compileCheck",
+  command = Compile / compile,
+  participates = _.id == "schema",
+  gate = Gate.Always,
+)
+
 // Assertions run inside the scripted test.
 val assertGraph = taskKey[Unit]("assert the graph and generated workflow are correct")
 assertGraph := {
@@ -82,4 +90,6 @@ assertGraph := {
   // The typed `zipxTasks.once(..., lintAll)` renders a single build-wide job running the key's label.
   assert(content.contains("lint:"), "typed once-capability should emit a build-wide `lint` job")
   assert(content.contains("sbt 'lintAll'"), "typed key should render to its bare label command")
+  // A config-scoped typed key renders the config axis: <module>/Compile/compile.
+  assert(content.contains("sbt 'schema/Compile/compile'"), "typed config-scoped key should render its config axis")
 }
