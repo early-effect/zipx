@@ -19,12 +19,27 @@ object ZipxCentralSpec extends ZIOSpecDefault:
         job.env.get("PGP_PASSPHRASE").contains("${{ secrets.PGP_PASSPHRASE }}"),
         job.env.get("SONATYPE_USERNAME").contains("${{ secrets.SONATYPE_USERNAME }}"),
         !job.env.contains("PGP_SECRET"), // secret stays on the import step, not job env
-        job.steps.exists(s => s.name.contains("Import signing key") && s.env.get("PGP_SECRET").contains("${{ secrets.PGP_SECRET }}")),
+        job.steps.exists(s =>
+          s.name.contains("Import signing key") && s.env.get("PGP_SECRET").contains("${{ secrets.PGP_SECRET }}")
+        ),
         job.`if`.exists(_.contains("refs/tags/v")),
       )
     },
+    test("gpg import uses $PGP_SECRET (NOT $$) so bash expands the env var instead of the PID") {
+      val importRun = Planner
+        .plan(sampleGraph, List(ZipxCentral.publishSigned), config)
+        .jobs("publish-schema")
+        .steps
+        .find(_.name.contains("Import signing key"))
+        .flatMap(_.run)
+        .getOrElse("")
+      assertTrue(
+        importRun.contains("""echo "$PGP_SECRET" | base64 --decode | gpg --batch --import"""),
+        !importRun.contains("$$PGP_SECRET"),
+      )
+    },
     test("cross-built modules get +publishSigned; single-version do not") {
-      val wf = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned), config)
+      val wf                = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned), config)
       def runOf(id: String) = wf.jobs(id).steps.last.run.getOrElse("")
       assertTrue(
         runOf("publish-api").contains("+api/publishSigned"),
@@ -33,7 +48,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       )
     },
     test("releaseOnce needs every publish job and runs sonaRelease") {
-      val wf = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned, ZipxCentral.releaseOnce), config)
+      val wf  = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned, ZipxCentral.releaseOnce), config)
       val rel = wf.jobs("central-release")
       assertTrue(
         rel.steps.last.run.exists(_.contains("sonaRelease")),
@@ -70,7 +85,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
     test("OrgSecretNames covers the five early-effect secrets") {
       assertTrue(
         ZipxCentral.OrgSecretNames.toSet ==
-          Set("PGP_KEY_HEX", "PGP_SECRET", "PGP_PASSPHRASE", "SONATYPE_USERNAME", "SONATYPE_PASSWORD"),
+          Set("PGP_KEY_HEX", "PGP_SECRET", "PGP_PASSPHRASE", "SONATYPE_USERNAME", "SONATYPE_PASSWORD")
       )
     },
   )
