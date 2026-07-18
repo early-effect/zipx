@@ -121,7 +121,7 @@ sbt 2.x has a machine-wide, content-addressed build cache. zipx persists it in C
 Three backends, selected via `zipxCache`:
 
 ```scala
-zipxCache := CacheBackend.LocalDir                                  // default: actions/cache over ~/.cache/sbt
+zipxCache := CacheBackend.LocalDir                                  // default: setup-java cache:sbt + setup-sbt disk-cache
 zipxCache := CacheBackend.BazelRemoteSidecar("buchgr/bazel-remote:latest", 9092)
 zipxCache := CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
 ```
@@ -136,7 +136,7 @@ zipxActions := ActionPins.Defaults.copy(
 )
 ```
 
-- **`LocalDir`** — persist sbt's local cache dir with `actions/cache` (pin via `zipxActions`), keyed by OS + JDK + epoch. No infrastructure.
+- **`LocalDir`** — rely on `setup-java` `cache: sbt` and `setup-sbt`'s disk-cache (no second `actions/cache` step). No infrastructure.
 - **`BazelRemoteSidecar(image, port)`** — run a `buchgr/bazel-remote` gRPC server as a job service; sbt uses it as a Bazel-protocol remote cache shared across the run.
 - **`ManagedRemote(uri, headerSecret)`** — point sbt at a managed gRPC cache (BuildBuddy/EngFlow/NativeLink); the auth header comes from the named repository secret.
 

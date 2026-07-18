@@ -93,12 +93,7 @@ object Planner:
       outputs = ListMap("modules" -> "${{ steps.compute.outputs.modules }}"),
       steps = List(
         Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0")),
-        Step(uses = Some(config.actions.setupSbt)),
-        Step(
-          name = Some(s"Setup JDK ${config.javaVersion}"),
-          uses = Some(config.actions.setupJava),
-          `with` = ListMap("distribution" -> "temurin", "java-version" -> config.javaVersion),
-        ),
+      ) ++ jdkAndSbtSteps(config) ++ List(
         Step(
           id = Some("compute"),
           name = Some("Compute affected modules"),
@@ -363,6 +358,24 @@ object Planner:
     go(List(node.id), Set.empty, Set.empty).toList.sorted
   end nearestParticipatingAncestors
 
+  /** JDK then sbt (peer order). `cache: sbt` on setup-java covers coursier/ivy/`~/.sbt`; setup-sbt's built-in
+    * disk-cache covers `~/.cache/sbt`. JDK first so setup-sbt keys its disk-cache on the configured JDK, not the
+    * runner default.
+    */
+  private def jdkAndSbtSteps(config: PlanConfig): List[Step] =
+    List(
+      Step(
+        name = Some(s"Setup JDK ${config.javaVersion}"),
+        uses = Some(config.actions.setupJava),
+        `with` = ListMap(
+          "distribution" -> "temurin",
+          "java-version" -> config.javaVersion,
+          "cache"        -> "sbt",
+        ),
+      ),
+      Step(uses = Some(config.actions.setupSbt)),
+    )
+
   private def stepsFor(
       capability: Capability,
       node: ModuleNode,
@@ -374,13 +387,7 @@ object Planner:
     val scalaArg = if hasMatrix then "++${{ matrix.scala }} " else ""
     List(
       Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0")),
-      Step(uses = Some(config.actions.setupSbt)),
-      Step(
-        name = Some(s"Setup JDK ${config.javaVersion}"),
-        uses = Some(config.actions.setupJava),
-        `with` = ListMap("distribution" -> "temurin", "java-version" -> config.javaVersion),
-      ),
-    ) ++ cache.steps ++ capability.extraSteps(StepContext(node, target, hasMatrix)) ++ List(
+    ) ++ jdkAndSbtSteps(config) ++ cache.steps ++ capability.extraSteps(StepContext(node, target, hasMatrix)) ++ List(
       Step(
         name = Some(capability.name),
         run = Some(s"sbt '$scalaArg${capability.command(node)}'"),
@@ -396,8 +403,9 @@ object Planner:
   )
 
   /** Caching for the chosen backend:
-    *   - `LocalDir`: persist sbt's local action-cache dir with `actions/cache`, keyed by a commit-stable epoch plus
-    *     OS/JDK (which sbt does not fold into its own key). `restore-keys` warm-starts from the newest prior epoch.
+    *   - `LocalDir`: no extra steps. [[jdkAndSbtSteps]] already enables `setup-java` `cache: sbt` (coursier/ivy) and
+    *     `setup-sbt`'s disk-cache (`~/.cache/sbt`). A second `actions/cache` over the same paths double-restored and
+    *     raced the built-in caches.
     *   - `BazelRemoteSidecar`: run `buchgr/bazel-remote` as a job service and point the sbt remote cache at it via env;
     *     the plugin reads `ZIPX_REMOTE_CACHE` and wires `Global / remoteCache` + `addRemoteCachePlugin`.
     *   - `ManagedRemote`: no sidecar; point the remote cache at a managed gRPC endpoint, auth via a header secret.
@@ -408,20 +416,7 @@ object Planner:
   private def cacheContribution(config: PlanConfig): CacheContribution =
     config.cache match
       case CacheBackend.LocalDir =>
-        val prefix = s"${config.runnerOs}-jdk${config.javaVersion}-sbt-"
-        CacheContribution(steps =
-          List(
-            Step(
-              name = Some("Cache sbt"),
-              uses = Some(config.actions.cache),
-              `with` = ListMap(
-                "path"         -> List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier").mkString("\n"),
-                "key"          -> s"$prefix${config.cacheEpoch}",
-                "restore-keys" -> prefix,
-              ),
-            )
-          )
-        )
+        CacheContribution()
 
       case CacheBackend.BazelRemoteSidecar(image, port) =>
         // A gRPC bazel-remote sidecar reachable at localhost:<port>. sbt talks to it via the plaintext grpc:// scheme.

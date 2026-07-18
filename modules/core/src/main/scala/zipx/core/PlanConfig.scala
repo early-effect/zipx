@@ -25,8 +25,8 @@ enum AffectedMode:
   * @param cache
   *   the cache backend strategy.
   * @param cacheEpoch
-  *   the commit-stable cache "epoch" (defaults to the build `version`). Mid-PR commits keep the same epoch so the sbt
-  *   action cache is reused; cutting a release tag rolls it. See project plan.
+  *   retained for build-settings compatibility (defaults to the build `version`). LocalDir caching is now owned by
+  *   `setup-java` / `setup-sbt`; this value is not folded into generated workflow steps.
   * @param pushBranches
   *   branches whose pushes trigger the workflow.
   * @param releaseTagPattern

@@ -20,7 +20,8 @@ package zipx.core
   * @param setupSbt
   *   `sbt/setup-sbt` pin (default v1.5.1).
   * @param cache
-  *   `actions/cache` pin for [[CacheBackend.LocalDir]] (default v6.1.0).
+  *   Reserved `actions/cache` pin (default v6.1.0). LocalDir no longer emits a separate cache step; kept for
+  *   overrides / future backends.
   */
 final case class ActionPins(
   checkout: String = ActionPins.Checkout,

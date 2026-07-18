@@ -31,7 +31,8 @@ object ActionPinsSpec extends ZIOSpecDefault:
         job.steps.exists(_.uses.contains("actions/checkout@deadbeef")),
         job.steps.exists(_.uses.contains("sbt/setup-sbt@feedface")),
         job.steps.exists(_.uses.contains("actions/setup-java@cafebabe")),
-        job.steps.exists(_.uses.contains("actions/cache@00ff00ff")),
+        // LocalDir no longer emits actions/cache (setup-java cache:sbt + setup-sbt disk-cache).
+        !job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
         job.steps.find(_.uses.exists(_.contains("checkout"))).exists(_.`with`.get("fetch-depth").contains("0")),
       )
     },
