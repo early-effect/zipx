@@ -168,6 +168,17 @@ object PlannerSpec extends ZIOSpecDefault:
         script.contains("""modules='["all"]'"""),
       )
     },
+    test("affected script never captures sbt stdout into modules (GITHUB_OUTPUT-safe)") {
+      // Regression: sbt 2 prints server banners on stdout; `modules=$(sbt …)` poisoned GITHUB_OUTPUT and failed CI.
+      val wf     = Planner.plan(sampleGraph, List(Capability.test), config.copy(affected = AffectedMode.AffectedOnPR))
+      val script = wf.jobs("affected").steps.find(_.id.contains("compute")).flatMap(_.run).getOrElse("")
+      assertTrue(
+        script.contains("sbt -batch --error \"zipxAffectedModules $BASE\""),
+        script.contains("modules=$(cat target/zipx-affected.json)"),
+        !script.contains("modules=$(sbt"),
+        wf.jobs("affected").steps.exists(_.uses.exists(_.startsWith("actions/setup-java@"))),
+      )
+    },
     test("affectedOnPush adds a guarded before-sha diff for pushes") {
       val wf = Planner.plan(
         sampleGraph,
@@ -178,7 +189,8 @@ object PlannerSpec extends ZIOSpecDefault:
       assertTrue(
         script.contains("github.event.before"),
         script.contains("zipxAffectedModules $BASE"),
-        script.contains("target/zipx-affected.json"),
+        script.contains("modules=$(cat target/zipx-affected.json)"),
+        !script.contains("modules=$(sbt"),
         // force-push / branch-create guard: all-zero sha → build everything.
         script.contains("0000000000000000000000000000000000000000"),
       )

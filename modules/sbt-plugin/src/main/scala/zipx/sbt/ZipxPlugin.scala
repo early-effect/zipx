@@ -368,9 +368,10 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   /** `zipxAffectedModules <base-ref>` — diff against the base ref, map changed files to owning modules, expand the
-    * reverse-dependency closure, and write the affected module ids as a JSON array to `target/zipx-affected.json`
-    * (also printed for local use). The generated workflow's `affected` job reads the file so sbt's own log lines never
-    * pollute `GITHUB_OUTPUT`.
+    * reverse-dependency closure, and write the affected module ids as a JSON array to
+    * `<base>/target/zipx-affected.json` (also printed for local use). The generated workflow's `affected` job reads that
+    * stable path so sbt's log lines never pollute `GITHUB_OUTPUT`. (Do not use `(target).value` — under sbt 2 it is a
+    * versioned `target/out/...` tree.)
     */
   private def affectedModulesTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
@@ -381,7 +382,7 @@ object ZipxPlugin extends AutoPlugin:
       val changed = gitDiffNames(root, baseRef)
       val modules = Affected.affectedModules(graph, changed).toList.sorted
       val json    = jsonArray(modules)
-      val out     = (LocalRootProject / target).value / "zipx-affected.json"
+      val out     = root / "target" / "zipx-affected.json"
       IO.write(out, json + "\n")
       println(json)
     }
@@ -391,8 +392,12 @@ object ZipxPlugin extends AutoPlugin:
     */
   private def gitDiffNames(root: File, baseRef: String): List[String] =
     try
-      val out = scala.sys.process.Process(Seq("git", "diff", "--name-only", s"$baseRef...HEAD"), root).!!
-      out.linesIterator.map(_.trim).filter(_.nonEmpty).toList
+      val lines = scala.collection.mutable.ListBuffer.empty[String]
+      val code  =
+        scala.sys.process
+          .Process(Seq("git", "diff", "--name-only", s"$baseRef...HEAD"), root)
+          .!(scala.sys.process.ProcessLogger(lines += _, _ => ()))
+      if code == 0 then lines.map(_.trim).filter(_.nonEmpty).toList else Nil
     catch case scala.util.control.NonFatal(_) => Nil
 
   private def jsonArray(items: List[String]): String =
