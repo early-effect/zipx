@@ -149,7 +149,7 @@ final case class Capability(             // gains (all defaulting to current beh
 
 | CI capability | zipx mechanism | milestone |
 |---|---|---|
-| test each module (custom task, e.g. `testFull`) | `Capability.test` + `zipxTestTask` | ✅ M1 |
+| test each module (custom task, e.g. `testFull`) | `zipxTestTask` (+ Aggregate Once / Graph/Layer); optional `zipxVerifyClean` | ✅ M1 / Verify knobs |
 | ordered library publish | `Capability.publish`, dependency-ordered | ✅ M2 |
 | publish gated on release | release-tag gate | ✅ M2 |
 | docker image build | `Capability.docker` (native-packager) | ✅ M4 |

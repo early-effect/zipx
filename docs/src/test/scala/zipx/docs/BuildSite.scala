@@ -10,15 +10,30 @@ import java.nio.file.Path
 /** Docs-as-tests site builder (Test classpath; `docs/specularSite`). */
 object BuildSite extends DocsSite:
 
-  def pages = Vector(Overview.doc, Usage.doc)
+  def pages = Vector(
+    Overview.doc,
+    QuickStart.doc,
+    ExecutionModes.doc,
+    Capabilities.doc,
+    CustomCapabilities.doc,
+    Verify.doc,
+    Caching.doc,
+    DockerAndDeploy.doc,
+    Packs.doc,
+    Settings.doc,
+    Developing.doc,
+  )
 
   override def site: SiteModel =
     val m = meta
     super.site.copy(
       summaryMarkdown = Some(
         s"""**zipx** makes the sbt build the single source of truth for GitHub Actions CI.
-It introspects the real module graph and generates a dependency-ordered, affected-aware,
-cached workflow — no hand-maintained YAML module lists.
+It introspects the real module graph and generates Aggregate-first (Layer/Graph when you need them),
+cached workflows — no hand-maintained YAML module lists.
+
+Guide: Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
+Docker and deploy → Packs → Settings.
 """
       ),
       installSnippets = Vector(

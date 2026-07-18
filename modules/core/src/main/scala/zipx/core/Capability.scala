@@ -36,7 +36,8 @@ enum Gate:
 /** How a capability turns participating modules into GitHub Actions jobs. This is the main CI-cost lever.
   *
   *   - `Aggregate`: one job per stage (or one per [[Target]] for deploy). Module commands are joined with `;` into a
-  *     single sbt session. Default for built-ins; fewest JVM starts.
+  *     single sbt session (Verify defaults to [[Capability.test]] Once with a root task instead). Default for
+  *     built-ins; fewest JVM starts.
   *   - `Layer`: one job per toposort wave (`subsetLayers`); commands joined within the wave; waves chained by `needs`.
   *   - `Graph`: one job per participating module (± matrix / targets). Today's full fan-out; enables affected-only PRs.
   *   - `Once`: a single build-wide job with a fixed command string (e.g. `scalafmtCheckAll`), independent of joining
@@ -164,8 +165,17 @@ object Capability:
     scope = scope,
   )
 
-  /** Aggregate test: one job joining every CI-relevant module's test task (single sbt session). Default built-in. */
-  val test: Capability = testBody(CapabilityScope.Aggregate, matrixed = false)
+  /** Aggregate Verify: one root sbt task (default `test`), matching `.aggregate`. Override the task with `zipxTestTask`
+    * (plugin builtin reads the root setting) and optional clean with `zipxVerifyClean` (applies to Aggregate, Layer,
+    * and Graph via [[PlanConfig.verifyClean]]).
+    */
+  val test: Capability =
+    Capability.once(name = "test", command = "test", phase = Phase.Verify, gate = Gate.Always)
+
+  /** Aggregate Verify that joins per-module `<id>/<testTask>` commands — escape hatch when a root aggregate task is
+    * wrong (e.g. mixed `zipxTestTask` overrides). Prefer [[test]] for typical builds.
+    */
+  val testJoined: Capability = testBody(CapabilityScope.Aggregate, matrixed = false)
 
   /** Layer test: one job per toposort wave; waves chained by `needs`. */
   val testLayers: Capability = testBody(CapabilityScope.Layer, matrixed = false)
@@ -281,9 +291,9 @@ object Capability:
       env = env,
     )
 
-  /** A run-once, build-wide gate — a single job (not per module) running one fixed command, e.g. a formatting/lint check
-    * (`scalafmtCheckAll`) or a post-publish Central release (`sonaRelease`). Other capabilities can depend on it by
-    * name via `needsCapabilities`; conversely, set `needsCapabilities` here so this once-job waits on every job of
+  /** A run-once, build-wide gate — a single job (not per module) running one fixed command, e.g. a formatting/lint
+    * check (`scalafmtCheckAll`) or a post-publish Central release (`sonaRelease`). Other capabilities can depend on it
+    * by name via `needsCapabilities`; conversely, set `needsCapabilities` here so this once-job waits on every job of
     * those capabilities.
     *
     * For a reusable-workflow call (no local steps), set [[Capability.workflowCall]] via `.copy` (see

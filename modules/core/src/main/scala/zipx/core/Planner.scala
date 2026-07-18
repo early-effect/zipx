@@ -597,8 +597,10 @@ object Planner:
       commandOverride: Option[String],
       jobSuffix: String,
   ): List[Step] =
-    val scalaArg   = if hasMatrix then "++${{ matrix.scala }} " else ""
-    val command    = commandOverride.getOrElse(capability.command(node))
+    val scalaArg = if hasMatrix then "++${{ matrix.scala }} " else ""
+    val raw      = commandOverride.getOrElse(capability.command(node))
+    val command  =
+      if capability.phase == Phase.Verify then config.verifyClean.prefixCommand(raw) else raw
     val cacheSteps =
       if cache.steps.isEmpty then localDirCacheSteps(config, jobSuffix) else cache.steps
     List(

@@ -37,6 +37,8 @@ object ZipxPlugin extends AutoPlugin:
     val Ordering = zipx.core.Ordering
     type CapabilityScope = zipx.core.CapabilityScope
     val CapabilityScope = zipx.core.CapabilityScope
+    type VerifyClean = zipx.core.VerifyClean
+    val VerifyClean = zipx.core.VerifyClean
     // Typed env / secret references — prefer these over hand-written "${{ secrets.X }}" strings.
     type EnvValue = zipx.core.EnvValue
     val EnvValue = zipx.core.EnvValue
@@ -92,10 +94,15 @@ object ZipxPlugin extends AutoPlugin:
     val zipxCiRelevant = settingKey[Boolean]("Whether this module participates in the CI test fan-out.")
     val zipxPublish    =
       settingKey[Option[Boolean]]("Force publish on/off; None (default) derives it from publish/skip.")
-    val zipxTestTask    = settingKey[String]("sbt task used to test this module (default 'test').")
+    val zipxTestTask = settingKey[String](
+      "sbt task for Verify: Aggregate root command and Graph/Layer per-module task (default 'test')."
+    )
     val zipxPublishTask = settingKey[String]("sbt task used to publish this module (default 'publish').")
     val zipxDocker      =
       settingKey[Boolean]("Whether this module publishes a docker image via Docker/publish (default false).")
+    val zipxVerifyClean = settingKey[VerifyClean](
+      "Optional clean/cleanFull prepended to every Verify sbt command (default None)."
+    )
 
     val zipxAffectedOnPR =
       settingKey[Boolean]("Whether Verify jobs run only for affected modules on PRs (default true).")
@@ -130,6 +137,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxAffectedOnPR      := true,
     zipxAffectedOnPush    := false,
     zipxSkipMergedPrPush  := true,
+    zipxVerifyClean       := VerifyClean.None,
     zipxActions           := ActionPins.Defaults,
     zipxWorkflowDispatch  := false,
   )
@@ -289,14 +297,16 @@ object ZipxPlugin extends AutoPlugin:
       actions = read(zipxActions, ActionPins.Defaults),
       workflowDispatch = read(zipxWorkflowDispatch, false),
       skipMergedPrPush = read(zipxSkipMergedPrPush, true),
+      verifyClean = read(zipxVerifyClean, VerifyClean.None),
     )
   }
 
-  /** The built-in capabilities zipx derives from the graph: always test + library publish, plus docker when any module
-    * opts in. Keying docker off the graph keeps `zipxGraph`/generated YAML free of a dead docker stage when unused.
+  /** The built-in capabilities zipx derives from the graph: Aggregate Verify (root `zipxTestTask`), library publish,
+    * plus docker when any module opts in. Clean prefixes come from [[PlanConfig.verifyClean]], not the command string.
     */
-  private def builtinCapabilities(graph: ModuleGraph): List[Capability] =
-    val base = List(Capability.test, Capability.publish)
+  private def builtinCapabilities(graph: ModuleGraph, verifyTask: String): List[Capability] =
+    val test = Capability.once(name = "test", command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
+    val base = List(test, Capability.publish)
     if graph.nodes.exists(_.docker) then base :+ Capability.docker else base
 
   private def renderWorkflow: Def.Initialize[Task[String]] = Def.task {
@@ -306,7 +316,8 @@ object ZipxPlugin extends AutoPlugin:
     // Built-in capabilities plus any the user appended via zipxCapabilities (custom stages / deploys), read from the
     // root project's scope so a bare `zipxCapabilities += ...` (a per-project common setting) is honored.
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
-    val capabilities = combineCapabilities(builtinCapabilities(graph), userCaps.toList)
+    val verifyTask   = readBuildSetting(extracted, zipxTestTask, "test")
+    val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
     Render.render(Planner.plan(graph, capabilities, cfg))
   }
 

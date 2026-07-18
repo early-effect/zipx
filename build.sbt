@@ -102,7 +102,7 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
 // Docs-as-tests site (Specular + early-effect theme). Deployed via ZipxDocs.pages in generated CI.
 lazy val docs = project
   .in(file("docs"))
-  .dependsOn(core)
+  .dependsOn(core, central)
   .enablePlugins(SpecularPlugin)
   .settings(
     name            := "zipx-docs",
