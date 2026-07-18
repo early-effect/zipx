@@ -1,0 +1,10 @@
+# Verify zipx generates a correct workflow and the generate/check round-trip is idempotent.
+> zipxGraph
+> zipxWorkflowGenerate
+$ exists .github/workflows/ci.yml
+> assertGraph
+# Freshly generated file must pass the check (determinism / idempotence).
+> zipxWorkflowCheck
+# Affected handoff for CI: task writes JSON to a file (never rely on capturing sbt stdout).
+> zipxAffectedModules HEAD
+$ exists target/zipx-affected.json
