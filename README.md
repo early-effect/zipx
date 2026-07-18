@@ -144,7 +144,7 @@ This repo dogfoods on Aggregate (`ZipxCentral.release`). [`examples/monorepo`](e
 
 ### Skip Verify after PR merge
 
-By default (`zipxSkipMergedPrPush := true`), a push to `main` that lands a merged PR does **not** re-run Verify: those tests already ran on the PR. Direct pushes to `main` still run Verify. Detection uses the GitHub API (`commits/{sha}/pulls`), so both merge commits and squash merges are covered. Publish / Deploy / tags / `workflow_dispatch` are unchanged. Set `zipxSkipMergedPrPush := false` to always Verify on every branch push.
+By default (`zipxSkipMergedPrPush := true`), a push to `main` that lands a merged PR does **not** re-run Verify: those tests already ran on the PR. Direct pushes to `main` still run Verify. Detection uses the GitHub API (`commits/{sha}/pulls`), so both merge commits and squash merges are covered. **Tag pushes never run Verify** (release tags only need Publish / Deploy). Set `zipxSkipMergedPrPush := false` to always Verify on every non-tag branch push.
 
 ## What gets generated
 

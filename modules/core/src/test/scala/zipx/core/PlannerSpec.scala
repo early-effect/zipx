@@ -176,12 +176,14 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("skipped-needs hazard: affected verify jobs use !cancelled() and tolerate skipped upstreams") {
-      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.AffectedOnPR))
+      val wf   = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.AffectedOnPR))
       val cond = wf.jobs("test-api").`if`.getOrElse("")
       assertTrue(
-        cond.startsWith("!cancelled()"),
+        cond.contains("!cancelled()"),
         // upstream test-schema must not have failed, but skipped/success are both allowed.
         cond.contains("needs.test-schema.result != 'failure'"),
+        // Tag pushes skip Verify entirely (release only needs Publish/Deploy).
+        cond.contains("!startsWith(github.ref, 'refs/tags/')"),
       )
     },
     test("by default the affected job builds all on push (no before-sha diff)") {
@@ -224,7 +226,9 @@ object PlannerSpec extends ZIOSpecDefault:
       val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.Always))
       assertTrue(
         !wf.jobs.contains("affected"),
-        wf.jobs("test-api").`if`.isEmpty,
+        // Verify still skips tag pushes; no affected membership gating.
+        wf.jobs("test-api").`if`.contains("!startsWith(github.ref, 'refs/tags/')"),
+        !wf.jobs("test-api").`if`.exists(_.contains("needs.affected")),
         !wf.jobs("test-api").needs.contains("affected"),
       )
     },
@@ -795,6 +799,7 @@ object PlannerSpec extends ZIOSpecDefault:
         gate.steps.exists(_.run.exists(_.contains("commits/${{ github.sha }}/pulls"))),
         test.needs.contains("verify-gate"),
         test.`if`.exists(_.contains("needs.verify-gate.outputs.run == 'true'")),
+        test.`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
       )
     },
     test("skipMergedPrPush does not gate Publish jobs") {
@@ -803,11 +808,17 @@ object PlannerSpec extends ZIOSpecDefault:
       assertTrue(
         wf.jobs("test").needs.contains("verify-gate"),
         !wf.jobs("publish").needs.contains("verify-gate"),
+        wf.jobs("test").`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
+        !wf.jobs("publish").`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
       )
     },
-    test("skipMergedPrPush false omits verify-gate") {
+    test("skipMergedPrPush false omits verify-gate but still skips Verify on tags") {
       val wf = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = false))
-      assertTrue(!wf.jobs.contains("verify-gate"), wf.jobs("test").needs.isEmpty)
+      assertTrue(
+        !wf.jobs.contains("verify-gate"),
+        wf.jobs("test").needs.isEmpty,
+        wf.jobs("test").`if`.contains("!startsWith(github.ref, 'refs/tags/')"),
+      )
     },
     test("Graph Verify still emits affected setup under AffectedOnPR") {
       val wf = Planner.plan(
