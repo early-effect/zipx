@@ -39,6 +39,8 @@ enum AffectedMode:
   *   when true (default), Verify jobs skip on a push to a branch if that commit already belongs to a PR merged into the
   *   same branch (merge or squash). Direct pushes to main still run; PRs, tags, and `workflow_dispatch` are unaffected.
   *   Avoids running tests twice after a PR merge.
+  * @param verifyClean
+  *   optional `clean` / `cleanFull` prepended to every Verify-phase sbt command (Aggregate, Layer, and Graph).
   */
 final case class PlanConfig(
     workflowName: String = "CI",
@@ -54,4 +56,5 @@ final case class PlanConfig(
     actions: ActionPins = ActionPins.Defaults,
     workflowDispatch: Boolean = false,
     skipMergedPrPush: Boolean = true,
+    verifyClean: VerifyClean = VerifyClean.None,
 )

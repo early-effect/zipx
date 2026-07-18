@@ -65,7 +65,7 @@ jobs:
             ubuntu-latest-jdk25-sbt-0.0.2-ci-
             ubuntu-latest-jdk25-sbt-
       - name: test
-        run: sbt 'workflow/test; core/test; central/test; docs/test; plugin/test'
+        run: sbt 'test'
   publish:
     name: publish
     runs-on: ubuntu-latest

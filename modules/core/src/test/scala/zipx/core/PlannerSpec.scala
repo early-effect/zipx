@@ -176,7 +176,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("skipped-needs hazard: affected verify jobs use !cancelled() and tolerate skipped upstreams") {
-      val wf   = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.AffectedOnPR))
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.AffectedOnPR))
       val cond = wf.jobs("test-api").`if`.getOrElse("")
       assertTrue(
         cond.contains("!cancelled()"),
@@ -712,17 +712,41 @@ object PlannerSpec extends ZIOSpecDefault:
       assertTrue(Affected.owningModule(g, "README.md").isEmpty, Affected.owningModule(g, "lib/X.scala").contains("lib"))
     },
     // ---- Aggregate / Layer / deploy-by-target ----
-    test("Aggregate test emits one job joining module commands") {
+    test("Aggregate test emits one root Once job (sbt test)") {
       val wf  = Planner.plan(sampleGraph, List(Capability.test), config)
       val run = wf.jobs("test").steps.last.run.getOrElse("")
       assertTrue(
         wf.jobs.size == 1,
         wf.jobs.contains("test"),
+        run.endsWith(" test") || run.contains("'test'"),
+        !run.contains("schema/test"),
+        !wf.jobs.contains("test-schema"),
+      )
+    },
+    test("Aggregate testJoined joins per-module test commands") {
+      val wf  = Planner.plan(sampleGraph, List(Capability.testJoined), config)
+      val run = wf.jobs("test").steps.last.run.getOrElse("")
+      assertTrue(
+        wf.jobs.contains("test"),
         run.contains("schema/test"),
         run.contains("api/test"),
         run.contains(";"),
-        !wf.jobs.contains("test-schema"),
       )
+    },
+    test("verifyClean prefixes Aggregate and Graph Verify commands, not Publish") {
+      val cleanCfg = config.copy(verifyClean = VerifyClean.CleanFull)
+      val agg      = Planner.plan(sampleGraph, List(Capability.test), cleanCfg)
+      val graph    = Planner.plan(sampleGraph, List(Capability.testGraph), cleanCfg)
+      val pub      = Planner.plan(sampleGraph, List(Capability.publish), cleanCfg)
+      assertTrue(
+        agg.jobs("test").steps.last.run.exists(_.contains("cleanFull; test")),
+        graph.jobs("test-schema").steps.last.run.exists(_.contains("cleanFull; schema/test")),
+        !pub.jobs("publish").steps.last.run.exists(_.contains("cleanFull")),
+      )
+    },
+    test("verifyClean.Clean prefixes Graph module commands") {
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(verifyClean = VerifyClean.Clean))
+      assertTrue(wf.jobs("test-api").steps.last.run.exists(_.contains("clean; api/test")))
     },
     test("Aggregate publish emits one release-gated job with joined publish commands") {
       val wf  = Planner.plan(sampleGraph, List(Capability.publish), config)
