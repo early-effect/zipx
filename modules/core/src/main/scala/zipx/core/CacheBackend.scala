@@ -9,9 +9,10 @@ package zipx.core
   */
 enum CacheBackend:
   /** Persist `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, and the build `target/` (compiled classes +
-    * `target/sona-staging`) with `actions/cache` (pin via [[ActionPins.cache]]), keyed by OS + JDK +
-    * [[PlanConfig.cacheEpoch]] (build version). Disables setup-sbt `disk-cache` and setup-java `cache: sbt` so caching
-    * is not also pinned to `hashFiles`.
+    * `target/sona-staging`) with `actions/cache` (pin via [[ActionPins.cache]]). Primary key is OS + JDK +
+    * [[PlanConfig.cacheEpoch]] + job id (so each job can save after a restore-keys warm start); restore-keys fall back
+    * to the same epoch then older epochs. Disables setup-sbt `disk-cache` and setup-java `cache: sbt` so caching is not
+    * also pinned to `hashFiles`.
     */
   case LocalDir
 

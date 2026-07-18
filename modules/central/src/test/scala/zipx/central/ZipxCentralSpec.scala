@@ -39,7 +39,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       )
     },
     test("cross-built modules get +publishSigned; single-version do not") {
-      val wf = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned), config)
+      val wf                = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned), config)
       def runOf(id: String) =
         wf.jobs(id).steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
       assertTrue(
@@ -49,15 +49,15 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       )
     },
     test("publish jobs upload target/sona-staging; central-release downloads and merges before sonaRelease") {
-      val wf  = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned, ZipxCentral.releaseOnce), config)
-      val pub = wf.jobs("publish-schema")
-      val rel = wf.jobs("central-release")
-      val upload = pub.steps.find(_.name.contains("Upload sona staging"))
+      val wf       = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned, ZipxCentral.releaseOnce), config)
+      val pub      = wf.jobs("publish-schema")
+      val rel      = wf.jobs("central-release")
+      val upload   = pub.steps.find(_.name.contains("Upload sona staging"))
       val download = rel.steps.find(_.name.contains("Download sona staging"))
-      val pubIdx = pub.steps.indexWhere(_.name.contains("publish"))
-      val upIdx  = pub.steps.indexWhere(_.name.contains("Upload sona staging"))
-      val dlIdx  = rel.steps.indexWhere(_.name.contains("Download sona staging"))
-      val runIdx = rel.steps.indexWhere(_.run.exists(_.contains("sonaRelease")))
+      val pubIdx   = pub.steps.indexWhere(_.name.contains("publish"))
+      val upIdx    = pub.steps.indexWhere(_.name.contains("Upload sona staging"))
+      val dlIdx    = rel.steps.indexWhere(_.name.contains("Download sona staging"))
+      val runIdx   = rel.steps.indexWhere(_.run.exists(_.contains("sonaRelease")))
       assertTrue(
         upload.exists(_.uses.exists(_.startsWith("actions/upload-artifact@"))),
         upload.exists(_.`with`.get("name").contains("sona-staging-publish-schema")),

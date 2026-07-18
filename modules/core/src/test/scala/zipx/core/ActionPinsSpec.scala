@@ -39,7 +39,7 @@ object ActionPinsSpec extends ZIOSpecDefault:
     },
     test("affected setup job also uses the configured checkout and setup-sbt pins") {
       val custom = ActionPins.Defaults.copy(checkout = "actions/checkout@aabbccdd", setupSbt = "sbt/setup-sbt@11223344")
-      val wf = Planner.plan(
+      val wf     = Planner.plan(
         Fixtures.sampleGraph,
         List(Capability.test),
         config.copy(affected = AffectedMode.AffectedOnPR, actions = custom),

@@ -63,8 +63,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-workflow
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'workflow/test'
   test-core:
@@ -94,8 +96,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-core
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'core/test'
   test-central:
@@ -125,8 +129,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-central
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'central/test'
   test-docs:
@@ -156,8 +162,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-docs
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'docs/test'
   test-plugin:
@@ -188,8 +196,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-plugin
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'plugin/test'
   publish-workflow:
@@ -221,8 +231,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-publish-workflow
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -271,8 +283,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-publish-core
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -321,8 +335,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-publish-central
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -372,8 +388,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-publish-plugin
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -425,8 +443,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-central-release
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: Download sona staging
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:

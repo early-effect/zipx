@@ -93,8 +93,8 @@ assertGraph := {
   assert(content.contains("schema/testFull"), "schema should inherit the build-wide testFull task")
   assert(content.contains("client/test'"), "client should override back to plain test")
   assert(!content.contains("client/testFull"), "client must NOT use the inherited testFull")
-  // LocalDir: epoch-keyed actions/cache including target/; setup-sbt disk-cache off (no hashFiles pin).
-  assert(content.contains("ubuntu-latest-jdk21-sbt-1.0.0-ci"), "cache key should embed the epoch")
+  // LocalDir: epoch+job primary key (so jobs can save); restore-keys warm from epoch/prior.
+  assert(content.contains("ubuntu-latest-jdk21-sbt-1.0.0-ci-test-schema"), "cache key should embed epoch + job id")
   assert(content.contains("disk-cache: \"false\""), "LocalDir must disable setup-sbt hashFiles disk-cache")
   assert(!content.contains("cache: sbt"), "LocalDir must not enable setup-java cache:sbt")
   assert(content.contains("target"), "cache path should include target/ for compile + sona-staging reuse")

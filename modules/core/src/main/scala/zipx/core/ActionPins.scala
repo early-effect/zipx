@@ -27,12 +27,12 @@ package zipx.core
   *   `actions/download-artifact` pin (default v8.0.1), used by `sonaRelease` to reassemble staging.
   */
 final case class ActionPins(
-  checkout: String = ActionPins.Checkout,
-  setupJava: String = ActionPins.SetupJava,
-  setupSbt: String = ActionPins.SetupSbt,
-  cache: String = ActionPins.Cache,
-  uploadArtifact: String = ActionPins.UploadArtifact,
-  downloadArtifact: String = ActionPins.DownloadArtifact,
+    checkout: String = ActionPins.Checkout,
+    setupJava: String = ActionPins.SetupJava,
+    setupSbt: String = ActionPins.SetupSbt,
+    cache: String = ActionPins.Cache,
+    uploadArtifact: String = ActionPins.UploadArtifact,
+    downloadArtifact: String = ActionPins.DownloadArtifact,
 )
 
 object ActionPins:

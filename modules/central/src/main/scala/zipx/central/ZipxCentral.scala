@@ -58,9 +58,9 @@ object ZipxCentral:
             |echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
             |echo "pinentry-mode loopback"   >> ~/.gnupg/gpg.conf
             |gpgconf --kill gpg-agent || true
-            |echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin,
+            |echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin
         ),
-      ),
+      )
     )
 
   /** After `publishSigned`, upload this job's `target/sona-staging` for the release job to merge. */
@@ -74,7 +74,7 @@ object ZipxCentral:
           "path"              -> StagingDir,
           "if-no-files-found" -> "error",
         ),
-      ),
+      )
     )
 
   /** Before `sonaRelease`, download every publish job's staging tree into [[StagingDir]]. */
@@ -88,7 +88,7 @@ object ZipxCentral:
           "path"           -> StagingDir,
           "merge-multiple" -> "true",
         ),
-      ),
+      )
     )
 
   /** Replaces [[Capability.publish]]: dependency-ordered `publishSigned`, release-gated, with org signing env + GPG
@@ -98,7 +98,8 @@ object ZipxCentral:
     Capability.publish.copy(
       command = n =>
         val task = "publishSigned"
-        if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/$task" else s"${n.id}/$task",
+        if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/$task" else s"${n.id}/$task"
+      ,
       env = signingEnv,
       extraSteps = gpgImportSteps,
       postSteps = uploadStagingSteps,

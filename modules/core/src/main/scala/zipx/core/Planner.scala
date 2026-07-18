@@ -92,21 +92,21 @@ object Planner:
       runsOn = List(config.runnerOs),
       outputs = ListMap("modules" -> "${{ steps.compute.outputs.modules }}"),
       steps = List(
-        Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0")),
+        Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0"))
       ) ++ jdkAndSbtSteps(config) ++ List(
         Step(
           id = Some("compute"),
           name = Some("Compute affected modules"),
           run = Some(affectedScript(config.affectedOnPush)),
-        ),
+        )
       ),
     )
 
   /** The compute-affected shell script. The push branch is present only when `affectedOnPush`; the `before` sha is
     * validated (an all-zero sha means a branch-create or force-push with no reliable prior state → build everything).
     *
-    * Reads `target/zipx-affected.json` written by [[zipx.sbt.ZipxPlugin]] rather than capturing sbt stdout (sbt 2 prints
-    * server banners that break `GITHUB_OUTPUT`).
+    * Reads `target/zipx-affected.json` written by [[zipx.sbt.ZipxPlugin]] rather than capturing sbt stdout (sbt 2
+    * prints server banners that break `GITHUB_OUTPUT`).
     */
   private def affectedScript(affectedOnPush: Boolean): String =
     val runAffected =
@@ -358,9 +358,9 @@ object Planner:
     go(List(node.id), Set.empty, Set.empty).toList.sorted
   end nearestParticipatingAncestors
 
-  /** JDK then sbt. For [[CacheBackend.LocalDir]] we own the dependency/action-cache via an epoch-keyed
-    * `actions/cache` step, so setup-java must NOT set `cache: sbt` (hashFiles) and setup-sbt must set
-    * `disk-cache: false` (also hashFiles). The setup-sbt *distribution* cache (keyed by runner version) stays on.
+  /** JDK then sbt. For [[CacheBackend.LocalDir]] we own the dependency/action-cache via an epoch-keyed `actions/cache`
+    * step, so setup-java must NOT set `cache: sbt` (hashFiles) and setup-sbt must set `disk-cache: false` (also
+    * hashFiles). The setup-sbt *distribution* cache (keyed by runner version) stays on.
     */
   private def jdkAndSbtSteps(config: PlanConfig): List[Step] =
     val setupSbtWith =
@@ -377,6 +377,7 @@ object Planner:
       ),
       Step(uses = Some(config.actions.setupSbt), `with` = setupSbtWith),
     )
+  end jdkAndSbtSteps
 
   private def stepsFor(
       capability: Capability,
@@ -387,9 +388,14 @@ object Planner:
       cache: CacheContribution,
   ): List[Step] =
     val scalaArg = if hasMatrix then "++${{ matrix.scala }} " else ""
+    val jobSuffix =
+      if capability.scope == CapabilityScope.Once then capability.name
+      else target.fold(s"${capability.name}-${node.id}")(t => jobId(capability, node.id, t))
+    val cacheSteps =
+      if cache.steps.isEmpty then localDirCacheSteps(config, jobSuffix) else cache.steps
     List(
       Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0")),
-    ) ++ jdkAndSbtSteps(config) ++ cache.steps ++ capability.extraSteps(
+    ) ++ jdkAndSbtSteps(config) ++ cacheSteps ++ capability.extraSteps(
       StepContext(node, target, hasMatrix, config.actions)
     ) ++ List(
       Step(
@@ -407,11 +413,10 @@ object Planner:
   )
 
   /** Caching for the chosen backend:
-    *   - `LocalDir`: persist sbt's local dirs + build `target/` with `actions/cache`, keyed by OS + JDK + commit-stable
-    *     [[PlanConfig.cacheEpoch]] (the build version). Mid-PR commits reuse the same key; a release tag rolls it.
-    *     `restore-keys` warm-starts from the newest prior epoch. `target/` speeds recompiles and carries
-    *     `target/sona-staging` for Central. setup-sbt's hashFiles disk-cache and setup-java `cache: sbt` are disabled
-    *     so they do not race or pin on file hashes.
+    *   - `LocalDir`: persist sbt's local dirs + build `target/` with `actions/cache`. Primary key is
+    *     OS+JDK+epoch+**job id** so each job can save after a restore (a hit on the exact primary key skips save).
+    *     `restore-keys` fall back to the same epoch (sibling/prior jobs) then older epochs. setup-sbt disk-cache and
+    *     setup-java `cache: sbt` stay off so they do not race or pin on hashFiles.
     *   - `BazelRemoteSidecar`: run `buchgr/bazel-remote` as a job service and point the sbt remote cache at it via env;
     *     the plugin reads `ZIPX_REMOTE_CACHE` and wires `Global / remoteCache` + `addRemoteCachePlugin`.
     *   - `ManagedRemote`: no sidecar; point the remote cache at a managed gRPC endpoint, auth via a header secret.
@@ -419,23 +424,29 @@ object Planner:
     * For remote backends sbt's own cache key omits OS/JDK, so a heterogeneous runner pool could poison a shared cache;
     * the plugin folds those axes into `Global / cacheVersion` (documented), and here we surface the endpoint via env.
     */
-  private def cacheContribution(config: PlanConfig): CacheContribution =
+  private def localDirCacheSteps(config: PlanConfig, jobSuffix: String): List[Step] =
     config.cache match
       case CacheBackend.LocalDir =>
         val prefix = s"${config.runnerOs}-jdk${config.javaVersion}-sbt-"
-        CacheContribution(steps =
-          List(
-            Step(
-              name = Some("Cache sbt"),
-              uses = Some(config.actions.cache),
-              `with` = ListMap(
-                "path"         -> List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n"),
-                "key"          -> s"$prefix${config.cacheEpoch}",
-                "restore-keys" -> prefix,
-              ),
-            )
+        val epoch  = s"$prefix${config.cacheEpoch}-"
+        List(
+          Step(
+            name = Some("Cache sbt"),
+            uses = Some(config.actions.cache),
+            `with` = ListMap(
+              "path"         -> List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n"),
+              "key"          -> s"$epoch$jobSuffix",
+              "restore-keys" -> List(epoch, prefix).mkString("\n"),
+            ),
           )
         )
+      case _ => Nil
+
+  private def cacheContribution(config: PlanConfig): CacheContribution =
+    config.cache match
+      case CacheBackend.LocalDir =>
+        // Steps are built per-job in [[localDirCacheSteps]] (primary key includes the job id).
+        CacheContribution()
 
       case CacheBackend.BazelRemoteSidecar(image, port) =>
         // A gRPC bazel-remote sidecar reachable at localhost:<port>. sbt talks to it via the plaintext grpc:// scheme.
