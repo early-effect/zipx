@@ -47,8 +47,8 @@ lazy val root = (project in file("."))
   .settings(
     name           := "zipx",
     publish / skip := true,
-    // Dogfood: generated CI owns Central publish + Specular Pages (no hand-rolled release.yml / docs.yml).
-    zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce, ZipxDocs.pages()),
+    // Dogfood: Aggregate Central release (one job) + Specular Pages.
+    zipxCapabilities ++= Seq(ZipxCentral.release, ZipxDocs.pages()),
     zipxJavaVersion      := "25",
     zipxWorkflowDispatch := true,
   )

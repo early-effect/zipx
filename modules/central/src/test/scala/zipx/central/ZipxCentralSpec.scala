@@ -6,7 +6,12 @@ import zipx.core.*
 object ZipxCentralSpec extends ZIOSpecDefault:
   import Fixtures.*
 
-  private val config = PlanConfig(workflowName = "CI", cacheEpoch = "1.0.0", affected = AffectedMode.Always)
+  private val config = PlanConfig(
+    workflowName = "CI",
+    cacheEpoch = "1.0.0",
+    affected = AffectedMode.Always,
+    skipMergedPrPush = false,
+  )
 
   def spec = suite("ZipxCentral")(
     test("publishSigned replaces bare publish with publishSigned + org secret env + GPG import") {
@@ -104,6 +109,20 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       assertTrue(
         ZipxCentral.OrgSecretNames.toSet ==
           Set("PGP_KEY_HEX", "PGP_SECRET", "PGP_PASSPHRASE", "SONATYPE_USERNAME", "SONATYPE_PASSWORD")
+      )
+    },
+    test("release is one publish job with publishSigned; sonaRelease and no staging artifacts") {
+      val wf  = Planner.plan(sampleGraph, List(ZipxCentral.release), config)
+      val job = wf.jobs("publish")
+      val run = job.steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
+      assertTrue(
+        wf.jobs.keys.toList == List("publish"),
+        run.contains("publishSigned; sonaRelease"),
+        !wf.jobs.contains("central-release"),
+        !job.steps.exists(_.name.contains("Upload sona staging")),
+        job.steps.exists(_.name.contains("Import signing key")),
+        job.env.get("SONATYPE_USERNAME").contains("${{ secrets.SONATYPE_USERNAME }}"),
+        job.`if`.exists(_.contains("refs/tags/v")),
       )
     },
   )

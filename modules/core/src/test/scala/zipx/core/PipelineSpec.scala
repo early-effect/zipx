@@ -39,24 +39,28 @@ object PipelineSpec extends ZIOSpecDefault:
     ),
   )
 
-  private val deploy = Capability.deploy(
-    participates = _.id == "serviceA",
-    command = n => s"${n.id}/Docker/publish",
-    targets = _ => deployTargets,
-    permissions = Map("id-token" -> "write", "contents" -> "read"),
-  ).copy(
-    extraSteps = _ =>
-      List(
-        Step(
-          name = Some("Configure credentials"),
-          uses = Some("aws-actions/configure-aws-credentials@v6"),
-          `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}", "aws-region" -> "${{ env.AWS_REGION }}"),
-        ),
-      ),
-  )
+  private val deploy = Capability
+    .deployGraph(
+      participates = _.id == "serviceA",
+      command = n => s"${n.id}/Docker/publish",
+      targets = _ => deployTargets,
+      permissions = Map("id-token" -> "write", "contents" -> "read"),
+    )
+    .copy(
+      extraSteps = _ =>
+        List(
+          Step(
+            name = Some("Configure credentials"),
+            uses = Some("aws-actions/configure-aws-credentials@v6"),
+            `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}", "aws-region" -> "${{ env.AWS_REGION }}"),
+          )
+        )
+    )
 
-  private val config = PlanConfig(cacheEpoch = "9.9.9", affected = AffectedMode.Always)
-  private val wf     = Planner.plan(graph, List(Capability.test, Capability.publish, Capability.docker, deploy), config)
+  private val config = PlanConfig(cacheEpoch = "9.9.9", affected = AffectedMode.Always, skipMergedPrPush = false)
+
+  private val wf =
+    Planner.plan(graph, List(Capability.testGraph, Capability.publishGraph, Capability.dockerGraph, deploy), config)
   private def job(id: String) = wf.jobs(id)
 
   def spec = suite("Pipeline (M6e end-to-end)")(
@@ -103,7 +107,7 @@ object PipelineSpec extends ZIOSpecDefault:
       )
     },
     test("phase order in the YAML: test before publish before docker before deploy") {
-      val keys = wf.jobs.keys.toList
+      val keys                         = wf.jobs.keys.toList
       def firstIndexOf(prefix: String) = keys.indexWhere(_.startsWith(prefix))
       assertTrue(
         firstIndexOf("test-") < firstIndexOf("publish-"),

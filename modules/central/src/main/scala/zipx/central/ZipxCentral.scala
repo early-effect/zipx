@@ -7,17 +7,17 @@ import scala.collection.immutable.ListMap
 
 /** Early-effect / Maven Central paved path for zipx.
   *
-  * Composes [[EnvValue]] secret refs, a GPG-import `extraSteps` block, a `publishSigned` capability (same-name replace
-  * of the built-in publish), and a post-wave `sonaRelease` once-job. Org secrets are referenced **by name only** —
-  * values come from the `early-effect` GitHub org (inherited by public repos).
+  * Prefer [[release]] (Aggregate: one job, `publishSigned; sonaRelease`) for typical library builds. Use
+  * [[publishSigned]] + [[releaseOnce]] when you need Graph fan-out with staging artifacts across jobs.
   *
-  * `publishSigned` writes to `target/sona-staging` on each job's runner; those trees are uploaded as artifacts and
-  * merged on the `central-release` job before `sonaRelease` (peers run publish+release in one job; zipx fans out).
+  * Org secrets are referenced **by name only** — values come from the `early-effect` GitHub org.
   *
   * {{{
-  * // build.sbt — ZipxCentral is re-exported from zipx-sbt's autoImport
-  * zipxCapabilities += ZipxCentral.publishSigned
-  * zipxCapabilities += ZipxCentral.releaseOnce
+  * // Aggregate (default / dogfood)
+  * zipxCapabilities += ZipxCentral.release
+  *
+  * // Graph escape hatch
+  * zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
   * }}}
   */
 object ZipxCentral:
@@ -37,7 +37,7 @@ object ZipxCentral:
   /** Local staging directory used by sbt `localStaging` / `sonaRelease`. */
   val StagingDir: String = "target/sona-staging"
 
-  /** Artifact name prefix; each publish job uploads `sona-staging-publish-<module>`. */
+  /** Artifact name prefix; each Graph publish job uploads `sona-staging-publish-<module>`. */
   val StagingArtifactPrefix: String = "sona-staging-"
 
   def stagingArtifactName(moduleId: String): String =
@@ -63,7 +63,7 @@ object ZipxCentral:
       )
     )
 
-  /** After `publishSigned`, upload this job's `target/sona-staging` for the release job to merge. */
+  /** After Graph `publishSigned`, upload this job's `target/sona-staging` for the release job to merge. */
   val uploadStagingSteps: StepContext => List[Step] = ctx =>
     List(
       Step(
@@ -77,7 +77,7 @@ object ZipxCentral:
       )
     )
 
-  /** Before `sonaRelease`, download every publish job's staging tree into [[StagingDir]]. */
+  /** Before Graph `sonaRelease`, download every publish job's staging tree into [[StagingDir]]. */
   val downloadStagingSteps: StepContext => List[Step] = ctx =>
     List(
       Step(
@@ -91,11 +91,27 @@ object ZipxCentral:
       )
     )
 
-  /** Replaces [[Capability.publish]]: dependency-ordered `publishSigned`, release-gated, with org signing env + GPG
-    * import + staging artifact upload.
+  /** Aggregate Central release: one job with GPG import + `publishSigned; sonaRelease`. Replaces the built-in `publish`
+    * capability (same name). Prefer this over [[publishSigned]] + [[releaseOnce]] unless you need Graph fan-out.
+    *
+    * Uses [[CapabilityScope.Once]] (not Aggregate join) so the root command runs once rather than being repeated per
+    * publishing module.
+    */
+  val release: Capability =
+    Capability.once(
+      name = "publish",
+      command = "publishSigned; sonaRelease",
+      phase = Phase.Publish,
+      gate = Gate.OnReleaseTag,
+      env = signingEnv,
+      extraSteps = gpgImportSteps,
+    )
+
+  /** Graph escape hatch: replaces [[Capability.publishGraph]] with dependency-ordered `publishSigned`, staging artifact
+    * upload, and org signing env. Pair with [[releaseOnce]].
     */
   val publishSigned: Capability =
-    Capability.publish.copy(
+    Capability.publishGraph.copy(
       command = n =>
         val task = "publishSigned"
         if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/$task" else s"${n.id}/$task"
@@ -105,7 +121,7 @@ object ZipxCentral:
       postSteps = uploadStagingSteps,
     )
 
-  /** After the full publish wave: merge staging artifacts and run `sonaRelease`. */
+  /** After the Graph publish wave: merge staging artifacts and run `sonaRelease`. */
   val releaseOnce: Capability =
     Capability.once(
       name = "central-release",

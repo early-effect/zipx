@@ -51,7 +51,7 @@ Append custom pipeline stages with `zipxCapabilities`. Same-name replaces a buil
           )
         )
         val graph = ModuleGraph(List(ModuleNode("lib", publishes = true, crossScalaVersions = List("3.8.4"))))
-        val job   = Planner.plan(graph, List(pub), PlanConfig(cacheEpoch = "0.1.0-ci")).jobs("publish-lib")
+        val job   = Planner.plan(graph, List(pub), PlanConfig(cacheEpoch = "0.1.0-ci")).jobs("publish")
         (job.env.get("PGP_PASSPHRASE"), job.env.get("SONATYPE_USERNAME"))
       }.assert { case (pgp, user) =>
         assertTrue(

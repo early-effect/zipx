@@ -35,6 +35,10 @@ enum AffectedMode:
   *   hash-pinned GitHub Actions (`uses:` values). Override via `zipxActions` to bump pins without a zipx release.
   * @param workflowDispatch
   *   when true, emit `on.workflow_dispatch` so the workflow can be run manually (useful for docs Pages deploys).
+  * @param skipMergedPrPush
+  *   when true (default), Verify jobs skip on a push to a branch if that commit already belongs to a PR merged into the
+  *   same branch (merge or squash). Direct pushes to main still run; PRs, tags, and `workflow_dispatch` are unaffected.
+  *   Avoids running tests twice after a PR merge.
   */
 final case class PlanConfig(
     workflowName: String = "CI",
@@ -49,4 +53,5 @@ final case class PlanConfig(
     releaseTagPattern: String = "v[0-9]+.[0-9]+.[0-9]+",
     actions: ActionPins = ActionPins.Defaults,
     workflowDispatch: Boolean = false,
+    skipMergedPrPush: Boolean = true,
 )

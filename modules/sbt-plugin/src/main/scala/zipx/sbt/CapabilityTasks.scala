@@ -100,7 +100,7 @@ object CapabilityTasks:
 
   // ---- Typed constructors mirroring Capability.{deploy,custom,once} but taking a key for the command ----
 
-  /** [[Capability.deploy]] with the deploy command given as a task key (rendered `<module>/<label>`). */
+  /** [[Capability.deploy]] (Aggregate-by-target) with the deploy command given as a task key. */
   def deploy(
       participates: ModuleNode => Boolean,
       command: Scoped,
@@ -111,6 +111,18 @@ object CapabilityTasks:
       env: Map[String, EnvValue] = Map.empty,
   ): Capability =
     Capability.deploy(participates, moduleCommand(command), targets, name, needsCapabilities, permissions, env)
+
+  /** [[Capability.deployGraph]] with the deploy command given as a task key. */
+  def deployGraph(
+      participates: ModuleNode => Boolean,
+      command: Scoped,
+      targets: ModuleNode => List[Target],
+      name: String = "deploy",
+      needsCapabilities: List[String] = List("docker"),
+      permissions: Map[String, String] = Map.empty,
+      env: Map[String, EnvValue] = Map.empty,
+  ): Capability =
+    Capability.deployGraph(participates, moduleCommand(command), targets, name, needsCapabilities, permissions, env)
 
   /** [[Capability.custom]] with the command given as a task key (rendered `<module>/<label>`). */
   def custom(
