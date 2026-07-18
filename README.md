@@ -233,14 +233,15 @@ zipxCapabilities += zipxTasks.deploy(_.id == "service", promote, targets)   // r
 
 A key renders to `<module>/<label>`, config-scoped keys keep their config axis (`Docker / publish` → `<module>/Docker/publish`), and a `Once` gate renders the bare `<label>` — all identical to the string form. `zipxTasks` mirrors `once` / `custom` / `deploy`.
 
-For commands that need shell *syntax* around a key — the cross `+`, `++<version>`, compound `;` — use the **`cmd"…"` interpolator**: literal text is verbatim, and each `${key}` splice is a typed, config-aware, module-scoped key:
+For commands that need shell *syntax* around a key — the cross `+`, `++<version>`, compound `;` — use the **`cmd"…"` interpolator**: literal text is verbatim, and each `${…}` splice is dispatched by its static type — a typed, config-aware, module-scoped key, **or** a plain `String` (a computed version, path, secret ref, …). A macro checks every splice is one of those two (anything else is a compile error):
 
 ```scala
-command = cmd"+ ${testFull}"                        // → +<module>/testFull
-command = cmd"++2.13.16; ${legacyClient / publish}" // literal version switch + a module-scoped typed key
+command = cmd"+ ${testFull}"                     // → +<module>/testFull   (key splice)
+command = cmd"${Docker / publish}"               // → <module>/Docker/publish   (config axis preserved)
+command = cmd"++${scalaVersion.value}; ${publish}" // String splice + a module-scoped key (mixed)
 ```
 
-`cmd"…"` produces the `command` function directly (pass it to `Capability.custom`/`.deploy`/`.once`). Splices are always module-scoped; drop to a plain string only for an explicitly cross-*project* command or command aliases.
+`cmd"…"` produces the `command` function directly (pass it to `Capability.custom`/`.deploy`/`.once`). Key splices are always module-scoped; drop to a plain string only for an explicitly cross-*project* command or command aliases.
 
 ## Self-checking
 

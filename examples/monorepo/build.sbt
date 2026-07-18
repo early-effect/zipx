@@ -71,11 +71,12 @@ zipxCapabilities += Capability.test.copy(needsCapabilities = List("fmt"))
 
 // Multi-registry image publish (Gap 1). Overrides the built-in single-target `docker` capability (same name ⇒
 // replace) to push the service image to N registries, each with its own credentials — the same targets+extraSteps
-// machinery deploy uses. Registries are a typed Scala list (project/Deploy.scala). The command is the real
-// config-scoped `Docker / publish` key (not a string) — zipx renders it to `<module>/Docker/publish`.
-zipxCapabilities += zipxTasks.custom(
+// machinery deploy uses. Registries are a typed Scala list (project/Deploy.scala). The command uses the `cmd"…"`
+// interpolator with the real config-scoped `Docker / publish` key → `<module>/Docker/publish`. (cmd also carries
+// command syntax around a key when you need it, e.g. `cmd"+ ${publish}"` or `cmd"++${scalaV}; ${publish}"`.)
+zipxCapabilities += Capability.custom(
   name = "docker",
-  command = Docker / publish,
+  command = cmd"${Docker / publish}",
   participates = _.docker,
   phase = Phase.Publish,
   targets = _ =>

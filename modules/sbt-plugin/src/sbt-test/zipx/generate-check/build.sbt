@@ -53,6 +53,15 @@ zipxCapabilities += Capability.custom(
   gate = Gate.Always,
 )
 
+// MIXED splices (the macro's point): a String value AND a typed key in one command → `++2.13.16; <module>/publish`.
+val scalaSwitch = "2.13.16"
+zipxCapabilities += Capability.custom(
+  name = "mixedCheck",
+  command = cmd"++${scalaSwitch}; ${publish}",
+  participates = _.id == "api",
+  gate = Gate.Always,
+)
+
 // Assertions run inside the scripted test.
 val assertGraph = taskKey[Unit]("assert the graph and generated workflow are correct")
 assertGraph := {
@@ -103,4 +112,6 @@ assertGraph := {
   assert(content.contains("sbt 'schema/Compile/compile'"), "typed config-scoped key should render its config axis")
   // The cmd"…" interpolator: literal `+ ` syntax + a module-scoped typed key splice.
   assert(content.contains("sbt '+ schema/publish'"), "cmd interpolator should emit literal syntax + module-scoped key")
+  // Mixed splices: a String (scalaSwitch) and a typed key in one cmd → `++2.13.16; api/publish`.
+  assert(content.contains("sbt '++2.13.16; api/publish'"), "cmd should mix a String splice with a module-scoped key")
 }

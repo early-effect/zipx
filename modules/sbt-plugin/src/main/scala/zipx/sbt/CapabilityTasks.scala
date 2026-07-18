@@ -3,6 +3,7 @@ package zipx.sbt
 import sbt.*
 import zipx.core.{Capability, Gate, ModuleNode, Ordering, Phase, StepContext, Target}
 import zipx.workflow.Step
+import scala.quoted.*
 
 /** Typed, IDE-friendly ways to specify a capability's sbt command from a real `TaskKey`/`InputKey` instead of a string.
   *
@@ -38,31 +39,64 @@ object CapabilityTasks:
   def crossModuleCommand(key: Scoped): ModuleNode => String =
     n => if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/${scopedLabel(key)}" else s"${n.id}/${scopedLabel(key)}"
 
-  /** The `cmd"…"` interpolator: write command *syntax* as literal text and splice typed keys with `${key}`.
+  /** Render one splice for the `cmd"…"` interpolator against a module. A `Scoped` (task/input key) renders
+    * module-scoped and config-aware (`<id>/[<Config>/]<label>`); a `String` passes through verbatim (so you can splice
+    * a computed version, path, etc.). Called by the [[cmd]] macro with statically-checked argument types.
+    */
+  def renderSplice(x: Any, n: ModuleNode): String = x match
+    case k: Scoped => s"${n.id}/${scopedLabel(k)}"
+    case s: String => s
+    case other     => other.toString // unreachable — the macro rejects other types at compile time
+
+  /** The `cmd"…"` interpolator: write command *syntax* as literal text and splice typed keys (or strings) with `$`.
     *
-    * Literal parts are emitted verbatim (so you carry `+`, `++<ver>`, compound `;`, and args), while each `${key}`
-    * splice is a real `TaskKey`/`InputKey` — compile-checked and config-aware — rendered **module-scoped** as
-    * `<moduleId>/[<Config>/]<label>`, exactly like the built-ins. The result is a `ModuleNode => String` you pass as a
-    * capability `command`:
+    * Literal parts are emitted verbatim (so you carry `+`, `++<ver>`, compound `;`, and args). Each `${…}` splice is
+    * dispatched by its **static type**:
+    *   - a `TaskKey`/`InputKey` (`Scoped`) is compile-checked, config-aware, and rendered **module-scoped** as
+    *     `<moduleId>/[<Config>/]<label>` — exactly like the built-ins;
+    *   - a `String` is spliced verbatim (a computed version, path, secret ref, …).
+    *
+    * A macro enforces that every splice is one of those two types (any other is a compile error) and dispatches
+    * statically, so a renamed/removed key fails to compile. The result is a `ModuleNode => String` for a capability
+    * `command`:
     *
     * {{{
-    * cmd"+ \${testFull}"                       // n => s"+\${n.id}/testFull"
-    * cmd"++2.13.16; \${legacyClient / publish}" // literal version switch + a module-scoped typed key
-    * cmd"\${Docker / publish}"                  // config axis preserved → <id>/Docker/publish
+    * cmd"+ \${testFull}"                          // n => s"+\${n.id}/testFull"
+    * cmd"++\${scalaV}; \${legacyClient / publish}" // String splice + a module-scoped typed key (mixed)
+    * cmd"\${Docker / publish}"                     // config axis preserved → <id>/Docker/publish
     * }}}
     *
-    * Splices are always module-scoped; for an explicitly cross-*project* command, use a plain string/lambda. No macro
-    * is involved — the typed splices are just `Scoped` varargs, so a renamed or removed key is a compile error.
+    * Splices are always module-scoped; for an explicitly cross-*project* command, use a plain string/lambda.
     */
-  extension (sc: StringContext)
-    def cmd(keys: Scoped*): ModuleNode => String =
-      n =>
-        val rendered = keys.map(k => s"${n.id}/${scopedLabel(k)}")
-        // Interleave: part0 splice0 part1 splice1 … partN  (StringContext guarantees parts.size == keys.size + 1).
-        sc.parts.iterator
-          .zipAll(rendered.iterator, "", "")
-          .foldLeft(new StringBuilder) { case (sb, (part, splice)) => sb.append(part).append(splice) }
-          .toString
+  extension (inline sc: StringContext)
+    inline def cmd(inline args: Any*): ModuleNode => String =
+      ${ cmdMacro('sc, 'args) }
+
+  private def cmdMacro(sc: Expr[StringContext], args: Expr[Seq[Any]])(using Quotes): Expr[ModuleNode => String] =
+    import quotes.reflect.*
+    val spliceExprs: Seq[Expr[Any]] = args match
+      case Varargs(es) => es
+      case _           => report.errorAndAbort("cmd\"…\" requires literal splices", args)
+    // Validate each splice's static type is Scoped or String; keep the checked Expr for code-gen.
+    spliceExprs.foreach { e =>
+      val tpe = e.asTerm.tpe.widen
+      if !(tpe <:< TypeRepr.of[Scoped] || tpe <:< TypeRepr.of[String]) then
+        report.errorAndAbort(
+          s"cmd\"…\" splices must be a TaskKey/InputKey or a String; got ${tpe.show}",
+          e,
+        )
+    }
+    // Build: (n: ModuleNode) => sc.parts interleaved with renderSplice(arg, n) for each splice.
+    '{ (n: ModuleNode) =>
+      val parts   = ${ sc }.parts.iterator
+      val splices = ${ Varargs(spliceExprs) }.iterator.map(a => CapabilityTasks.renderSplice(a, n))
+      val sb      = new StringBuilder
+      while parts.hasNext do
+        sb.append(parts.next())
+        if splices.hasNext then sb.append(splices.next())
+      sb.toString
+    }
+  end cmdMacro
 
   // ---- Typed constructors mirroring Capability.{deploy,custom,once} but taking a key for the command ----
 
