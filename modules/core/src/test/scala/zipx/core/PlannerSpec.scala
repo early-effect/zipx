@@ -103,9 +103,14 @@ object PlannerSpec extends ZIOSpecDefault:
       val sbt       = steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
       val jdkIx     = steps.indexWhere(_.uses.exists(_.startsWith("actions/setup-java@")))
       val sbtIx     = steps.indexWhere(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
+      val paths     = cacheStep.map(_.`with`("path")).getOrElse("")
       assertTrue(
         cacheStep.exists(_.`with`("key").endsWith("1.2.3-ci")),
         cacheStep.exists(s => s.`with`("key").startsWith(s.`with`("restore-keys"))),
+        paths.contains("~/.sbt"),
+        paths.contains("~/.cache/sbt"),
+        paths.contains("~/.cache/coursier"),
+        paths.contains("target"), // compiled classes + sona-staging
         !java.exists(_.`with`.contains("cache")), // no hashFiles-based setup-java cache:sbt
         sbt.exists(_.`with`.get("disk-cache").contains("false")),
         jdkIx >= 0,
