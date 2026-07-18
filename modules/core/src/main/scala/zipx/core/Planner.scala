@@ -159,19 +159,24 @@ object Planner:
       ),
     )
 
-  /** Wire Verify jobs to [[verifyGateJobId]]: need the gate, and run when it was skipped/failed or outputs run=true. */
+  /** Wire Verify jobs: never run on tag pushes (release tags only need Publish/Deploy). When [[usesVerifyGate]], also
+    * need the gate and run when it was skipped/failed or outputs run=true (fail-open for PRs / API errors).
+    */
   private def applyVerifyGate(
       needs: List[String],
       cond: Option[String],
       phase: Phase,
       usesVerifyGate: Boolean,
   ): (List[String], Option[String]) =
-    if !usesVerifyGate || phase != Phase.Verify then (needs, cond)
+    if phase != Phase.Verify then (needs, cond)
     else
-      val gatedNeeds = (verifyGateJobId :: needs).distinct.sorted
-      val gateCond   =
-        s"!cancelled() && ((needs.$verifyGateJobId.result != 'success') || (needs.$verifyGateJobId.outputs.run == 'true'))"
-      (gatedNeeds, andConditions(Some(gateCond), cond))
+      val notOnTag = "!startsWith(github.ref, 'refs/tags/')"
+      if !usesVerifyGate then (needs, andConditions(Some(notOnTag), cond))
+      else
+        val gatedNeeds = (verifyGateJobId :: needs).distinct.sorted
+        val gateCond   =
+          s"!cancelled() && $notOnTag && ((needs.$verifyGateJobId.result != 'success') || (needs.$verifyGateJobId.outputs.run == 'true'))"
+        (gatedNeeds, andConditions(Some(gateCond), cond))
 
   private def affectedSetupJob(config: PlanConfig, usesVerifyGate: Boolean): Job =
     val (needs, cond) = applyVerifyGate(Nil, None, Phase.Verify, usesVerifyGate)
@@ -458,7 +463,9 @@ object Planner:
     // When affected setup already needs verify-gate, Graph Verify jobs inherit the skip via affected.
     // Otherwise (no affected, or non-Verify), apply the gate directly.
     val (needs, cond) =
-      if gatedOnAffected then (rawNeeds, baseCond)
+      if gatedOnAffected then
+        // Affected setup already needs verify-gate; still exclude tags (release pushes only Publish/Deploy).
+        applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate = false)
       else applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
     val runner = capability.runsOn.getOrElse(List(config.runnerOs))
 
