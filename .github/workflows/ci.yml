@@ -63,8 +63,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-workflow
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-workflow
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: test
@@ -96,8 +97,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-core
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-core
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: test
@@ -129,8 +131,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-central
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-central
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: test
@@ -162,8 +165,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-docs
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-docs
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: test
@@ -196,8 +200,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-test-plugin
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-plugin
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: test
@@ -231,8 +236,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-publish-workflow
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-publish-workflow
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: Import signing key
@@ -283,8 +289,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-publish-core
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-publish-core
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: Import signing key
@@ -335,8 +342,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-publish-central
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-publish-central
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: Import signing key
@@ -388,8 +396,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-publish-plugin
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-publish-plugin
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: Import signing key
@@ -443,8 +452,9 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-central-release
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-central-release
           restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
             ubuntu-latest-jdk25-sbt-0.1.0-ci-
             ubuntu-latest-jdk25-sbt-
       - name: Download sona staging

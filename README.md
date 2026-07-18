@@ -136,7 +136,7 @@ zipxActions := ActionPins.Defaults.copy(
 )
 ```
 
-- **`LocalDir`** — persist sbt's local cache dirs and build `target/` with `actions/cache` (pin via `zipxActions`). Primary key is OS + JDK + epoch + job id (so each job can save after a warm restore); restore-keys fall back within the epoch. Disables setup-sbt's hashFiles disk-cache. No infrastructure.
+- **`LocalDir`** — persist sbt's local cache dirs and build `target/` with `actions/cache` (pin via `zipxActions`). Primary key is OS + JDK + epoch + run id + job id so each job in a run can save; restore-keys prefer the same run (accumulated upstream), then the epoch. Disables setup-sbt's hashFiles disk-cache. No infrastructure.
 - **`BazelRemoteSidecar(image, port)`** — run a `buchgr/bazel-remote` gRPC server as a job service; sbt uses it as a Bazel-protocol remote cache shared across the run.
 - **`ManagedRemote(uri, headerSecret)`** — point sbt at a managed gRPC cache (BuildBuddy/EngFlow/NativeLink); the auth header comes from the named repository secret.
 

@@ -96,19 +96,23 @@ object PlannerSpec extends ZIOSpecDefault:
         !wf.jobs("publish-api").steps.last.run.getOrElse("").contains("matrix.scala"),
       )
     },
-    test("LocalDir cache primary key includes the job id so intermediate jobs can save") {
+    test("LocalDir cache keys include run_id + job id so same-run jobs accumulate and can save") {
       val wf        = Planner.plan(sampleGraph, List(Capability.test), config)
-      val coreKey   = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@"))).map(_.`with`("key"))
-      val apiKey    = wf.jobs("test-api").steps.find(_.uses.exists(_.startsWith("actions/cache@"))).map(_.`with`("key"))
-      val cacheStep = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
-      val paths     = cacheStep.map(_.`with`("path")).getOrElse("")
-      val restore   = cacheStep.map(_.`with`("restore-keys")).getOrElse("")
+      val coreStep  = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val apiStep   = wf.jobs("test-api").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val coreKey   = coreStep.map(_.`with`("key")).getOrElse("")
+      val apiKey    = apiStep.map(_.`with`("key")).getOrElse("")
+      val restore   = coreStep.map(_.`with`("restore-keys")).getOrElse("")
+      val paths     = coreStep.map(_.`with`("path")).getOrElse("")
       val java      = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
       val sbt       = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
       assertTrue(
-        coreKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-test-core"),
-        apiKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-test-api"),
-        coreKey != apiKey, // distinct primary keys → each job can save after restore
+        // Primary key always misses within a run (run_id) so the job can save after restoring upstream.
+        coreKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-core"),
+        apiKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-api"),
+        coreKey != apiKey,
+        // Same-run prefix first (accumulated upstream), then epoch, then older epochs.
+        restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-"),
         restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-"),
         restore.contains("ubuntu-latest-jdk21-sbt-"),
         paths.contains("~/.sbt"),
@@ -119,7 +123,7 @@ object PlannerSpec extends ZIOSpecDefault:
         sbt.exists(_.`with`.get("disk-cache").contains("false")),
       )
     },
-    test("cache key is identical across commits with the same epoch+job, differs across epochs") {
+    test("cache key is identical across commits with the same epoch+job template, differs across epochs") {
       def keyFor(epoch: String) =
         Planner
           .plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = epoch))

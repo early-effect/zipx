@@ -414,9 +414,9 @@ object Planner:
 
   /** Caching for the chosen backend:
     *   - `LocalDir`: persist sbt's local dirs + build `target/` with `actions/cache`. Primary key is
-    *     OS+JDK+epoch+**job id** so each job can save after a restore (a hit on the exact primary key skips save).
-    *     `restore-keys` fall back to the same epoch (sibling/prior jobs) then older epochs. setup-sbt disk-cache and
-    *     setup-java `cache: sbt` stay off so they do not race or pin on hashFiles.
+    *     OS+JDK+epoch+**run id**+**job id** so every job misses the primary key within a run (a hit skips save) and
+    *     can save its updated tree. `restore-keys` prefer the same run (accumulated upstream jobs), then the same
+    *     epoch from prior runs, then older epochs. setup-sbt disk-cache and setup-java `cache: sbt` stay off.
     *   - `BazelRemoteSidecar`: run `buchgr/bazel-remote` as a job service and point the sbt remote cache at it via env;
     *     the plugin reads `ZIPX_REMOTE_CACHE` and wires `Global / remoteCache` + `addRemoteCachePlugin`.
     *   - `ManagedRemote`: no sidecar; point the remote cache at a managed gRPC endpoint, auth via a header secret.
@@ -429,14 +429,16 @@ object Planner:
       case CacheBackend.LocalDir =>
         val prefix = s"${config.runnerOs}-jdk${config.javaVersion}-sbt-"
         val epoch  = s"$prefix${config.cacheEpoch}-"
+        // run_id keeps same-run upstream saves ahead of a stale per-job hit from a previous run.
+        val run = s"$epoch$${{ github.run_id }}-"
         List(
           Step(
             name = Some("Cache sbt"),
             uses = Some(config.actions.cache),
             `with` = ListMap(
               "path"         -> List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n"),
-              "key"          -> s"$epoch$jobSuffix",
-              "restore-keys" -> List(epoch, prefix).mkString("\n"),
+              "key"          -> s"$run$jobSuffix",
+              "restore-keys" -> List(run, epoch, prefix).mkString("\n"),
             ),
           )
         )
@@ -445,7 +447,7 @@ object Planner:
   private def cacheContribution(config: PlanConfig): CacheContribution =
     config.cache match
       case CacheBackend.LocalDir =>
-        // Steps are built per-job in [[localDirCacheSteps]] (primary key includes the job id).
+        // Steps are built per-job in [[localDirCacheSteps]] (primary key includes run id + job id).
         CacheContribution()
 
       case CacheBackend.BazelRemoteSidecar(image, port) =>
