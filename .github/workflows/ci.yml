@@ -23,8 +23,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
       - name: Compute affected modules
         id: compute
         run: |
@@ -51,8 +52,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'workflow/test'
   test-core:
@@ -71,8 +82,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'core/test'
   test-central:
@@ -91,8 +112,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'central/test'
   test-docs:
@@ -111,8 +142,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'docs/test'
   test-plugin:
@@ -132,8 +173,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'plugin/test'
   publish-workflow:
@@ -154,8 +205,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -187,8 +248,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -220,8 +291,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -254,8 +335,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -290,8 +381,18 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-          cache: sbt
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+        with:
+          disk-cache: "false"
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
+          restore-keys: ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg

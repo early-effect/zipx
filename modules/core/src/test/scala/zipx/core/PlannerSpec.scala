@@ -96,17 +96,33 @@ object PlannerSpec extends ZIOSpecDefault:
         !wf.jobs("publish-api").steps.last.run.getOrElse("").contains("matrix.scala"),
       )
     },
-    test("LocalDir uses setup-java cache:sbt and does NOT emit a second actions/cache step") {
-      val steps = Planner.plan(sampleGraph, List(Capability.test), config).jobs("test-core").steps
-      val java  = steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
-      val sbtIx = steps.indexWhere(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
-      val jdkIx = steps.indexWhere(_.uses.exists(_.startsWith("actions/setup-java@")))
+    test("LocalDir uses an epoch-keyed actions/cache and disables setup-sbt disk-cache") {
+      val steps     = Planner.plan(sampleGraph, List(Capability.test), config).jobs("test-core").steps
+      val cacheStep = steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val java      = steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
+      val sbt       = steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
+      val jdkIx     = steps.indexWhere(_.uses.exists(_.startsWith("actions/setup-java@")))
+      val sbtIx     = steps.indexWhere(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
       assertTrue(
-        java.exists(_.`with`.get("cache").contains("sbt")),
-        !steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
-        !steps.exists(_.name.contains("Cache sbt")),
+        cacheStep.exists(_.`with`("key").endsWith("1.2.3-ci")),
+        cacheStep.exists(s => s.`with`("key").startsWith(s.`with`("restore-keys"))),
+        !java.exists(_.`with`.contains("cache")), // no hashFiles-based setup-java cache:sbt
+        sbt.exists(_.`with`.get("disk-cache").contains("false")),
         jdkIx >= 0,
-        sbtIx > jdkIx, // JDK before sbt so disk-cache keys on the configured JDK
+        sbtIx > jdkIx,
+      )
+    },
+    test("cache key is identical across commits with the same epoch, differs across epochs") {
+      def keyFor(epoch: String) =
+        Planner
+          .plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = epoch))
+          .jobs("test-core")
+          .steps
+          .find(_.uses.exists(_.startsWith("actions/cache@")))
+          .map(_.`with`("key"))
+      assertTrue(
+        keyFor("1.2.3-ci") == keyFor("1.2.3-ci"), // same epoch (e.g. two commits in a PR) → identical
+        keyFor("1.2.3-ci") != keyFor("1.3.0"),    // new release tag → different
       )
     },
     test("release triggers include the tag pattern; PR/test-only builds do not gate on tags") {
@@ -196,14 +212,14 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     // ---- M5 remote caches ----
-    test("LocalDir backend adds no services/env and no duplicate actions/cache step") {
+    test("LocalDir backend caches via epoch-keyed actions/cache and adds no services/env") {
       val wf  = Planner.plan(sampleGraph, List(Capability.test), config)
       val job = wf.jobs("test-core")
       assertTrue(
         job.services.isEmpty,
         job.env.isEmpty,
-        !job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
-        job.steps.exists(s => s.uses.exists(_.startsWith("actions/setup-java@")) && s.`with`.get("cache").contains("sbt")),
+        job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
+        job.steps.exists(s => s.uses.exists(_.startsWith("sbt/setup-sbt@")) && s.`with`.get("disk-cache").contains("false")),
       )
     },
     test("BazelRemoteSidecar backend emits a service sidecar and the remote-cache env, no actions/cache") {
@@ -219,7 +235,8 @@ object PlannerSpec extends ZIOSpecDefault:
         job.services("bazel-remote").ports == List("9092:9092"),
         job.env.get("ZIPX_REMOTE_CACHE").contains("grpc://localhost:9092"),
         !job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
-        job.steps.exists(s => s.uses.exists(_.startsWith("actions/setup-java@")) && s.`with`.get("cache").contains("sbt")),
+        // remote backends leave setup-sbt disk-cache at its default (no disk-cache: false)
+        !job.steps.exists(s => s.uses.exists(_.startsWith("sbt/setup-sbt@")) && s.`with`.contains("disk-cache")),
       )
     },
     test("ManagedRemote backend sets the endpoint + header-from-secret env, no service") {

@@ -3,13 +3,14 @@ package zipx.core
 /** How CI caches sbt's build state.
   *
   * sbt 2.x's action cache is machine-wide and content-addressed on disk. All three backends are fully wired by the
-  * planner: [[LocalDir]] relies on `setup-java` `cache: sbt` plus `setup-sbt`'s disk-cache (no second `actions/cache`);
-  * the remote backends point sbt at a Bazel-gRPC endpoint (sidecar or managed) via job env that the plugin reads at
-  * load time.
+  * planner: [[LocalDir]] persists the local cache dirs with an epoch-keyed `actions/cache` (and disables the
+  * hashFiles-based built-ins that would otherwise race it); the remote backends point sbt at a Bazel-gRPC endpoint
+  * (sidecar or managed) via job env that the plugin reads at load time.
   */
 enum CacheBackend:
-  /** Default: use the caches already built into `actions/setup-java` (`cache: sbt`) and `sbt/setup-sbt` (disk-cache).
-    * No extra `actions/cache` step — that double-restored `~/.cache/sbt` against setup-sbt.
+  /** Persist `~/.sbt`, `~/.cache/sbt`, and `~/.cache/coursier` with `actions/cache` (pin via [[ActionPins.cache]]),
+    * keyed by OS + JDK + [[PlanConfig.cacheEpoch]] (build version). Disables setup-sbt `disk-cache` and setup-java
+    * `cache: sbt` so caching is not also pinned to `hashFiles`.
     */
   case LocalDir
 

@@ -93,10 +93,10 @@ assertGraph := {
   assert(content.contains("schema/testFull"), "schema should inherit the build-wide testFull task")
   assert(content.contains("client/test'"), "client should override back to plain test")
   assert(!content.contains("client/testFull"), "client must NOT use the inherited testFull")
-  // LocalDir: setup-java cache:sbt (no duplicate actions/cache / epoch key).
-  assert(content.contains("cache: sbt"), "setup-java should enable cache: sbt")
-  assert(!content.contains("Cache sbt"), "must not emit a second Cache sbt actions/cache step")
-  assert(!content.contains("ubuntu-latest-jdk21-sbt-1.0.0-ci"), "epoch actions/cache key must be gone")
+  // LocalDir: epoch-keyed actions/cache; setup-sbt disk-cache off (no hashFiles pin).
+  assert(content.contains("ubuntu-latest-jdk21-sbt-1.0.0-ci"), "cache key should embed the epoch")
+  assert(content.contains("disk-cache: \"false\""), "LocalDir must disable setup-sbt hashFiles disk-cache")
+  assert(!content.contains("cache: sbt"), "LocalDir must not enable setup-java cache:sbt")
   // M3: affected-only setup job + gating on verify jobs (default AffectedOnPR).
   assert(content.contains("affected:"), "missing affected setup job")
   assert(content.contains("modules: ${{ steps.compute.outputs.modules }}"), "affected job should output modules")

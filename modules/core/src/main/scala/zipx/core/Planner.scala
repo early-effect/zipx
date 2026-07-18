@@ -358,11 +358,14 @@ object Planner:
     go(List(node.id), Set.empty, Set.empty).toList.sorted
   end nearestParticipatingAncestors
 
-  /** JDK then sbt (peer order). `cache: sbt` on setup-java covers coursier/ivy/`~/.sbt`; setup-sbt's built-in
-    * disk-cache covers `~/.cache/sbt`. JDK first so setup-sbt keys its disk-cache on the configured JDK, not the
-    * runner default.
+  /** JDK then sbt. For [[CacheBackend.LocalDir]] we own the dependency/action-cache via an epoch-keyed
+    * `actions/cache` step, so setup-java must NOT set `cache: sbt` (hashFiles) and setup-sbt must set
+    * `disk-cache: false` (also hashFiles). The setup-sbt *distribution* cache (keyed by runner version) stays on.
     */
   private def jdkAndSbtSteps(config: PlanConfig): List[Step] =
+    val setupSbtWith =
+      if config.cache == CacheBackend.LocalDir then ListMap("disk-cache" -> "false")
+      else ListMap.empty[String, String]
     List(
       Step(
         name = Some(s"Setup JDK ${config.javaVersion}"),
@@ -370,10 +373,9 @@ object Planner:
         `with` = ListMap(
           "distribution" -> "temurin",
           "java-version" -> config.javaVersion,
-          "cache"        -> "sbt",
         ),
       ),
-      Step(uses = Some(config.actions.setupSbt)),
+      Step(uses = Some(config.actions.setupSbt), `with` = setupSbtWith),
     )
 
   private def stepsFor(
@@ -403,9 +405,10 @@ object Planner:
   )
 
   /** Caching for the chosen backend:
-    *   - `LocalDir`: no extra steps. [[jdkAndSbtSteps]] already enables `setup-java` `cache: sbt` (coursier/ivy) and
-    *     `setup-sbt`'s disk-cache (`~/.cache/sbt`). A second `actions/cache` over the same paths double-restored and
-    *     raced the built-in caches.
+    *   - `LocalDir`: persist sbt's local dirs with `actions/cache`, keyed by OS + JDK + commit-stable
+    *     [[PlanConfig.cacheEpoch]] (the build version). Mid-PR commits reuse the same key; a release tag rolls it.
+    *     `restore-keys` warm-starts from the newest prior epoch. setup-sbt's hashFiles disk-cache and setup-java
+    *     `cache: sbt` are disabled so they do not race or pin on file hashes.
     *   - `BazelRemoteSidecar`: run `buchgr/bazel-remote` as a job service and point the sbt remote cache at it via env;
     *     the plugin reads `ZIPX_REMOTE_CACHE` and wires `Global / remoteCache` + `addRemoteCachePlugin`.
     *   - `ManagedRemote`: no sidecar; point the remote cache at a managed gRPC endpoint, auth via a header secret.
@@ -416,7 +419,20 @@ object Planner:
   private def cacheContribution(config: PlanConfig): CacheContribution =
     config.cache match
       case CacheBackend.LocalDir =>
-        CacheContribution()
+        val prefix = s"${config.runnerOs}-jdk${config.javaVersion}-sbt-"
+        CacheContribution(steps =
+          List(
+            Step(
+              name = Some("Cache sbt"),
+              uses = Some(config.actions.cache),
+              `with` = ListMap(
+                "path"         -> List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier").mkString("\n"),
+                "key"          -> s"$prefix${config.cacheEpoch}",
+                "restore-keys" -> prefix,
+              ),
+            )
+          )
+        )
 
       case CacheBackend.BazelRemoteSidecar(image, port) =>
         // A gRPC bazel-remote sidecar reachable at localhost:<port>. sbt talks to it via the plaintext grpc:// scheme.
