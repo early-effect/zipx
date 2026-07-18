@@ -64,5 +64,13 @@ sbt zipxWorkflowCheck   # fails CI when the committed YAML drifts""",
     )
 
   override def afterBuild(out: Path, result: SiteOutput): Task[Unit] =
-    EarlyEffectTheme.writeLogo(out)
+    for
+      _ <- EarlyEffectTheme.writeLogo(out)
+      _ <- ZIO.attempt {
+             val themeCss = out.resolve("assets/theme.css")
+             val extra    = DocTables.contributionBlocks.map(_._2).mkString("\n")
+             val prior    = java.nio.file.Files.readString(themeCss)
+             java.nio.file.Files.writeString(themeCss, prior + "\n/* zipx doc tables (Ascent GlobalStyle) */\n" + extra)
+           }
+    yield ()
 end BuildSite
