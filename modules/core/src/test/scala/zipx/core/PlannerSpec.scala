@@ -177,7 +177,8 @@ object PlannerSpec extends ZIOSpecDefault:
       val script = wf.jobs("affected").steps.find(_.id.contains("compute")).flatMap(_.run).getOrElse("")
       assertTrue(
         script.contains("github.event.before"),
-        script.contains("zipxAffectedModules $before"),
+        script.contains("zipxAffectedModules $BASE"),
+        script.contains("target/zipx-affected.json"),
         // force-push / branch-create guard: all-zero sha → build everything.
         script.contains("0000000000000000000000000000000000000000"),
       )

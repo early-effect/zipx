@@ -95,6 +95,11 @@ object Planner:
         Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0")),
         Step(uses = Some(config.actions.setupSbt)),
         Step(
+          name = Some(s"Setup JDK ${config.javaVersion}"),
+          uses = Some(config.actions.setupJava),
+          `with` = ListMap("distribution" -> "temurin", "java-version" -> config.javaVersion),
+        ),
+        Step(
           id = Some("compute"),
           name = Some("Compute affected modules"),
           run = Some(affectedScript(config.affectedOnPush)),
@@ -104,20 +109,27 @@ object Planner:
 
   /** The compute-affected shell script. The push branch is present only when `affectedOnPush`; the `before` sha is
     * validated (an all-zero sha means a branch-create or force-push with no reliable prior state → build everything).
+    *
+    * Reads `target/zipx-affected.json` written by [[zipx.sbt.ZipxPlugin]] rather than capturing sbt stdout (sbt 2 prints
+    * server banners that break `GITHUB_OUTPUT`).
     */
   private def affectedScript(affectedOnPush: Boolean): String =
+    val runAffected =
+      """sbt -batch --error "zipxAffectedModules $BASE"
+        |  modules=$(cat target/zipx-affected.json)""".stripMargin
     val pushBranch =
-      if affectedOnPush then """elif [ "${{ github.event_name }}" = "push" ]; then
-          |  before="${{ github.event.before }}"
-          |  if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+      if affectedOnPush then s"""elif [ "$${{ github.event_name }}" = "push" ]; then
+          |  before="$${{ github.event.before }}"
+          |  if [ -z "$$before" ] || [ "$$before" = "0000000000000000000000000000000000000000" ]; then
           |    modules='["all"]'
           |  else
-          |    modules=$(sbt -batch --error "zipxAffectedModules $before")
+          |    BASE="$$before"
+          |    $runAffected
           |  fi""".stripMargin
       else ""
     s"""if [ "$${{ github.event_name }}" = "pull_request" ]; then
-       |  base="$${{ github.event.pull_request.base.sha }}"
-       |  modules=$$(sbt -batch --error "zipxAffectedModules $$base")
+       |  BASE="$${{ github.event.pull_request.base.sha }}"
+       |  $runAffected
        |$pushBranch
        |else
        |  modules='["all"]'

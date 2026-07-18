@@ -368,8 +368,9 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   /** `zipxAffectedModules <base-ref>` — diff against the base ref, map changed files to owning modules, expand the
-    * reverse-dependency closure, and print the affected module ids as a JSON array on stdout. Consumed by the generated
-    * workflow's `affected` setup job. Uses `println` (not the sbt logger) so the JSON is clean on stdout for capture.
+    * reverse-dependency closure, and write the affected module ids as a JSON array to `target/zipx-affected.json`
+    * (also printed for local use). The generated workflow's `affected` job reads the file so sbt's own log lines never
+    * pollute `GITHUB_OUTPUT`.
     */
   private def affectedModulesTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
@@ -379,7 +380,10 @@ object ZipxPlugin extends AutoPlugin:
       val baseRef = if base.isEmpty then "HEAD^" else base
       val changed = gitDiffNames(root, baseRef)
       val modules = Affected.affectedModules(graph, changed).toList.sorted
-      println(jsonArray(modules))
+      val json    = jsonArray(modules)
+      val out     = (LocalRootProject / target).value / "zipx-affected.json"
+      IO.write(out, json + "\n")
+      println(json)
     }
 
   /** Files changed on HEAD since its merge-base with `baseRef` (three-dot diff), repo-root-relative with forward

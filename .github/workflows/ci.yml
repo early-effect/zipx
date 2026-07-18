@@ -19,12 +19,18 @@ jobs:
         with:
           fetch-depth: "0"
       - uses: sbt/setup-sbt@9d56cf12e9b58d219605e1d8bfe69a8395fedde0
+      - name: Setup JDK 25
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: "25"
       - name: Compute affected modules
         id: compute
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-            modules=$(sbt -batch --error "zipxAffectedModules $base")
+            BASE="${{ github.event.pull_request.base.sha }}"
+            sbt -batch --error "zipxAffectedModules $BASE"
+            modules=$(cat target/zipx-affected.json)
           else
             modules='["all"]'
           fi
