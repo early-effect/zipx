@@ -8,9 +8,11 @@ package zipx.core
   * (sidecar or managed) via job env that the plugin reads at load time.
   */
 enum CacheBackend:
-  /** Persist `~/.sbt`, `~/.cache/sbt`, and `~/.cache/coursier` with `actions/cache` (pin via [[ActionPins.cache]]),
-    * keyed by OS + JDK + [[PlanConfig.cacheEpoch]] (build version). Disables setup-sbt `disk-cache` and setup-java
-    * `cache: sbt` so caching is not also pinned to `hashFiles`.
+  /** Persist `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, and the build `target/` (compiled classes +
+    * `target/sona-staging`) with `actions/cache` (pin via [[ActionPins.cache]]). Primary key is OS + JDK +
+    * [[PlanConfig.cacheEpoch]] + `github.run_id` + job id so each job in a run can save; restore-keys prefer the same
+    * run (accumulated upstream jobs), then the same epoch from prior runs. Disables setup-sbt `disk-cache` and
+    * setup-java `cache: sbt` so caching is not also pinned to `hashFiles`.
     */
   case LocalDir
 

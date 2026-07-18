@@ -16,6 +16,8 @@ object ActionPinsSpec extends ZIOSpecDefault:
         p.setupJava.contains("@03ad4de"),
         p.setupSbt.contains("@9d56cf1"),
         p.cache.contains("@55cc834"),
+        p.uploadArtifact.contains("@043fb46"),
+        p.downloadArtifact.contains("@3e5f45b"),
       )
     },
     test("planner emits the configured pins on every job") {
@@ -37,7 +39,7 @@ object ActionPinsSpec extends ZIOSpecDefault:
     },
     test("affected setup job also uses the configured checkout and setup-sbt pins") {
       val custom = ActionPins.Defaults.copy(checkout = "actions/checkout@aabbccdd", setupSbt = "sbt/setup-sbt@11223344")
-      val wf = Planner.plan(
+      val wf     = Planner.plan(
         Fixtures.sampleGraph,
         List(Capability.test),
         config.copy(affected = AffectedMode.AffectedOnPR, actions = custom),

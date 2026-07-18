@@ -79,10 +79,10 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("publish command crosses when the module is cross-built, single otherwise") {
-      val wf   = Planner.plan(sampleGraph, List(Capability.publish), config)
+      val wf    = Planner.plan(sampleGraph, List(Capability.publish), config)
       val runOf = (id: String) => wf.jobs(id).steps.last.run.getOrElse("")
       assertTrue(
-        runOf("publish-api").contains("+api/publish"),      // cross → +
+        runOf("publish-api").contains("+api/publish"), // cross → +
         runOf("publish-legacyClient").contains("legacyClient/publish"),
         !runOf("publish-legacyClient").contains("+legacyClient"), // 2.13-only → no +
       )
@@ -96,23 +96,34 @@ object PlannerSpec extends ZIOSpecDefault:
         !wf.jobs("publish-api").steps.last.run.getOrElse("").contains("matrix.scala"),
       )
     },
-    test("LocalDir uses an epoch-keyed actions/cache and disables setup-sbt disk-cache") {
-      val steps     = Planner.plan(sampleGraph, List(Capability.test), config).jobs("test-core").steps
-      val cacheStep = steps.find(_.uses.exists(_.startsWith("actions/cache@")))
-      val java      = steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
-      val sbt       = steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
-      val jdkIx     = steps.indexWhere(_.uses.exists(_.startsWith("actions/setup-java@")))
-      val sbtIx     = steps.indexWhere(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
+    test("LocalDir cache keys include run_id + job id so same-run jobs accumulate and can save") {
+      val wf        = Planner.plan(sampleGraph, List(Capability.test), config)
+      val coreStep  = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val apiStep   = wf.jobs("test-api").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val coreKey   = coreStep.map(_.`with`("key")).getOrElse("")
+      val apiKey    = apiStep.map(_.`with`("key")).getOrElse("")
+      val restore   = coreStep.map(_.`with`("restore-keys")).getOrElse("")
+      val paths     = coreStep.map(_.`with`("path")).getOrElse("")
+      val java      = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
+      val sbt       = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
       assertTrue(
-        cacheStep.exists(_.`with`("key").endsWith("1.2.3-ci")),
-        cacheStep.exists(s => s.`with`("key").startsWith(s.`with`("restore-keys"))),
-        !java.exists(_.`with`.contains("cache")), // no hashFiles-based setup-java cache:sbt
+        // Primary key always misses within a run (run_id) so the job can save after restoring upstream.
+        coreKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-core"),
+        apiKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-api"),
+        coreKey != apiKey,
+        // Same-run prefix first (accumulated upstream), then epoch, then older epochs.
+        restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-"),
+        restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-"),
+        restore.contains("ubuntu-latest-jdk21-sbt-"),
+        paths.contains("~/.sbt"),
+        paths.contains("~/.cache/sbt"),
+        paths.contains("~/.cache/coursier"),
+        paths.contains("target"),
+        !java.exists(_.`with`.contains("cache")),
         sbt.exists(_.`with`.get("disk-cache").contains("false")),
-        jdkIx >= 0,
-        sbtIx > jdkIx,
       )
     },
-    test("cache key is identical across commits with the same epoch, differs across epochs") {
+    test("cache key is identical across commits with the same epoch+job template, differs across epochs") {
       def keyFor(epoch: String) =
         Planner
           .plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = epoch))
@@ -121,8 +132,8 @@ object PlannerSpec extends ZIOSpecDefault:
           .find(_.uses.exists(_.startsWith("actions/cache@")))
           .map(_.`with`("key"))
       assertTrue(
-        keyFor("1.2.3-ci") == keyFor("1.2.3-ci"), // same epoch (e.g. two commits in a PR) → identical
-        keyFor("1.2.3-ci") != keyFor("1.3.0"),    // new release tag → different
+        keyFor("1.2.3-ci") == keyFor("1.2.3-ci"),
+        keyFor("1.2.3-ci") != keyFor("1.3.0"),
       )
     },
     test("release triggers include the tag pattern; PR/test-only builds do not gate on tags") {
@@ -136,7 +147,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("publish jobs are gated on a release tag") {
       val wf = Planner.plan(sampleGraph, List(Capability.publish), config)
       assertTrue(
-        wf.jobs("publish-schema").`if`.exists(_.contains("startsWith(github.ref, 'refs/tags/v')")),
+        wf.jobs("publish-schema").`if`.exists(_.contains("startsWith(github.ref, 'refs/tags/v')"))
       )
     },
     // ---- M3 affected-only ----
@@ -150,7 +161,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("verify jobs gate on affected-set membership (with the `all` sentinel escape hatch)") {
-      val wf  = Planner.plan(sampleGraph, List(Capability.test), config.copy(affected = AffectedMode.AffectedOnPR))
+      val wf   = Planner.plan(sampleGraph, List(Capability.test), config.copy(affected = AffectedMode.AffectedOnPR))
       val cond = wf.jobs("test-api").`if`.getOrElse("")
       assertTrue(
         cond.contains("contains(fromJson(needs.affected.outputs.modules), 'api')"),
@@ -219,7 +230,9 @@ object PlannerSpec extends ZIOSpecDefault:
         job.services.isEmpty,
         job.env.isEmpty,
         job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
-        job.steps.exists(s => s.uses.exists(_.startsWith("sbt/setup-sbt@")) && s.`with`.get("disk-cache").contains("false")),
+        job.steps.exists(s =>
+          s.uses.exists(_.startsWith("sbt/setup-sbt@")) && s.`with`.get("disk-cache").contains("false")
+        ),
       )
     },
     test("BazelRemoteSidecar backend emits a service sidecar and the remote-cache env, no actions/cache") {
@@ -306,7 +319,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val cond = wf.jobs("deploy-serviceA-prod").`if`.getOrElse("")
       assertTrue(
         cond.contains("startsWith(github.ref, 'refs/tags/v')"), // capability gate preserved
-        cond.contains("github.ref == 'refs/heads/main'"),        // target condition ANDed in
+        cond.contains("github.ref == 'refs/heads/main'"),       // target condition ANDed in
         cond.contains("&&"),
       )
     },
@@ -360,32 +373,62 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("a needsCapabilities cycle is rejected") {
-      val a = Capability("a", Phase.Publish, Ordering.DependencyOrdered, Gate.Always, _ => true, _ => "a", false,
-                          needsCapabilities = List("b"))
-      val b = Capability("b", Phase.Publish, Ordering.DependencyOrdered, Gate.Always, _ => true, _ => "b", false,
-                          needsCapabilities = List("a"))
+      val a = Capability(
+        "a",
+        Phase.Publish,
+        Ordering.DependencyOrdered,
+        Gate.Always,
+        _ => true,
+        _ => "a",
+        false,
+        needsCapabilities = List("b"),
+      )
+      val b = Capability(
+        "b",
+        Phase.Publish,
+        Ordering.DependencyOrdered,
+        Gate.Always,
+        _ => true,
+        _ => "b",
+        false,
+        needsCapabilities = List("a"),
+      )
       assertTrue(scala.util.Try(Planner.plan(sampleGraph, List(a, b), config)).isFailure)
     },
     // ---- M6d — extension seam, custom capabilities, list runners ----
     test("extraSteps are injected before the command and can reference the target") {
-      val cap = Capability.deploy(
-        participates = _.id == "serviceA",
-        command = n => s"${n.id}/deploy",
-        targets = _ => stagingProd,
-      ).copy(
-        extraSteps = _ =>
-          List(
-            Step(
-              name = Some("Configure credentials"),
-              uses = Some("aws-actions/configure-aws-credentials@v6"),
-              `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"),
-            ),
-          ),
-      )
-      val steps = Planner.plan(sampleGraph, List(cap), config).jobs("deploy-serviceA-prod").steps
+      val cap = Capability
+        .deploy(
+          participates = _.id == "serviceA",
+          command = n => s"${n.id}/deploy",
+          targets = _ => stagingProd,
+        )
+        .copy(
+          extraSteps = _ =>
+            List(
+              Step(
+                name = Some("Configure credentials"),
+                uses = Some("aws-actions/configure-aws-credentials@v6"),
+                `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"),
+              )
+            )
+        )
+      val steps   = Planner.plan(sampleGraph, List(cap), config).jobs("deploy-serviceA-prod").steps
       val credIdx = steps.indexWhere(_.uses.contains("aws-actions/configure-aws-credentials@v6"))
       val cmdIdx  = steps.indexWhere(_.run.exists(_.contains("serviceA/deploy")))
       assertTrue(credIdx >= 0, cmdIdx >= 0, credIdx < cmdIdx) // injected before the command
+    },
+    test("postSteps are injected after the command") {
+      val cap = Capability.custom(
+        name = "publish",
+        command = n => s"${n.id}/publish",
+        participates = _.id == "schema",
+        postSteps = _ => List(Step(name = Some("Upload"), run = Some("echo uploaded"))),
+      )
+      val steps   = Planner.plan(sampleGraph, List(cap), config).jobs("publish-schema").steps
+      val cmdIdx  = steps.indexWhere(_.run.exists(_.contains("schema/publish")))
+      val postIdx = steps.indexWhere(_.name.contains("Upload"))
+      assertTrue(cmdIdx >= 0, postIdx > cmdIdx)
     },
     test("Capability.runsOn overrides the build-level runner (list form)") {
       val cap = Capability.custom(
@@ -394,7 +437,9 @@ object PlannerSpec extends ZIOSpecDefault:
         participates = _.id == "serviceA",
         runsOn = Some(List("self-hosted", "linux")),
       )
-      assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs("release-serviceA").runsOn == List("self-hosted", "linux"))
+      assertTrue(
+        Planner.plan(sampleGraph, List(cap), config).jobs("release-serviceA").runsOn == List("self-hosted", "linux")
+      )
     },
     test("Capability.custom emits a job with its command and defaults") {
       val cap = Capability.custom(name = "notify", command = _ => "notify", participates = _.id == "schema")
@@ -415,17 +460,25 @@ object PlannerSpec extends ZIOSpecDefault:
         Target("eu", env = Map("REGISTRY" -> EnvValue.plain("222.dkr.ecr.eu-west-1"), "ROLE" -> secret"EU_ROLE")),
       )
       // A docker capability that pushes to multiple registries — same shape as deploy.
-      val multiDocker = Capability.custom(
-        name = "docker",
-        command = n => s"${n.id}/Docker/publish",
-        participates = _.docker,
-        phase = Phase.Publish,
-        targets = _ => registries,
-        permissions = Map("id-token" -> "write"),
-      ).copy(
-        extraSteps = _ =>
-          List(Step(name = Some("Login"), uses = Some("aws-actions/amazon-ecr-login@v2"), env = Map("R" -> "${{ env.REGISTRY }}"))),
-      )
+      val multiDocker = Capability
+        .custom(
+          name = "docker",
+          command = n => s"${n.id}/Docker/publish",
+          participates = _.docker,
+          phase = Phase.Publish,
+          targets = _ => registries,
+          permissions = Map("id-token" -> "write"),
+        )
+        .copy(
+          extraSteps = _ =>
+            List(
+              Step(
+                name = Some("Login"),
+                uses = Some("aws-actions/amazon-ecr-login@v2"),
+                env = Map("R" -> "${{ env.REGISTRY }}"),
+              )
+            )
+        )
       val wf = Planner.plan(graph, List(multiDocker), config)
       assertTrue(
         wf.jobs.contains("docker-serviceA-us"),
@@ -440,8 +493,8 @@ object PlannerSpec extends ZIOSpecDefault:
       val fmt = Capability.once("fmt", "scalafmtCheckAll")
       val wf  = Planner.plan(sampleGraph, List(fmt), config)
       assertTrue(
-        wf.jobs.contains("fmt"),                                  // bare name, not fmt-<module>
-        wf.jobs.keys.count(_.startsWith("fmt")) == 1,             // exactly one job
+        wf.jobs.contains("fmt"),                      // bare name, not fmt-<module>
+        wf.jobs.keys.count(_.startsWith("fmt")) == 1, // exactly one job
         wf.jobs("fmt").steps.last.run.exists(_.contains("scalafmtCheckAll")),
       )
     },
@@ -458,9 +511,9 @@ object PlannerSpec extends ZIOSpecDefault:
     test("capability.env injects into every job of the capability (no targets)") {
       val pub = Capability.publish.copy(env =
         Map(
-          "PGP_PASSPHRASE"     -> secret"PGP_PASSPHRASE",
-          "SONATYPE_USERNAME"  -> Secret.ref("SONATYPE_USERNAME"),
-        ),
+          "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
+          "SONATYPE_USERNAME" -> Secret.ref("SONATYPE_USERNAME"),
+        )
       )
       val job = Planner.plan(sampleGraph, List(pub), config).jobs("publish-schema")
       assertTrue(
@@ -483,17 +536,17 @@ object PlannerSpec extends ZIOSpecDefault:
                 Target(
                   "prod",
                   env = Map("TIER" -> EnvValue.plain("prod"), "EXTRA" -> EnvValue.plain("only-target")),
-                ),
+                )
               ),
-          ),
+          )
         ),
         config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")),
       )
       val job = wf.jobs("ship-serviceA-prod")
       assertTrue(
-        job.env.get("TIER").contains("prod"),                         // target wins
-        job.env.get("SHARED").contains("from-cap"),                   // capability preserved
-        job.env.get("EXTRA").contains("only-target"),                 // target-only
+        job.env.get("TIER").contains("prod"),                               // target wins
+        job.env.get("SHARED").contains("from-cap"),                         // capability preserved
+        job.env.get("EXTRA").contains("only-target"),                       // target-only
         job.env.get("ZIPX_REMOTE_CACHE").contains("grpcs://cache.example"), // cache preserved
         job.env.get("ZIPX_REMOTE_CACHE_HEADER").contains("${{ secrets.CACHE_KEY }}"),
       )
@@ -501,7 +554,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("Once jobs receive capability.env") {
       val fmt = Capability.once("fmt", "scalafmtCheckAll", env = Map("SCALAFMT_VERSION" -> EnvValue.plain("3.8")))
       assertTrue(
-        Planner.plan(sampleGraph, List(fmt), config).jobs("fmt").env.get("SCALAFMT_VERSION").contains("3.8"),
+        Planner.plan(sampleGraph, List(fmt), config).jobs("fmt").env.get("SCALAFMT_VERSION").contains("3.8")
       )
     },
     test("FromEnv renders as ${{ env.NAME }}") {
@@ -513,7 +566,12 @@ object PlannerSpec extends ZIOSpecDefault:
         env = Map("UPSTREAM" -> EnvValue.env("DEPLOY_ROLE")),
       )
       assertTrue(
-        Planner.plan(sampleGraph, List(cap), config).jobs("relay-schema").env.get("UPSTREAM").contains("${{ env.DEPLOY_ROLE }}"),
+        Planner
+          .plan(sampleGraph, List(cap), config)
+          .jobs("relay-schema")
+          .env
+          .get("UPSTREAM")
+          .contains("${{ env.DEPLOY_ROLE }}")
       )
     },
     test("Expr is an escape hatch rendered verbatim") {
@@ -530,7 +588,7 @@ object PlannerSpec extends ZIOSpecDefault:
           .jobs("expr-schema")
           .env
           .get("COMPLEX")
-          .contains("${{ github.sha }}-${{ github.run_id }}"),
+          .contains("${{ github.sha }}-${{ github.run_id }}")
       )
     },
     test("ManagedRemote rejects an invalid headerSecret name at plan time") {
@@ -541,9 +599,9 @@ object PlannerSpec extends ZIOSpecDefault:
               sampleGraph,
               List(Capability.test),
               config.copy(cache = CacheBackend.ManagedRemote("grpcs://x", "bad name")),
-            ),
+            )
           )
-          .isFailure,
+          .isFailure
       )
     },
     // ---- Adversarial / gap coverage for existing planner behavior ----
@@ -554,7 +612,7 @@ object PlannerSpec extends ZIOSpecDefault:
           ModuleNode("pubRoot", publishes = true, crossScalaVersions = List(scala3)),
           ModuleNode("middle", dependsOn = List("pubRoot"), publishes = false, crossScalaVersions = List(scala3)),
           ModuleNode("pubLeaf", dependsOn = List("middle"), publishes = true, crossScalaVersions = List(scala3)),
-        ),
+        )
       )
       val wf = Planner.plan(g, List(Capability.publish), config)
       assertTrue(
@@ -599,13 +657,15 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("StepContext.matrixed is true only when a Scala matrix is active") {
       var seen: List[Boolean] = Nil
-      val cap = Capability.test.copy(
+      val cap                 = Capability.test.copy(
         participates = _.id == "api", // cross-built
-        extraSteps = ctx => { seen = ctx.matrixed :: seen; Nil },
+        extraSteps = ctx =>
+          seen = ctx.matrixed :: seen; Nil,
       )
       val noMatrix = Capability.test.copy(
         participates = _.id == "core", // single scala
-        extraSteps = ctx => { seen = ctx.matrixed :: seen; Nil },
+        extraSteps = ctx =>
+          seen = ctx.matrixed :: seen; Nil,
       )
       val _ = Planner.plan(sampleGraph, List(cap, noMatrix), config)
       assertTrue(seen.contains(true), seen.contains(false))
@@ -623,7 +683,7 @@ object PlannerSpec extends ZIOSpecDefault:
           .plan(sampleGraph, List(cap), config)
           .jobs("gate-schema-only")
           .`if`
-          .contains("github.ref == 'refs/heads/main'"),
+          .contains("github.ref == 'refs/heads/main'")
       )
     },
     test("Once capability with OnReleaseTag is gated") {
@@ -633,7 +693,7 @@ object PlannerSpec extends ZIOSpecDefault:
           .plan(sampleGraph, List(once), config)
           .jobs("releaseNotes")
           .`if`
-          .exists(_.contains("refs/tags/v")),
+          .exists(_.contains("refs/tags/v"))
       )
     },
     test("root modules with empty baseDir never own changed files via the planner path") {

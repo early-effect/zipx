@@ -62,8 +62,12 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-workflow
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'workflow/test'
   test-core:
@@ -92,8 +96,12 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-core
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'core/test'
   test-central:
@@ -122,8 +130,12 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-central
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'central/test'
   test-docs:
@@ -152,8 +164,12 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-docs
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'docs/test'
   test-plugin:
@@ -183,8 +199,12 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-test-plugin
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'plugin/test'
   publish-workflow:
@@ -215,8 +235,12 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-publish-workflow
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -228,6 +252,12 @@ jobs:
           PGP_SECRET: ${{ secrets.PGP_SECRET }}
       - name: publish
         run: sbt 'workflow/publishSigned'
+      - name: Upload sona staging
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sona-staging-publish-workflow
+          path: target/sona-staging
+          if-no-files-found: error
   publish-core:
     name: publish core
     runs-on: ubuntu-latest
@@ -258,8 +288,12 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-publish-core
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -271,6 +305,12 @@ jobs:
           PGP_SECRET: ${{ secrets.PGP_SECRET }}
       - name: publish
         run: sbt 'core/publishSigned'
+      - name: Upload sona staging
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sona-staging-publish-core
+          path: target/sona-staging
+          if-no-files-found: error
   publish-central:
     name: publish central
     runs-on: ubuntu-latest
@@ -301,8 +341,12 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-publish-central
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -314,6 +358,12 @@ jobs:
           PGP_SECRET: ${{ secrets.PGP_SECRET }}
       - name: publish
         run: sbt 'central/publishSigned'
+      - name: Upload sona staging
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sona-staging-publish-central
+          path: target/sona-staging
+          if-no-files-found: error
   publish-plugin:
     name: publish plugin
     runs-on: ubuntu-latest
@@ -345,8 +395,12 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-publish-plugin
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -358,6 +412,12 @@ jobs:
           PGP_SECRET: ${{ secrets.PGP_SECRET }}
       - name: publish
         run: sbt 'plugin/publishSigned'
+      - name: Upload sona staging
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sona-staging-publish-plugin
+          path: target/sona-staging
+          if-no-files-found: error
   central-release:
     name: central-release
     runs-on: ubuntu-latest
@@ -391,8 +451,18 @@ jobs:
             ~/.sbt
             ~/.cache/sbt
             ~/.cache/coursier
-          key: ubuntu-latest-jdk25-sbt-0.1.0-ci
-          restore-keys: ubuntu-latest-jdk25-sbt-
+            target
+          key: ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-central-release
+          restore-keys: |
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.1.0-ci-
+            ubuntu-latest-jdk25-sbt-
+      - name: Download sona staging
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: sona-staging-*
+          path: target/sona-staging
+          merge-multiple: "true"
       - name: Import signing key
         run: |
           mkdir -p ~/.gnupg && chmod 700 ~/.gnupg

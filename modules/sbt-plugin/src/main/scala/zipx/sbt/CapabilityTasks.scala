@@ -102,31 +102,31 @@ object CapabilityTasks:
 
   /** [[Capability.deploy]] with the deploy command given as a task key (rendered `<module>/<label>`). */
   def deploy(
-    participates: ModuleNode => Boolean,
-    command: Scoped,
-    targets: ModuleNode => List[Target],
-    name: String = "deploy",
-    needsCapabilities: List[String] = List("docker"),
-    permissions: Map[String, String] = Map.empty,
-    env: Map[String, EnvValue] = Map.empty,
+      participates: ModuleNode => Boolean,
+      command: Scoped,
+      targets: ModuleNode => List[Target],
+      name: String = "deploy",
+      needsCapabilities: List[String] = List("docker"),
+      permissions: Map[String, String] = Map.empty,
+      env: Map[String, EnvValue] = Map.empty,
   ): Capability =
     Capability.deploy(participates, moduleCommand(command), targets, name, needsCapabilities, permissions, env)
 
   /** [[Capability.custom]] with the command given as a task key (rendered `<module>/<label>`). */
   def custom(
-    name: String,
-    command: Scoped,
-    participates: ModuleNode => Boolean = _ => true,
-    phase: Phase = Phase.Publish,
-    ordering: Ordering = Ordering.DependencyOrdered,
-    gate: Gate = Gate.OnReleaseTag,
-    matrixed: Boolean = false,
-    targets: ModuleNode => List[Target] = _ => Nil,
-    needsCapabilities: List[String] = Nil,
-    permissions: Map[String, String] = Map.empty,
-    runsOn: Option[List[String]] = None,
-    extraSteps: StepContext => List[Step] = _ => Nil,
-    env: Map[String, EnvValue] = Map.empty,
+      name: String,
+      command: Scoped,
+      participates: ModuleNode => Boolean = _ => true,
+      phase: Phase = Phase.Publish,
+      ordering: Ordering = Ordering.DependencyOrdered,
+      gate: Gate = Gate.OnReleaseTag,
+      matrixed: Boolean = false,
+      targets: ModuleNode => List[Target] = _ => Nil,
+      needsCapabilities: List[String] = Nil,
+      permissions: Map[String, String] = Map.empty,
+      runsOn: Option[List[String]] = None,
+      extraSteps: StepContext => List[Step] = _ => Nil,
+      env: Map[String, EnvValue] = Map.empty,
   ): Capability =
     Capability.custom(
       name,
@@ -141,20 +141,29 @@ object CapabilityTasks:
       permissions,
       runsOn,
       extraSteps,
-      env,
+      env = env,
     )
 
   /** [[Capability.once]] with the single build-wide command given as a task key (rendered as its bare `<label>`). */
   def once(
-    name: String,
-    command: Scoped,
-    phase: Phase = Phase.Verify,
-    gate: Gate = Gate.Always,
-    runsOn: Option[List[String]] = None,
-    extraSteps: StepContext => List[Step] = _ => Nil,
-    env: Map[String, EnvValue] = Map.empty,
-    needsCapabilities: List[String] = Nil,
+      name: String,
+      command: Scoped,
+      phase: Phase = Phase.Verify,
+      gate: Gate = Gate.Always,
+      runsOn: Option[List[String]] = None,
+      extraSteps: StepContext => List[Step] = _ => Nil,
+      env: Map[String, EnvValue] = Map.empty,
+      needsCapabilities: List[String] = Nil,
   ): Capability =
-    Capability.once(name, scopedLabel(command), phase, gate, runsOn, extraSteps, env, needsCapabilities)
+    Capability.once(
+      name,
+      scopedLabel(command),
+      phase,
+      gate,
+      runsOn,
+      extraSteps,
+      env = env,
+      needsCapabilities = needsCapabilities,
+    )
 
 end CapabilityTasks
