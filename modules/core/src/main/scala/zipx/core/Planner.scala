@@ -93,12 +93,7 @@ object Planner:
       outputs = ListMap("modules" -> "${{ steps.compute.outputs.modules }}"),
       steps = List(
         Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0")),
-        Step(uses = Some(config.actions.setupSbt)),
-        Step(
-          name = Some(s"Setup JDK ${config.javaVersion}"),
-          uses = Some(config.actions.setupJava),
-          `with` = ListMap("distribution" -> "temurin", "java-version" -> config.javaVersion),
-        ),
+      ) ++ jdkAndSbtSteps(config) ++ List(
         Step(
           id = Some("compute"),
           name = Some("Compute affected modules"),
@@ -363,6 +358,26 @@ object Planner:
     go(List(node.id), Set.empty, Set.empty).toList.sorted
   end nearestParticipatingAncestors
 
+  /** JDK then sbt. For [[CacheBackend.LocalDir]] we own the dependency/action-cache via an epoch-keyed
+    * `actions/cache` step, so setup-java must NOT set `cache: sbt` (hashFiles) and setup-sbt must set
+    * `disk-cache: false` (also hashFiles). The setup-sbt *distribution* cache (keyed by runner version) stays on.
+    */
+  private def jdkAndSbtSteps(config: PlanConfig): List[Step] =
+    val setupSbtWith =
+      if config.cache == CacheBackend.LocalDir then ListMap("disk-cache" -> "false")
+      else ListMap.empty[String, String]
+    List(
+      Step(
+        name = Some(s"Setup JDK ${config.javaVersion}"),
+        uses = Some(config.actions.setupJava),
+        `with` = ListMap(
+          "distribution" -> "temurin",
+          "java-version" -> config.javaVersion,
+        ),
+      ),
+      Step(uses = Some(config.actions.setupSbt), `with` = setupSbtWith),
+    )
+
   private def stepsFor(
       capability: Capability,
       node: ModuleNode,
@@ -374,13 +389,7 @@ object Planner:
     val scalaArg = if hasMatrix then "++${{ matrix.scala }} " else ""
     List(
       Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0")),
-      Step(uses = Some(config.actions.setupSbt)),
-      Step(
-        name = Some(s"Setup JDK ${config.javaVersion}"),
-        uses = Some(config.actions.setupJava),
-        `with` = ListMap("distribution" -> "temurin", "java-version" -> config.javaVersion),
-      ),
-    ) ++ cache.steps ++ capability.extraSteps(StepContext(node, target, hasMatrix)) ++ List(
+    ) ++ jdkAndSbtSteps(config) ++ cache.steps ++ capability.extraSteps(StepContext(node, target, hasMatrix)) ++ List(
       Step(
         name = Some(capability.name),
         run = Some(s"sbt '$scalaArg${capability.command(node)}'"),
@@ -396,8 +405,10 @@ object Planner:
   )
 
   /** Caching for the chosen backend:
-    *   - `LocalDir`: persist sbt's local action-cache dir with `actions/cache`, keyed by a commit-stable epoch plus
-    *     OS/JDK (which sbt does not fold into its own key). `restore-keys` warm-starts from the newest prior epoch.
+    *   - `LocalDir`: persist sbt's local dirs with `actions/cache`, keyed by OS + JDK + commit-stable
+    *     [[PlanConfig.cacheEpoch]] (the build version). Mid-PR commits reuse the same key; a release tag rolls it.
+    *     `restore-keys` warm-starts from the newest prior epoch. setup-sbt's hashFiles disk-cache and setup-java
+    *     `cache: sbt` are disabled so they do not race or pin on file hashes.
     *   - `BazelRemoteSidecar`: run `buchgr/bazel-remote` as a job service and point the sbt remote cache at it via env;
     *     the plugin reads `ZIPX_REMOTE_CACHE` and wires `Global / remoteCache` + `addRemoteCachePlugin`.
     *   - `ManagedRemote`: no sidecar; point the remote cache at a managed gRPC endpoint, auth via a header secret.

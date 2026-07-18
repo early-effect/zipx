@@ -31,7 +31,11 @@ object ZipxCentral:
     "SONATYPE_PASSWORD" -> secret"SONATYPE_PASSWORD",
   )
 
-  /** Import the CI signing key from the base64-encoded `PGP_SECRET` org secret (same recipe as peer release.yml). */
+  /** Import the CI signing key from the base64-encoded `PGP_SECRET` org secret (same recipe as peer release.yml).
+    *
+    * Use a plain `$PGP_SECRET` (not `$$`). This string is not Scala-interpolated; a doubled `$` survives into the
+    * workflow YAML and bash expands `$$` to the PID, which poisons `base64 --decode`.
+    */
   val gpgImportSteps: StepContext => List[Step] = _ =>
     List(
       Step(
@@ -42,7 +46,7 @@ object ZipxCentral:
             |echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
             |echo "pinentry-mode loopback"   >> ~/.gnupg/gpg.conf
             |gpgconf --kill gpg-agent || true
-            |echo "$$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin,
+            |echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin,
         ),
       ),
     )

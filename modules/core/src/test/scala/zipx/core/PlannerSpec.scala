@@ -96,12 +96,20 @@ object PlannerSpec extends ZIOSpecDefault:
         !wf.jobs("publish-api").steps.last.run.getOrElse("").contains("matrix.scala"),
       )
     },
-    test("local-dir cache step uses a commit-stable key with restore-keys fallback") {
-      val wf        = Planner.plan(sampleGraph, List(Capability.test), config)
-      val cacheStep = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+    test("LocalDir uses an epoch-keyed actions/cache and disables setup-sbt disk-cache") {
+      val steps     = Planner.plan(sampleGraph, List(Capability.test), config).jobs("test-core").steps
+      val cacheStep = steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val java      = steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
+      val sbt       = steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
+      val jdkIx     = steps.indexWhere(_.uses.exists(_.startsWith("actions/setup-java@")))
+      val sbtIx     = steps.indexWhere(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
       assertTrue(
         cacheStep.exists(_.`with`("key").endsWith("1.2.3-ci")),
         cacheStep.exists(s => s.`with`("key").startsWith(s.`with`("restore-keys"))),
+        !java.exists(_.`with`.contains("cache")), // no hashFiles-based setup-java cache:sbt
+        sbt.exists(_.`with`.get("disk-cache").contains("false")),
+        jdkIx >= 0,
+        sbtIx > jdkIx,
       )
     },
     test("cache key is identical across commits with the same epoch, differs across epochs") {
@@ -204,13 +212,14 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     // ---- M5 remote caches ----
-    test("LocalDir backend caches via actions/cache and adds no services/env") {
+    test("LocalDir backend caches via epoch-keyed actions/cache and adds no services/env") {
       val wf  = Planner.plan(sampleGraph, List(Capability.test), config)
       val job = wf.jobs("test-core")
       assertTrue(
         job.services.isEmpty,
         job.env.isEmpty,
         job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
+        job.steps.exists(s => s.uses.exists(_.startsWith("sbt/setup-sbt@")) && s.`with`.get("disk-cache").contains("false")),
       )
     },
     test("BazelRemoteSidecar backend emits a service sidecar and the remote-cache env, no actions/cache") {
@@ -226,6 +235,8 @@ object PlannerSpec extends ZIOSpecDefault:
         job.services("bazel-remote").ports == List("9092:9092"),
         job.env.get("ZIPX_REMOTE_CACHE").contains("grpc://localhost:9092"),
         !job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
+        // remote backends leave setup-sbt disk-cache at its default (no disk-cache: false)
+        !job.steps.exists(s => s.uses.exists(_.startsWith("sbt/setup-sbt@")) && s.`with`.contains("disk-cache")),
       )
     },
     test("ManagedRemote backend sets the endpoint + header-from-secret env, no service") {
