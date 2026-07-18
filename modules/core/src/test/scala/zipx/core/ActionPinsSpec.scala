@@ -16,6 +16,8 @@ object ActionPinsSpec extends ZIOSpecDefault:
         p.setupJava.contains("@03ad4de"),
         p.setupSbt.contains("@9d56cf1"),
         p.cache.contains("@55cc834"),
+        p.uploadArtifact.contains("@043fb46"),
+        p.downloadArtifact.contains("@3e5f45b"),
       )
     },
     test("planner emits the configured pins on every job") {

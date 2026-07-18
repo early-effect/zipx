@@ -2,10 +2,15 @@ package zipx.core
 
 import zipx.workflow.Step
 
-/** Context passed to a capability's `extraSteps` so injected steps can reference the module, the current deploy target
-  * (when fanned out), and whether a Scala matrix leg is active.
+/** Context passed to a capability's `extraSteps` / `postSteps` so injected steps can reference the module, the current
+  * deploy target (when fanned out), matrix state, and the build's [[ActionPins]].
   */
-final case class StepContext(node: ModuleNode, target: Option[Target], matrixed: Boolean)
+final case class StepContext(
+    node: ModuleNode,
+    target: Option[Target],
+    matrixed: Boolean,
+    actions: ActionPins = ActionPins.Defaults,
+)
 
 /** Where a capability sits in the pipeline, in run order: Verify (test/build) → Publish (artifacts/images) → Deploy
   * (release to environments). Only Verify jobs are affected-gated; Publish and Deploy are release-gated. The phase also
@@ -96,6 +101,8 @@ final case class Target(
   * @param extraSteps
   *   extra steps injected before the command step (the extension seam) — e.g. cloud credential setup that references a
   *   target's env. Receives a [[StepContext]] with the module, the current target (if fanned out), and matrix state.
+  * @param postSteps
+  *   extra steps injected after the command step — e.g. uploading `target/sona-staging` after `publishSigned`.
   * @param scope
   *   whether this capability fans out per module (default) or runs once for the whole build (a lint/format gate).
   * @param env
@@ -117,6 +124,7 @@ final case class Capability(
     permissions: Map[String, String] = Map.empty,
     runsOn: Option[List[String]] = None,
     extraSteps: StepContext => List[Step] = _ => Nil,
+    postSteps: StepContext => List[Step] = _ => Nil,
     scope: CapabilityScope = CapabilityScope.PerModule,
     env: Map[String, EnvValue] = Map.empty,
     workflowCall: Option[WorkflowCall] = None,
@@ -207,6 +215,7 @@ object Capability:
       permissions: Map[String, String] = Map.empty,
       runsOn: Option[List[String]] = None,
       extraSteps: StepContext => List[Step] = _ => Nil,
+      postSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
   ): Capability =
     Capability(
@@ -222,6 +231,7 @@ object Capability:
       permissions,
       runsOn,
       extraSteps,
+      postSteps,
       env = env,
     )
 
@@ -240,6 +250,7 @@ object Capability:
       gate: Gate = Gate.Always,
       runsOn: Option[List[String]] = None,
       extraSteps: StepContext => List[Step] = _ => Nil,
+      postSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
       needsCapabilities: List[String] = Nil,
       permissions: Map[String, String] = Map.empty,
@@ -256,6 +267,7 @@ object Capability:
       permissions = permissions,
       runsOn = runsOn,
       extraSteps = extraSteps,
+      postSteps = postSteps,
       scope = CapabilityScope.Once,
       env = env,
     )

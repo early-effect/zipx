@@ -148,8 +148,8 @@ Org paved paths as capabilities (secret *names* only; values stay in GitHub):
 
 ```scala
 zipxCapabilities ++= Seq(
-  ZipxCentral.publishSigned,  // GPG import + publishSigned + org signing env
-  ZipxCentral.releaseOnce,    // sonaRelease after the publish wave
+  ZipxCentral.publishSigned,  // GPG import + publishSigned + staging artifact upload + org signing env
+  ZipxCentral.releaseOnce,    // download/merge staging + sonaRelease
   ZipxDocs.pages(),           // Specular site → GitHub Pages via org reusable workflow
 )
 zipxWorkflowDispatch := true  // optional: manual "Run workflow" for docs-only deploys

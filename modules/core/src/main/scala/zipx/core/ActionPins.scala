@@ -21,12 +21,18 @@ package zipx.core
   *   `sbt/setup-sbt` pin (default v1.5.1).
   * @param cache
   *   `actions/cache` pin for [[CacheBackend.LocalDir]] (default v6.1.0).
+  * @param uploadArtifact
+  *   `actions/upload-artifact` pin (default v7.0.1), used to share `target/sona-staging` across publish jobs.
+  * @param downloadArtifact
+  *   `actions/download-artifact` pin (default v8.0.1), used by `sonaRelease` to reassemble staging.
   */
 final case class ActionPins(
   checkout: String = ActionPins.Checkout,
   setupJava: String = ActionPins.SetupJava,
   setupSbt: String = ActionPins.SetupSbt,
   cache: String = ActionPins.Cache,
+  uploadArtifact: String = ActionPins.UploadArtifact,
+  downloadArtifact: String = ActionPins.DownloadArtifact,
 )
 
 object ActionPins:
@@ -42,6 +48,12 @@ object ActionPins:
 
   /** actions/cache@v6.1.0 */
   val Cache: String = "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
+
+  /** actions/upload-artifact@v7.0.1 */
+  val UploadArtifact: String = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+
+  /** actions/download-artifact@v8.0.1 */
+  val DownloadArtifact: String = "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
 
   /** Current zipx defaults — prefer this over assembling pins by hand. */
   val Defaults: ActionPins = ActionPins()

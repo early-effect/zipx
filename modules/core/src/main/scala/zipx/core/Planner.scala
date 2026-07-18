@@ -389,12 +389,14 @@ object Planner:
     val scalaArg = if hasMatrix then "++${{ matrix.scala }} " else ""
     List(
       Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0")),
-    ) ++ jdkAndSbtSteps(config) ++ cache.steps ++ capability.extraSteps(StepContext(node, target, hasMatrix)) ++ List(
+    ) ++ jdkAndSbtSteps(config) ++ cache.steps ++ capability.extraSteps(
+      StepContext(node, target, hasMatrix, config.actions)
+    ) ++ List(
       Step(
         name = Some(capability.name),
         run = Some(s"sbt '$scalaArg${capability.command(node)}'"),
       )
-    )
+    ) ++ capability.postSteps(StepContext(node, target, hasMatrix, config.actions))
   end stepsFor
 
   /** A cache backend's contribution to a job: pre-run steps, service sidecars, and job-level env. */

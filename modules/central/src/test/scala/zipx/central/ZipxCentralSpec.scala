@@ -12,7 +12,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
     test("publishSigned replaces bare publish with publishSigned + org secret env + GPG import") {
       val wf  = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned), config)
       val job = wf.jobs("publish-schema")
-      val run = job.steps.last.run.getOrElse("")
+      val run = job.steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
       assertTrue(
         run.contains("publishSigned"),
         !run.contains("/publish'"), // not the unsigned task as the sole command
@@ -39,19 +39,37 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       )
     },
     test("cross-built modules get +publishSigned; single-version do not") {
-      val wf                = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned), config)
-      def runOf(id: String) = wf.jobs(id).steps.last.run.getOrElse("")
+      val wf = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned), config)
+      def runOf(id: String) =
+        wf.jobs(id).steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
       assertTrue(
         runOf("publish-api").contains("+api/publishSigned"),
         runOf("publish-legacyClient").contains("legacyClient/publishSigned"),
         !runOf("publish-legacyClient").contains("+legacyClient"),
       )
     },
-    test("releaseOnce needs every publish job and runs sonaRelease") {
+    test("publish jobs upload target/sona-staging; central-release downloads and merges before sonaRelease") {
       val wf  = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned, ZipxCentral.releaseOnce), config)
+      val pub = wf.jobs("publish-schema")
       val rel = wf.jobs("central-release")
+      val upload = pub.steps.find(_.name.contains("Upload sona staging"))
+      val download = rel.steps.find(_.name.contains("Download sona staging"))
+      val pubIdx = pub.steps.indexWhere(_.name.contains("publish"))
+      val upIdx  = pub.steps.indexWhere(_.name.contains("Upload sona staging"))
+      val dlIdx  = rel.steps.indexWhere(_.name.contains("Download sona staging"))
+      val runIdx = rel.steps.indexWhere(_.run.exists(_.contains("sonaRelease")))
       assertTrue(
-        rel.steps.last.run.exists(_.contains("sonaRelease")),
+        upload.exists(_.uses.exists(_.startsWith("actions/upload-artifact@"))),
+        upload.exists(_.`with`.get("name").contains("sona-staging-publish-schema")),
+        upload.exists(_.`with`.get("path").contains(ZipxCentral.StagingDir)),
+        download.exists(_.uses.exists(_.startsWith("actions/download-artifact@"))),
+        download.exists(_.`with`.get("pattern").contains("sona-staging-*")),
+        download.exists(_.`with`.get("path").contains(ZipxCentral.StagingDir)),
+        download.exists(_.`with`.get("merge-multiple").contains("true")),
+        pubIdx >= 0,
+        upIdx > pubIdx, // upload after publishSigned
+        dlIdx >= 0,
+        runIdx > dlIdx, // download before sonaRelease
         rel.needs.contains("publish-schema"),
         rel.needs.contains("publish-api"),
         rel.needs.contains("publish-clientA"),

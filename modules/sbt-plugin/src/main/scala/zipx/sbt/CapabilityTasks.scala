@@ -141,7 +141,7 @@ object CapabilityTasks:
       permissions,
       runsOn,
       extraSteps,
-      env,
+      env = env,
     )
 
   /** [[Capability.once]] with the single build-wide command given as a task key (rendered as its bare `<label>`). */
@@ -155,6 +155,6 @@ object CapabilityTasks:
     env: Map[String, EnvValue] = Map.empty,
     needsCapabilities: List[String] = Nil,
   ): Capability =
-    Capability.once(name, scopedLabel(command), phase, gate, runsOn, extraSteps, env, needsCapabilities)
+    Capability.once(name, scopedLabel(command), phase, gate, runsOn, extraSteps, env = env, needsCapabilities = needsCapabilities)
 
 end CapabilityTasks

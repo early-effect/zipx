@@ -392,6 +392,18 @@ object PlannerSpec extends ZIOSpecDefault:
       val cmdIdx  = steps.indexWhere(_.run.exists(_.contains("serviceA/deploy")))
       assertTrue(credIdx >= 0, cmdIdx >= 0, credIdx < cmdIdx) // injected before the command
     },
+    test("postSteps are injected after the command") {
+      val cap = Capability.custom(
+        name = "publish",
+        command = n => s"${n.id}/publish",
+        participates = _.id == "schema",
+        postSteps = _ => List(Step(name = Some("Upload"), run = Some("echo uploaded"))),
+      )
+      val steps = Planner.plan(sampleGraph, List(cap), config).jobs("publish-schema").steps
+      val cmdIdx = steps.indexWhere(_.run.exists(_.contains("schema/publish")))
+      val postIdx = steps.indexWhere(_.name.contains("Upload"))
+      assertTrue(cmdIdx >= 0, postIdx > cmdIdx)
+    },
     test("Capability.runsOn overrides the build-level runner (list form)") {
       val cap = Capability.custom(
         name = "release",

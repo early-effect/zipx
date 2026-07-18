@@ -11,6 +11,9 @@ import scala.collection.immutable.ListMap
   * of the built-in publish), and a post-wave `sonaRelease` once-job. Org secrets are referenced **by name only** —
   * values come from the `early-effect` GitHub org (inherited by public repos).
   *
+  * `publishSigned` writes to `target/sona-staging` on each job's runner; those trees are uploaded as artifacts and
+  * merged on the `central-release` job before `sonaRelease` (peers run publish+release in one job; zipx fans out).
+  *
   * {{{
   * // build.sbt — ZipxCentral is re-exported from zipx-sbt's autoImport
   * zipxCapabilities += ZipxCentral.publishSigned
@@ -30,6 +33,15 @@ object ZipxCentral:
     "SONATYPE_USERNAME" -> secret"SONATYPE_USERNAME",
     "SONATYPE_PASSWORD" -> secret"SONATYPE_PASSWORD",
   )
+
+  /** Local staging directory used by sbt `localStaging` / `sonaRelease`. */
+  val StagingDir: String = "target/sona-staging"
+
+  /** Artifact name prefix; each publish job uploads `sona-staging-publish-<module>`. */
+  val StagingArtifactPrefix: String = "sona-staging-"
+
+  def stagingArtifactName(moduleId: String): String =
+    s"${StagingArtifactPrefix}publish-$moduleId"
 
   /** Import the CI signing key from the base64-encoded `PGP_SECRET` org secret (same recipe as peer release.yml).
     *
@@ -51,7 +63,37 @@ object ZipxCentral:
       ),
     )
 
-  /** Replaces [[Capability.publish]]: dependency-ordered `publishSigned`, release-gated, with org signing env + GPG import. */
+  /** After `publishSigned`, upload this job's `target/sona-staging` for the release job to merge. */
+  val uploadStagingSteps: StepContext => List[Step] = ctx =>
+    List(
+      Step(
+        name = Some("Upload sona staging"),
+        uses = Some(ctx.actions.uploadArtifact),
+        `with` = ListMap(
+          "name"              -> stagingArtifactName(ctx.node.id),
+          "path"              -> StagingDir,
+          "if-no-files-found" -> "error",
+        ),
+      ),
+    )
+
+  /** Before `sonaRelease`, download every publish job's staging tree into [[StagingDir]]. */
+  val downloadStagingSteps: StepContext => List[Step] = ctx =>
+    List(
+      Step(
+        name = Some("Download sona staging"),
+        uses = Some(ctx.actions.downloadArtifact),
+        `with` = ListMap(
+          "pattern"        -> s"$StagingArtifactPrefix*",
+          "path"           -> StagingDir,
+          "merge-multiple" -> "true",
+        ),
+      ),
+    )
+
+  /** Replaces [[Capability.publish]]: dependency-ordered `publishSigned`, release-gated, with org signing env + GPG
+    * import + staging artifact upload.
+    */
   val publishSigned: Capability =
     Capability.publish.copy(
       command = n =>
@@ -59,9 +101,10 @@ object ZipxCentral:
         if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/$task" else s"${n.id}/$task",
       env = signingEnv,
       extraSteps = gpgImportSteps,
+      postSteps = uploadStagingSteps,
     )
 
-  /** After the full publish wave: a single `sonaRelease` job that uploads the Central Portal bundle. */
+  /** After the full publish wave: merge staging artifacts and run `sonaRelease`. */
   val releaseOnce: Capability =
     Capability.once(
       name = "central-release",
@@ -70,7 +113,7 @@ object ZipxCentral:
       gate = Gate.OnReleaseTag,
       needsCapabilities = List("publish"),
       env = signingEnv,
-      extraSteps = gpgImportSteps, // sonaRelease may need the key still present; cheap to re-import
+      extraSteps = ctx => downloadStagingSteps(ctx) ++ gpgImportSteps(ctx),
     )
 
 end ZipxCentral
