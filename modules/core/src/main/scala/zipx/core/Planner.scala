@@ -405,10 +405,11 @@ object Planner:
   )
 
   /** Caching for the chosen backend:
-    *   - `LocalDir`: persist sbt's local dirs with `actions/cache`, keyed by OS + JDK + commit-stable
+    *   - `LocalDir`: persist sbt's local dirs + build `target/` with `actions/cache`, keyed by OS + JDK + commit-stable
     *     [[PlanConfig.cacheEpoch]] (the build version). Mid-PR commits reuse the same key; a release tag rolls it.
-    *     `restore-keys` warm-starts from the newest prior epoch. setup-sbt's hashFiles disk-cache and setup-java
-    *     `cache: sbt` are disabled so they do not race or pin on file hashes.
+    *     `restore-keys` warm-starts from the newest prior epoch. `target/` speeds recompiles and carries
+    *     `target/sona-staging` for Central. setup-sbt's hashFiles disk-cache and setup-java `cache: sbt` are disabled
+    *     so they do not race or pin on file hashes.
     *   - `BazelRemoteSidecar`: run `buchgr/bazel-remote` as a job service and point the sbt remote cache at it via env;
     *     the plugin reads `ZIPX_REMOTE_CACHE` and wires `Global / remoteCache` + `addRemoteCachePlugin`.
     *   - `ManagedRemote`: no sidecar; point the remote cache at a managed gRPC endpoint, auth via a header secret.
@@ -426,7 +427,7 @@ object Planner:
               name = Some("Cache sbt"),
               uses = Some(config.actions.cache),
               `with` = ListMap(
-                "path"         -> List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier").mkString("\n"),
+                "path"         -> List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n"),
                 "key"          -> s"$prefix${config.cacheEpoch}",
                 "restore-keys" -> prefix,
               ),
