@@ -64,10 +64,14 @@ lazy val root = (project in file("."))
   .aggregate(models, coreLib, client, service)
   .settings(publish / skip := true)
 
-// A build-wide format gate that every test job waits on (Gap 3: run-once capability). One job, not per-module.
-// The command is the real `scalafmtCheckAll` task key (typed, not a string) — from sbt-scalafmt.
+// Format gate, then Layer-mode test/publish (dependency-ordered waves, few sbt sessions).
+// Deploy stays Aggregate-by-target (one job per staging/prod; modules batched). Multi-registry
+// docker below remains Graph (per registry target).
 zipxCapabilities += zipxTasks.once("fmt", scalafmtCheckAll)
-zipxCapabilities += Capability.test.copy(needsCapabilities = List("fmt"))
+zipxCapabilities ++= Seq(
+  Capability.testLayers.copy(needsCapabilities = List("fmt")),
+  Capability.publishLayers,
+)
 
 // Multi-registry image publish (Gap 1). Overrides the built-in single-target `docker` capability (same name ⇒
 // replace) to push the service image to N registries, each with its own credentials — the same targets+extraSteps

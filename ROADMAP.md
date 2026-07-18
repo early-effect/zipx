@@ -15,6 +15,7 @@ A self-describing CI plugin for Scala monorepos: a set of Scala 3 libraries plus
 | M6 — Environments, approval & multi-target deploys | ✅ |
 | M7 — Typed secrets & capability env | ✅ |
 | M8 — `zipx-central` + dogfood Central publish | ✅ |
+| M9a — Aggregate-first + Layer + deploy-by-target | ✅ |
 | M9 — Dynver-ci + publishSigned auto-detect | ⬜ |
 | M10 — `zipx-aws` (on second consumer) | ⬜ |
 | M11 — "Extend with Scala" docs & org rollout | ⬜ |
@@ -208,16 +209,32 @@ enum EnvValue:
 **Shipped.** `zipx-central` composes M7 primitives into the paved Central path. Dogfood:
 
 ```scala
-zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
+zipxCapabilities += ZipxCentral.release   // Aggregate: one job
+// or Graph: ZipxCentral.publishSigned + ZipxCentral.releaseOnce
 ```
 
-Generated CI owns GPG import + `publishSigned` + `central-release` (`sonaRelease`) + Specular Pages (`ZipxDocs.pages`); hand-rolled `release.yml` / `docs.yml` deleted. `ZipxCentral` / `ZipxDocs` are re-exported from the plugin's `autoImport` (nested objects so meta-build only needs the plugin jar).
+Generated CI owns GPG import + `publishSigned; sonaRelease` (Aggregate) or Graph staging artifacts + Specular Pages (`ZipxDocs.pages`); hand-rolled `release.yml` / `docs.yml` deleted. `ZipxCentral` / `ZipxDocs` are re-exported from the plugin's `autoImport` (nested objects so meta-build only needs the plugin jar).
 
 **Also:** hash-pinned GitHub Actions via configurable `zipxActions` / `ActionPins` (checkout v7, setup-java v5, setup-sbt v1.5, cache v6). Reusable-workflow once-jobs via `Capability.workflowCall` / `Job.uses`.
 
 **Acceptance:** unit coverage for `publishSigned` / `releaseOnce` / `needsCapabilities` fan-out; dogfood `ci.yml` regenerated with SHA pins + Central jobs. First Central tag publish is the live proof (same org secrets as peers).
 
 **Out of scope for M8:** replacing every hand-written `release.yml` across the org (that's M11 rollout); local manual publishing.
+
+### M9a — Aggregate-first + Layer + deploy-by-target ✅
+
+**Why.** Graph (one job per module) proves topology but burns GHA minutes (~11 sbt starts on dogfood). sbt's root `.aggregate` already batches work in one JVM; zipx defaults should match that cost profile while keeping Graph as an escape hatch.
+
+**Shipped:**
+- `CapabilityScope`: `Aggregate` | `Layer` | `Graph` | `Once`
+- Defaults: `Capability.test` / `.publish` / `.docker` / `.deploy` are Aggregate (deploy = one job per Target, modules joined)
+- Escape hatches: `testGraph` / `publishGraph` / `dockerGraph` / `deployGraph`; Layer: `testLayers` / `publishLayers` / `dockerLayers`
+- Planner emits joined `;` commands for Aggregate/Layer; Layer uses `subsetLayers` with previous-wave `needs`
+- Affected setup only when a Graph Verify capability is present
+- `ZipxCentral.release` (Aggregate single-job) preferred; Graph staging path retained
+- Dogfood on Aggregate; `examples/monorepo` on Layer test/publish + Aggregate deploy; README execution-modes guide
+
+**Acceptance:** unit coverage for Aggregate/Layer/Graph across test, publish, docker, deploy; dogfood workflow regenerates to Aggregate shape.
 
 ### M9 — Dynver-ci + publishSigned auto-detect ⬜
 

@@ -9,7 +9,12 @@ object PlannerSpec extends ZIOSpecDefault:
 
   // Base config for M1/M2 tests: Always mode keeps job graphs focused (no affected setup job / gating).
   // M3 tests opt into AffectedOnPR explicitly via config.copy(...).
-  private val config = PlanConfig(workflowName = "CI", cacheEpoch = "1.2.3-ci", affected = AffectedMode.Always)
+  private val config = PlanConfig(
+    workflowName = "CI",
+    cacheEpoch = "1.2.3-ci",
+    affected = AffectedMode.Always,
+    skipMergedPrPush = false,
+  )
 
   // A deploy-style capability on serviceA fanning out to staging + prod (prod carries a GitHub Environment).
   private def deployCap(targets: List[Target]) = Capability(
@@ -21,6 +26,7 @@ object PlannerSpec extends ZIOSpecDefault:
     command = n => s"${n.id}/deploy",
     matrixed = false,
     targets = _ => targets,
+    scope = CapabilityScope.Graph,
   )
   private val stagingProd = List(
     Target("staging", env = Map("DEPLOY_ROLE" -> secret"STAGING_ROLE", "TIER" -> EnvValue.plain("staging"))),
@@ -34,7 +40,7 @@ object PlannerSpec extends ZIOSpecDefault:
 
   def spec = suite("Planner")(
     test("emits one test job per CI-relevant module") {
-      val wf = Planner.plan(sampleGraph, List(Capability.test), config)
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config)
       assertTrue(
         wf.jobs.contains("test-schema"),
         wf.jobs.contains("test-clientA"),
@@ -43,7 +49,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("test-job `needs` are the direct upstream modules' test jobs") {
-      val wf = Planner.plan(sampleGraph, List(Capability.test), config)
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config)
       assertTrue(
         wf.jobs("test-schema").needs == Nil,
         wf.jobs("test-api").needs == List("test-schema"),
@@ -52,7 +58,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("per-module Scala matrix reflects each module's crossScalaVersions") {
-      val wf = Planner.plan(sampleGraph, List(Capability.test), config)
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config)
       // schema is cross-built → matrix with both versions.
       assertTrue(
         wf.jobs("test-schema").strategy.exists(_.matrix("scala") == cross),
@@ -63,7 +69,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("publish jobs are dependency-ordered (the L0/L1/L2 headline case)") {
-      val wf = Planner.plan(sampleGraph, List(Capability.publish), config)
+      val wf = Planner.plan(sampleGraph, List(Capability.publishGraph), config)
       assertTrue(
         // L0: schema has no publishing ancestors.
         wf.jobs("publish-schema").needs == Nil,
@@ -79,7 +85,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("publish command crosses when the module is cross-built, single otherwise") {
-      val wf    = Planner.plan(sampleGraph, List(Capability.publish), config)
+      val wf    = Planner.plan(sampleGraph, List(Capability.publishGraph), config)
       val runOf = (id: String) => wf.jobs(id).steps.last.run.getOrElse("")
       assertTrue(
         runOf("publish-api").contains("+api/publish"), // cross → +
@@ -88,7 +94,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("publish jobs are never matrixed — the `+publish` leg crosses internally") {
-      val wf = Planner.plan(sampleGraph, List(Capability.publish), config)
+      val wf = Planner.plan(sampleGraph, List(Capability.publishGraph), config)
       // api is cross-built, but its publish job must NOT expand into a scala matrix
       // (else the run would be a contradictory `++${{ matrix.scala }} +api/publish`).
       assertTrue(
@@ -97,15 +103,15 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("LocalDir cache keys include run_id + job id so same-run jobs accumulate and can save") {
-      val wf        = Planner.plan(sampleGraph, List(Capability.test), config)
-      val coreStep  = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
-      val apiStep   = wf.jobs("test-api").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
-      val coreKey   = coreStep.map(_.`with`("key")).getOrElse("")
-      val apiKey    = apiStep.map(_.`with`("key")).getOrElse("")
-      val restore   = coreStep.map(_.`with`("restore-keys")).getOrElse("")
-      val paths     = coreStep.map(_.`with`("path")).getOrElse("")
-      val java      = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
-      val sbt       = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
+      val wf       = Planner.plan(sampleGraph, List(Capability.testGraph), config)
+      val coreStep = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val apiStep  = wf.jobs("test-api").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val coreKey  = coreStep.map(_.`with`("key")).getOrElse("")
+      val apiKey   = apiStep.map(_.`with`("key")).getOrElse("")
+      val restore  = coreStep.map(_.`with`("restore-keys")).getOrElse("")
+      val paths    = coreStep.map(_.`with`("path")).getOrElse("")
+      val java     = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
+      val sbt      = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
       assertTrue(
         // Primary key always misses within a run (run_id) so the job can save after restoring upstream.
         coreKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-core"),
@@ -126,7 +132,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("cache key is identical across commits with the same epoch+job template, differs across epochs") {
       def keyFor(epoch: String) =
         Planner
-          .plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = epoch))
+          .plan(sampleGraph, List(Capability.testGraph), config.copy(cacheEpoch = epoch))
           .jobs("test-core")
           .steps
           .find(_.uses.exists(_.startsWith("actions/cache@")))
@@ -137,22 +143,22 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("release triggers include the tag pattern; PR/test-only builds do not gate on tags") {
-      val withPublish = Planner.plan(sampleGraph, List(Capability.test, Capability.publish), config)
-      val testOnly    = Planner.plan(sampleGraph, List(Capability.test), config)
+      val withPublish = Planner.plan(sampleGraph, List(Capability.testGraph, Capability.publishGraph), config)
+      val testOnly    = Planner.plan(sampleGraph, List(Capability.testGraph), config)
       assertTrue(
         withPublish.on.push.exists(_.tags.contains(config.releaseTagPattern)),
         testOnly.on.push.exists(_.tags.isEmpty),
       )
     },
     test("publish jobs are gated on a release tag") {
-      val wf = Planner.plan(sampleGraph, List(Capability.publish), config)
+      val wf = Planner.plan(sampleGraph, List(Capability.publishGraph), config)
       assertTrue(
         wf.jobs("publish-schema").`if`.exists(_.contains("startsWith(github.ref, 'refs/tags/v')"))
       )
     },
     // ---- M3 affected-only ----
     test("affected mode adds a leading `affected` setup job with a modules output") {
-      val wf = Planner.plan(sampleGraph, List(Capability.test), config.copy(affected = AffectedMode.AffectedOnPR))
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.AffectedOnPR))
       assertTrue(
         wf.jobs.contains("affected"),
         wf.jobs.keys.head == "affected", // emitted first
@@ -161,7 +167,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("verify jobs gate on affected-set membership (with the `all` sentinel escape hatch)") {
-      val wf   = Planner.plan(sampleGraph, List(Capability.test), config.copy(affected = AffectedMode.AffectedOnPR))
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.AffectedOnPR))
       val cond = wf.jobs("test-api").`if`.getOrElse("")
       assertTrue(
         cond.contains("contains(fromJson(needs.affected.outputs.modules), 'api')"),
@@ -170,7 +176,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("skipped-needs hazard: affected verify jobs use !cancelled() and tolerate skipped upstreams") {
-      val wf   = Planner.plan(sampleGraph, List(Capability.test), config.copy(affected = AffectedMode.AffectedOnPR))
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.AffectedOnPR))
       val cond = wf.jobs("test-api").`if`.getOrElse("")
       assertTrue(
         cond.startsWith("!cancelled()"),
@@ -179,7 +185,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("by default the affected job builds all on push (no before-sha diff)") {
-      val wf     = Planner.plan(sampleGraph, List(Capability.test), config.copy(affected = AffectedMode.AffectedOnPR))
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.AffectedOnPR))
       val script = wf.jobs("affected").steps.find(_.id.contains("compute")).flatMap(_.run).getOrElse("")
       assertTrue(
         script.contains("pull_request"),
@@ -189,7 +195,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("affected script never captures sbt stdout into modules (GITHUB_OUTPUT-safe)") {
       // Regression: sbt 2 prints server banners on stdout; `modules=$(sbt …)` poisoned GITHUB_OUTPUT and failed CI.
-      val wf     = Planner.plan(sampleGraph, List(Capability.test), config.copy(affected = AffectedMode.AffectedOnPR))
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.AffectedOnPR))
       val script = wf.jobs("affected").steps.find(_.id.contains("compute")).flatMap(_.run).getOrElse("")
       assertTrue(
         script.contains("sbt -batch --error \"zipxAffectedModules $BASE\""),
@@ -201,7 +207,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("affectedOnPush adds a guarded before-sha diff for pushes") {
       val wf = Planner.plan(
         sampleGraph,
-        List(Capability.test),
+        List(Capability.testGraph),
         config.copy(affected = AffectedMode.AffectedOnPR, affectedOnPush = true),
       )
       val script = wf.jobs("affected").steps.find(_.id.contains("compute")).flatMap(_.run).getOrElse("")
@@ -215,7 +221,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("Always mode emits no affected job and no affected gating") {
-      val wf = Planner.plan(sampleGraph, List(Capability.test), config.copy(affected = AffectedMode.Always))
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.Always))
       assertTrue(
         !wf.jobs.contains("affected"),
         wf.jobs("test-api").`if`.isEmpty,
@@ -224,7 +230,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     // ---- M5 remote caches ----
     test("LocalDir backend caches via epoch-keyed actions/cache and adds no services/env") {
-      val wf  = Planner.plan(sampleGraph, List(Capability.test), config)
+      val wf  = Planner.plan(sampleGraph, List(Capability.testGraph), config)
       val job = wf.jobs("test-core")
       assertTrue(
         job.services.isEmpty,
@@ -238,7 +244,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("BazelRemoteSidecar backend emits a service sidecar and the remote-cache env, no actions/cache") {
       val wf = Planner.plan(
         sampleGraph,
-        List(Capability.test),
+        List(Capability.testGraph),
         config.copy(cache = CacheBackend.BazelRemoteSidecar("buchgr/bazel-remote:latest", 9092)),
       )
       val job = wf.jobs("test-core")
@@ -255,7 +261,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("ManagedRemote backend sets the endpoint + header-from-secret env, no service") {
       val wf = Planner.plan(
         sampleGraph,
-        List(Capability.test),
+        List(Capability.testGraph),
         config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")),
       )
       val job = wf.jobs("test-core")
@@ -272,7 +278,7 @@ object PlannerSpec extends ZIOSpecDefault:
         case n if n.id == "serviceA" || n.id == "serviceB" => n.copy(docker = true)
         case n                                             => n
       })
-      val wf = Planner.plan(withDocker, List(Capability.docker), config)
+      val wf = Planner.plan(withDocker, List(Capability.dockerGraph), config)
       assertTrue(
         wf.jobs.contains("docker-serviceA"),
         wf.jobs.contains("docker-serviceB"),
@@ -337,12 +343,12 @@ object PlannerSpec extends ZIOSpecDefault:
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
       })
-      val deploy = Capability.deploy(
+      val deploy = Capability.deployGraph(
         participates = _.id == "serviceA",
         command = n => s"${n.id}/deploy",
         targets = _ => stagingProd,
       )
-      val wf = Planner.plan(graph, List(Capability.docker, deploy), config)
+      val wf = Planner.plan(graph, List(Capability.dockerGraph, deploy), config)
       assertTrue(
         wf.jobs("deploy-serviceA-prod").needs.contains("docker-serviceA"),
         wf.jobs("deploy-serviceA-staging").needs.contains("docker-serviceA"),
@@ -353,14 +359,14 @@ object PlannerSpec extends ZIOSpecDefault:
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
       })
-      val deploy = Capability.deploy(_.id == "serviceA", n => s"${n.id}/deploy", _ => stagingProd)
+      val deploy = Capability.deployGraph(_.id == "serviceA", n => s"${n.id}/deploy", _ => stagingProd)
       // Declare deploy BEFORE docker to prove phase order (not declaration order) governs.
-      val wf   = Planner.plan(graph, List(deploy, Capability.docker), config)
+      val wf   = Planner.plan(graph, List(deploy, Capability.dockerGraph), config)
       val keys = wf.jobs.keys.toList
       assertTrue(keys.indexOf("docker-serviceA") < keys.indexOf("deploy-serviceA-prod"))
     },
     test("Capability.permissions renders on the job (OIDC id-token)") {
-      val deploy = Capability.deploy(
+      val deploy = Capability.deployGraph(
         participates = _.id == "serviceA",
         command = n => s"${n.id}/deploy",
         targets = _ => stagingProd,
@@ -398,7 +404,7 @@ object PlannerSpec extends ZIOSpecDefault:
     // ---- M6d — extension seam, custom capabilities, list runners ----
     test("extraSteps are injected before the command and can reference the target") {
       val cap = Capability
-        .deploy(
+        .deployGraph(
           participates = _.id == "serviceA",
           command = n => s"${n.id}/deploy",
           targets = _ => stagingProd,
@@ -500,7 +506,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("per-module capabilities can depend on a Once gate by name") {
       val fmt  = Capability.once("fmt", "scalafmtCheckAll")
-      val test = Capability.test.copy(needsCapabilities = List("fmt"))
+      val test = Capability.testGraph.copy(needsCapabilities = List("fmt"))
       val wf   = Planner.plan(sampleGraph, List(fmt, test), config)
       assertTrue(
         wf.jobs("test-schema").needs.contains("fmt"),
@@ -509,7 +515,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     // ---- M7 — typed secrets & capability env ----
     test("capability.env injects into every job of the capability (no targets)") {
-      val pub = Capability.publish.copy(env =
+      val pub = Capability.publishGraph.copy(env =
         Map(
           "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
           "SONATYPE_USERNAME" -> Secret.ref("SONATYPE_USERNAME"),
@@ -597,7 +603,7 @@ object PlannerSpec extends ZIOSpecDefault:
           .Try(
             Planner.plan(
               sampleGraph,
-              List(Capability.test),
+              List(Capability.testGraph),
               config.copy(cache = CacheBackend.ManagedRemote("grpcs://x", "bad name")),
             )
           )
@@ -614,7 +620,7 @@ object PlannerSpec extends ZIOSpecDefault:
           ModuleNode("pubLeaf", dependsOn = List("middle"), publishes = true, crossScalaVersions = List(scala3)),
         )
       )
-      val wf = Planner.plan(g, List(Capability.publish), config)
+      val wf = Planner.plan(g, List(Capability.publishGraph), config)
       assertTrue(
         wf.jobs("publish-pubLeaf").needs == List("publish-pubRoot"),
         !wf.jobs.contains("publish-middle"),
@@ -631,7 +637,7 @@ object PlannerSpec extends ZIOSpecDefault:
         participates = _.docker,
         targets = _ => List(Target("us"), Target("eu")),
       )
-      val deploy = Capability.deploy(
+      val deploy = Capability.deployGraph(
         participates = _.id == "serviceA",
         command = n => s"${n.id}/promote",
         targets = _ => List(Target("staging")),
@@ -643,7 +649,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("unknown needsCapabilities names are ignored (do not crash)") {
-      val cap = Capability.test.copy(needsCapabilities = List("does-not-exist"))
+      val cap = Capability.testGraph.copy(needsCapabilities = List("does-not-exist"))
       val wf  = Planner.plan(sampleGraph, List(cap), config)
       assertTrue(!wf.jobs("test-schema").needs.contains("does-not-exist"))
     },
@@ -652,17 +658,17 @@ object PlannerSpec extends ZIOSpecDefault:
         case n if n.id == "core" => n.copy(ciRelevant = false)
         case n                   => n
       })
-      val wf = Planner.plan(g, List(Capability.test), config)
+      val wf = Planner.plan(g, List(Capability.testGraph), config)
       assertTrue(!wf.jobs.contains("test-core"), wf.jobs.contains("test-schema"))
     },
     test("StepContext.matrixed is true only when a Scala matrix is active") {
       var seen: List[Boolean] = Nil
-      val cap                 = Capability.test.copy(
+      val cap                 = Capability.testGraph.copy(
         participates = _.id == "api", // cross-built
         extraSteps = ctx =>
           seen = ctx.matrixed :: seen; Nil,
       )
-      val noMatrix = Capability.test.copy(
+      val noMatrix = Capability.testGraph.copy(
         participates = _.id == "core", // single scala
         extraSteps = ctx =>
           seen = ctx.matrixed :: seen; Nil,
@@ -700,6 +706,116 @@ object PlannerSpec extends ZIOSpecDefault:
       // Sanity: Affected is what the affected job uses; empty baseDir is excluded by design.
       val g = ModuleGraph(List(ModuleNode("root", baseDir = ""), ModuleNode("lib", baseDir = "lib")))
       assertTrue(Affected.owningModule(g, "README.md").isEmpty, Affected.owningModule(g, "lib/X.scala").contains("lib"))
+    },
+    // ---- Aggregate / Layer / deploy-by-target ----
+    test("Aggregate test emits one job joining module commands") {
+      val wf  = Planner.plan(sampleGraph, List(Capability.test), config)
+      val run = wf.jobs("test").steps.last.run.getOrElse("")
+      assertTrue(
+        wf.jobs.size == 1,
+        wf.jobs.contains("test"),
+        run.contains("schema/test"),
+        run.contains("api/test"),
+        run.contains(";"),
+        !wf.jobs.contains("test-schema"),
+      )
+    },
+    test("Aggregate publish emits one release-gated job with joined publish commands") {
+      val wf  = Planner.plan(sampleGraph, List(Capability.publish), config)
+      val job = wf.jobs("publish")
+      val run = job.steps.last.run.getOrElse("")
+      assertTrue(
+        wf.jobs.keys.toList == List("publish"),
+        run.contains("+schema/publish") || run.contains("schema/publish"),
+        run.contains(";"),
+        job.`if`.exists(_.contains("refs/tags/v")),
+      )
+    },
+    test("Aggregate docker joins Docker/publish for each docker module") {
+      val withDocker = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+        case n if n.id == "serviceA" => n.copy(docker = true)
+        case n                       => n
+      })
+      val wf = Planner.plan(withDocker, List(Capability.docker), config)
+      assertTrue(
+        wf.jobs.keys.toList == List("docker"),
+        wf.jobs("docker").steps.last.run.exists(_.contains("serviceA/Docker/publish")),
+      )
+    },
+    test("Aggregate deploy is one job per target, not per module") {
+      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+        case n if n.id == "serviceA" || n.id == "clientA" => n.copy(docker = true)
+        case n                                            => n
+      })
+      val deploy = Capability.deploy(
+        participates = n => n.id == "serviceA" || n.id == "clientA",
+        command = n => s"${n.id}/promote",
+        targets = _ => stagingProd,
+      )
+      val wf = Planner.plan(graph, List(Capability.docker, deploy), config)
+      assertTrue(
+        wf.jobs.contains("deploy-staging"),
+        wf.jobs.contains("deploy-prod"),
+        !wf.jobs.contains("deploy-serviceA-staging"),
+        wf.jobs("deploy-prod").environment.contains("production"),
+        wf.jobs("deploy-staging").environment.isEmpty,
+        wf.jobs("deploy-prod").needs.contains("docker"),
+        wf.jobs("deploy-staging")
+          .steps
+          .last
+          .run
+          .exists(r => r.contains("serviceA/promote") && r.contains("clientA/promote") && r.contains(";")),
+        wf.jobs("deploy-prod").`if`.exists(_.contains("refs/heads/main")),
+      )
+    },
+    test("Layer test emits one job per toposort wave chained by needs") {
+      val wf = Planner.plan(sampleGraph, List(Capability.testLayers), config)
+      val l0 = wf.jobs.keys.filter(_.startsWith("test-L")).toList.sorted
+      assertTrue(
+        l0.nonEmpty,
+        wf.jobs("test-L0").needs == Nil,
+        wf.jobs.get("test-L1").exists(_.needs == List("test-L0")),
+        wf.jobs("test-L0").steps.last.run.exists(_.contains(";")),
+      )
+    },
+    test("Aggregate Verify does not emit affected setup even when AffectedOnPR") {
+      val wf = Planner.plan(
+        sampleGraph,
+        List(Capability.test),
+        config.copy(affected = AffectedMode.AffectedOnPR),
+      )
+      assertTrue(!wf.jobs.contains("affected"), wf.jobs.contains("test"))
+    },
+    test("skipMergedPrPush emits verify-gate and gates Aggregate test") {
+      val wf   = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = true))
+      val gate = wf.jobs("verify-gate")
+      val test = wf.jobs("test")
+      assertTrue(
+        gate.`if`.contains("""github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')"""),
+        gate.steps.exists(_.run.exists(_.contains("commits/${{ github.sha }}/pulls"))),
+        test.needs.contains("verify-gate"),
+        test.`if`.exists(_.contains("needs.verify-gate.outputs.run == 'true'")),
+      )
+    },
+    test("skipMergedPrPush does not gate Publish jobs") {
+      val wf =
+        Planner.plan(sampleGraph, List(Capability.test, Capability.publish), config.copy(skipMergedPrPush = true))
+      assertTrue(
+        wf.jobs("test").needs.contains("verify-gate"),
+        !wf.jobs("publish").needs.contains("verify-gate"),
+      )
+    },
+    test("skipMergedPrPush false omits verify-gate") {
+      val wf = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = false))
+      assertTrue(!wf.jobs.contains("verify-gate"), wf.jobs("test").needs.isEmpty)
+    },
+    test("Graph Verify still emits affected setup under AffectedOnPR") {
+      val wf = Planner.plan(
+        sampleGraph,
+        List(Capability.testGraph),
+        config.copy(affected = AffectedMode.AffectedOnPR),
+      )
+      assertTrue(wf.jobs.contains("affected"), wf.jobs.contains("test-schema"))
     },
   )
 end PlannerSpec

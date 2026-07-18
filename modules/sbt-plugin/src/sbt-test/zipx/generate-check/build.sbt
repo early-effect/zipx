@@ -63,10 +63,14 @@ zipxCapabilities += Capability.custom(
 )
 
 // A publish-style capability carrying typed secrets (M7) — no raw "${{ secrets.X }}" strings.
-zipxCapabilities += Capability.publish.copy(
-  env = Map(
-    "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
-    "SONATYPE_USERNAME" -> Secret("SONATYPE_USERNAME"),
+// Graph modes exercise affected / matrix / per-module needs (scripted asserts those shapes).
+zipxCapabilities ++= Seq(
+  Capability.testGraph,
+  Capability.publishGraph.copy(
+    env = Map(
+      "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
+      "SONATYPE_USERNAME" -> Secret("SONATYPE_USERNAME"),
+    ),
   ),
 )
 

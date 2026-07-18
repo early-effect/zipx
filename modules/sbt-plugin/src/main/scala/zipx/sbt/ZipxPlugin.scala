@@ -45,6 +45,7 @@ object ZipxPlugin extends AutoPlugin:
     // Early-effect Central paved path (publishSigned + sonaRelease).
     // Nested object: build.sbt only needs Capability from the plugin jar (not zipx-central on the meta classpath).
     object ZipxCentral:
+      def release: Capability       = zipx.central.ZipxCentral.release
       def publishSigned: Capability = zipx.central.ZipxCentral.publishSigned
       def releaseOnce: Capability   = zipx.central.ZipxCentral.releaseOnce
       def signingEnv                = zipx.central.ZipxCentral.signingEnv
@@ -100,6 +101,10 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[Boolean]("Whether Verify jobs run only for affected modules on PRs (default true).")
     val zipxAffectedOnPush =
       settingKey[Boolean]("Also restrict pushes to affected modules via the before-sha diff (default false).")
+    val zipxSkipMergedPrPush =
+      settingKey[Boolean](
+        "Skip Verify on branch pushes when the commit already belongs to a merged PR (default true)."
+      )
 
     // Tasks.
     val zipxGraph            = taskKey[Unit]("Print the resolved module graph and topological layers.")
@@ -124,6 +129,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxWorkflowPath      := ".github/workflows/ci.yml",
     zipxAffectedOnPR      := true,
     zipxAffectedOnPush    := false,
+    zipxSkipMergedPrPush  := true,
     zipxActions           := ActionPins.Defaults,
     zipxWorkflowDispatch  := false,
   )
@@ -282,6 +288,7 @@ object ZipxPlugin extends AutoPlugin:
       releaseTagPattern = read(zipxReleaseTagPattern, "v[0-9]+.[0-9]+.[0-9]+"),
       actions = read(zipxActions, ActionPins.Defaults),
       workflowDispatch = read(zipxWorkflowDispatch, false),
+      skipMergedPrPush = read(zipxSkipMergedPrPush, true),
     )
   }
 
@@ -369,9 +376,9 @@ object ZipxPlugin extends AutoPlugin:
 
   /** `zipxAffectedModules <base-ref>` — diff against the base ref, map changed files to owning modules, expand the
     * reverse-dependency closure, and write the affected module ids as a JSON array to
-    * `<base>/target/zipx-affected.json` (also printed for local use). The generated workflow's `affected` job reads that
-    * stable path so sbt's log lines never pollute `GITHUB_OUTPUT`. (Do not use `(target).value` — under sbt 2 it is a
-    * versioned `target/out/...` tree.)
+    * `<base>/target/zipx-affected.json` (also printed for local use). The generated workflow's `affected` job reads
+    * that stable path so sbt's log lines never pollute `GITHUB_OUTPUT`. (Do not use `(target).value` — under sbt 2 it
+    * is a versioned `target/out/...` tree.)
     */
   private def affectedModulesTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {

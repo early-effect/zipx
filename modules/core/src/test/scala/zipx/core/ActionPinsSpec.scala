@@ -4,7 +4,12 @@ import zio.test.*
 
 object ActionPinsSpec extends ZIOSpecDefault:
 
-  private val config = PlanConfig(workflowName = "CI", cacheEpoch = "1.0.0", affected = AffectedMode.Always)
+  private val config = PlanConfig(
+    workflowName = "CI",
+    cacheEpoch = "1.0.0",
+    affected = AffectedMode.Always,
+    skipMergedPrPush = false,
+  )
 
   def spec = suite("ActionPins")(
     test("defaults are full commit SHAs, not mutable tags") {
@@ -27,7 +32,7 @@ object ActionPinsSpec extends ZIOSpecDefault:
         setupSbt = "sbt/setup-sbt@feedface",
         cache = "actions/cache@00ff00ff",
       )
-      val wf  = Planner.plan(Fixtures.sampleGraph, List(Capability.test), config.copy(actions = custom))
+      val wf  = Planner.plan(Fixtures.sampleGraph, List(Capability.testGraph), config.copy(actions = custom))
       val job = wf.jobs("test-core")
       assertTrue(
         job.steps.exists(_.uses.contains("actions/checkout@deadbeef")),
@@ -41,7 +46,7 @@ object ActionPinsSpec extends ZIOSpecDefault:
       val custom = ActionPins.Defaults.copy(checkout = "actions/checkout@aabbccdd", setupSbt = "sbt/setup-sbt@11223344")
       val wf     = Planner.plan(
         Fixtures.sampleGraph,
-        List(Capability.test),
+        List(Capability.testGraph),
         config.copy(affected = AffectedMode.AffectedOnPR, actions = custom),
       )
       val steps = wf.jobs("affected").steps
