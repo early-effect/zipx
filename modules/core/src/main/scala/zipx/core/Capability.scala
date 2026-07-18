@@ -48,15 +48,16 @@ enum CapabilityScope:
   *   production) — zipx only emits the binding; it generates no manual-approval steps.
   * @param env
   *   environment variables injected into the job's `env:` block (account id, region, credentials/role, tier, …),
-  *   referenced by steps as `$${{ env.KEY }}`. Values may be secret expressions like `$${{ secrets.X }}`.
+  *   referenced by steps as `${{ env.KEY }}`. Use [[EnvValue.secret]] / `secret"NAME"` for secret refs;
+  *   [[EnvValue.plain]] for literals. Merged after [[Capability.env]] (target wins on key clash).
   * @param condition
   *   an extra `if` clause ANDed into the job's condition (e.g. main-only for a target).
   */
 final case class Target(
-  name: String,
-  environment: Option[String] = None,
-  env: Map[String, String] = Map.empty,
-  condition: Option[String] = None,
+    name: String,
+    environment: Option[String] = None,
+    env: Map[String, EnvValue] = Map.empty,
+    condition: Option[String] = None,
 )
 
 /** A pipeline stage that runs one sbt invocation per participating module.
@@ -81,8 +82,8 @@ final case class Target(
   *   whether a cross-built module's job expands into a per-Scala-version matrix. Test does (each version is a separate
   *   leg); publish does not (it uses a single `+publish` leg that crosses internally, keeping publish ordering clean).
   * @param targets
-  *   destinations to fan out over — one job per (module × target). Empty (default) = a single job with no fan-out.
-  *   Used by deploy/publish capabilities that target multiple environments (staging/prod, regions, registries).
+  *   destinations to fan out over — one job per (module × target). Empty (default) = a single job with no fan-out. Used
+  *   by deploy/publish capabilities that target multiple environments (staging/prod, regions, registries).
   * @param needsCapabilities
   *   names of other capabilities whose same-module jobs this capability's job must also `needs` — e.g. deploy needs the
   *   module's docker job. Composes with the per-capability `ordering`.
@@ -97,21 +98,28 @@ final case class Target(
   *   target's env. Receives a [[StepContext]] with the module, the current target (if fanned out), and matrix state.
   * @param scope
   *   whether this capability fans out per module (default) or runs once for the whole build (a lint/format gate).
+  * @param env
+  *   capability-wide env injected into every job of this capability (e.g. PGP/Sonatype secrets for publish). Merged
+  *   after cache env and before [[Target.env]] — target wins on key clash. See [[EnvValue]].
+  * @param workflowCall
+  *   when set (typically on a [[CapabilityScope.Once]] capability), emit a reusable-workflow job instead of sbt steps.
   */
 final case class Capability(
-  name: String,
-  phase: Phase,
-  ordering: Ordering,
-  gate: Gate,
-  participates: ModuleNode => Boolean,
-  command: ModuleNode => String,
-  matrixed: Boolean,
-  targets: ModuleNode => List[Target] = _ => Nil,
-  needsCapabilities: List[String] = Nil,
-  permissions: Map[String, String] = Map.empty,
-  runsOn: Option[List[String]] = None,
-  extraSteps: StepContext => List[Step] = _ => Nil,
-  scope: CapabilityScope = CapabilityScope.PerModule,
+    name: String,
+    phase: Phase,
+    ordering: Ordering,
+    gate: Gate,
+    participates: ModuleNode => Boolean,
+    command: ModuleNode => String,
+    matrixed: Boolean,
+    targets: ModuleNode => List[Target] = _ => Nil,
+    needsCapabilities: List[String] = Nil,
+    permissions: Map[String, String] = Map.empty,
+    runsOn: Option[List[String]] = None,
+    extraSteps: StepContext => List[Step] = _ => Nil,
+    scope: CapabilityScope = CapabilityScope.PerModule,
+    env: Map[String, EnvValue] = Map.empty,
+    workflowCall: Option[WorkflowCall] = None,
 )
 
 object Capability:
@@ -135,7 +143,8 @@ object Capability:
     gate = Gate.OnReleaseTag,
     participates = _.publishes,
     // Cross-version publish uses a single `+` leg so publish ordering stays clean (no per-scala matrix legs).
-    command = n => if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/${n.publishTask}" else s"${n.id}/${n.publishTask}",
+    command =
+      n => if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/${n.publishTask}" else s"${n.id}/${n.publishTask}",
     matrixed = false,
   )
 
@@ -155,16 +164,17 @@ object Capability:
 
   /** A deploy capability: release-gated, fanned out over `targets` (environments/regions), depending on the module's
     * docker job. `command` is the sbt task that performs the deploy/promote for a module; `participates` selects the
-    * deployable modules. The caller supplies environment-specific config via the `targets` (env vars, GitHub Environment
-    * for approval, per-target `if`).
+    * deployable modules. The caller supplies environment-specific config via the `targets` (env vars, GitHub
+    * Environment for approval, per-target `if`).
     */
   def deploy(
-    participates: ModuleNode => Boolean,
-    command: ModuleNode => String,
-    targets: ModuleNode => List[Target],
-    name: String = "deploy",
-    needsCapabilities: List[String] = List("docker"),
-    permissions: Map[String, String] = Map.empty,
+      participates: ModuleNode => Boolean,
+      command: ModuleNode => String,
+      targets: ModuleNode => List[Target],
+      name: String = "deploy",
+      needsCapabilities: List[String] = List("docker"),
+      permissions: Map[String, String] = Map.empty,
+      env: Map[String, EnvValue] = Map.empty,
   ): Capability =
     Capability(
       name = name,
@@ -177,6 +187,7 @@ object Capability:
       targets = targets,
       needsCapabilities = needsCapabilities,
       permissions = permissions,
+      env = env,
     )
 
   /** A custom capability for a stage zipx doesn't model directly — the general extension point. All topology knobs are
@@ -184,33 +195,54 @@ object Capability:
     * (e.g. cloud auth) and `targets` to fan out over environments.
     */
   def custom(
-    name: String,
-    command: ModuleNode => String,
-    participates: ModuleNode => Boolean = _ => true,
-    phase: Phase = Phase.Publish,
-    ordering: Ordering = Ordering.DependencyOrdered,
-    gate: Gate = Gate.OnReleaseTag,
-    matrixed: Boolean = false,
-    targets: ModuleNode => List[Target] = _ => Nil,
-    needsCapabilities: List[String] = Nil,
-    permissions: Map[String, String] = Map.empty,
-    runsOn: Option[List[String]] = None,
-    extraSteps: StepContext => List[Step] = _ => Nil,
+      name: String,
+      command: ModuleNode => String,
+      participates: ModuleNode => Boolean = _ => true,
+      phase: Phase = Phase.Publish,
+      ordering: Ordering = Ordering.DependencyOrdered,
+      gate: Gate = Gate.OnReleaseTag,
+      matrixed: Boolean = false,
+      targets: ModuleNode => List[Target] = _ => Nil,
+      needsCapabilities: List[String] = Nil,
+      permissions: Map[String, String] = Map.empty,
+      runsOn: Option[List[String]] = None,
+      extraSteps: StepContext => List[Step] = _ => Nil,
+      env: Map[String, EnvValue] = Map.empty,
   ): Capability =
-    Capability(name, phase, ordering, gate, participates, command, matrixed, targets, needsCapabilities, permissions,
-               runsOn, extraSteps)
+    Capability(
+      name,
+      phase,
+      ordering,
+      gate,
+      participates,
+      command,
+      matrixed,
+      targets,
+      needsCapabilities,
+      permissions,
+      runsOn,
+      extraSteps,
+      env = env,
+    )
 
   /** A run-once, build-wide gate — a single job (not per module) running one command, e.g. a formatting/lint check
-    * (`scalafmtCheckAll`) up front in the Verify phase. Other capabilities can depend on it by name via
-    * `needsCapabilities` (e.g. make every test job wait on `fmt`).
+    * (`scalafmtCheckAll`) up front in the Verify phase, or a post-publish Central release (`sonaRelease`). Other
+    * capabilities can depend on it by name via `needsCapabilities`; conversely, set `needsCapabilities` here so this
+    * once-job waits on every job of those capabilities (all modules × targets).
+    *
+    * For a reusable-workflow call (no local steps), set [[Capability.workflowCall]] via `.copy` (see
+    * [[zipx.specular.ZipxDocs]]).
     */
   def once(
-    name: String,
-    command: String,
-    phase: Phase = Phase.Verify,
-    gate: Gate = Gate.Always,
-    runsOn: Option[List[String]] = None,
-    extraSteps: StepContext => List[Step] = _ => Nil,
+      name: String,
+      command: String,
+      phase: Phase = Phase.Verify,
+      gate: Gate = Gate.Always,
+      runsOn: Option[List[String]] = None,
+      extraSteps: StepContext => List[Step] = _ => Nil,
+      env: Map[String, EnvValue] = Map.empty,
+      needsCapabilities: List[String] = Nil,
+      permissions: Map[String, String] = Map.empty,
   ): Capability =
     Capability(
       name = name,
@@ -220,8 +252,11 @@ object Capability:
       participates = _ => true,
       command = _ => command,
       matrixed = false,
+      needsCapabilities = needsCapabilities,
+      permissions = permissions,
       runsOn = runsOn,
       extraSteps = extraSteps,
       scope = CapabilityScope.Once,
+      env = env,
     )
 end Capability

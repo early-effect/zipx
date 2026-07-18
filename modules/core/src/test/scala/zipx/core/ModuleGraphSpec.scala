@@ -79,5 +79,43 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       )
       assertTrue(g.subsetLayers(n => n.id == "a" || n.id == "c") == List(List("a"), List("c")))
     },
+    test("self-cycle is detected") {
+      val self = ModuleGraph(List(ModuleNode("a", dependsOn = List("a"))))
+      assertTrue(scala.util.Try(self.topologicalSort).isFailure)
+    },
+    test("external dependsOn ids are dropped from directDeps") {
+      val g = ModuleGraph(List(ModuleNode("a", dependsOn = List("outside", "b")), ModuleNode("b")))
+      assertTrue(g.directDeps("a") == List("b"), g.transitiveDeps("a") == Set("b"))
+    },
+    test("affectedClosure ignores seed ids absent from the graph") {
+      assertTrue(sampleGraph.affectedClosure(Set("nope", "schema")).contains("schema"))
+      assertTrue(!sampleGraph.affectedClosure(Set("nope")).contains("nope"))
+    },
+    test("duplicate node ids: last definition wins in get; ids lists every occurrence") {
+      val g = ModuleGraph(
+        List(
+          ModuleNode("a", publishes = false),
+          ModuleNode("a", publishes = true),
+        ),
+      )
+      // byId last-wins; ids is derived from the raw node list (callers must not duplicate).
+      assertTrue(g.get("a").exists(_.publishes), g.ids == List("a", "a"))
+    },
+    test("empty graph sorts and layers to empty") {
+      val g = ModuleGraph(Nil)
+      assertTrue(g.topologicalSort == Nil, g.topologicalLayers == Nil, g.subsetLayers(_ => true) == Nil)
+    },
+    test("diamond publish contraction: two paths to the same publisher") {
+      // leaf depends on midA and midB; both depend on root; only root+leaf publish.
+      val g = ModuleGraph(
+        List(
+          ModuleNode("root", publishes = true),
+          ModuleNode("midA", dependsOn = List("root")),
+          ModuleNode("midB", dependsOn = List("root")),
+          ModuleNode("leaf", dependsOn = List("midA", "midB"), publishes = true),
+        ),
+      )
+      assertTrue(g.subsetLayers(_.publishes) == List(List("root"), List("leaf")))
+    },
   )
 end ModuleGraphSpec

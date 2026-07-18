@@ -5,6 +5,7 @@ import zipx.workflow.*
 
 object PlannerSpec extends ZIOSpecDefault:
   import Fixtures.*
+  import EnvValue.secret
 
   // Base config for M1/M2 tests: Always mode keeps job graphs focused (no affected setup job / gating).
   // M3 tests opt into AffectedOnPR explicitly via config.copy(...).
@@ -22,11 +23,11 @@ object PlannerSpec extends ZIOSpecDefault:
     targets = _ => targets,
   )
   private val stagingProd = List(
-    Target("staging", env = Map("DEPLOY_ROLE" -> "${{ secrets.STAGING_ROLE }}", "TIER" -> "staging")),
+    Target("staging", env = Map("DEPLOY_ROLE" -> secret"STAGING_ROLE", "TIER" -> EnvValue.plain("staging"))),
     Target(
       "prod",
       environment = Some("production"),
-      env = Map("DEPLOY_ROLE" -> "${{ secrets.PROD_ROLE }}", "TIER" -> "prod"),
+      env = Map("DEPLOY_ROLE" -> secret"PROD_ROLE", "TIER" -> EnvValue.plain("prod")),
       condition = Some("github.ref == 'refs/heads/main'"),
     ),
   )
@@ -97,7 +98,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("local-dir cache step uses a commit-stable key with restore-keys fallback") {
       val wf        = Planner.plan(sampleGraph, List(Capability.test), config)
-      val cacheStep = wf.jobs("test-core").steps.find(_.uses.contains("actions/cache@v4"))
+      val cacheStep = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
       assertTrue(
         cacheStep.exists(_.`with`("key").endsWith("1.2.3-ci")),
         cacheStep.exists(s => s.`with`("key").startsWith(s.`with`("restore-keys"))),
@@ -109,7 +110,7 @@ object PlannerSpec extends ZIOSpecDefault:
           .plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = epoch))
           .jobs("test-core")
           .steps
-          .find(_.uses.contains("actions/cache@v4"))
+          .find(_.uses.exists(_.startsWith("actions/cache@")))
           .map(_.`with`("key"))
       assertTrue(
         keyFor("1.2.3-ci") == keyFor("1.2.3-ci"), // same epoch (e.g. two commits in a PR) → identical
@@ -196,7 +197,7 @@ object PlannerSpec extends ZIOSpecDefault:
       assertTrue(
         job.services.isEmpty,
         job.env.isEmpty,
-        job.steps.exists(_.uses.contains("actions/cache@v4")),
+        job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
       )
     },
     test("BazelRemoteSidecar backend emits a service sidecar and the remote-cache env, no actions/cache") {
@@ -211,7 +212,7 @@ object PlannerSpec extends ZIOSpecDefault:
         job.services("bazel-remote").image == "buchgr/bazel-remote:latest",
         job.services("bazel-remote").ports == List("9092:9092"),
         job.env.get("ZIPX_REMOTE_CACHE").contains("grpc://localhost:9092"),
-        !job.steps.exists(_.uses.contains("actions/cache@v4")),
+        !job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
       )
     },
     test("ManagedRemote backend sets the endpoint + header-from-secret env, no service") {
@@ -386,8 +387,8 @@ object PlannerSpec extends ZIOSpecDefault:
         case n                       => n
       })
       val registries = List(
-        Target("us", env = Map("REGISTRY" -> "111.dkr.ecr.us-east-1", "ROLE" -> "${{ secrets.US_ROLE }}")),
-        Target("eu", env = Map("REGISTRY" -> "222.dkr.ecr.eu-west-1", "ROLE" -> "${{ secrets.EU_ROLE }}")),
+        Target("us", env = Map("REGISTRY" -> EnvValue.plain("111.dkr.ecr.us-east-1"), "ROLE" -> secret"US_ROLE")),
+        Target("eu", env = Map("REGISTRY" -> EnvValue.plain("222.dkr.ecr.eu-west-1"), "ROLE" -> secret"EU_ROLE")),
       )
       // A docker capability that pushes to multiple registries — same shape as deploy.
       val multiDocker = Capability.custom(
@@ -428,6 +429,193 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs("test-schema").needs.contains("fmt"),
         wf.jobs("test-api").needs.contains("fmt"),
       )
+    },
+    // ---- M7 — typed secrets & capability env ----
+    test("capability.env injects into every job of the capability (no targets)") {
+      val pub = Capability.publish.copy(env =
+        Map(
+          "PGP_PASSPHRASE"     -> secret"PGP_PASSPHRASE",
+          "SONATYPE_USERNAME"  -> Secret.ref("SONATYPE_USERNAME"),
+        ),
+      )
+      val job = Planner.plan(sampleGraph, List(pub), config).jobs("publish-schema")
+      assertTrue(
+        job.env.get("PGP_PASSPHRASE").contains("${{ secrets.PGP_PASSPHRASE }}"),
+        job.env.get("SONATYPE_USERNAME").contains("${{ secrets.SONATYPE_USERNAME }}"),
+      )
+    },
+    test("target.env wins over capability.env on key clash; cache keys survive unless overridden") {
+      val wf = Planner.plan(
+        sampleGraph,
+        List(
+          Capability.custom(
+            name = "ship",
+            command = _ => "ship",
+            participates = _.id == "serviceA",
+            gate = Gate.Always,
+            env = Map("TIER" -> EnvValue.plain("capability-default"), "SHARED" -> EnvValue.plain("from-cap")),
+            targets = _ =>
+              List(
+                Target(
+                  "prod",
+                  env = Map("TIER" -> EnvValue.plain("prod"), "EXTRA" -> EnvValue.plain("only-target")),
+                ),
+              ),
+          ),
+        ),
+        config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")),
+      )
+      val job = wf.jobs("ship-serviceA-prod")
+      assertTrue(
+        job.env.get("TIER").contains("prod"),                         // target wins
+        job.env.get("SHARED").contains("from-cap"),                   // capability preserved
+        job.env.get("EXTRA").contains("only-target"),                 // target-only
+        job.env.get("ZIPX_REMOTE_CACHE").contains("grpcs://cache.example"), // cache preserved
+        job.env.get("ZIPX_REMOTE_CACHE_HEADER").contains("${{ secrets.CACHE_KEY }}"),
+      )
+    },
+    test("Once jobs receive capability.env") {
+      val fmt = Capability.once("fmt", "scalafmtCheckAll", env = Map("SCALAFMT_VERSION" -> EnvValue.plain("3.8")))
+      assertTrue(
+        Planner.plan(sampleGraph, List(fmt), config).jobs("fmt").env.get("SCALAFMT_VERSION").contains("3.8"),
+      )
+    },
+    test("FromEnv renders as ${{ env.NAME }}") {
+      val cap = Capability.custom(
+        name = "relay",
+        command = _ => "relay",
+        participates = _.id == "schema",
+        gate = Gate.Always,
+        env = Map("UPSTREAM" -> EnvValue.env("DEPLOY_ROLE")),
+      )
+      assertTrue(
+        Planner.plan(sampleGraph, List(cap), config).jobs("relay-schema").env.get("UPSTREAM").contains("${{ env.DEPLOY_ROLE }}"),
+      )
+    },
+    test("Expr is an escape hatch rendered verbatim") {
+      val cap = Capability.custom(
+        name = "expr",
+        command = _ => "x",
+        participates = _.id == "schema",
+        gate = Gate.Always,
+        env = Map("COMPLEX" -> EnvValue.expr("${{ github.sha }}-${{ github.run_id }}")),
+      )
+      assertTrue(
+        Planner
+          .plan(sampleGraph, List(cap), config)
+          .jobs("expr-schema")
+          .env
+          .get("COMPLEX")
+          .contains("${{ github.sha }}-${{ github.run_id }}"),
+      )
+    },
+    test("ManagedRemote rejects an invalid headerSecret name at plan time") {
+      assertTrue(
+        scala.util
+          .Try(
+            Planner.plan(
+              sampleGraph,
+              List(Capability.test),
+              config.copy(cache = CacheBackend.ManagedRemote("grpcs://x", "bad name")),
+            ),
+          )
+          .isFailure,
+      )
+    },
+    // ---- Adversarial / gap coverage for existing planner behavior ----
+    test("publish contracts edges through a non-publishing intermediate") {
+      // pubRoot → middle(no publish) → pubLeaf : publish-pubLeaf must need publish-pubRoot, not a missing middle job.
+      val g = ModuleGraph(
+        List(
+          ModuleNode("pubRoot", publishes = true, crossScalaVersions = List(scala3)),
+          ModuleNode("middle", dependsOn = List("pubRoot"), publishes = false, crossScalaVersions = List(scala3)),
+          ModuleNode("pubLeaf", dependsOn = List("middle"), publishes = true, crossScalaVersions = List(scala3)),
+        ),
+      )
+      val wf = Planner.plan(g, List(Capability.publish), config)
+      assertTrue(
+        wf.jobs("publish-pubLeaf").needs == List("publish-pubRoot"),
+        !wf.jobs.contains("publish-middle"),
+      )
+    },
+    test("cross-capability needs fans out over all per-target jobs of the dependency") {
+      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+        case n if n.id == "serviceA" => n.copy(docker = true)
+        case n                       => n
+      })
+      val multiDocker = Capability.custom(
+        name = "docker",
+        command = n => s"${n.id}/Docker/publish",
+        participates = _.docker,
+        targets = _ => List(Target("us"), Target("eu")),
+      )
+      val deploy = Capability.deploy(
+        participates = _.id == "serviceA",
+        command = n => s"${n.id}/promote",
+        targets = _ => List(Target("staging")),
+      )
+      val needs = Planner.plan(graph, List(multiDocker, deploy), config).jobs("deploy-serviceA-staging").needs
+      assertTrue(
+        needs.contains("docker-serviceA-eu"),
+        needs.contains("docker-serviceA-us"),
+      )
+    },
+    test("unknown needsCapabilities names are ignored (do not crash)") {
+      val cap = Capability.test.copy(needsCapabilities = List("does-not-exist"))
+      val wf  = Planner.plan(sampleGraph, List(cap), config)
+      assertTrue(!wf.jobs("test-schema").needs.contains("does-not-exist"))
+    },
+    test("ciRelevant=false modules are excluded from the test fan-out") {
+      val g = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+        case n if n.id == "core" => n.copy(ciRelevant = false)
+        case n                   => n
+      })
+      val wf = Planner.plan(g, List(Capability.test), config)
+      assertTrue(!wf.jobs.contains("test-core"), wf.jobs.contains("test-schema"))
+    },
+    test("StepContext.matrixed is true only when a Scala matrix is active") {
+      var seen: List[Boolean] = Nil
+      val cap = Capability.test.copy(
+        participates = _.id == "api", // cross-built
+        extraSteps = ctx => { seen = ctx.matrixed :: seen; Nil },
+      )
+      val noMatrix = Capability.test.copy(
+        participates = _.id == "core", // single scala
+        extraSteps = ctx => { seen = ctx.matrixed :: seen; Nil },
+      )
+      val _ = Planner.plan(sampleGraph, List(cap, noMatrix), config)
+      assertTrue(seen.contains(true), seen.contains(false))
+    },
+    test("andConditions with Always gate still applies a bare target condition") {
+      val cap = Capability.custom(
+        name = "gate",
+        command = _ => "x",
+        participates = _.id == "schema",
+        gate = Gate.Always,
+        targets = _ => List(Target("only", condition = Some("github.ref == 'refs/heads/main'"))),
+      )
+      assertTrue(
+        Planner
+          .plan(sampleGraph, List(cap), config)
+          .jobs("gate-schema-only")
+          .`if`
+          .contains("github.ref == 'refs/heads/main'"),
+      )
+    },
+    test("Once capability with OnReleaseTag is gated") {
+      val once = Capability.once("releaseNotes", "notes", gate = Gate.OnReleaseTag)
+      assertTrue(
+        Planner
+          .plan(sampleGraph, List(once), config)
+          .jobs("releaseNotes")
+          .`if`
+          .exists(_.contains("refs/tags/v")),
+      )
+    },
+    test("root modules with empty baseDir never own changed files via the planner path") {
+      // Sanity: Affected is what the affected job uses; empty baseDir is excluded by design.
+      val g = ModuleGraph(List(ModuleNode("root", baseDir = ""), ModuleNode("lib", baseDir = "lib")))
+      assertTrue(Affected.owningModule(g, "README.md").isEmpty, Affected.owningModule(g, "lib/X.scala").contains("lib"))
     },
   )
 end PlannerSpec

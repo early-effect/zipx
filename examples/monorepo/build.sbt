@@ -81,7 +81,13 @@ zipxCapabilities += Capability.custom(
   phase = Phase.Publish,
   targets = _ =>
     Registry.all.map(r =>
-      Target(name = r.name, env = Map("REGISTRY" -> r.host, "DEPLOY_ROLE" -> s"$${{ secrets.${r.roleSecret} }}"))
+      Target(
+        name = r.name,
+        env = Map(
+          "REGISTRY"    -> EnvValue.plain(r.host),
+          "DEPLOY_ROLE" -> secret"${r.roleSecret}",
+        ),
+      )
     ),
   permissions = Map("id-token" -> "write", "contents" -> "read"),
 ).copy(
@@ -111,9 +117,9 @@ zipxCapabilities += zipxTasks.deploy(
         name = e.name,
         environment = e.ghEnvironment,
         env = Map(
-          "AWS_REGION"  -> e.region,
-          "DEPLOY_ROLE" -> s"$${{ secrets.${e.roleSecret} }}",
-          "TIER"        -> e.tier,
+          "AWS_REGION"  -> EnvValue.plain(e.region),
+          "DEPLOY_ROLE" -> secret"${e.roleSecret}",
+          "TIER"        -> EnvValue.plain(e.tier),
         ),
         condition = Some("github.ref == 'refs/heads/main'"),
       )

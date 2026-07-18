@@ -62,6 +62,14 @@ zipxCapabilities += Capability.custom(
   gate = Gate.Always,
 )
 
+// A publish-style capability carrying typed secrets (M7) — no raw "${{ secrets.X }}" strings.
+zipxCapabilities += Capability.publish.copy(
+  env = Map(
+    "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
+    "SONATYPE_USERNAME" -> Secret("SONATYPE_USERNAME"),
+  ),
+)
+
 // Assertions run inside the scripted test.
 val assertGraph = taskKey[Unit]("assert the graph and generated workflow are correct")
 assertGraph := {
@@ -114,4 +122,7 @@ assertGraph := {
   assert(content.contains("sbt '+ schema/publish'"), "cmd interpolator should emit literal syntax + module-scoped key")
   // Mixed splices: a String (scalaSwitch) and a typed key in one cmd → `++2.13.16; api/publish`.
   assert(content.contains("sbt '++2.13.16; api/publish'"), "cmd should mix a String splice with a module-scoped key")
+  // M7: typed secrets render into publish job env (capability.env).
+  assert(content.contains("PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}"), "typed secret should render into publish env")
+  assert(content.contains("SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}"), "Secret() helper should render")
 }

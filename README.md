@@ -1,6 +1,13 @@
 # zipx
 
+[![CI](https://github.com/early-effect/zipx/actions/workflows/ci.yml/badge.svg)](https://github.com/early-effect/zipx/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-earlyeffect.rocks-blue)](https://www.earlyeffect.rocks/zipx/)
+[![Maven Central](https://img.shields.io/maven-central/v/rocks.earlyeffect/zipx-sbt_sbt2_3?logo=apachemaven)](https://central.sonatype.com/artifact/rocks.earlyeffect/zipx-sbt_sbt2_3)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 **The build describes its own CI.** zipx is an sbt 2.x plugin (Scala 3) that generates a fast, concurrent, dependency-ordered GitHub Actions workflow directly from your sbt build graph — no hand-maintained YAML, no module list to keep in sync, no per-module command strings to copy-paste.
+
+Docs: [early-effect.github.io/zipx](https://early-effect.github.io/zipx/) (after the first `v*` Docs deploy).
 
 You declare your modules and their `dependsOn` edges once, in `build.sbt`, as you already do. zipx introspects that graph and emits a workflow that:
 
@@ -119,11 +126,36 @@ zipxCache := CacheBackend.BazelRemoteSidecar("buchgr/bazel-remote:latest", 9092)
 zipxCache := CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
 ```
 
-- **`LocalDir`** — persist sbt's local cache dir with `actions/cache@v4`, keyed by OS + JDK + epoch. No infrastructure.
+### Action pins
+
+Generated workflows use **commit-SHA pins** (not floating `@v4` tags). Defaults track current upstream releases; override when you want to bump without waiting on a zipx release:
+
+```scala
+zipxActions := ActionPins.Defaults.copy(
+  checkout = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0", // v7.0.0
+)
+```
+
+- **`LocalDir`** — persist sbt's local cache dir with `actions/cache` (pin via `zipxActions`), keyed by OS + JDK + epoch. No infrastructure.
 - **`BazelRemoteSidecar(image, port)`** — run a `buchgr/bazel-remote` gRPC server as a job service; sbt uses it as a Bazel-protocol remote cache shared across the run.
 - **`ManagedRemote(uri, headerSecret)`** — point sbt at a managed gRPC cache (BuildBuddy/EngFlow/NativeLink); the auth header comes from the named repository secret.
 
 The remote-cache transport (`sbt-remote-cache`) is bundled with zipx, so remote backends need no extra plugin. For remote backends zipx also sets `Global / cacheVersion` from a hash of `(JDK, OS)` — the axes sbt itself doesn't hash — so a heterogeneous runner pool can't poison the shared cache.
+
+### Early-effect packs (`ZipxCentral`, `ZipxDocs`)
+
+Org paved paths as capabilities (secret *names* only; values stay in GitHub):
+
+```scala
+zipxCapabilities ++= Seq(
+  ZipxCentral.publishSigned,  // GPG import + publishSigned + org signing env
+  ZipxCentral.releaseOnce,    // sonaRelease after the publish wave
+  ZipxDocs.pages(),           // Specular site → GitHub Pages via org reusable workflow
+)
+zipxWorkflowDispatch := true  // optional: manual "Run workflow" for docs-only deploys
+```
+
+`ZipxDocs.pages` emits a reusable-workflow job (`jobs.docs.uses: early-effect/.github/.../specular-docs.yml@main`) on `v*` tags. No hand-rolled `docs.yml`.
 
 ### Docker: the paved path
 
@@ -170,9 +202,9 @@ zipxCapabilities += Capability.deploy(
       name        = e.name,
       environment = e.ghEnvironment,           // binds `environment:` → GitHub enforces required reviewers
       env         = Map(                        // injected into the job's `env:`, referenced as ${{ env.KEY }}
-        "AWS_REGION"  -> e.region,
-        "DEPLOY_ROLE" -> s"$${{ secrets.${e.roleSecret} }}",
-        "TIER"        -> e.tier,
+        "AWS_REGION"  -> EnvValue.plain(e.region),
+        "DEPLOY_ROLE" -> secret"${e.roleSecret}",
+        "TIER"        -> EnvValue.plain(e.tier),
       ),
       condition   = Some("github.ref == 'refs/heads/main'"),
     )),
@@ -204,7 +236,8 @@ zipxCapabilities += Capability.custom(
   command      = n => s"${n.id}/Docker/publish",
   participates = _.docker,
   phase        = Phase.Publish,
-  targets      = _ => Registry.all.map(r => Target(r.name, env = Map("REGISTRY" -> r.host, "DEPLOY_ROLE" -> r.roleSecret))),
+  targets      = _ => Registry.all.map(r =>
+    Target(r.name, env = Map("REGISTRY" -> EnvValue.plain(r.host), "DEPLOY_ROLE" -> secret"${r.roleSecret}"))),
   permissions  = Map("id-token" -> "write", "contents" -> "read"),
 ).copy(extraSteps = _ => List(Step(name = Some("Login"), uses = Some("aws-actions/configure-aws-credentials@v6"),
   `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"))))
@@ -261,7 +294,8 @@ All settings have sensible derived defaults; override only what your build genui
 | `zipxJavaVersion` | `String` | `"21"` | JDK for `setup-java` and the cache key |
 | `zipxRunnerOs` | `String` | `"ubuntu-latest"` | default runner label |
 | `zipxScalaMatrix` | `Boolean` | `true` | expand a per-module Scala matrix |
-| `zipxCache` | `CacheBackend` | `LocalDir` | cache backend (see above) |
+| `zipxActions` | `ActionPins` | hash-pinned defaults | `uses:` pins for checkout / setup-java / setup-sbt / cache |
+| `zipxWorkflowDispatch` | `Boolean` | `false` | emit `on.workflow_dispatch` (manual runs; useful with `ZipxDocs.pages`) |
 | `zipxCacheEpoch` | `String` | `version` | commit-stable cache-key epoch |
 | `zipxPushBranches` | `Seq[String]` | `Seq("main")` | branches whose pushes trigger CI |
 | `zipxReleaseTagPattern` | `String` | `v[0-9]+.[0-9]+.[0-9]+` | tag glob that gates publishing |
@@ -280,7 +314,7 @@ All settings have sensible derived defaults; override only what your build genui
 
 ### Capability model (`zipx.core`, re-exported via `autoImport`)
 
-`Capability` fields: `name`, `phase` (`Verify`/`Publish`/`Deploy`), `ordering`, `gate`, `participates`, `command`, `matrixed`, `targets`, `needsCapabilities`, `permissions`, `runsOn`, `extraSteps`, `scope` (`PerModule`/`Once`). Constructors: `Capability.test` / `.publish` / `.docker` (built-ins), `Capability.deploy(...)`, `Capability.custom(...)`, `Capability.once(...)`. A `Target` is `(name, environment, env, condition)`; a `StepContext` (passed to `extraSteps`) is `(node, target, matrixed)`.
+`Capability` fields: `name`, `phase` (`Verify`/`Publish`/`Deploy`), `ordering`, `gate`, `participates`, `command`, `matrixed`, `targets`, `needsCapabilities`, `permissions`, `runsOn`, `extraSteps`, `scope` (`PerModule`/`Once`), `env` (`Map[String, EnvValue]`), `workflowCall` (optional reusable-workflow `uses`/`with`). Constructors: `Capability.test` / `.publish` / `.docker` (built-ins), `Capability.deploy(...)`, `Capability.custom(...)`, `Capability.once(...)`. Packs: `ZipxCentral.*`, `ZipxDocs.pages(...)`. A `Target` is `(name, environment, env, condition)` with typed `EnvValue`s (`secret"NAME"`, `EnvValue.plain`, …); a `StepContext` (passed to `extraSteps`) is `(node, target, matrixed)`. Job env merge order: cache → capability → target (later wins).
 
 ### Tasks
 
@@ -296,6 +330,26 @@ All settings have sensible derived defaults; override only what your build genui
 
 [`examples/monorepo`](examples/monorepo) is a runnable monorepo that generates its **whole** pipeline from the build — fmt gate → test → dependency-ordered publish → multi-registry docker → gated staging/production deploy — with the deploy/registry config as typed lists in [`project/Deploy.scala`](examples/monorepo/project/Deploy.scala) and **no external YAML**. It's the reference for wiring the plugin.
 
+## Developing zipx (dogfood)
+
+The **root** build loads zipx from **source** via a meta-build mirror (`project/dogfood.sbt`), not via `publishLocal`:
+
+- `project/meta-{workflow,core,central,plugin}` compile the same `modules/*/src/main/scala` trees (wired in [`project/dogfood.sbt`](project/dogfood.sbt)).
+- Shared versions and library deps live in [`project/Dependencies.scala`](project/Dependencies.scala) (used by both the meta mirror and `build.sbt`).
+- Because `project/*.sbt` is the meta-meta layer, [`project/project/Dependencies.scala`](project/project/Dependencies.scala) and [`project/project/Dogfood.scala`](project/project/Dogfood.scala) are **symlinks** to those files so dogfood can see them. Edit only the real files under `project/`; do not replace the symlinks with copies.
+
+**After changing** sources under `modules/{workflow,core,central,sbt-plugin}` that the plugin uses: run `reload` (then `zipxWorkflowGenerate` if you changed planner output).
+
+**When adding a library dependency** used by those modules: update `project/Dependencies.scala` only (main + meta stay in sync).
+
+**When adding a new mirrored module:** add a `meta*` project in `project/dogfood.sbt`, create `project/meta-<name>/`, and wire `dependsOn` like the existing chain.
+
+The publishable `plugin` project in `build.sbt` remains for Central publish and scripted tests. [`examples/monorepo`](examples/monorepo) is a **consumer** and still uses `publishLocal` (or a released `zipx-sbt` version); that is separate from root dogfood.
+
 ## Status
 
-Milestones M0–M6 are complete: test, ordered publish, affected-only, caching (local + remote), docker, and environments/approval/multi-target deploys, plus the extensibility surface. See [ROADMAP.md](ROADMAP.md) for details and design notes. The plugin targets sbt 2.0.1 / Scala 3.8.4.
+Milestones M0–M8 are complete: test, ordered publish, affected-only, caching (local + remote), docker, environments/approval/multi-target deploys, extensibility, typed secrets / capability env, and `zipx-central` dogfood. See [ROADMAP.md](ROADMAP.md) for details and the next milestones (dynver-ci polish, org rollout). The plugin targets sbt 2.0.1 / Scala 3.8.4.
+
+## License
+
+Apache-2.0

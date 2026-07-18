@@ -1,7 +1,7 @@
 package zipx.sbt
 
 import sbt.*
-import zipx.core.{Capability, Gate, ModuleNode, Ordering, Phase, StepContext, Target}
+import zipx.core.{Capability, EnvValue, Gate, ModuleNode, Ordering, Phase, StepContext, Target}
 import zipx.workflow.Step
 import scala.quoted.*
 
@@ -108,8 +108,9 @@ object CapabilityTasks:
     name: String = "deploy",
     needsCapabilities: List[String] = List("docker"),
     permissions: Map[String, String] = Map.empty,
+    env: Map[String, EnvValue] = Map.empty,
   ): Capability =
-    Capability.deploy(participates, moduleCommand(command), targets, name, needsCapabilities, permissions)
+    Capability.deploy(participates, moduleCommand(command), targets, name, needsCapabilities, permissions, env)
 
   /** [[Capability.custom]] with the command given as a task key (rendered `<module>/<label>`). */
   def custom(
@@ -125,9 +126,23 @@ object CapabilityTasks:
     permissions: Map[String, String] = Map.empty,
     runsOn: Option[List[String]] = None,
     extraSteps: StepContext => List[Step] = _ => Nil,
+    env: Map[String, EnvValue] = Map.empty,
   ): Capability =
-    Capability.custom(name, moduleCommand(command), participates, phase, ordering, gate, matrixed, targets,
-                      needsCapabilities, permissions, runsOn, extraSteps)
+    Capability.custom(
+      name,
+      moduleCommand(command),
+      participates,
+      phase,
+      ordering,
+      gate,
+      matrixed,
+      targets,
+      needsCapabilities,
+      permissions,
+      runsOn,
+      extraSteps,
+      env,
+    )
 
   /** [[Capability.once]] with the single build-wide command given as a task key (rendered as its bare `<label>`). */
   def once(
@@ -137,7 +152,9 @@ object CapabilityTasks:
     gate: Gate = Gate.Always,
     runsOn: Option[List[String]] = None,
     extraSteps: StepContext => List[Step] = _ => Nil,
+    env: Map[String, EnvValue] = Map.empty,
+    needsCapabilities: List[String] = Nil,
   ): Capability =
-    Capability.once(name, scopedLabel(command), phase, gate, runsOn, extraSteps)
+    Capability.once(name, scopedLabel(command), phase, gate, runsOn, extraSteps, env, needsCapabilities)
 
 end CapabilityTasks

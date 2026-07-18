@@ -10,6 +10,7 @@ import zipx.workflow.*
   */
 object PipelineSpec extends ZIOSpecDefault:
   import Fixtures.*
+  import EnvValue.secret
 
   // A graph where serviceA is a docker image AND a deploy target (the "app" shape), alongside the publishing libraries.
   private val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
@@ -18,11 +19,22 @@ object PipelineSpec extends ZIOSpecDefault:
   })
 
   private val deployTargets = List(
-    Target("staging", env = Map("AWS_REGION" -> "us-west-2", "DEPLOY_ROLE" -> "${{ secrets.STAGING_ROLE }}", "TIER" -> "staging")),
+    Target(
+      "staging",
+      env = Map(
+        "AWS_REGION"  -> EnvValue.plain("us-west-2"),
+        "DEPLOY_ROLE" -> secret"STAGING_ROLE",
+        "TIER"        -> EnvValue.plain("staging"),
+      ),
+    ),
     Target(
       "prod",
       environment = Some("production"),
-      env = Map("AWS_REGION" -> "us-east-1", "DEPLOY_ROLE" -> "${{ secrets.PROD_ROLE }}", "TIER" -> "prod"),
+      env = Map(
+        "AWS_REGION"  -> EnvValue.plain("us-east-1"),
+        "DEPLOY_ROLE" -> secret"PROD_ROLE",
+        "TIER"        -> EnvValue.plain("prod"),
+      ),
       condition = Some("github.ref == 'refs/heads/main'"),
     ),
   )

@@ -5,7 +5,8 @@ enum AffectedMode:
   case Always, AffectedOnPR
 
 /** Build-level configuration for the workflow the planner produces. Everything here is what the build genuinely cannot
-  * infer from the graph (triggers, matrix axes, cache choice); module identity and edges are always derived.
+  * infer from the graph (triggers, matrix axes, cache choice, action pins); module identity and edges are always
+  * derived.
   *
   * @param workflowName
   *   the GitHub Actions workflow `name:`.
@@ -30,16 +31,22 @@ enum AffectedMode:
   *   branches whose pushes trigger the workflow.
   * @param releaseTagPattern
   *   the tag glob that gates publishing (e.g. "v[0-9]+.[0-9]+.[0-9]+").
+  * @param actions
+  *   hash-pinned GitHub Actions (`uses:` values). Override via `zipxActions` to bump pins without a zipx release.
+  * @param workflowDispatch
+  *   when true, emit `on.workflow_dispatch` so the workflow can be run manually (useful for docs Pages deploys).
   */
 final case class PlanConfig(
-  workflowName: String = "CI",
-  scalaMatrix: Boolean = true,
-  javaVersion: String = "21",
-  runnerOs: String = "ubuntu-latest",
-  affected: AffectedMode = AffectedMode.AffectedOnPR,
-  affectedOnPush: Boolean = false,
-  cache: CacheBackend = CacheBackend.LocalDir,
-  cacheEpoch: String = "0.0.0",
-  pushBranches: List[String] = List("main"),
-  releaseTagPattern: String = "v[0-9]+.[0-9]+.[0-9]+",
+    workflowName: String = "CI",
+    scalaMatrix: Boolean = true,
+    javaVersion: String = "21",
+    runnerOs: String = "ubuntu-latest",
+    affected: AffectedMode = AffectedMode.AffectedOnPR,
+    affectedOnPush: Boolean = false,
+    cache: CacheBackend = CacheBackend.LocalDir,
+    cacheEpoch: String = "0.0.0",
+    pushBranches: List[String] = List("main"),
+    releaseTagPattern: String = "v[0-9]+.[0-9]+.[0-9]+",
+    actions: ActionPins = ActionPins.Defaults,
+    workflowDispatch: Boolean = false,
 )

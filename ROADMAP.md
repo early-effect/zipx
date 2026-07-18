@@ -1,6 +1,6 @@
 # zipx — Roadmap
 
-A self-describing CI plugin for Scala 2.x monorepos: a set of Scala 3 libraries plus an **sbt 2.x (2.0.1) AutoPlugin** that lets a Scala monorepo *describe its own* fast, concurrent, dependency-ordered GitHub Actions pipeline — test, library publish, and docker-image publish — with pluggable Bazel-style caching.
+A self-describing CI plugin for Scala monorepos: a set of Scala 3 libraries plus an **sbt 2.x (2.0.1) AutoPlugin** that lets a Scala monorepo *describe its own* fast, concurrent, dependency-ordered GitHub Actions pipeline — test, library publish, and docker-image publish — with pluggable Bazel-style caching.
 
 **Status legend:** ✅ done · 🚧 in progress · ⬜ not started
 
@@ -13,6 +13,11 @@ A self-describing CI plugin for Scala 2.x monorepos: a set of Scala 3 libraries 
 | M4 — Docker paved path + POC | ✅ |
 | M5 — Remote caches | ✅ |
 | M6 — Environments, approval & multi-target deploys | ✅ |
+| M7 — Typed secrets & capability env | ✅ |
+| M8 — `zipx-central` + dogfood Central publish | ✅ |
+| M9 — Dynver-ci + publishSigned auto-detect | ⬜ |
+| M10 — `zipx-aws` (on second consumer) | ⬜ |
+| M11 — "Extend with Scala" docs & org rollout | ⬜ |
 
 ## Context
 
@@ -32,16 +37,22 @@ A common way to drive CI for a Scala monorepo is a hand-maintained external conf
 - **Caching:** an **abstraction** (`CacheBackend`) — local-dir or remote selectable by config/availability.
 - **Publishing:** a **registry-agnostic abstraction** — any publish mechanism plugs in; zipx owns ordering/gating, not the command.
 - **Commit-stable cache keys:** the `actions/cache` primary key tracks a **commit-stable "cache epoch"** (`zipxCacheEpoch`, defaults to `version`) so mid-PR commits reuse the sbt action cache; integrates with the sibling `sbt-dynver-ci` plugin.
+- **Action pins:** generated `uses:` values are **commit-SHA pins** (`ActionPins` / `zipxActions`), not floating tags. Defaults ship with zipx; consumers override to bump without waiting on a release.
+- **Secrets:** zipx renders secret *references* into job `env:` / steps; it never stores secret *values*. Named GitHub secrets (org- or repo-scoped) are selected in Scala; convenience packs (e.g. `zipx-central`) name the early-effect org secrets and supply GPG-import steps. Semantics stay out of core.
+- **Extension language:** people extend zipx with **actual Scala** — `Capability` values, typed `zipxTasks` / `cmd"…"`, `project/*.scala` typed config, and published meta-build libraries — not external YAML or stringly `${{ secrets.X }}` soup.
 
 ## Central design principle
 
-**zipx owns *topology*; the build owns *what to run*.** Topology = the graph, topological layers, `needs` edges, matrix axes, gating, and cache wiring — all derived. "What to run" is delegated to sbt tasks the build already defines, modeled as a pluggable **Capability**. Test, library-publish, and docker-publish are all `Capability` instances; a user can define custom ones.
+**zipx owns *topology*; the build owns *what to run*.** Topology = the graph, topological layers, `needs` edges, matrix axes, gating, environment binding, env injection, target fan-out, and cache wiring — all derived. "What to run" is delegated to sbt tasks the build already defines, modeled as a pluggable **Capability**. Test, library-publish, and docker-publish are all `Capability` instances; a user can define custom ones. Cloud, registry, and Central-signing semantics live in **Scala packs on the meta-build classpath**, not in the planner.
 
 ## Module layout
 
 - **`modules/workflow`** — `zipx.workflow`. GHA AST (`Workflow`, `Job`, `Step`, `Triggers`, `Strategy`, `Concurrency`) + deterministic YAML printer. Uses zio-blocks' schema-derived codecs to build the `Yaml` AST; **our own `YamlPrinter`** serializes it (adds literal block scalars zio-blocks' writer can't emit).
-- **`modules/core`** — `zipx.core`. Graph model (`ModuleId`, `ModuleNode`, `ModuleGraph`), own deterministic toposort + layers + affected-closure, the `Capability` model, `CacheBackend`, `PlanConfig`, and the `Planner` (`ModuleGraph => Workflow`). Pure, sbt-free, unit-tested against a fixture mirroring the real graph.
+- **`modules/core`** — `zipx.core`. Graph model (`ModuleId`, `ModuleNode`, `ModuleGraph`), own deterministic toposort + layers + affected-closure, the `Capability` model, `CacheBackend`, `PlanConfig`, and the `Planner` (`ModuleGraph => Workflow`). Pure, sbt-free, unit-tested against a fixture mirroring the real graph. (M7 adds typed `EnvValue` / secret refs here.)
 - **`modules/sbt-plugin`** — `zipx.sbt.ZipxPlugin`. The only module touching `sbt.*`: adapts build `State`/`structure`/`buildDependencies` into a `ModuleGraph`, defines `autoImport`, wires tasks.
+- **Planned convenience packs** (meta-build Scala libraries, not more plugin magic):
+  - **`zipx-central`** (M8) — early-effect / Maven Central org secrets, GPG import steps, `publishSigned` capability.
+  - **`zipx-aws`** (M10, deferred) — OIDC + ECR helpers extracted from `examples/monorepo` once a second consumer needs them.
 
 ## Milestones
 
@@ -68,7 +79,7 @@ Selectable via `zipxCache`:
 
 The plugin reads those env vars at load and wires `Global / remoteCache` + `remoteCacheHeaders` + `Global / cacheVersion` (inert when unset). The transport is bundled (zipx-sbt depends on `sbt-remote-cache`), and `cacheVersion` folds JDK+OS to keep heterogeneous remote pools sound — see the follow-ups section above.
 
-### M6 — Environments, approval gates & multi-target deploys ⬜
+### M6 — Environments, approval gates & multi-target deploys ✅
 
 **Why.** Real monorepos need three more capabilities beyond test/publish/docker, plus a first-class extension seam:
 
@@ -157,6 +168,94 @@ final case class Capability(             // gains (all defaulting to current beh
 Deliberately **not** modeled (equivalent-or-better by design): a container-based sbt runner — zipx uses `actions/setup-java` + `sbt/setup-sbt` for the same toolchain pinning without a container; `Job.container` remains available if a user wants it. Ad-hoc cache-warmup hacks and time-bucketed cache keys are obviated by M5's content-addressed caching + commit-stable epoch. `examples/monorepo` demonstrates the full pipeline end-to-end (fmt gate → test → ordered publish → multi-registry docker → gated multi-target deploy) generated entirely from `build.sbt` + typed lists in `project/`, no external YAML.
 
 **Every acceptance-mapping capability is now implemented and proven** (unit + scripted + running example). A monorepo on the external-YAML-config pattern can migrate its whole pipeline to zipx.
+
+### M7 — Typed secrets & capability env ✅
+
+**Why.** Secrets were stringly typed: consumers hand-wrote `"${{ secrets.X }}"` into `Target.env`. That worked for demos but was error-prone, un-completable, and insufficient for early-effect Central publishing (publish jobs ran bare `publish` with **no** PGP/Sonatype env injection).
+
+**Goal.** Make secret *references* first-class Scala while keeping zipx semantics-agnostic (names and values stay out of the planner; only rendering is owned).
+
+**Shipped types:**
+```scala
+enum EnvValue:
+  case Plain(value: String)
+  case FromSecret(name: String)   // → ${{ secrets.NAME }}
+  case FromEnv(name: String)      // → ${{ env.NAME }}
+  case Expr(expr: String)         // escape hatch
+
+// Target.env and Capability.env are Map[String, EnvValue]
+// autoImport: secret"PGP_PASSPHRASE", Secret.ref("…"), EnvValue.plain / .env / .expr
+```
+
+**Planner / plugin:**
+- Capability gains `env: Map[String, EnvValue]` so publish/signing secrets attach once to all jobs of that capability.
+- Merge precedence (later wins): cache contribution → `Capability.env` → `Target.env`.
+- `ManagedRemote.headerSecret` validated via `EnvValue.secret` at plan time.
+- Re-exported via `autoImport`; `examples/monorepo` uses `secret"…"` / `EnvValue.plain`.
+
+**Acceptance (met):**
+- Unit: `EnvValueSpec` (render + adversarial name validation); planner injects capability/target/cache layers; golden expressions.
+- Scripted: publish jobs carry typed secret env; `zipxWorkflowCheck` clean.
+- Example: no raw `"$${{ secrets.… }}"` strings in `examples/monorepo/build.sbt`.
+- Gap coverage added for publish-edge contraction, cross-capability target fan-out needs, `ciRelevant=false`, unknown `needsCapabilities`, trailing-slash base dirs, ModuleGraph edge cases.
+
+**Design guardrails:** generate-time resolution only (no runtime secret matrix); zipx never stores secret values; org vs repo secret *scope* is a GitHub concern, not a zipx type. Empty / spaced / expression-like secret names are rejected at construction.
+
+### M8 — `zipx-central` + dogfood Central publish ✅
+
+**Why.** early-effect libraries publish CI-only to the Sonatype Central Portal, signing with the shared org secrets (`PGP_KEY_HEX`, `PGP_SECRET`, `PGP_PASSPHRASE`, `SONATYPE_USERNAME`, `SONATYPE_PASSWORD`). Before M8, zipx's own `publish-*` jobs could not release; consumers had to invent GPG-import steps and env wiring by hand.
+
+**Shipped.** `zipx-central` composes M7 primitives into the paved Central path. Dogfood:
+
+```scala
+zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
+```
+
+Generated CI owns GPG import + `publishSigned` + `central-release` (`sonaRelease`) + Specular Pages (`ZipxDocs.pages`); hand-rolled `release.yml` / `docs.yml` deleted. `ZipxCentral` / `ZipxDocs` are re-exported from the plugin's `autoImport` (nested objects so meta-build only needs the plugin jar).
+
+**Also:** hash-pinned GitHub Actions via configurable `zipxActions` / `ActionPins` (checkout v7, setup-java v5, setup-sbt v1.5, cache v6). Reusable-workflow once-jobs via `Capability.workflowCall` / `Job.uses`.
+
+**Acceptance:** unit coverage for `publishSigned` / `releaseOnce` / `needsCapabilities` fan-out; dogfood `ci.yml` regenerated with SHA pins + Central jobs. First Central tag publish is the live proof (same org secrets as peers).
+
+**Out of scope for M8:** replacing every hand-written `release.yml` across the org (that's M11 rollout); local manual publishing.
+
+### M9 — Dynver-ci + publishSigned auto-detect ⬜
+
+**Why.** Cache epoch already defaults to `version`; [`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci) makes that PR-stable (`<last-tag>-ci`). Docker auto-detect from `DockerPlugin` is the right pattern for "the build describes itself"; pgp presence should similarly nudge the default publish command.
+
+**Goal:**
+- Document / recommend `sbt-dynver-ci` alongside zipx (epoch = dynver-ci version across a PR).
+- When `sbt-pgp` is on the classpath, default `zipxPublishTask` (or the built-in publish capability command) toward `publishSigned`, with an explicit override. Consumers using `zipx-central` already get this via capability replace; auto-detect helps bare setups.
+- Hygiene: refresh stale milestone comments in `Planner` / `CacheBackend`; keep ROADMAP status table in sync.
+
+**Acceptance:** docs + scripted/unit proving pgp auto-detect and override; dynver-ci called out in README cache-epoch section.
+
+### M10 — `zipx-aws` (on second consumer) ⬜
+
+**Deferred by design** until a second real consumer would otherwise copy the OIDC + ECR block from `examples/monorepo`.
+
+**When started:** extract `project/Deploy.scala`-style helpers into `zipx-aws` (role assumption step factory, registry `Target` builders) using M7 `EnvValue` / `secret"…"`. Same meta-build library pattern as `zipx-central`.
+
+### M11 — "Extend with Scala" docs & org rollout ⬜
+
+**Docs:** a first-class guide that makes Scala the default extension story:
+- `project/*.scala` typed config (the join that replaced YAML + resolver scripts)
+- `zipxTasks` / `cmd"…"` over string commands
+- `EnvValue` / `secret"…"` over raw `${{ }}` strings
+- composing `Capability.custom` / `.deploy` / `.once` and same-name replace
+- published packs (`zipx-central`, later `zipx-aws`)
+
+**Org rollout:**
+1. Publish zipx `0.1.0` to Central (via M8 dogfood).
+2. Adopt zipx in 1–2 early-effect libraries (alongside `sbt-dynver-ci`).
+3. Prefer generated publish/release topology over hand-maintained `release.yml` where the build graph already knows the modules.
+4. Extract `zipx-aws` only when step 2 produces a second copy of the AWS block (triggers M10).
+
+**Design guardrails (carry forward):**
+1. Topology in zipx; semantics in Scala packs.
+2. Generate-time resolution; deterministic YAML for `zipxWorkflowCheck`.
+3. Org secrets by **name**, never value, in the plugin or packs.
+4. sbt 2.0 remains the unlock (action cache, remote cache, Scala 3 plugins, common settings); do not regress to sbt 1.x shapes.
 
 ## Verification
 

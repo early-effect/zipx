@@ -40,7 +40,11 @@ object Affected:
     candidates.headOption.map(_.id)
 
   private def underBase(path: String, base: String): Boolean =
-    val b = if base.endsWith("/") then base else base + "/"
-    path == base || path.startsWith(b)
+    // Normalize so `app` and `app/` are equivalent; a trailing slash must not break exact-dir matches.
+    val normalized = if base.endsWith("/") then base.dropRight(1) else base
+    if normalized.isEmpty then false
+    else
+      val prefix = normalized + "/"
+      path == normalized || path.startsWith(prefix)
 
 end Affected

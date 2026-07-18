@@ -90,17 +90,17 @@ object RenderSpec extends ZIOSpecDefault:
                 name = Some("Cache"),
                 uses = Some("actions/cache@v4"),
                 `with` = ListMap("path" -> "~/.sbt\n~/.cache/sbt"),
-              ),
-            ),
-          ),
+              )
+            )
+          )
         ),
       )
       val out = Render.render(wf)
       assertTrue(
-        out.contains("path: |"),      // literal block scalar marker
+        out.contains("path: |"), // literal block scalar marker
         out.contains("~/.sbt"),
         out.contains("~/.cache/sbt"),
-        !out.contains("""\n"""),      // never an escaped newline
+        !out.contains("""\n"""), // never an escaped newline
       )
     },
     test("renders a job's environment binding and env block") {
@@ -114,7 +114,7 @@ object RenderSpec extends ZIOSpecDefault:
             permissions = ListMap("id-token" -> "write", "contents" -> "read"),
             env = ListMap("DEPLOY_ROLE" -> "${{ secrets.PROD_ROLE }}", "TIER" -> "prod"),
             steps = List(Step(uses = Some("actions/checkout@v4"))),
-          ),
+          )
         ),
       )
       val out = Render.render(wf)
@@ -133,15 +133,39 @@ object RenderSpec extends ZIOSpecDefault:
             name = "CI",
             on = Triggers(push = Some(BranchFilter(branches = List("main")))),
             jobs = ListMap("j" -> Job(runsOn = labels, steps = List(Step(uses = Some("actions/checkout@v4"))))),
-          ),
+          )
         )
       val single = render(List("ubuntu-latest"))
       val multi  = render(List("self-hosted", "linux"))
       assertTrue(
         single.contains("runs-on: ubuntu-latest"), // scalar
-        !single.contains("runs-on:\n      -"),      // not a sequence
-        multi.contains("- self-hosted"),            // sequence
+        !single.contains("runs-on:\n      -"),     // not a sequence
+        multi.contains("- self-hosted"),           // sequence
         multi.contains("- linux"),
+      )
+    },
+    test("reusable workflow call jobs emit uses/with and omit runs-on/steps") {
+      val wf = Workflow(
+        name = "CI",
+        on = Triggers(workflowDispatch = true),
+        jobs = ListMap(
+          "docs" -> Job(
+            name = Some("docs"),
+            runsOn = Nil,
+            permissions = ListMap("pages" -> "write", "id-token" -> "write", "contents" -> "read"),
+            uses = Some("early-effect/.github/.github/workflows/specular-docs.yml@main"),
+            `with` = ListMap("sbt-project" -> "docs"),
+          )
+        ),
+      )
+      val out = Render.render(wf)
+      assertTrue(
+        out.contains("uses: early-effect/.github/.github/workflows/specular-docs.yml@main"),
+        out.contains("sbt-project: docs"),
+        out.contains("pages: write"),
+        out.contains("workflow_dispatch: null"),
+        !out.contains("runs-on:"),
+        !out.contains("steps:"),
       )
     },
   )

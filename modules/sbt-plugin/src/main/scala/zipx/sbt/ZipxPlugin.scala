@@ -19,6 +19,8 @@ object ZipxPlugin extends AutoPlugin:
     // Re-export the core cache-backend ADT so users can write `zipxCache := CacheBackend.LocalDir` etc.
     type CacheBackend = zipx.core.CacheBackend
     val CacheBackend = zipx.core.CacheBackend
+    type ActionPins = zipx.core.ActionPins
+    val ActionPins = zipx.core.ActionPins
 
     // Re-export the capability/target model so users can define and append custom capabilities in build.sbt.
     type Capability = zipx.core.Capability
@@ -35,6 +37,26 @@ object ZipxPlugin extends AutoPlugin:
     val Ordering = zipx.core.Ordering
     type CapabilityScope = zipx.core.CapabilityScope
     val CapabilityScope = zipx.core.CapabilityScope
+    // Typed env / secret references — prefer these over hand-written "${{ secrets.X }}" strings.
+    type EnvValue = zipx.core.EnvValue
+    val EnvValue = zipx.core.EnvValue
+    val Secret   = zipx.core.Secret
+    export zipx.core.EnvValue.secret
+    // Early-effect Central paved path (publishSigned + sonaRelease).
+    // Nested object: build.sbt only needs Capability from the plugin jar (not zipx-central on the meta classpath).
+    object ZipxCentral:
+      def publishSigned: Capability = zipx.central.ZipxCentral.publishSigned
+      def releaseOnce: Capability   = zipx.central.ZipxCentral.releaseOnce
+      def signingEnv                = zipx.central.ZipxCentral.signingEnv
+      def OrgSecretNames            = zipx.central.ZipxCentral.OrgSecretNames
+      def gpgImportSteps            = zipx.central.ZipxCentral.gpgImportSteps
+    end ZipxCentral
+    // Early-effect Specular Pages paved path (org reusable workflow).
+    object ZipxDocs:
+      def pages(sbtProject: String = "docs", javaVersion: Option[String] = None): Capability =
+        zipx.specular.ZipxDocs.pages(sbtProject, javaVersion)
+      def ReusableWorkflow = zipx.specular.ZipxDocs.ReusableWorkflow
+      def pagesPermissions = zipx.specular.ZipxDocs.pagesPermissions
     // The workflow Step type, so extraSteps can be written in build.sbt.
     type Step = zipx.workflow.Step
     val Step = zipx.workflow.Step
@@ -58,14 +80,20 @@ object ZipxPlugin extends AutoPlugin:
     val zipxCacheEpoch   = settingKey[String]("Commit-stable cache epoch (default: version). Rolls on release tags.")
     val zipxPushBranches = settingKey[Seq[String]]("Branches whose pushes trigger CI.")
     val zipxReleaseTagPattern = settingKey[String]("Tag glob that gates publishing.")
+    val zipxActions           =
+      settingKey[ActionPins](
+        "Hash-pinned GitHub Actions (checkout, setup-java, setup-sbt, cache). Override to bump pins."
+      )
+    val zipxWorkflowDispatch =
+      settingKey[Boolean]("Emit on.workflow_dispatch so the workflow can be run manually (default false).")
 
     // Per-project configuration (all default-derived; override only for edge cases).
     val zipxCiRelevant = settingKey[Boolean]("Whether this module participates in the CI test fan-out.")
-    val zipxPublish =
+    val zipxPublish    =
       settingKey[Option[Boolean]]("Force publish on/off; None (default) derives it from publish/skip.")
     val zipxTestTask    = settingKey[String]("sbt task used to test this module (default 'test').")
     val zipxPublishTask = settingKey[String]("sbt task used to publish this module (default 'publish').")
-    val zipxDocker =
+    val zipxDocker      =
       settingKey[Boolean]("Whether this module publishes a docker image via Docker/publish (default false).")
 
     val zipxAffectedOnPR =
@@ -78,7 +106,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxPublishOrder     = taskKey[Unit]("Print the dependency-ordered publish layers (contracted publish chain).")
     val zipxWorkflowGenerate = taskKey[Unit]("Generate the GitHub Actions workflow YAML from the build graph.")
     val zipxWorkflowCheck    = taskKey[Unit]("Verify the checked-in workflow matches what the build would generate.")
-    val zipxAffectedModules =
+    val zipxAffectedModules  =
       inputKey[Unit]("Print, as a JSON array, the modules affected by changes since the given git base ref.")
   end autoImport
 
@@ -96,6 +124,8 @@ object ZipxPlugin extends AutoPlugin:
     zipxWorkflowPath      := ".github/workflows/ci.yml",
     zipxAffectedOnPR      := true,
     zipxAffectedOnPush    := false,
+    zipxActions           := ActionPins.Defaults,
+    zipxWorkflowDispatch  := false,
   )
 
   /** Wires sbt's remote cache from the environment the generated workflow sets up (`ZIPX_REMOTE_CACHE`,
@@ -107,7 +137,7 @@ object ZipxPlugin extends AutoPlugin:
     */
   private def remoteCacheWiring: Seq[Setting[?]] =
     sys.env.get("ZIPX_REMOTE_CACHE").filter(_.nonEmpty) match
-      case None => Nil
+      case None         => Nil
       case Some(uriStr) =>
         Seq(
           Global / remoteCache := Some(uri(uriStr)),
@@ -127,12 +157,13 @@ object ZipxPlugin extends AutoPlugin:
   private def runtimeOs: String = sys.props.getOrElse("os.name", "unknown").toLowerCase.split(' ').head
 
   /** A stable 64-bit hash of the cache-correctness axes → `cacheVersion`. Deterministic across machines (FNV-1a over
-    * the UTF-8 bytes), so the same (jdk, os) always yields the same partition and different ones never collide by design.
+    * the UTF-8 bytes), so the same (jdk, os) always yields the same partition and different ones never collide by
+    * design.
     */
   private def cacheVersionFor(jdk: String, os: String): Long =
-    val input  = s"jdk=$jdk;os=$os"
-    var hash   = 0xcbf29ce484222325L // FNV-1a 64-bit offset basis
-    val prime  = 0x100000001b3L
+    val input = s"jdk=$jdk;os=$os"
+    var hash  = 0xcbf29ce484222325L // FNV-1a 64-bit offset basis
+    val prime = 0x100000001b3L
     input.getBytes(java.nio.charset.StandardCharsets.UTF_8).foreach { b =>
       hash = (hash ^ (b & 0xff)) * prime
     }
@@ -152,8 +183,8 @@ object ZipxPlugin extends AutoPlugin:
       IO.write(out, content)
       streams.value.log.info(s"zipx wrote ${out.getPath}")
     },
-    zipxWorkflowCheck    := checkTask.value,
-    zipxAffectedModules  := affectedModulesTask.evaluated,
+    zipxWorkflowCheck   := checkTask.value,
+    zipxAffectedModules := affectedModulesTask.evaluated,
   )
 
   override def projectSettings: Seq[Setting[?]] = Seq(
@@ -182,9 +213,9 @@ object ZipxPlugin extends AutoPlugin:
     val refs = structure.allProjectRefs.sortBy(_.project)
 
     // Aggregators (aggregate ≥1 project) are containers, not publishable modules — never publish by default.
-    val aggregatorIds: Set[String] = structure.allProjects.filter(_.aggregate.nonEmpty).map(_.id).toSet
+    val aggregatorIds: Set[String]                 = structure.allProjects.filter(_.aggregate.nonEmpty).map(_.id).toSet
     val resolvedById: Map[String, ResolvedProject] = structure.allProjects.map(p => p.id -> p).toMap
-    val buildRoot = (LocalRootProject / baseDirectory).value.toPath
+    val buildRoot                                  = (LocalRootProject / baseDirectory).value.toPath
 
     val nodes = refs.map { ref =>
       def read[A](key: SettingKey[A], default: A): A = extracted.getOpt(ref / key).getOrElse(default)
@@ -200,7 +231,10 @@ object ZipxPlugin extends AutoPlugin:
           case versions => versions.toList
       // Module base dir relative to the build root, forward-slashed; "" for the root project itself.
       val baseDir =
-        resolvedById.get(ref.project).map(p => buildRoot.relativize(p.base.toPath).toString.replace('\\', '/')).getOrElse("")
+        resolvedById
+          .get(ref.project)
+          .map(p => buildRoot.relativize(p.base.toPath).toString.replace('\\', '/'))
+          .getOrElse("")
       ModuleNode(
         id = ref.project,
         dependsOn = deps.classpathRefs(ref).map(_.project).toList.distinct,
@@ -230,7 +264,7 @@ object ZipxPlugin extends AutoPlugin:
     extracted.getOpt(rootRef(extracted.structure) / key).getOrElse(default)
 
   private def planConfig: Def.Initialize[Task[PlanConfig]] = Def.task {
-    val extracted = Project.extract(state.value)
+    val extracted                                  = Project.extract(state.value)
     def read[A](key: SettingKey[A], default: A): A = readBuildSetting(extracted, key, default)
     // Epoch defaults to the root project's `version` (delegates project→ThisBuild→Global) so a bare `version := ...`
     // is honored; an explicit zipxCacheEpoch wins.
@@ -246,6 +280,8 @@ object ZipxPlugin extends AutoPlugin:
       cacheEpoch = read(zipxCacheEpoch, rootVersion),
       pushBranches = read(zipxPushBranches, Seq("main")).toList,
       releaseTagPattern = read(zipxReleaseTagPattern, "v[0-9]+.[0-9]+.[0-9]+"),
+      actions = read(zipxActions, ActionPins.Defaults),
+      workflowDispatch = read(zipxWorkflowDispatch, false),
     )
   }
 
@@ -326,7 +362,7 @@ object ZipxPlugin extends AutoPlugin:
     val actual   = if out.exists then IO.read(out) else ""
     if actual != expected then
       sys.error(
-        s"${out.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result.",
+        s"${out.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
       )
     streams.value.log.info(s"zipx: ${out.getPath} is up to date.")
   }

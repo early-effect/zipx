@@ -115,5 +115,48 @@ object AffectedSpec extends ZIOSpecDefault:
         Affected.affectedModules(graph, List("core-lib/build.sbt")) == graph.ids.toSet,
       )
     },
+    test("empty baseDir never owns a file (root aggregators are invisible)") {
+      val g = ModuleGraph(
+        List(
+          ModuleNode("root", baseDir = ""),
+          ModuleNode("lib", baseDir = "lib"),
+        ),
+      )
+      assertTrue(
+        Affected.owningModule(g, "build.sbt").isEmpty, // owningModule itself — build.sbt is handled by isBuildFile upstream
+        Affected.owningModule(g, "something.txt").isEmpty,
+        Affected.owningModule(g, "lib/X.scala").contains("lib"),
+      )
+    },
+    test("baseDir with a trailing slash still matches") {
+      val g = ModuleGraph(List(ModuleNode("app", baseDir = "app/")))
+      assertTrue(
+        Affected.owningModule(g, "app/Main.scala").contains("app"),
+        Affected.owningModule(g, "app").contains("app"),
+      )
+    },
+    test("the exact path `project` (no slash) forces a full build") {
+      assertTrue(Affected.affectedModules(graph, List("project")) == graph.ids.toSet)
+    },
+    test("`.sbt.bak` is not a build file (suffix must be exactly `.sbt`)") {
+      // endsWith(".sbt") must not match `foo.sbt.bak`.
+      assertTrue(
+        Affected.affectedModules(graph, List("docs/foo.sbt.bak")) == Set.empty, // unowned + not a build file
+        // Under a leaf module: affects only that leaf — proves isBuildFile did not fire (else full set).
+        Affected.affectedModules(graph, List("client/foo.sbt.bak")) == Set("client"),
+      )
+    },
+    test("path that equals a baseDir with nested sibling does not steal the sibling") {
+      val g = ModuleGraph(
+        List(
+          ModuleNode("a", baseDir = "pkgs/a"),
+          ModuleNode("ab", baseDir = "pkgs/ab"),
+        ),
+      )
+      assertTrue(
+        Affected.owningModule(g, "pkgs/ab/X.scala").contains("ab"),
+        Affected.owningModule(g, "pkgs/a/X.scala").contains("a"),
+      )
+    },
   )
 end AffectedSpec

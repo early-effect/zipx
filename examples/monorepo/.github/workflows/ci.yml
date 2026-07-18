@@ -256,8 +256,8 @@ jobs:
       id-token: write
       contents: read
     env:
-      REGISTRY: "222.dkr.ecr.eu-west-1.amazonaws.com"
       DEPLOY_ROLE: ${{ secrets.EU_REGISTRY_ROLE }}
+      REGISTRY: "222.dkr.ecr.eu-west-1.amazonaws.com"
     steps:
       - uses: actions/checkout@v4
       - uses: sbt/setup-sbt@v1
@@ -289,8 +289,8 @@ jobs:
       id-token: write
       contents: read
     env:
-      REGISTRY: "111.dkr.ecr.us-east-1.amazonaws.com"
       DEPLOY_ROLE: ${{ secrets.US_REGISTRY_ROLE }}
+      REGISTRY: "111.dkr.ecr.us-east-1.amazonaws.com"
     steps:
       - uses: actions/checkout@v4
       - uses: sbt/setup-sbt@v1
