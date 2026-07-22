@@ -11,8 +11,8 @@ package zipx.core
   *   - `workerA`, `workerB` (→ core, non-publishing) — background apps
   *   - `core` (∅, non-publishing) — a shared internal dependency
   *
-  * Publish partial order (what dependency-ordered publishing must produce):
-  * L0 `schema`; L1 `api`, `legacyClient`; L2 `clientA`, `clientB`.
+  * Publish partial order (what dependency-ordered publishing must produce): L0 `schema`; L1 `api`, `legacyClient`; L2
+  * `clientA`, `clientB`.
   */
 object Fixtures:
 
@@ -34,6 +34,6 @@ object Fixtures:
       ModuleNode("serviceD", dependsOn = List("core", "api"), crossScalaVersions = List(scala3)),
       ModuleNode("workerA", dependsOn = List("core"), crossScalaVersions = List(scala3)),
       ModuleNode("workerB", dependsOn = List("core"), crossScalaVersions = List(scala3)),
-    ),
+    )
   )
 end Fixtures

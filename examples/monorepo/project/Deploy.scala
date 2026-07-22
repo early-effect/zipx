@@ -6,11 +6,11 @@
 
 /** One deploy destination. zipx knows nothing about clouds/tiers — this is entirely user-defined. */
 final case class DeployEnv(
-  name: String,
-  ghEnvironment: Option[String],
-  region: String,
-  roleSecret: String,
-  tier: String,
+    name: String,
+    ghEnvironment: Option[String],
+    region: String,
+    roleSecret: String,
+    tier: String,
 )
 
 object DeployEnv:

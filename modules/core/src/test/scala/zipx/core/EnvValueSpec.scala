@@ -21,7 +21,9 @@ object EnvValueSpec extends ZIOSpecDefault:
     test("Plain and Expr are verbatim") {
       assertTrue(
         EnvValue.plain("us-west-2").render == "us-west-2",
-        EnvValue.plain("${{ secrets.LOOKS_LIKE_ONE }}").render == "${{ secrets.LOOKS_LIKE_ONE }}", // Plain does not rewrite
+        EnvValue
+          .plain("${{ secrets.LOOKS_LIKE_ONE }}")
+          .render == "${{ secrets.LOOKS_LIKE_ONE }}", // Plain does not rewrite
         EnvValue.expr("${{ github.sha }}").render == "${{ github.sha }}",
       )
     },
@@ -31,7 +33,7 @@ object EnvValueSpec extends ZIOSpecDefault:
           "Z_LAST"  -> EnvValue.plain("z"),
           "A_FIRST" -> secret"A_SECRET",
           "M_MID"   -> EnvValue.env("M"),
-        ),
+        )
       )
       assertTrue(
         rendered == ListMap(

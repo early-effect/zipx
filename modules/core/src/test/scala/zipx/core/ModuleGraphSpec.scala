@@ -7,7 +7,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
 
   def spec = suite("ModuleGraph")(
     test("topological sort places dependencies before dependents") {
-      val order = sampleGraph.topologicalSort
+      val order           = sampleGraph.topologicalSort
       def idx(id: String) = order.indexOf(id)
       assertTrue(
         idx("schema") < idx("api"),
@@ -62,10 +62,10 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       val layers = sampleGraph.subsetLayers(_.publishes)
       assertTrue(
         layers == List(
-          List("schema"),                 // L0
-          List("api", "legacyClient"),    // L1 (both need only schema)
-          List("clientA", "clientB"),     // L2 (need api)
-        ),
+          List("schema"),              // L0
+          List("api", "legacyClient"), // L1 (both need only schema)
+          List("clientA", "clientB"),  // L2 (need api)
+        )
       )
     },
     test("subsetLayers contracts edges through excluded intermediates") {
@@ -75,7 +75,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
           ModuleNode("a"),
           ModuleNode("b", dependsOn = List("a")),
           ModuleNode("c", dependsOn = List("b")),
-        ),
+        )
       )
       assertTrue(g.subsetLayers(n => n.id == "a" || n.id == "c") == List(List("a"), List("c")))
     },
@@ -96,7 +96,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
         List(
           ModuleNode("a", publishes = false),
           ModuleNode("a", publishes = true),
-        ),
+        )
       )
       // byId last-wins; ids is derived from the raw node list (callers must not duplicate).
       assertTrue(g.get("a").exists(_.publishes), g.ids == List("a", "a"))
@@ -113,7 +113,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
           ModuleNode("midA", dependsOn = List("root")),
           ModuleNode("midB", dependsOn = List("root")),
           ModuleNode("leaf", dependsOn = List("midA", "midB"), publishes = true),
-        ),
+        )
       )
       assertTrue(g.subsetLayers(_.publishes) == List(List("root"), List("leaf")))
     },

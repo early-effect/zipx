@@ -23,7 +23,7 @@ lazy val client = project
 lazy val service = project
   .dependsOn(api)
   .settings(
-    publishArtifact := false, // non-publishing → test job only, no publish job
+    publishArtifact := false // non-publishing → test job only, no publish job
   )
 
 lazy val root = (project in file("."))
@@ -70,14 +70,14 @@ zipxCapabilities ++= Seq(
     env = Map(
       "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
       "SONATYPE_USERNAME" -> Secret("SONATYPE_USERNAME"),
-    ),
+    )
   ),
 )
 
 // Assertions run inside the scripted test.
 val assertGraph = taskKey[Unit]("assert the graph and generated workflow are correct")
 assertGraph := {
-  val wf = (LocalRootProject / baseDirectory).value / ".github" / "workflows" / "ci.yml"
+  val wf      = (LocalRootProject / baseDirectory).value / ".github" / "workflows" / "ci.yml"
   val content = IO.read(wf)
   // Test jobs for every real module; the aggregating root gets no job.
   assert(content.contains("test-schema:"), "missing test-schema job")
@@ -133,6 +133,9 @@ assertGraph := {
   // Mixed splices: a String (scalaSwitch) and a typed key in one cmd → `++2.13.16; api/publish`.
   assert(content.contains("sbt '++2.13.16; api/publish'"), "cmd should mix a String splice with a module-scoped key")
   // M7: typed secrets render into publish job env (capability.env).
-  assert(content.contains("PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}"), "typed secret should render into publish env")
+  assert(
+    content.contains("PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}"),
+    "typed secret should render into publish env",
+  )
   assert(content.contains("SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}"), "Secret() helper should render")
 }

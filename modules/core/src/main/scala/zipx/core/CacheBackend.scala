@@ -23,3 +23,4 @@ enum CacheBackend:
     * *name* of a GitHub Actions secret whose value becomes the auth header (rendered via [[EnvValue.secret]]).
     */
   case ManagedRemote(uri: String, headerSecret: String)
+end CacheBackend

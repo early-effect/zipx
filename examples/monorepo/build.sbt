@@ -12,7 +12,7 @@ val scala2 = "2.13.16"
 
 scalaVersion := scala3
 organization := "com.example"
-version := "1.4.2-ci" // stands in for sbt-dynver-ci output; drives the cache epoch (bare — a common setting)
+version      := "1.4.2-ci" // stands in for sbt-dynver-ci output; drives the cache epoch (bare — a common setting)
 
 // Build-level zipx config — plain bare settings (sbt 2.0 common settings). zipx reads these from the root project's
 // scope, so no `ThisBuild /` prefix is needed.
@@ -44,13 +44,13 @@ lazy val service = (project in file("service"))
   .dependsOn(coreLib)
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
-    publishArtifact    := false, // application, not a library
-    crossScalaVersions := Seq(scala3),
-    Compile / mainClass    := Some("example.run"),
-    dockerBaseImage        := "eclipse-temurin:21-jre",
-    Docker / packageName   := "example-service",
-    dockerExposedPorts     := Seq(8080),
-    dockerUpdateLatest     := true,
+    publishArtifact      := false, // application, not a library
+    crossScalaVersions   := Seq(scala3),
+    Compile / mainClass  := Some("example.run"),
+    dockerBaseImage      := "eclipse-temurin:21-jre",
+    Docker / packageName := "example-service",
+    dockerExposedPorts   := Seq(8080),
+    dockerUpdateLatest   := true,
     // In CI, the deploy job's `env:` block (from the target) sets TIER before sbt cold-starts, so this fresh JVM
     // reads it. (Locally, a long-lived sbt server predating the env may show the default — a dev-only artifact.)
     promote := {
@@ -78,32 +78,34 @@ zipxCapabilities ++= Seq(
 // machinery deploy uses. Registries are a typed Scala list (project/Deploy.scala). The command uses the `cmd"…"`
 // interpolator with the real config-scoped `Docker / publish` key → `<module>/Docker/publish`. (cmd also carries
 // command syntax around a key when you need it, e.g. `cmd"+ ${publish}"` or `cmd"++${scalaV}; ${publish}"`.)
-zipxCapabilities += Capability.custom(
-  name = "docker",
-  command = cmd"${Docker / publish}",
-  participates = _.docker,
-  phase = Phase.Publish,
-  targets = _ =>
-    Registry.all.map(r =>
-      Target(
-        name = r.name,
-        env = Map(
-          "REGISTRY"    -> EnvValue.plain(r.host),
-          "DEPLOY_ROLE" -> secret"${r.roleSecret}",
-        ),
+zipxCapabilities += Capability
+  .custom(
+    name = "docker",
+    command = cmd"${Docker / publish}",
+    participates = _.docker,
+    phase = Phase.Publish,
+    targets = _ =>
+      Registry.all.map(r =>
+        Target(
+          name = r.name,
+          env = Map(
+            "REGISTRY"    -> EnvValue.plain(r.host),
+            "DEPLOY_ROLE" -> secret"${r.roleSecret}",
+          ),
+        )
+      ),
+    permissions = Map("id-token" -> "write", "contents" -> "read"),
+  )
+  .copy(
+    extraSteps = _ =>
+      List(
+        Step(
+          name = Some("Login to registry"),
+          uses = Some("aws-actions/configure-aws-credentials@v6"),
+          `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"),
+        )
       )
-    ),
-  permissions = Map("id-token" -> "write", "contents" -> "read"),
-).copy(
-  extraSteps = _ =>
-    List(
-      Step(
-        name = Some("Login to registry"),
-        uses = Some("aws-actions/configure-aws-credentials@v6"),
-        `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"),
-      )
-    ),
-)
+  )
 
 // --- Deploy: staging + production, with production behind a GitHub Environment approval gate. ---
 //
@@ -112,32 +114,34 @@ zipxCapabilities += Capability.custom(
 // one job per target, binds the GitHub Environment, injects the env, and wires needs.
 // Note: the deploy command is given as the real `promote` TaskKey (not a string) via `zipxTasks.deploy` — so it's
 // code-completed and compile-checked. zipx renders it to `<module>/promote`. It reads the injected TIER env (Gap 2).
-zipxCapabilities += zipxTasks.deploy(
-  participates = _.id == "service",
-  command = promote,
-  targets = _ =>
-    DeployEnv.all.map(e =>
-      Target(
-        name = e.name,
-        environment = e.ghEnvironment,
-        env = Map(
-          "AWS_REGION"  -> EnvValue.plain(e.region),
-          "DEPLOY_ROLE" -> secret"${e.roleSecret}",
-          "TIER"        -> EnvValue.plain(e.tier),
-        ),
-        condition = Some("github.ref == 'refs/heads/main'"),
+zipxCapabilities += zipxTasks
+  .deploy(
+    participates = _.id == "service",
+    command = promote,
+    targets = _ =>
+      DeployEnv.all.map(e =>
+        Target(
+          name = e.name,
+          environment = e.ghEnvironment,
+          env = Map(
+            "AWS_REGION"  -> EnvValue.plain(e.region),
+            "DEPLOY_ROLE" -> secret"${e.roleSecret}",
+            "TIER"        -> EnvValue.plain(e.tier),
+          ),
+          condition = Some("github.ref == 'refs/heads/main'"),
+        )
+      ),
+    needsCapabilities = List("docker"), // deploy waits on the (multi-registry) image publish
+    permissions = Map("id-token" -> "write", "contents" -> "read"), // OIDC
+  )
+  .copy(
+    // The extension seam: assume the cloud role (from the target's env) before running the deploy command.
+    extraSteps = _ =>
+      List(
+        Step(
+          name = Some("Configure AWS credentials"),
+          uses = Some("aws-actions/configure-aws-credentials@v6"),
+          `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}", "aws-region" -> "${{ env.AWS_REGION }}"),
+        )
       )
-    ),
-  needsCapabilities = List("docker"), // deploy waits on the (multi-registry) image publish
-  permissions = Map("id-token" -> "write", "contents" -> "read"), // OIDC
-).copy(
-  // The extension seam: assume the cloud role (from the target's env) before running the deploy command.
-  extraSteps = _ =>
-    List(
-      Step(
-        name = Some("Configure AWS credentials"),
-        uses = Some("aws-actions/configure-aws-credentials@v6"),
-        `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}", "aws-region" -> "${{ env.AWS_REGION }}"),
-      )
-    ),
-)
+  )
