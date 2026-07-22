@@ -609,7 +609,8 @@ object Planner:
       StepContext(node, target, hasMatrix, config.actions)
     ) ++ List(
       Step(
-        name = Some(capability.name),
+        // Distinct from the job name so the Actions UI can expand this step while it is running.
+        name = Some(s"zipx ${capability.name}"),
         run = Some(s"sbt '$scalaArg$command'"),
       )
     ) ++ capability.postSteps(StepContext(node, target, hasMatrix, config.actions))

@@ -714,10 +714,13 @@ object PlannerSpec extends ZIOSpecDefault:
     // ---- Aggregate / Layer / deploy-by-target ----
     test("Aggregate test emits one root Once job (sbt test)") {
       val wf  = Planner.plan(sampleGraph, List(Capability.test), config)
-      val run = wf.jobs("test").steps.last.run.getOrElse("")
+      val job = wf.jobs("test")
+      val run = job.steps.last.run.getOrElse("")
       assertTrue(
         wf.jobs.size == 1,
         wf.jobs.contains("test"),
+        job.steps.last.name.contains("zipx test"),
+        job.name != job.steps.last.name,
         run.endsWith(" test") || run.contains("'test'"),
         !run.contains("schema/test"),
         !wf.jobs.contains("test-schema"),

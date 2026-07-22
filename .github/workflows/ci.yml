@@ -59,12 +59,12 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.0.3-ci-${{ github.run_id }}-test
+          key: ubuntu-latest-jdk25-sbt-0.0.4-ci-${{ github.run_id }}-test
           restore-keys: |
-            ubuntu-latest-jdk25-sbt-0.0.3-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk25-sbt-0.0.3-ci-
+            ubuntu-latest-jdk25-sbt-0.0.4-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.0.4-ci-
             ubuntu-latest-jdk25-sbt-
-      - name: test
+      - name: zipx test
         run: sbt 'test'
   publish:
     name: publish
@@ -95,10 +95,10 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.0.3-ci-${{ github.run_id }}-publish
+          key: ubuntu-latest-jdk25-sbt-0.0.4-ci-${{ github.run_id }}-publish
           restore-keys: |
-            ubuntu-latest-jdk25-sbt-0.0.3-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk25-sbt-0.0.3-ci-
+            ubuntu-latest-jdk25-sbt-0.0.4-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.0.4-ci-
             ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |
@@ -109,7 +109,7 @@ jobs:
           echo "$PGP_SECRET" | base64 --decode | gpg --batch --import
         env:
           PGP_SECRET: ${{ secrets.PGP_SECRET }}
-      - name: publish
+      - name: zipx publish
         run: sbt 'publishSigned; sonaRelease'
   docs:
     name: docs

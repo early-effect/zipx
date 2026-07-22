@@ -17,7 +17,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
     test("publishSigned replaces bare publish with publishSigned + org secret env + GPG import") {
       val wf  = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned), config)
       val job = wf.jobs("publish-schema")
-      val run = job.steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
+      val run = job.steps.find(_.name.contains("zipx publish")).flatMap(_.run).getOrElse("")
       assertTrue(
         run.contains("publishSigned"),
         !run.contains("/publish'"), // not the unsigned task as the sole command
@@ -46,7 +46,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
     test("cross-built modules get +publishSigned; single-version do not") {
       val wf                = Planner.plan(sampleGraph, List(ZipxCentral.publishSigned), config)
       def runOf(id: String) =
-        wf.jobs(id).steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
+        wf.jobs(id).steps.find(_.name.contains("zipx publish")).flatMap(_.run).getOrElse("")
       assertTrue(
         runOf("publish-api").contains("+api/publishSigned"),
         runOf("publish-legacyClient").contains("legacyClient/publishSigned"),
@@ -59,7 +59,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       val rel      = wf.jobs("central-release")
       val upload   = pub.steps.find(_.name.contains("Upload sona staging"))
       val download = rel.steps.find(_.name.contains("Download sona staging"))
-      val pubIdx   = pub.steps.indexWhere(_.name.contains("publish"))
+      val pubIdx   = pub.steps.indexWhere(_.name.contains("zipx publish"))
       val upIdx    = pub.steps.indexWhere(_.name.contains("Upload sona staging"))
       val dlIdx    = rel.steps.indexWhere(_.name.contains("Download sona staging"))
       val runIdx   = rel.steps.indexWhere(_.run.exists(_.contains("sonaRelease")))
@@ -114,7 +114,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
     test("release is one publish job with publishSigned; sonaRelease and no staging artifacts") {
       val wf  = Planner.plan(sampleGraph, List(ZipxCentral.release), config)
       val job = wf.jobs("publish")
-      val run = job.steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
+      val run = job.steps.find(_.name.contains("zipx publish")).flatMap(_.run).getOrElse("")
       assertTrue(
         wf.jobs.keys.toList == List("publish"),
         run.contains("publishSigned; sonaRelease"),

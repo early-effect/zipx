@@ -1,6 +1,6 @@
 // Consumes the locally-published zipx plugin. Run `sbt publishLocal` in the zipx root first
 // (use the version publishLocal prints, e.g. dynver `0.0.3-ci`).
-addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "0.0.3-ci")
+addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "0.0.4-ci")
 
 // The paved path for images: the build describes its own docker image (base, entrypoint, ports)
 // via sbt-native-packager, instead of an external Dockerfile + a hand-written `docker build` string.

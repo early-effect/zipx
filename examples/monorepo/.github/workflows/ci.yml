@@ -64,7 +64,7 @@ jobs:
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
             ubuntu-latest-jdk21-sbt-
-      - name: test
+      - name: zipx test
         run: sbt 'models/test'
   test-L1:
     name: test L1
@@ -97,7 +97,7 @@ jobs:
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
             ubuntu-latest-jdk21-sbt-
-      - name: test
+      - name: zipx test
         run: sbt 'coreLib/test'
   test-L2:
     name: test L2
@@ -130,7 +130,7 @@ jobs:
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
             ubuntu-latest-jdk21-sbt-
-      - name: test
+      - name: zipx test
         run: sbt 'client/test; service/test'
   fmt:
     name: fmt
@@ -163,7 +163,7 @@ jobs:
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
             ubuntu-latest-jdk21-sbt-
-      - name: fmt
+      - name: zipx fmt
         run: sbt 'scalafmtCheckAll'
   publish-L0:
     name: publish L0
@@ -194,7 +194,7 @@ jobs:
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
             ubuntu-latest-jdk21-sbt-
-      - name: publish
+      - name: zipx publish
         run: sbt '+models/publish'
   publish-L1:
     name: publish L1
@@ -227,7 +227,7 @@ jobs:
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
             ubuntu-latest-jdk21-sbt-
-      - name: publish
+      - name: zipx publish
         run: sbt '+coreLib/publish'
   publish-L2:
     name: publish L2
@@ -260,7 +260,7 @@ jobs:
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
             ubuntu-latest-jdk21-sbt-
-      - name: publish
+      - name: zipx publish
         run: sbt '+client/publish'
   docker-service-eu:
     name: docker service (eu)
@@ -301,7 +301,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE }}
-      - name: docker
+      - name: zipx docker
         run: sbt 'service/Docker/publish'
   docker-service-us:
     name: docker service (us)
@@ -342,7 +342,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE }}
-      - name: docker
+      - name: zipx docker
         run: sbt 'service/Docker/publish'
   deploy-prod:
     name: deploy (prod)
@@ -389,7 +389,7 @@ jobs:
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: deploy
+      - name: zipx deploy
         run: sbt 'service/promote'
   deploy-staging:
     name: deploy (staging)
@@ -435,5 +435,5 @@ jobs:
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: deploy
+      - name: zipx deploy
         run: sbt 'service/promote'
