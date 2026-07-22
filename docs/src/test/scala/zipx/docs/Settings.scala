@@ -23,6 +23,7 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxActions` | `ActionPins` | jar defaults | one-off `uses:` override (**prefer pin file**; see **Action pins**) |
 | `zipxActionsPath` | `String` | `.github/zipx/action-pins.yml` | pin file path (`""` disables file loading) |
 | `zipxDependabotSync` | `Boolean` | `false` | also generate `.github/workflows/zipx-action-pins-sync.yml` |
+| `zipxScalaSteward` | `Boolean` | `false` | also generate `.github/workflows/zipx-scala-steward.yml` |
 | `zipxWorkflowDispatch` | `Boolean` | `false` | emit `on.workflow_dispatch` |
 | `zipxCache` | `CacheBackend` | `LocalDir` | cache strategy |
 | `zipxCacheEpoch` | `String` | `version` | commit-stable cache epoch |
@@ -60,8 +61,8 @@ Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Lay
       md"""
 | Task | Purpose |
 |---|---|
-| `zipxWorkflowGenerate` | write the workflow YAML (and sync workflow when `zipxDependabotSync`) |
-| `zipxWorkflowCheck` | fail if committed YAML is stale (includes sync workflow when enabled) |
+| `zipxWorkflowGenerate` | write the workflow YAML (and companion workflows when enabled) |
+| `zipxWorkflowCheck` | fail if committed YAML is stale (includes companions when enabled) |
 | `zipxActionsPull` | pull `uses:` SHAs from the workflow into the pin file, then regenerate |
 | `zipxGraph` | print modules, edges, flags, layers |
 | `zipxPublishOrder` | print contracted publish waves |

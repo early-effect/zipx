@@ -52,6 +52,7 @@ lazy val root = (project in file("."))
     zipxJavaVersion      := "25",
     zipxWorkflowDispatch := true,
     zipxDependabotSync   := true,
+    zipxScalaSteward     := true,
   )
 
 // Scala 3. GitHub Actions AST + deterministic YAML renderer.

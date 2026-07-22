@@ -42,6 +42,14 @@ Generated `uses:` lines are SHA-pinned (with `# vX.Y.Z` comments). To track upst
 
 Resolve order: explicit `zipxActions` → pin file when present → jar defaults. Full guide: **Action pins** on the docs site.
 
+### Scala Steward (optional)
+
+```scala
+zipxScalaSteward := true
+```
+
+Generates `.github/workflows/zipx-scala-steward.yml` (weekly + manual). Enable **Allow GitHub Actions to create and approve pull requests** on the repo/org. See **Dependency updates**.
+
 ## Docs
 
 Full guide (Specular):
@@ -58,6 +66,7 @@ What's covered:
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
 - Caching
 - **Action pins** (pin file, Dependabot, `zipxActionsPull`, sync workflow)
+- **Dependency updates** (Scala Steward opt-in)
 - Docker and multi-target deploy
 - `ZipxCentral` / `ZipxDocs` packs
 - Settings reference and dogfood notes

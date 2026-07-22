@@ -23,8 +23,10 @@ object ActionPinsSpec extends ZIOSpecDefault:
         p.cache.contains("@55cc834"),
         p.uploadArtifact.contains("@043fb46"),
         p.downloadArtifact.contains("@3e5f45b"),
+        p.scalaSteward.contains("@ff09222"),
         p.versions.get("setupSbt").contains("v1.5.2"),
         p.versions.get("checkout").contains("v7.0.1"),
+        p.versions.get("scalaSteward").contains("v2.92.0"),
       )
     },
     test("planner emits the configured pins on every job") {
