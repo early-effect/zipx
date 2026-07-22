@@ -6,8 +6,8 @@ package zipx.core
   *   1. If any changed file touches the build itself (a `.sbt` file or anything under the `project` dir), treat the
   *      whole build as affected — the graph or plugins may have changed, so nothing can be safely skipped.
   *   2. Otherwise map each changed file to its owning module by **longest matching base-dir prefix**.
-  *   3. Take the reverse-dependency closure of those seed modules (a module plus everything that transitively depends on
-  *      it) — that is the affected set.
+  *   3. Take the reverse-dependency closure of those seed modules (a module plus everything that transitively depends
+  *      on it) — that is the affected set.
   *
   * Pure and unit-testable; the sbt plugin supplies the changed-file list from `git diff`.
   */

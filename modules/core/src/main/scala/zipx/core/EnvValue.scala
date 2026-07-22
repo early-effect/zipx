@@ -23,15 +23,16 @@ enum EnvValue:
 
   /** Render to the string that lands in the workflow YAML `env:` block. */
   def render: String = this match
-    case EnvValue.Plain(value)      => value
-    case EnvValue.FromSecret(name)  => s"$${{ secrets.$name }}"
-    case EnvValue.FromEnv(name)     => s"$${{ env.$name }}"
-    case EnvValue.Expr(expr)        => expr
+    case EnvValue.Plain(value)     => value
+    case EnvValue.FromSecret(name) => s"$${{ secrets.$name }}"
+    case EnvValue.FromEnv(name)    => s"$${{ env.$name }}"
+    case EnvValue.Expr(expr)       => expr
+end EnvValue
 
 object EnvValue:
 
-  /** GitHub Actions secret / env names: start with a letter or underscore, then alphanumerics and underscores.
-    * Rejects empty, spaces, `${{`, hyphens-at-start, and other characters that would produce broken or surprising YAML.
+  /** GitHub Actions secret / env names: start with a letter or underscore, then alphanumerics and underscores. Rejects
+    * empty, spaces, `${{`, hyphens-at-start, and other characters that would produce broken or surprising YAML.
     */
   private val NamePattern = raw"[A-Za-z_][A-Za-z0-9_]*".r
 
@@ -41,7 +42,7 @@ object EnvValue:
     if NamePattern.matches(name) then name
     else
       throw IllegalArgumentException(
-        s"invalid $kind name '$name': must match ${NamePattern.regex} (letters, digits, underscore; no spaces or expressions)",
+        s"invalid $kind name '$name': must match ${NamePattern.regex} (letters, digits, underscore; no spaces or expressions)"
       )
 
   /** A GitHub Actions secret reference: renders as `${{ secrets.<name> }}`. */
@@ -61,8 +62,7 @@ object EnvValue:
     ListMap.from(m.toList.sortBy(_._1).map((k, v) => k -> v.render))
 
   /** `secret"PGP_PASSPHRASE"` → [[FromSecret]]. Rejects interpolated forms that fail [[requireName]]. */
-  extension (sc: StringContext)
-    def secret(args: Any*): EnvValue = EnvValue.secret(sc.s(args*))
+  extension (sc: StringContext) def secret(args: Any*): EnvValue = EnvValue.secret(sc.s(args*))
 
 end EnvValue
 

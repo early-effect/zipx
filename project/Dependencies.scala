@@ -15,7 +15,7 @@ object Dependencies:
   val zioVersion         = "2.1.26"
   val zioBlocksVersion   = "0.0.47"
   val specularVersion    = "0.5.2"
-  val remoteCacheVersion = "2.0.1"
+  val remoteCacheVersion = "2.0.3"
 
   val commonScalacOptions: Seq[String] = Seq(
     "-deprecation",
