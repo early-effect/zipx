@@ -18,6 +18,7 @@ object BuildSite extends DocsSite:
     CustomCapabilities.doc,
     Verify.doc,
     Caching.doc,
+    ActionPinsDoc.doc,
     DockerAndDeploy.doc,
     Packs.doc,
     Settings.doc,
@@ -33,7 +34,7 @@ It introspects the real module graph and generates Aggregate-first (Layer/Graph 
 cached workflows — no hand-maintained YAML module lists.
 
 Guide: Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
-Docker and deploy → Packs → Settings.
+Action pins → Docker and deploy → Packs → Settings.
 """
       ),
       installSnippets = Vector(
@@ -43,6 +44,12 @@ Docker and deploy → Packs → Settings.
           """sbt zipxWorkflowGenerate
 git add .github/workflows/ci.yml
 sbt zipxWorkflowCheck   # fails CI when the committed YAML drifts""",
+        ),
+        CodeSnippet(
+          "Action pins (optional)",
+          """# Prefer .github/zipx/action-pins.yml + Dependabot; see Action pins docs
+zipxDependabotSync := true
+sbt zipxActionsPull   # after Dependabot bumps workflow uses:""",
         ),
       ),
       logo = Some(EarlyEffectTheme.logoHref),
@@ -67,10 +74,10 @@ sbt zipxWorkflowCheck   # fails CI when the committed YAML drifts""",
     for
       _ <- EarlyEffectTheme.writeLogo(out)
       _ <- ZIO.attempt {
-             val themeCss = out.resolve("assets/theme.css")
-             val extra    = DocTables.contributionBlocks.map(_._2).mkString("\n")
-             val prior    = java.nio.file.Files.readString(themeCss)
-             java.nio.file.Files.writeString(themeCss, prior + "\n/* zipx doc tables (Ascent GlobalStyle) */\n" + extra)
-           }
+        val themeCss = out.resolve("assets/theme.css")
+        val extra    = DocTables.contributionBlocks.map(_._2).mkString("\n")
+        val prior    = java.nio.file.Files.readString(themeCss)
+        java.nio.file.Files.writeString(themeCss, prior + "\n/* zipx doc tables (Ascent GlobalStyle) */\n" + extra)
+      }
     yield ()
 end BuildSite

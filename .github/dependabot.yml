@@ -1,0 +1,13 @@
+# Keep GitHub Actions SHA pins discoverable. After Dependabot bumps `.github/workflows/*.yml`,
+# the zipx-action-pins-sync workflow runs `sbt zipxActionsPull` to update `.github/zipx/action-pins.yml`
+# and regenerate workflows.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

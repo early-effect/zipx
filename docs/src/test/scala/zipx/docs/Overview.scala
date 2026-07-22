@@ -27,6 +27,7 @@ From the loaded sbt build, zipx emits:
 - dependency-ordered publish under Layer/Graph, gated on release tags
 - commit-stable caching keyed by a version epoch (pairs with `sbt-dynver-ci`)
 - pluggable **capabilities** (test, publish, docker, deploy, or stages you invent in Scala)
+- **SHA-pinned** GitHub Actions (`uses:`), with an optional pin file + Dependabot sync path
 """
     ),
     section("Why sbt 2.0")(

@@ -15,14 +15,16 @@ object ActionPinsSpec extends ZIOSpecDefault:
     test("defaults are full commit SHAs, not mutable tags") {
       val p = ActionPins.Defaults
       assertTrue(
-        p.checkout.contains("@9c091bb"),
+        p.checkout.contains("@3d3c42e"),
         !p.checkout.endsWith("@v4"),
         !p.checkout.endsWith("@v7"),
         p.setupJava.contains("@03ad4de"),
-        p.setupSbt.contains("@9d56cf1"),
+        p.setupSbt.contains("@6444f4c"),
         p.cache.contains("@55cc834"),
         p.uploadArtifact.contains("@043fb46"),
         p.downloadArtifact.contains("@3e5f45b"),
+        p.versions.get("setupSbt").contains("v1.5.2"),
+        p.versions.get("checkout").contains("v7.0.1"),
       )
     },
     test("planner emits the configured pins on every job") {

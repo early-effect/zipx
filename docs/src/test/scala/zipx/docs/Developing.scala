@@ -19,6 +19,11 @@ The **root** build loads zipx from **source** via a meta-build mirror (`project/
 **After changing** sources under `modules/{workflow,core,central,sbt-plugin}`: `reload`, then `zipxWorkflowGenerate` if
 planner output changed.
 
+**Action pins:** edit [`.github/zipx/action-pins.yml`](https://github.com/early-effect/zipx/blob/main/.github/zipx/action-pins.yml)
+(not under `workflows/`), then regenerate. Or let Dependabot bump workflow `uses:` and run `sbt zipxActionsPull`
+(dogfood enables `zipxDependabotSync := true` for the automatic sync workflow). Published jar defaults embed this
+pin file via `resourceGenerators`. See the **Action pins** docs page.
+
 **When adding a library dependency** used by those modules: update `project/Dependencies.scala` only.
 
 **When adding a mirrored module:** add a `meta*` project in `project/dogfood.sbt`, create `project/meta-<name>/`, and

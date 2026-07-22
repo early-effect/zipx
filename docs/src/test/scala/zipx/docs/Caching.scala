@@ -49,14 +49,10 @@ The remote-cache transport is bundled with zipx. For remote backends zipx also s
     ),
     section("Action pins")(
       md"""
-Generated workflows use **commit-SHA pins** (not floating `@v4` tags). Override via `zipxActions` to bump without a
-zipx release:
+Generated workflows use **commit-SHA pins** (not floating `@v4` tags), with `# vX.Y.Z` comments for readability.
 
-```scala
-zipxActions := ActionPins.Defaults.copy(
-  checkout = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0", // v7.0.0
-)
-```
+Prefer `.github/zipx/action-pins.yml` (Dependabot-friendly) over pasting SHAs into `build.sbt`. Full guide:
+**Action pins** (resolve order, Dependabot, `zipxActionsPull`, sync workflow, jar defaults).
 """
     ),
   )

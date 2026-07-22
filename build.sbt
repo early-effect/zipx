@@ -51,6 +51,7 @@ lazy val root = (project in file("."))
     zipxCapabilities ++= Seq(ZipxCentral.release, ZipxDocs.pages()),
     zipxJavaVersion      := "25",
     zipxWorkflowDispatch := true,
+    zipxDependabotSync   := true,
   )
 
 // Scala 3. GitHub Actions AST + deterministic YAML renderer.
@@ -69,6 +70,15 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name        := "zipx-core",
     description := "Pure planner: module graph, capabilities, EnvValue, ModuleGraph => Workflow",
+    // Embed `.github/zipx/action-pins.yml` so ActionPins.Defaults matches dogfood / published pins.
+    Compile / resourceGenerators += Def.task {
+      val repo = (LocalRootProject / baseDirectory).value
+      val src  = repo / ".github" / "zipx" / "action-pins.yml"
+      val out  = (Compile / resourceManaged).value / "zipx" / "action-pins.yml"
+      if (!src.exists) sys.error(s"Missing action pin file: ${src.getPath}")
+      IO.copyFile(src, out)
+      Seq(out)
+    }.taskValue,
   )
 
 // Early-effect / Maven Central paved path (typed secrets + GPG import + publishSigned + sonaRelease).

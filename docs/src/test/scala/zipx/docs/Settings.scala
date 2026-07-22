@@ -20,7 +20,9 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxJavaVersion` | `String` | `"21"` | JDK for setup-java and cache key |
 | `zipxRunnerOs` | `String` | `"ubuntu-latest"` | default runner |
 | `zipxScalaMatrix` | `Boolean` | `true` | per-module Scala matrix (**Graph** test only) |
-| `zipxActions` | `ActionPins` | hash-pinned defaults | `uses:` pins |
+| `zipxActions` | `ActionPins` | jar defaults | one-off `uses:` override (**prefer pin file**; see **Action pins**) |
+| `zipxActionsPath` | `String` | `.github/zipx/action-pins.yml` | pin file path (`""` disables file loading) |
+| `zipxDependabotSync` | `Boolean` | `false` | also generate `.github/workflows/zipx-action-pins-sync.yml` |
 | `zipxWorkflowDispatch` | `Boolean` | `false` | emit `on.workflow_dispatch` |
 | `zipxCache` | `CacheBackend` | `LocalDir` | cache strategy |
 | `zipxCacheEpoch` | `String` | `version` | commit-stable cache epoch |
@@ -58,11 +60,21 @@ Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Lay
       md"""
 | Task | Purpose |
 |---|---|
-| `zipxWorkflowGenerate` | write the workflow YAML |
-| `zipxWorkflowCheck` | fail if committed YAML is stale |
+| `zipxWorkflowGenerate` | write the workflow YAML (and sync workflow when `zipxDependabotSync`) |
+| `zipxWorkflowCheck` | fail if committed YAML is stale (includes sync workflow when enabled) |
+| `zipxActionsPull` | pull `uses:` SHAs from the workflow into the pin file, then regenerate |
 | `zipxGraph` | print modules, edges, flags, layers |
 | `zipxPublishOrder` | print contracted publish waves |
 | `zipxAffectedModules <base-ref>` | print affected modules (used by the `affected` job) |
+"""
+    ),
+    section("Action pins")(
+      md"""
+SHA pins for generated `uses:` lines. Full guide: **Action pins**.
+
+Resolve order: explicit `zipxActions` (≠ `Defaults`) → `.github/zipx/action-pins.yml` when present → jar
+`ActionPins.Defaults`. Dependabot bumps workflow YAML; `zipxActionsPull` (or the sync workflow) writes the pin file
+and regenerates so `zipxWorkflowCheck` stays green.
 """
     ),
   )

@@ -85,7 +85,15 @@ object ZipxPlugin extends AutoPlugin:
     val zipxReleaseTagPattern = settingKey[String]("Tag glob that gates publishing.")
     val zipxActions           =
       settingKey[ActionPins](
-        "Hash-pinned GitHub Actions (checkout, setup-java, setup-sbt, cache). Override to bump pins."
+        "Hash-pinned GitHub Actions (checkout, setup-java, setup-sbt, cache). Override for one-offs; prefer the pin file."
+      )
+    val zipxActionsPath =
+      settingKey[String](
+        "Path to the action-pins YAML relative to the build root (default .github/zipx/action-pins.yml). Empty disables file loading."
+      )
+    val zipxDependabotSync =
+      settingKey[Boolean](
+        "When true, also generate .github/workflows/zipx-action-pins-sync.yml to sync Dependabot SHA bumps into the pin file."
       )
     val zipxWorkflowDispatch =
       settingKey[Boolean]("Emit on.workflow_dispatch so the workflow can be run manually (default false).")
@@ -118,7 +126,10 @@ object ZipxPlugin extends AutoPlugin:
     val zipxPublishOrder     = taskKey[Unit]("Print the dependency-ordered publish layers (contracted publish chain).")
     val zipxWorkflowGenerate = taskKey[Unit]("Generate the GitHub Actions workflow YAML from the build graph.")
     val zipxWorkflowCheck    = taskKey[Unit]("Verify the checked-in workflow matches what the build would generate.")
-    val zipxAffectedModules  =
+    val zipxActionsPull      = taskKey[Unit](
+      "Pull uses: SHA pins from the generated workflow into the action-pins file, then regenerate."
+    )
+    val zipxAffectedModules =
       inputKey[Unit]("Print, as a JSON array, the modules affected by changes since the given git base ref.")
   end autoImport
 
@@ -139,6 +150,8 @@ object ZipxPlugin extends AutoPlugin:
     zipxSkipMergedPrPush  := true,
     zipxVerifyClean       := VerifyClean.None,
     zipxActions           := ActionPins.Defaults,
+    zipxActionsPath       := ActionPinFile.DefaultPath,
+    zipxDependabotSync    := false,
     zipxWorkflowDispatch  := false,
   )
 
@@ -192,12 +205,12 @@ object ZipxPlugin extends AutoPlugin:
     // Side-effecting file write → Unit task key + Def.uncached, matching the established sbt-2.x plugin pattern
     // (side effects are not valid cached-task outputs).
     zipxWorkflowGenerate := Def.uncached {
-      val out     = workflowFile.value
-      val content = renderWorkflow.value
-      IO.write(out, content)
-      streams.value.log.info(s"zipx wrote ${out.getPath}")
+      writeGeneratedWorkflows.value
     },
-    zipxWorkflowCheck   := checkTask.value,
+    zipxWorkflowCheck := checkTask.value,
+    zipxActionsPull   := Def.uncached {
+      actionsPullTask.value
+    },
     zipxAffectedModules := affectedModulesTask.evaluated,
   )
 
@@ -283,6 +296,7 @@ object ZipxPlugin extends AutoPlugin:
     // Epoch defaults to the root project's `version` (delegates project→ThisBuild→Global) so a bare `version := ...`
     // is honored; an explicit zipxCacheEpoch wins.
     val rootVersion = read(version, "0.0.0")
+    val root        = (LocalRootProject / baseDirectory).value
     PlanConfig(
       workflowName = read(zipxWorkflowName, "CI"),
       scalaMatrix = read(zipxScalaMatrix, true),
@@ -294,12 +308,21 @@ object ZipxPlugin extends AutoPlugin:
       cacheEpoch = read(zipxCacheEpoch, rootVersion),
       pushBranches = read(zipxPushBranches, Seq("main")).toList,
       releaseTagPattern = read(zipxReleaseTagPattern, "v[0-9]+.[0-9]+.[0-9]+"),
-      actions = read(zipxActions, ActionPins.Defaults),
+      actions = resolveActionPins(extracted, root),
       workflowDispatch = read(zipxWorkflowDispatch, false),
       skipMergedPrPush = read(zipxSkipMergedPrPush, true),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
     )
   }
+
+  /** Resolve pins: explicit `zipxActions` (≠ Defaults) wins; else the pin file when present; else Defaults. */
+  private def resolveActionPins(extracted: Extracted, root: File): ActionPins =
+    val setting = readBuildSetting(extracted, zipxActions, ActionPins.Defaults)
+    if setting != ActionPins.Defaults then setting
+    else
+      val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
+      if rel.isEmpty then ActionPins.Defaults
+      else ActionPinFile.loadOption((root / rel).toPath).getOrElse(ActionPins.Defaults)
 
   /** The built-in capabilities zipx derives from the graph: Aggregate Verify (root `zipxTestTask`), library publish,
     * plus docker when any module opts in. Clean prefixes come from [[PlanConfig.verifyClean]], not the command string.
@@ -318,7 +341,56 @@ object ZipxPlugin extends AutoPlugin:
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
     val verifyTask   = readBuildSetting(extracted, zipxTestTask, "test")
     val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
-    Render.render(Planner.plan(graph, capabilities, cfg))
+    ActionPinFile.annotateUses(Render.render(Planner.plan(graph, capabilities, cfg)), cfg.actions)
+  }
+
+  private def writeGeneratedWorkflows: Def.Initialize[Task[Unit]] = Def.task {
+    val log     = streams.value.log
+    val out     = workflowFile.value
+    val content = renderWorkflow.value
+    IO.write(out, content)
+    log.info(s"zipx wrote ${out.getPath}")
+    writeSyncWorkflowIfEnabled.value
+  }
+
+  private def writeSyncWorkflowIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
+    val extracted = Project.extract(state.value)
+    val enabled   = readBuildSetting(extracted, zipxDependabotSync, false)
+    val root      = (LocalRootProject / baseDirectory).value
+    val syncFile  = root / ActionPinsSyncWorkflow.DefaultPath
+    if enabled then
+      val cfg        = planConfig.value
+      val actionsRel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath)
+      val wfRel      = readBuildSetting(extracted, zipxWorkflowPath, ".github/workflows/ci.yml")
+      val body       = ActionPinsSyncWorkflow.render(
+        cfg.actions,
+        cfg.javaVersion,
+        cfg.runnerOs,
+        actionsRel,
+        wfRel,
+      )
+      IO.write(syncFile, body)
+      streams.value.log.info(s"zipx wrote ${syncFile.getPath}")
+    else if syncFile.exists then
+      // Leave an existing file alone when disabled (user may have checked one in manually).
+      ()
+    end if
+  }
+
+  private def actionsPullTask: Def.Initialize[Task[Unit]] = Def.task {
+    val log       = streams.value.log
+    val extracted = Project.extract(state.value)
+    val root      = (LocalRootProject / baseDirectory).value
+    val wfFile    = workflowFile.value
+    if !wfFile.exists then sys.error(s"${wfFile.getPath} does not exist; nothing to pull from.")
+    val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
+    if rel.isEmpty then sys.error("zipxActionsPath is empty; refuse to pull pins without a pin file path.")
+    val pinPath = (root / rel).toPath
+    val base    = ActionPinFile.loadOption(pinPath).getOrElse(ActionPins.Defaults)
+    val pulled  = ActionPinFile.pullFromWorkflow(IO.read(wfFile), base)
+    ActionPinFile.write(pinPath, pulled)
+    log.info(s"zipx wrote ${pinPath}")
+    writeGeneratedWorkflows.value
   }
 
   /** Merge built-in and user capabilities: a user capability whose `name` matches a built-in *replaces* it (same-name
@@ -383,6 +455,27 @@ object ZipxPlugin extends AutoPlugin:
         s"${out.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
       )
     streams.value.log.info(s"zipx: ${out.getPath} is up to date.")
+    val extracted = Project.extract(state.value)
+    if readBuildSetting(extracted, zipxDependabotSync, false) then
+      val root         = (LocalRootProject / baseDirectory).value
+      val syncFile     = root / ActionPinsSyncWorkflow.DefaultPath
+      val cfg          = planConfig.value
+      val actionsRel   = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath)
+      val wfRel        = readBuildSetting(extracted, zipxWorkflowPath, ".github/workflows/ci.yml")
+      val expectedSync = ActionPinsSyncWorkflow.render(
+        cfg.actions,
+        cfg.javaVersion,
+        cfg.runnerOs,
+        actionsRel,
+        wfRel,
+      )
+      val actualSync = if syncFile.exists then IO.read(syncFile) else ""
+      if actualSync != expectedSync then
+        sys.error(
+          s"${syncFile.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
+        )
+      streams.value.log.info(s"zipx: ${syncFile.getPath} is up to date.")
+    end if
   }
 
   /** `zipxAffectedModules <base-ref>` — diff against the base ref, map changed files to owning modules, expand the
