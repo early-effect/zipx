@@ -50,7 +50,8 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
       md"""
 `Capability` fields: `name`, `phase`, `ordering`, `gate`, `participates`, `command`, `matrixed`, `targets`,
 `needsCapabilities`, `permissions`, `runsOn`, `extraSteps`, `scope` (`Aggregate` / `Layer` / `Graph` / `Once`),
-`env`, `workflowCall`, `condition` (`Option[JobCondition]`, default `None`).
+`env`, `workflowCall`, `condition` (`Option[JobCondition]`, default `None`; prefer `withCondition(...)` on
+built-ins).
 
 Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Layers`, `.*Graph`, `.deploy` /
 `.deployGraph`, `.custom`, `.once`. Packs: `ZipxCentral.*`, `ZipxGitHubPackages.*`, `ZipxDocs.pages`. A `Target` is

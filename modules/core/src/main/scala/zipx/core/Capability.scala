@@ -111,7 +111,7 @@ final case class Target(
   *   when set (typically on [[CapabilityScope.Once]]), emit a reusable-workflow job instead of sbt steps.
   * @param condition
   *   optional [[JobCondition]] ANDed into every job's `if` for this capability (after [[Gate]] / affected clauses).
-  *   Default `None`. Built-in vals use `.copy(condition = Some(...))`; factories take an explicit parameter.
+  *   Default `None`. Prefer [[withCondition]] on built-ins / pack vals; factories take an explicit parameter.
   */
 final case class Capability(
     name: String,
@@ -131,7 +131,15 @@ final case class Capability(
     env: Map[String, EnvValue] = Map.empty,
     workflowCall: Option[WorkflowCall] = None,
     condition: Option[JobCondition] = None,
-)
+):
+  /** Set (or replace) the optional job `if` filter. */
+  def withCondition(condition: JobCondition): Capability =
+    copy(condition = Some(condition))
+
+  /** Set or clear the optional job `if` filter. */
+  def withCondition(condition: Option[JobCondition]): Capability =
+    copy(condition = condition)
+end Capability
 
 object Capability:
 

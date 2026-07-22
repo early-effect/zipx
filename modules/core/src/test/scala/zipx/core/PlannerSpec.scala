@@ -856,11 +856,11 @@ object PlannerSpec extends ZIOSpecDefault:
     test("capability condition None leaves Aggregate publish if unchanged") {
       val plain = Planner.plan(sampleGraph, List(Capability.publish), config)
       val withC =
-        Planner.plan(sampleGraph, List(Capability.publish.copy(condition = None)), config)
+        Planner.plan(sampleGraph, List(Capability.publish.withCondition(None)), config)
       assertTrue(plain.jobs("publish").`if` == withC.jobs("publish").`if`)
     },
     test("capability condition ANDed with OnReleaseTag on Aggregate") {
-      val cap  = Capability.publish.copy(condition = Some(JobCondition.repositoryIs("acme/fork")))
+      val cap  = Capability.publish.withCondition(JobCondition.repositoryIs("acme/fork"))
       val cond = Planner.plan(sampleGraph, List(cap), config).jobs("publish").`if`.getOrElse("")
       assertTrue(
         cond.contains("startsWith(github.ref, 'refs/tags/v')"),
@@ -869,10 +869,9 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("Gate.Always + capability condition has no tag clause") {
-      val cap = Capability.docker.copy(
-        gate = Gate.Always,
-        condition = Some(JobCondition.hasPrLabel("deploy-stg")),
-      )
+      val cap = Capability.docker
+        .copy(gate = Gate.Always)
+        .withCondition(JobCondition.hasPrLabel("deploy-stg"))
       val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
@@ -940,10 +939,8 @@ object PlannerSpec extends ZIOSpecDefault:
     test("Once workflowCall job also gets capability condition") {
       val cap = Capability
         .once(name = "docs", command = "true", phase = Phase.Publish, gate = Gate.OnReleaseTag)
-        .copy(
-          workflowCall = Some(WorkflowCall("org/repo/.github/workflows/pages.yml@main")),
-          condition = Some(JobCondition.repositoryIs("org/repo")),
-        )
+        .copy(workflowCall = Some(WorkflowCall("org/repo/.github/workflows/pages.yml@main")))
+        .withCondition(JobCondition.repositoryIs("org/repo"))
       val job = Planner.plan(sampleGraph, List(cap), config).jobs("docs")
       assertTrue(
         job.uses.contains("org/repo/.github/workflows/pages.yml@main"),
@@ -952,13 +949,13 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("Layer jobs each carry capability condition") {
-      val cap = Capability.testLayers.copy(condition = Some(JobCondition.varNonEmpty("RUN_LAYERS")))
+      val cap = Capability.testLayers.withCondition(JobCondition.varNonEmpty("RUN_LAYERS"))
       val wf  = Planner.plan(sampleGraph, List(cap), config)
       val ifs = wf.jobs.values.flatMap(_.`if`).toList
       assertTrue(ifs.nonEmpty, ifs.forall(_.contains("vars.RUN_LAYERS != ''")))
     },
     test("Graph affected Verify ANDs capability condition without dropping affected clauses") {
-      val cap = Capability.testGraph.copy(condition = Some(JobCondition.repositoryIs("acme/ci")))
+      val cap = Capability.testGraph.withCondition(JobCondition.repositoryIs("acme/ci"))
       val wf  = Planner.plan(
         sampleGraph,
         List(cap),
@@ -973,10 +970,9 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("two Publish caps keep independent conditions") {
       val central = Capability.publish
-      val ghp     = Capability.publish.copy(
-        name = "github-packages",
-        condition = Some(JobCondition.repositoryIs("acme/fork")),
-      )
+      val ghp     = Capability.publish
+        .copy(name = "github-packages")
+        .withCondition(JobCondition.repositoryIs("acme/fork"))
       val wf = Planner.plan(sampleGraph, List(central, ghp), config)
       assertTrue(
         wf.jobs.contains("publish"),
@@ -987,7 +983,9 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("adding only condition leaves needs and permissions stable") {
       val base  = Capability.publish
-      val gated = base.copy(condition = Some(JobCondition.repositoryIs("a/b")), permissions = Map("contents" -> "read"))
+      val gated = base
+        .copy(permissions = Map("contents" -> "read"))
+        .withCondition(JobCondition.repositoryIs("a/b"))
       val plainJob =
         Planner.plan(sampleGraph, List(base.copy(permissions = Map("contents" -> "read"))), config).jobs("publish")
       val gatedJob = Planner.plan(sampleGraph, List(gated), config).jobs("publish")

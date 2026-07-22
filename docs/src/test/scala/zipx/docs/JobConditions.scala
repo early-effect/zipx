@@ -51,13 +51,13 @@ capabilities.
     section("Fork / upstream publish gate")(
       md"""
 ```scala
-zipxCapabilities += Capability.publish.copy(
-  condition = Some(JobCondition.repositoryIs("acme/my-fork")),
+zipxCapabilities += Capability.publish.withCondition(
+  JobCondition.repositoryIs("acme/my-fork"),
 )
 ```
 """,
       exampleValue {
-        val cap = Capability.publish.copy(condition = Some(JobCondition.repositoryIs("acme/my-fork")))
+        val cap = Capability.publish.withCondition(JobCondition.repositoryIs("acme/my-fork"))
         Planner.plan(libGraph, List(cap), config).jobs("publish").`if`
       }.assert(cond =>
         assertTrue(

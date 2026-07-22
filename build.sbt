@@ -50,10 +50,10 @@ lazy val root = (project in file("."))
     // Dogfood: Aggregate Central + Pages, fork-gated so tag pushes on forks skip publish/docs.
     // (No ZipxGitHubPackages here yet: that needs dual publishTo when PUBLISH_GITHUB_PACKAGES=true.)
     zipxCapabilities ++= {
-      val upstream = Some(JobCondition.repositoryIs("early-effect/zipx"))
+      val upstream = JobCondition.repositoryIs("early-effect/zipx")
       Seq(
-        ZipxCentral.release.copy(condition = upstream),
-        ZipxDocs.pages().copy(condition = upstream),
+        ZipxCentral.release.withCondition(upstream),
+        ZipxDocs.pages().withCondition(upstream),
       )
     },
     zipxJavaVersion      := "25",
