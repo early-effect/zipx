@@ -7,4 +7,4 @@ addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "0.0.3-ci")
 addSbtPlugin("com.github.sbt" % "sbt-native-packager" % "1.11.7")
 
 // Formatting — so the `fmt` gate uses the real, typed `scalafmtCheckAll` task key.
-addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.1")
+addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")
