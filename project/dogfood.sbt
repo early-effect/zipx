@@ -22,6 +22,15 @@ lazy val metaCore = project
     publish / skip := true,
     scalacOptions ++= Dependencies.commonScalacOptions,
     libraryDependencies ++= Dependencies.zioDeps,
+    // Same embedded pin file as the main `core` module (dogfood classpath).
+    Compile / resourceGenerators += Def.task {
+      val repo = (LocalRootProject / baseDirectory).value.getParentFile
+      val src  = repo / ".github" / "zipx" / "action-pins.yml"
+      val out  = (Compile / resourceManaged).value / "zipx" / "action-pins.yml"
+      if (!src.exists) sys.error(s"Missing action pin file: ${src.getPath}")
+      IO.copyFile(src, out)
+      Seq(out)
+    }.taskValue,
   )
   .settings(Dogfood.mirrorMainScala("core"))
 

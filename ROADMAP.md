@@ -38,7 +38,7 @@ A common way to drive CI for a Scala monorepo is a hand-maintained external conf
 - **Caching:** an **abstraction** (`CacheBackend`) — local-dir or remote selectable by config/availability.
 - **Publishing:** a **registry-agnostic abstraction** — any publish mechanism plugs in; zipx owns ordering/gating, not the command.
 - **Commit-stable cache keys:** the `actions/cache` primary key tracks a **commit-stable "cache epoch"** (`zipxCacheEpoch`, defaults to `version`) so mid-PR commits reuse the sbt action cache; integrates with the sibling `sbt-dynver-ci` plugin.
-- **Action pins:** generated `uses:` values are **commit-SHA pins** (`ActionPins` / `zipxActions`), not floating tags. Defaults ship with zipx; consumers override to bump without waiting on a release.
+- **Action pins:** generated `uses:` values are **commit-SHA pins** (with `# vX.Y.Z` comments). Editable source of truth is `.github/zipx/action-pins.yml` (embedded into the jar as `ActionPins.Defaults`). Consumers bump via the pin file + Dependabot / `zipxActionsPull` / `zipxDependabotSync`, or one-off `zipxActions` in `build.sbt`.
 - **Secrets:** zipx renders secret *references* into job `env:` / steps; it never stores secret *values*. Named GitHub secrets (org- or repo-scoped) are selected in Scala; convenience packs (e.g. `zipx-central`) name the early-effect org secrets and supply GPG-import steps. Semantics stay out of core.
 - **Extension language:** people extend zipx with **actual Scala** — `Capability` values, typed `zipxTasks` / `cmd"…"`, `project/*.scala` typed config, and published meta-build libraries — not external YAML or stringly `${{ secrets.X }}` soup.
 
@@ -215,7 +215,7 @@ zipxCapabilities += ZipxCentral.release   // Aggregate: one job
 
 Generated CI owns GPG import + `publishSigned; sonaRelease` (Aggregate) or Graph staging artifacts + Specular Pages (`ZipxDocs.pages`); hand-rolled `release.yml` / `docs.yml` deleted. `ZipxCentral` / `ZipxDocs` are re-exported from the plugin's `autoImport` (nested objects so meta-build only needs the plugin jar).
 
-**Also:** hash-pinned GitHub Actions via configurable `zipxActions` / `ActionPins` (checkout v7, setup-java v5, setup-sbt v1.5, cache v6). Reusable-workflow once-jobs via `Capability.workflowCall` / `Job.uses`.
+**Also:** hash-pinned GitHub Actions via `.github/zipx/action-pins.yml` / `zipxActions` / Dependabot sync (`zipxDependabotSync`, `zipxActionsPull`). Reusable-workflow once-jobs via `Capability.workflowCall` / `Job.uses`.
 
 **Acceptance:** unit coverage for `publishSigned` / `releaseOnce` / `needsCapabilities` fan-out; dogfood `ci.yml` regenerated with SHA pins + Central jobs. First Central tag publish is the live proof (same org secrets as peers).
 

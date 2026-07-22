@@ -32,7 +32,8 @@ enum AffectedMode:
   * @param releaseTagPattern
   *   the tag glob that gates publishing (e.g. "v[0-9]+.[0-9]+.[0-9]+").
   * @param actions
-  *   hash-pinned GitHub Actions (`uses:` values). Override via `zipxActions` to bump pins without a zipx release.
+  *   hash-pinned GitHub Actions (`uses:` values). Prefer `.github/zipx/action-pins.yml` (see [[ActionPinFile]]);
+  *   one-off override via `zipxActions`. Jar [[ActionPins.Defaults]] embed the pin file from the zipx release.
   * @param workflowDispatch
   *   when true, emit `on.workflow_dispatch` so the workflow can be run manually (useful for docs Pages deploys).
   * @param skipMergedPrPush

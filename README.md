@@ -15,7 +15,8 @@ You declare modules and `dependsOn` once in `build.sbt`. zipx introspects that g
 - **builds & publishes docker images** via sbt-native-packager when `DockerPlugin` is enabled;
 - **deploys to multiple environments** with GitHub Environment approval (targets fan out; modules can batch);
 - **extends with custom capabilities** — lint gates, multi-registry pushes, stages you invent in Scala;
-- **checks itself in CI**: a committed workflow that drifts from the build fails the build.
+- **checks itself in CI**: a committed workflow that drifts from the build fails the build;
+- **pins GitHub Actions to commit SHAs**, with an optional pin file + Dependabot sync so consumers can bump actions without waiting on a zipx release.
 
 ## Quick start
 
@@ -31,6 +32,16 @@ git add .github/workflows/ci.yml && git commit -m "ci: generate with zipx"
 
 Defaults are Aggregate: one root `test` job and one publish job (plus docker when any module enables `DockerPlugin`). Write bare settings in `build.sbt` (no `ThisBuild /`); e.g. `zipxTestTask := "testFull"` applies to every module and any module can override it.
 
+### Action pins (optional)
+
+Generated `uses:` lines are SHA-pinned (with `# vX.Y.Z` comments). To track upstream action releases ahead of a zipx upgrade:
+
+1. Commit [`.github/zipx/action-pins.yml`](.github/zipx/action-pins.yml) (this repo’s format is the reference)
+2. Enable Dependabot for `github-actions` (see [`.github/dependabot.yml`](.github/dependabot.yml))
+3. On Dependabot PRs run `sbt zipxActionsPull`, **or** set `zipxDependabotSync := true` so zipx also generates `.github/workflows/zipx-action-pins-sync.yml`
+
+Resolve order: explicit `zipxActions` → pin file when present → jar defaults. Full guide: **Action pins** on the docs site.
+
 ## Docs
 
 Full guide (Specular):
@@ -45,7 +56,8 @@ What's covered:
 - **Execution modes** (Aggregate / Layer / Graph)
 - Built-in **capabilities** and **custom capabilities** (`once`, `custom`, `zipxTasks`, `cmd`)
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
-- Caching and action pins
+- Caching
+- **Action pins** (pin file, Dependabot, `zipxActionsPull`, sync workflow)
 - Docker and multi-target deploy
 - `ZipxCentral` / `ZipxDocs` packs
 - Settings reference and dogfood notes
