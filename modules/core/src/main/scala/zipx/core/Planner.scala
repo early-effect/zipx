@@ -257,7 +257,8 @@ object Planner:
   ): (String, Job) =
     val releaseCond   = Option.when(capability.gate == Gate.OnReleaseTag)("startsWith(github.ref, 'refs/tags/v')")
     val crossNeeds    = crossCapabilityNeeds(capability, graph, byName)
-    val (needs, cond) = applyVerifyGate(crossNeeds, releaseCond, capability.phase, usesVerifyGate)
+    val (needs, base) = applyVerifyGate(crossNeeds, releaseCond, capability.phase, usesVerifyGate)
+    val cond          = andConditions(base, JobCondition.renderOpt(capability.condition))
     capability.workflowCall match
       case Some(call) =>
         capability.name -> Job(
@@ -311,7 +312,8 @@ object Planner:
       val runner      = capability.runsOn.getOrElse(List(config.runnerOs))
       val releaseCond =
         Option.when(capability.gate == Gate.OnReleaseTag)("startsWith(github.ref, 'refs/tags/v')")
-      val (baseNeeds, baseCond) = applyVerifyGate(crossNeeds, releaseCond, capability.phase, usesVerifyGate)
+      val (baseNeeds, gatedCond) = applyVerifyGate(crossNeeds, releaseCond, capability.phase, usesVerifyGate)
+      val baseCond               = andConditions(gatedCond, JobCondition.renderOpt(capability.condition))
 
       distinctTargets(capability, graph) match
         case Nil =>
@@ -345,7 +347,7 @@ object Planner:
               name = Some(s"${capability.name} (${target.name})"),
               runsOn = runner,
               needs = baseNeeds,
-              `if` = andConditions(baseCond, target.condition),
+              `if` = andConditions(baseCond, JobCondition.renderOpt(target.condition)),
               environment = target.environment,
               permissions = ListMap.from(capability.permissions),
               services = cache.services,
@@ -387,10 +389,11 @@ object Planner:
         val id            = layerJobId(capability, i)
         val prevNeed      = if i == 0 then Nil else List(layerJobId(capability, i - 1))
         val layerNeeds    = (prevNeed ++ crossNeeds).distinct.sorted
-        val (needs, cond) =
+        val (needs, base) =
           // Only the first wave depends on verify-gate; later waves already wait on L0.
           if i == 0 then applyVerifyGate(layerNeeds, releaseCond, capability.phase, usesVerifyGate)
           else (layerNeeds, releaseCond)
+        val cond       = andConditions(base, JobCondition.renderOpt(capability.condition))
         val layerNodes = layerIds.flatMap(graph.get)
         val cmd        = joinCommands(capability, layerNodes)
         id -> Job(
@@ -462,11 +465,12 @@ object Planner:
     val baseCond = jobCondition(capability, node, upstreamNeeds, gatedOnAffected)
     // When affected setup already needs verify-gate, Graph Verify jobs inherit the skip via affected.
     // Otherwise (no affected, or non-Verify), apply the gate directly.
-    val (needs, cond) =
+    val (needs, gated) =
       if gatedOnAffected then
         // Affected setup already needs verify-gate; still exclude tags (release pushes only Publish/Deploy).
         applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate = false)
       else applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
+    val cond   = andConditions(gated, JobCondition.renderOpt(capability.condition))
     val runner = capability.runsOn.getOrElse(List(config.runnerOs))
 
     def baseJob(
@@ -508,7 +512,7 @@ object Planner:
             jobId(capability, node.id, target),
             s"${capability.name} ${node.id} (${target.name})",
             Some(target),
-            andConditions(cond, target.condition),
+            andConditions(cond, JobCondition.renderOpt(target.condition)),
             target.environment,
             target.env,
           )

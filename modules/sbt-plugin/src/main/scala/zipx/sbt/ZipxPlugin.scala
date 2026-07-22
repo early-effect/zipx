@@ -38,6 +38,8 @@ object ZipxPlugin extends AutoPlugin:
     val Phase = zipx.core.Phase
     type Gate = zipx.core.Gate
     val Gate = zipx.core.Gate
+    type JobCondition = zipx.core.JobCondition
+    val JobCondition = zipx.core.JobCondition
     type Ordering = zipx.core.Ordering
     val Ordering = zipx.core.Ordering
     type CapabilityScope = zipx.core.CapabilityScope
@@ -65,6 +67,39 @@ object ZipxPlugin extends AutoPlugin:
         zipx.specular.ZipxDocs.pages(sbtProject, javaVersion)
       def ReusableWorkflow = zipx.specular.ZipxDocs.ReusableWorkflow
       def pagesPermissions = zipx.specular.ZipxDocs.pagesPermissions
+    // GitHub Packages paved path (token env + packages: write; sbt owns publishTo).
+    object ZipxGitHubPackages:
+      def sameRepo(
+          name: String = zipx.github.ZipxGitHubPackages.DefaultName,
+          scope: CapabilityScope = CapabilityScope.Aggregate,
+          repository: Option[String] = None,
+          condition: Option[JobCondition] = None,
+      ): Capability =
+        zipx.github.ZipxGitHubPackages.sameRepo(name, scope, repository, condition)
+      def sharedRegistry(
+          tokenSecret: String = "GH_PACKAGES_TOKEN",
+          name: String = zipx.github.ZipxGitHubPackages.DefaultName,
+          scope: CapabilityScope = CapabilityScope.Aggregate,
+          repository: Option[String] = None,
+          condition: Option[JobCondition] = None,
+          packagesRepo: Option[String] = None,
+          publishOrg: Option[String] = None,
+          publishOrgName: Option[String] = None,
+      ): Capability =
+        zipx.github.ZipxGitHubPackages.sharedRegistry(
+          tokenSecret,
+          name,
+          scope,
+          repository,
+          condition,
+          packagesRepo,
+          publishOrg,
+          publishOrgName,
+        )
+      def packagesPermissions = zipx.github.ZipxGitHubPackages.packagesPermissions
+      def DefaultName         = zipx.github.ZipxGitHubPackages.DefaultName
+      def PublishFlagEnv      = zipx.github.ZipxGitHubPackages.PublishFlagEnv
+    end ZipxGitHubPackages
     // The workflow Step type, so extraSteps can be written in build.sbt.
     type Step = zipx.workflow.Step
     val Step = zipx.workflow.Step

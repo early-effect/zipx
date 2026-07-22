@@ -62,13 +62,13 @@ enum CapabilityScope:
   *   [[EnvValue.secret]] / `secret"NAME"` for secret refs; [[EnvValue.plain]] for literals. Merged after
   *   [[Capability.env]] (target wins on key clash).
   * @param condition
-  *   an extra `if` clause ANDed into the job's condition (e.g. main-only for a target).
+  *   an extra [[JobCondition]] ANDed into the job's `if` (e.g. main-only or PR-label for a target).
   */
 final case class Target(
     name: String,
     environment: Option[String] = None,
     env: Map[String, EnvValue] = Map.empty,
-    condition: Option[String] = None,
+    condition: Option[JobCondition] = None,
 )
 
 /** A pipeline stage that runs one or more sbt invocations, shaped by [[CapabilityScope]].
@@ -109,6 +109,9 @@ final case class Target(
   *   capability-wide env injected into every job.
   * @param workflowCall
   *   when set (typically on [[CapabilityScope.Once]]), emit a reusable-workflow job instead of sbt steps.
+  * @param condition
+  *   optional [[JobCondition]] ANDed into every job's `if` for this capability (after [[Gate]] / affected clauses).
+  *   Default `None`. Built-in vals use `.copy(condition = Some(...))`; factories take an explicit parameter.
   */
 final case class Capability(
     name: String,
@@ -127,6 +130,7 @@ final case class Capability(
     scope: CapabilityScope = CapabilityScope.Aggregate,
     env: Map[String, EnvValue] = Map.empty,
     workflowCall: Option[WorkflowCall] = None,
+    condition: Option[JobCondition] = None,
 )
 
 object Capability:
@@ -212,8 +216,21 @@ object Capability:
       needsCapabilities: List[String] = List("docker"),
       permissions: Map[String, String] = Map.empty,
       env: Map[String, EnvValue] = Map.empty,
+      gate: Gate = Gate.OnReleaseTag,
+      condition: Option[JobCondition] = None,
   ): Capability =
-    deployBody(CapabilityScope.Aggregate, participates, command, targets, name, needsCapabilities, permissions, env)
+    deployBody(
+      CapabilityScope.Aggregate,
+      participates,
+      command,
+      targets,
+      name,
+      needsCapabilities,
+      permissions,
+      env,
+      gate,
+      condition,
+    )
 
   /** Graph deploy: one job per (module × target) — full fan-out. */
   def deployGraph(
@@ -224,8 +241,21 @@ object Capability:
       needsCapabilities: List[String] = List("docker"),
       permissions: Map[String, String] = Map.empty,
       env: Map[String, EnvValue] = Map.empty,
+      gate: Gate = Gate.OnReleaseTag,
+      condition: Option[JobCondition] = None,
   ): Capability =
-    deployBody(CapabilityScope.Graph, participates, command, targets, name, needsCapabilities, permissions, env)
+    deployBody(
+      CapabilityScope.Graph,
+      participates,
+      command,
+      targets,
+      name,
+      needsCapabilities,
+      permissions,
+      env,
+      gate,
+      condition,
+    )
 
   private def deployBody(
       scope: CapabilityScope,
@@ -236,12 +266,14 @@ object Capability:
       needsCapabilities: List[String],
       permissions: Map[String, String],
       env: Map[String, EnvValue],
+      gate: Gate,
+      condition: Option[JobCondition],
   ): Capability =
     Capability(
       name = name,
       phase = Phase.Deploy,
       ordering = Ordering.DependencyOrdered,
-      gate = Gate.OnReleaseTag,
+      gate = gate,
       participates = participates,
       command = command,
       matrixed = false,
@@ -250,6 +282,7 @@ object Capability:
       permissions = permissions,
       env = env,
       scope = scope,
+      condition = condition,
     )
 
   /** A custom capability for a stage zipx doesn't model directly. Defaults to [[CapabilityScope.Graph]] so target
@@ -272,6 +305,7 @@ object Capability:
       postSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
       scope: CapabilityScope = CapabilityScope.Graph,
+      condition: Option[JobCondition] = None,
   ): Capability =
     Capability(
       name,
@@ -289,6 +323,7 @@ object Capability:
       postSteps,
       scope = scope,
       env = env,
+      condition = condition,
     )
 
   /** A run-once, build-wide gate — a single job (not per module) running one fixed command, e.g. a formatting/lint
@@ -310,6 +345,7 @@ object Capability:
       env: Map[String, EnvValue] = Map.empty,
       needsCapabilities: List[String] = Nil,
       permissions: Map[String, String] = Map.empty,
+      condition: Option[JobCondition] = None,
   ): Capability =
     Capability(
       name = name,
@@ -326,5 +362,6 @@ object Capability:
       postSteps = postSteps,
       scope = CapabilityScope.Once,
       env = env,
+      condition = condition,
     )
 end Capability

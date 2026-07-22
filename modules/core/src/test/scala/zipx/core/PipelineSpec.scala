@@ -35,7 +35,7 @@ object PipelineSpec extends ZIOSpecDefault:
         "DEPLOY_ROLE" -> secret"PROD_ROLE",
         "TIER"        -> EnvValue.plain("prod"),
       ),
-      condition = Some("github.ref == 'refs/heads/main'"),
+      condition = Some(JobCondition.refIs("refs/heads/main")),
     ),
   )
 
