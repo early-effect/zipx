@@ -36,6 +36,7 @@ object ActionPinFile:
     "cache"            -> "actions/cache",
     "uploadArtifact"   -> "actions/upload-artifact",
     "downloadArtifact" -> "actions/download-artifact",
+    "scalaSteward"     -> "scala-steward-org/scala-steward-action",
   )
 
   def parse(text: String): ActionPins =
@@ -97,6 +98,7 @@ object ActionPinFile:
       cache = foundRef.getOrElse("cache", base.cache),
       uploadArtifact = foundRef.getOrElse("uploadArtifact", base.uploadArtifact),
       downloadArtifact = foundRef.getOrElse("downloadArtifact", base.downloadArtifact),
+      scalaSteward = foundRef.getOrElse("scalaSteward", base.scalaSteward),
       versions = base.versions ++ foundVer.toMap,
     )
   end pullFromWorkflow
@@ -133,6 +135,7 @@ object ActionPinFile:
       cache = values.getOrElse("cache", ActionPins.BootstrapCache),
       uploadArtifact = values.getOrElse("uploadArtifact", ActionPins.BootstrapUploadArtifact),
       downloadArtifact = values.getOrElse("downloadArtifact", ActionPins.BootstrapDownloadArtifact),
+      scalaSteward = values.getOrElse("scalaSteward", ActionPins.BootstrapScalaSteward),
       versions = ActionPins.BootstrapVersions ++ versions,
     )
 

@@ -19,6 +19,7 @@ object BuildSite extends DocsSite:
     Verify.doc,
     Caching.doc,
     ActionPinsDoc.doc,
+    DependencyUpdates.doc,
     DockerAndDeploy.doc,
     Packs.doc,
     Settings.doc,
@@ -34,7 +35,7 @@ It introspects the real module graph and generates Aggregate-first (Layer/Graph 
 cached workflows — no hand-maintained YAML module lists.
 
 Guide: Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
-Action pins → Docker and deploy → Packs → Settings.
+Action pins → Dependency updates → Docker and deploy → Packs → Settings.
 """
       ),
       installSnippets = Vector(

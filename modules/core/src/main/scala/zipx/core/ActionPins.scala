@@ -24,6 +24,8 @@ package zipx.core
   *   `actions/upload-artifact` pin (Central staging share).
   * @param downloadArtifact
   *   `actions/download-artifact` pin (Central staging reassembly).
+  * @param scalaSteward
+  *   `scala-steward-org/scala-steward-action` pin (opt-in [[ScalaStewardWorkflow]]).
   * @param versions
   *   Optional semver labels (`v7.0.1`) keyed by field name for `# vX.Y.Z` comments on generated `uses:` lines.
   */
@@ -34,6 +36,7 @@ final case class ActionPins(
     cache: String = ActionPins.BootstrapCache,
     uploadArtifact: String = ActionPins.BootstrapUploadArtifact,
     downloadArtifact: String = ActionPins.BootstrapDownloadArtifact,
+    scalaSteward: String = ActionPins.BootstrapScalaSteward,
     versions: Map[String, String] = Map.empty,
 ):
   def field(name: String): String = name match
@@ -43,6 +46,7 @@ final case class ActionPins(
     case "cache"            => cache
     case "uploadArtifact"   => uploadArtifact
     case "downloadArtifact" => downloadArtifact
+    case "scalaSteward"     => scalaSteward
     case other              => throw new IllegalArgumentException(s"Unknown action pin field: $other")
 end ActionPins
 
@@ -62,6 +66,8 @@ object ActionPins:
     "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
   private[core] val BootstrapDownloadArtifact: String =
     "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
+  private[core] val BootstrapScalaSteward: String =
+    "scala-steward-org/scala-steward-action@ff09222640622d474d0d9f93c04aefedd125b187"
 
   private[core] val BootstrapVersions: Map[String, String] = Map(
     "checkout"         -> "v7.0.1",
@@ -70,6 +76,7 @@ object ActionPins:
     "cache"            -> "v6.1.0",
     "uploadArtifact"   -> "v7.0.1",
     "downloadArtifact" -> "v8.0.1",
+    "scalaSteward"     -> "v2.92.0",
   )
 
   /** Current zipx defaults — loaded from classpath `zipx/action-pins.yml` when present. */
@@ -84,6 +91,7 @@ object ActionPins:
           BootstrapCache,
           BootstrapUploadArtifact,
           BootstrapDownloadArtifact,
+          BootstrapScalaSteward,
           BootstrapVersions,
         )
 
@@ -94,5 +102,6 @@ object ActionPins:
   def Cache: String            = Defaults.cache
   def UploadArtifact: String   = Defaults.uploadArtifact
   def DownloadArtifact: String = Defaults.downloadArtifact
+  def ScalaSteward: String     = Defaults.scalaSteward
 
 end ActionPins

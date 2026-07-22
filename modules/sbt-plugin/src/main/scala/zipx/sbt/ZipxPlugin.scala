@@ -21,6 +21,11 @@ object ZipxPlugin extends AutoPlugin:
     val CacheBackend = zipx.core.CacheBackend
     type ActionPins = zipx.core.ActionPins
     val ActionPins = zipx.core.ActionPins
+    // Re-export schedule helpers so companion workflows can use typed cron.
+    type Cron = zipx.workflow.Cron
+    val Cron = zipx.workflow.Cron
+    type DayOfWeek = zipx.workflow.DayOfWeek
+    val DayOfWeek = zipx.workflow.DayOfWeek
 
     // Re-export the capability/target model so users can define and append custom capabilities in build.sbt.
     type Capability = zipx.core.Capability
@@ -95,6 +100,10 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[Boolean](
         "When true, also generate .github/workflows/zipx-action-pins-sync.yml to sync Dependabot SHA bumps into the pin file."
       )
+    val zipxScalaSteward =
+      settingKey[Boolean](
+        "When true, also generate .github/workflows/zipx-scala-steward.yml (weekly Scala Steward via GITHUB_TOKEN)."
+      )
     val zipxWorkflowDispatch =
       settingKey[Boolean]("Emit on.workflow_dispatch so the workflow can be run manually (default false).")
 
@@ -152,6 +161,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxActions           := ActionPins.Defaults,
     zipxActionsPath       := ActionPinFile.DefaultPath,
     zipxDependabotSync    := false,
+    zipxScalaSteward      := false,
     zipxWorkflowDispatch  := false,
   )
 
@@ -351,6 +361,7 @@ object ZipxPlugin extends AutoPlugin:
     IO.write(out, content)
     log.info(s"zipx wrote ${out.getPath}")
     writeSyncWorkflowIfEnabled.value
+    writeStewardWorkflowIfEnabled.value
   }
 
   private def writeSyncWorkflowIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
@@ -374,6 +385,20 @@ object ZipxPlugin extends AutoPlugin:
     else if syncFile.exists then
       // Leave an existing file alone when disabled (user may have checked one in manually).
       ()
+    end if
+  }
+
+  private def writeStewardWorkflowIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
+    val extracted   = Project.extract(state.value)
+    val enabled     = readBuildSetting(extracted, zipxScalaSteward, false)
+    val root        = (LocalRootProject / baseDirectory).value
+    val stewardFile = root / ScalaStewardWorkflow.DefaultPath
+    if enabled then
+      val cfg  = planConfig.value
+      val body = ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs)
+      IO.write(stewardFile, body)
+      streams.value.log.info(s"zipx wrote ${stewardFile.getPath}")
+    else if stewardFile.exists then ()
     end if
   }
 
@@ -475,6 +500,18 @@ object ZipxPlugin extends AutoPlugin:
           s"${syncFile.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
         )
       streams.value.log.info(s"zipx: ${syncFile.getPath} is up to date.")
+    end if
+    if readBuildSetting(extracted, zipxScalaSteward, false) then
+      val root            = (LocalRootProject / baseDirectory).value
+      val stewardFile     = root / ScalaStewardWorkflow.DefaultPath
+      val cfg             = planConfig.value
+      val expectedSteward = ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs)
+      val actualSteward   = if stewardFile.exists then IO.read(stewardFile) else ""
+      if actualSteward != expectedSteward then
+        sys.error(
+          s"${stewardFile.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
+        )
+      streams.value.log.info(s"zipx: ${stewardFile.getPath} is up to date.")
     end if
   }
 

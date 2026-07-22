@@ -43,19 +43,29 @@ object Render:
         mapEntry("permissions", wf.permissions) ++
         mapEntry("env", wf.env) ++
         wf.concurrency.map(c => "concurrency" -> concurrencyCodec.encodeValue(c)) ++
-        Seq("jobs" -> jobsYaml(wf.jobs)),
+        Seq("jobs" -> jobsYaml(wf.jobs))
     )
     Yaml.Mapping(entries.map((k, v) => (Yaml.Scalar(k), v)))
   end workflowYaml
 
   /** The `on:` block, hand-built with GitHub's exact underscore event keys. */
   private def triggersYaml(t: Triggers): Yaml =
+    val scheduleEntry =
+      if t.schedule.isEmpty then Nil
+      else
+        Seq(
+          "schedule" -> Yaml.Sequence(
+            Chunk.from(t.schedule.map(c => Yaml.Mapping.fromStringKeys("cron" -> Yaml.Scalar(c.render))))
+          )
+        )
     val entries =
       t.push.map(b => "push" -> branchFilterYaml(b)).toSeq ++
         t.pullRequest.map(b => "pull_request" -> branchFilterYaml(b)) ++
+        scheduleEntry ++
         (if t.workflowDispatch then Seq("workflow_dispatch" -> Yaml.NullValue) else Nil) ++
         (if t.workflowCall then Seq("workflow_call" -> Yaml.NullValue) else Nil)
     Yaml.Mapping.fromStringKeys(entries*)
+  end triggersYaml
 
   private def branchFilterYaml(b: BranchFilter): Yaml =
     val entries =
@@ -65,7 +75,9 @@ object Render:
     if entries.isEmpty then Yaml.NullValue else Yaml.Mapping.fromStringKeys(entries*)
 
   private def jobsYaml(jobs: ListMap[String, Job]): Yaml =
-    Yaml.Mapping(Chunk.from(jobs.map((id, job) => (Yaml.Scalar(id), collapseSingletonRunsOn(jobCodec.encodeValue(job))))))
+    Yaml.Mapping(
+      Chunk.from(jobs.map((id, job) => (Yaml.Scalar(id), collapseSingletonRunsOn(jobCodec.encodeValue(job)))))
+    )
 
   /** The derived codec renders `runsOn: List[String]` as a sequence. GitHub Actions convention (and every existing
     * golden) is a scalar for a single label — so collapse a one-element `runs-on` sequence to a scalar, leaving

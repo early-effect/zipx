@@ -31,7 +31,77 @@ final case class Triggers(
     pullRequest: Option[BranchFilter] = None,
     workflowDispatch: Boolean = false,
     workflowCall: Boolean = false,
+    /** `on.schedule` entries. Prefer [[Cron]] smart constructors over [[Cron.Raw]]. */
+    schedule: List[Cron] = Nil,
 )
+
+/** Day-of-week for [[Cron.Weekly]] (GitHub Actions: `0` = Sunday … `6` = Saturday). */
+enum DayOfWeek:
+  case Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday
+
+  /** Numeric field used in the five-field cron expression. */
+  def cronValue: Int = ordinal
+
+/** Five-field UTC cron for GitHub Actions `on.schedule` (`minute hour day-of-month month day-of-week`).
+  *
+  * Prefer [[Cron.weekly]], [[Cron.daily]], [[Cron.hourly]] over [[Cron.Raw]]. Constructors validate ranges; [[Raw]] is
+  * the escape hatch for expressions the variants cannot express.
+  */
+enum Cron:
+  case Weekly(day: DayOfWeek, hour: Int = 0, minute: Int = 0)
+  case Daily(hour: Int = 0, minute: Int = 0)
+  case Hourly(minute: Int = 0)
+  case Raw(expression: String)
+
+  /** Render to the string that lands in YAML `cron:`. */
+  def render: String = this match
+    case Cron.Weekly(day, hour, minute) =>
+      Cron.requireMinute(minute)
+      Cron.requireHour(hour)
+      s"$minute $hour * * ${day.cronValue}"
+    case Cron.Daily(hour, minute) =>
+      Cron.requireMinute(minute)
+      Cron.requireHour(hour)
+      s"$minute $hour * * *"
+    case Cron.Hourly(minute) =>
+      Cron.requireMinute(minute)
+      s"$minute * * * *"
+    case Cron.Raw(expression) =>
+      Cron.requireRaw(expression)
+end Cron
+
+object Cron:
+
+  def weekly(day: DayOfWeek = DayOfWeek.Sunday, hour: Int = 0, minute: Int = 0): Cron =
+    Weekly(day, hour, minute)
+
+  def daily(hour: Int = 0, minute: Int = 0): Cron =
+    Daily(hour, minute)
+
+  def hourly(minute: Int = 0): Cron =
+    Hourly(minute)
+
+  /** Escape hatch: a raw five-field cron string, rendered verbatim after light validation. */
+  def raw(expression: String): Cron =
+    Raw(expression)
+
+  private def requireMinute(minute: Int): Unit =
+    require(minute >= 0 && minute <= 59, s"cron minute must be 0–59, got $minute")
+
+  private def requireHour(hour: Int): Unit =
+    require(hour >= 0 && hour <= 23, s"cron hour must be 0–23, got $hour")
+
+  private val RawPattern = raw"\S+(?:\s+\S+){4}".r
+
+  private def requireRaw(expression: String): String =
+    val trimmed = expression.trim
+    if trimmed.isEmpty then throw IllegalArgumentException("cron expression must be non-empty")
+    if RawPattern.matches(trimmed) then trimmed
+    else
+      throw IllegalArgumentException(
+        s"invalid cron '$expression': expected five whitespace-separated fields (minute hour dom month dow)"
+      )
+end Cron
 
 /** Branch/tag/path filters for a `push` or `pull_request` trigger. Empty lists are pruned at render time. */
 final case class BranchFilter(
