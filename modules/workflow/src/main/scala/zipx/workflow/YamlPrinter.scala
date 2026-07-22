@@ -28,10 +28,10 @@ object YamlPrinter:
       case Yaml.NullValue          => sb.append("null")
 
   private def writeBlockMapping(
-    sb: java.lang.StringBuilder,
-    entries: Chunk[(Yaml, Yaml)],
-    indent: Int,
-    isTopLevel: Boolean,
+      sb: java.lang.StringBuilder,
+      entries: Chunk[(Yaml, Yaml)],
+      indent: Int,
+      isTopLevel: Boolean,
   ): Unit =
     if entries.isEmpty then sb.append("{}")
     else
@@ -51,18 +51,18 @@ object YamlPrinter:
     */
   private def writeMappedValue(sb: java.lang.StringBuilder, value: Yaml, indent: Int): Unit =
     value match
-      case Yaml.Mapping(sub) if sub.nonEmpty  => writeBlockMapping(sb, sub, indent + indentStep, isTopLevel = false)
-      case Yaml.Sequence(el) if el.nonEmpty   => writeBlockSequence(sb, el, indent + indentStep, isTopLevel = false)
+      case Yaml.Mapping(sub) if sub.nonEmpty     => writeBlockMapping(sb, sub, indent + indentStep, isTopLevel = false)
+      case Yaml.Sequence(el) if el.nonEmpty      => writeBlockSequence(sb, el, indent + indentStep, isTopLevel = false)
       case Yaml.Scalar(v, _) if v.contains('\n') => writeBlockScalar(sb, v, indent + indentStep)
-      case _ =>
+      case _                                     =>
         sb.append(' ')
         writeNode(sb, value, indent + indentStep, isTopLevel = false)
 
   private def writeBlockSequence(
-    sb: java.lang.StringBuilder,
-    elements: Chunk[Yaml],
-    indent: Int,
-    isTopLevel: Boolean,
+      sb: java.lang.StringBuilder,
+      elements: Chunk[Yaml],
+      indent: Int,
+      isTopLevel: Boolean,
   ): Unit =
     if elements.isEmpty then sb.append("[]")
     else
@@ -85,6 +85,7 @@ object YamlPrinter:
               firstEntry = false
             }
           case _ => writeNode(sb, elem, indent + 2, isTopLevel = false)
+        end match
         first = false
       }
 
@@ -120,6 +121,7 @@ object YamlPrinter:
           case c if c < 0x20 => sb.append("\\u").append(String.format("%04x", Int.box(c.toInt)))
           case c             => sb.append(c)
         idx += 1
+      end while
       sb.append('"')
     else sb.append(value)
 
@@ -143,6 +145,7 @@ object YamlPrinter:
       if c == '#' && idx > 0 && value.charAt(idx - 1) == ' ' then return true
       idx += 1
     false
+  end needsQuoting
 
   private def isSpecialValue(value: String): Boolean = value match
     case "null" | "~" | "Null" | "NULL"                         => true
@@ -164,6 +167,7 @@ object YamlPrinter:
       val c1 = value.charAt(1)
       if c1 >= '0' && c1 <= '9' then return true
     false
+  end looksNumeric
 
   private def appendIndent(sb: java.lang.StringBuilder, indent: Int): Unit =
     var idx = 0

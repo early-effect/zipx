@@ -11,7 +11,7 @@ object AffectedSpec extends ZIOSpecDefault:
       ModuleNode("coreLib", dependsOn = List("models"), baseDir = "core-lib"),
       ModuleNode("client", dependsOn = List("coreLib"), baseDir = "client"),
       ModuleNode("service", dependsOn = List("coreLib"), baseDir = "service"),
-    ),
+    )
   )
 
   def spec = suite("Affected")(
@@ -26,12 +26,12 @@ object AffectedSpec extends ZIOSpecDefault:
       // Changing models affects everything downstream.
       assertTrue(
         Affected.affectedModules(graph, List("models/src/main/scala/Models.scala")) ==
-          Set("models", "coreLib", "client", "service"),
+          Set("models", "coreLib", "client", "service")
       )
     },
     test("a leaf change affects only that leaf") {
       assertTrue(
-        Affected.affectedModules(graph, List("client/src/main/scala/Client.scala")) == Set("client"),
+        Affected.affectedModules(graph, List("client/src/main/scala/Client.scala")) == Set("client")
       )
     },
     test("a coreLib change affects coreLib and its dependents but not models") {
@@ -57,7 +57,7 @@ object AffectedSpec extends ZIOSpecDefault:
         List(
           ModuleNode("outer", baseDir = "mods"),
           ModuleNode("inner", baseDir = "mods/inner"),
-        ),
+        )
       )
       assertTrue(
         Affected.owningModule(nested, "mods/inner/X.scala").contains("inner"),
@@ -90,7 +90,7 @@ object AffectedSpec extends ZIOSpecDefault:
           ModuleNode("b", dependsOn = List("d"), baseDir = "b"),
           ModuleNode("c", dependsOn = List("d"), baseDir = "c"),
           ModuleNode("a", dependsOn = List("b", "c"), baseDir = "a"),
-        ),
+        )
       )
       assertTrue(Affected.affectedModules(diamond, List("d/X.scala")) == Set("a", "b", "c", "d"))
     },
@@ -120,10 +120,12 @@ object AffectedSpec extends ZIOSpecDefault:
         List(
           ModuleNode("root", baseDir = ""),
           ModuleNode("lib", baseDir = "lib"),
-        ),
+        )
       )
       assertTrue(
-        Affected.owningModule(g, "build.sbt").isEmpty, // owningModule itself — build.sbt is handled by isBuildFile upstream
+        Affected
+          .owningModule(g, "build.sbt")
+          .isEmpty, // owningModule itself — build.sbt is handled by isBuildFile upstream
         Affected.owningModule(g, "something.txt").isEmpty,
         Affected.owningModule(g, "lib/X.scala").contains("lib"),
       )
@@ -151,7 +153,7 @@ object AffectedSpec extends ZIOSpecDefault:
         List(
           ModuleNode("a", baseDir = "pkgs/a"),
           ModuleNode("ab", baseDir = "pkgs/ab"),
-        ),
+        )
       )
       assertTrue(
         Affected.owningModule(g, "pkgs/ab/X.scala").contains("ab"),
