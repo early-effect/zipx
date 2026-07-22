@@ -1,0 +1,21 @@
+# Temporary hand-rolled probe: can we expand/tail a running step in this repo?
+# Remove after the GitHub Actions log-expand investigation.
+name: Log expand probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: noisy sleep
+        run: |
+          for i in $(seq 1 90); do
+            echo "tick $i"
+            sleep 1
+          done
+
+      - name: quiet sleep
+        run: sleep 60
