@@ -27,15 +27,15 @@ package zipx.core
   *   the docker capability's per-module jobs.
   */
 final case class ModuleNode(
-  id: String,
-  dependsOn: List[String] = Nil,
-  publishes: Boolean = false,
-  ciRelevant: Boolean = true,
-  crossScalaVersions: List[String] = Nil,
-  testTask: String = "test",
-  publishTask: String = "publish",
-  baseDir: String = "",
-  docker: Boolean = false,
+    id: String,
+    dependsOn: List[String] = Nil,
+    publishes: Boolean = false,
+    ciRelevant: Boolean = true,
+    crossScalaVersions: List[String] = Nil,
+    testTask: String = "test",
+    publishTask: String = "publish",
+    baseDir: String = "",
+    docker: Boolean = false,
 )
 
 /** The module dependency graph. Nodes are keyed by id; edges are `dependsOn` (child → its dependencies). */
@@ -55,7 +55,7 @@ final case class ModuleGraph(nodes: List[ModuleNode]):
   def transitiveDeps(id: String): Set[String] =
     def go(frontier: List[String], seen: Set[String]): Set[String] =
       frontier match
-        case Nil => seen
+        case Nil    => seen
         case h :: t =>
           val next = directDeps(h).filterNot(seen)
           go(next ++ t, seen ++ next)
@@ -71,7 +71,7 @@ final case class ModuleGraph(nodes: List[ModuleNode]):
   def affectedClosure(seeds: Set[String]): Set[String] =
     def go(frontier: List[String], seen: Set[String]): Set[String] =
       frontier match
-        case Nil => seen
+        case Nil    => seen
         case h :: t =>
           val next = directDependents(h).filterNot(seen)
           go(next ++ t, seen ++ next)
@@ -93,23 +93,24 @@ final case class ModuleGraph(nodes: List[ModuleNode]):
     * nodes. This is the publish-ordering view — e.g. layers of just the publishing modules. Empty when nothing matches.
     */
   def subsetLayers(include: ModuleNode => Boolean): List[List[String]] =
-    val included: Set[String] = nodes.filter(include).map(_.id).toSet
+    val included: Set[String]                             = nodes.filter(include).map(_.id).toSet
     def nearestIncludedAncestors(id: String): Set[String] =
       def go(frontier: List[String], found: Set[String], seen: Set[String]): Set[String] =
         frontier match
-          case Nil => found
+          case Nil    => found
           case h :: t =>
-            val deps                         = directDeps(h).filterNot(seen)
-            val (inc, passthrough)           = deps.partition(included.contains)
+            val deps               = directDeps(h).filterNot(seen)
+            val (inc, passthrough) = deps.partition(included.contains)
             go(passthrough ++ t, found ++ inc, seen ++ deps)
       go(List(id), Set.empty, Set.empty)
     kahnLayers(included.toList.sorted, nearestIncludedAncestors)
+  end subsetLayers
 
   /** Kahn's algorithm producing deterministic layers over `nodeIds`, using `depsOf` for in-edges (restricted to
     * `nodeIds`). Ties broken by sorted id. Throws [[CyclicGraphError]] on a cycle.
     */
   private def kahnLayers(nodeIds: List[String], depsOf: String => Set[String]): List[List[String]] =
-    val present = nodeIds.toSet
+    val present                                                          = nodeIds.toSet
     val remainingDeps: scala.collection.mutable.Map[String, Set[String]] =
       scala.collection.mutable.Map.from(nodeIds.map(id => id -> depsOf(id).intersect(present)))
     val layers = scala.collection.mutable.ListBuffer.empty[List[String]]
@@ -120,6 +121,7 @@ final case class ModuleGraph(nodes: List[ModuleNode]):
       ready.foreach(remainingDeps.remove)
       remainingDeps.mapValuesInPlace((_, deps) => deps -- ready.toSet)
     layers.toList
+  end kahnLayers
 
 end ModuleGraph
 

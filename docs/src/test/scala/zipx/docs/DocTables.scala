@@ -24,7 +24,7 @@ object DocTables
         boxShadow(Shadow(0.px, 1.px, 2.px, Color.rgba(0, 0, 0, 0.12))),
       ),
       GlobalRule.selector(Sel.tag("thead"))(
-        background(DocTablesTokens.headerBg),
+        background(DocTablesTokens.headerBg)
       ),
       GlobalRule.selector(Sel.tag("th"))(
         textAlign.left,
@@ -45,15 +45,15 @@ object DocTables
         borderBottom(Border.solid(1.px, DocTablesTokens.border)),
       ),
       GlobalRule.selector(Sel.tag("tbody").child(Sel.tag("tr")).pseudoClass(PseudoClass.nthChild(Nth.even)))(
-        background(DocTablesTokens.stripe),
+        background(DocTablesTokens.stripe)
       ),
       GlobalRule.selector(
         Sel.tag("tbody").child(Sel.tag("tr")).pseudoClass(PseudoClass.lastChild).descendant(Sel.tag("td"))
       )(
-        borderBottom.none,
+        borderBottom.none
       ),
       GlobalRule.selector(Sel.tag("th").descendant(Sel.tag("code")).or(Sel.tag("td").descendant(Sel.tag("code"))))(
-        fontSize(0.85.em),
+        fontSize(0.85.em)
       ),
       GlobalRule.atRule(
         "zipx-doc-tables-narrow",
