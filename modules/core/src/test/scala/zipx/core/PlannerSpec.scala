@@ -34,7 +34,7 @@ object PlannerSpec extends ZIOSpecDefault:
       "prod",
       environment = Some("production"),
       env = Map("DEPLOY_ROLE" -> secret"PROD_ROLE", "TIER" -> EnvValue.plain("prod")),
-      condition = Some("github.ref == 'refs/heads/main'"),
+      condition = Some(JobCondition.refIs("refs/heads/main")),
     ),
   )
 
@@ -686,7 +686,7 @@ object PlannerSpec extends ZIOSpecDefault:
         command = _ => "x",
         participates = _.id == "schema",
         gate = Gate.Always,
-        targets = _ => List(Target("only", condition = Some("github.ref == 'refs/heads/main'"))),
+        targets = _ => List(Target("only", condition = Some(JobCondition.refIs("refs/heads/main")))),
       )
       assertTrue(
         Planner
@@ -851,6 +851,150 @@ object PlannerSpec extends ZIOSpecDefault:
         config.copy(affected = AffectedMode.AffectedOnPR),
       )
       assertTrue(wf.jobs.contains("affected"), wf.jobs.contains("test-schema"))
+    },
+    // ---- JobCondition (capability + target) ----
+    test("capability condition None leaves Aggregate publish if unchanged") {
+      val plain = Planner.plan(sampleGraph, List(Capability.publish), config)
+      val withC =
+        Planner.plan(sampleGraph, List(Capability.publish.withCondition(None)), config)
+      assertTrue(plain.jobs("publish").`if` == withC.jobs("publish").`if`)
+    },
+    test("capability condition ANDed with OnReleaseTag on Aggregate") {
+      val cap  = Capability.publish.withCondition(JobCondition.repositoryIs("acme/fork"))
+      val cond = Planner.plan(sampleGraph, List(cap), config).jobs("publish").`if`.getOrElse("")
+      assertTrue(
+        cond.contains("startsWith(github.ref, 'refs/tags/v')"),
+        cond.contains("github.repository == 'acme/fork'"),
+        cond.contains("&&"),
+      )
+    },
+    test("Gate.Always + capability condition has no tag clause") {
+      val cap = Capability.docker
+        .copy(gate = Gate.Always)
+        .withCondition(JobCondition.hasPrLabel("deploy-stg"))
+      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+        case n if n.id == "serviceA" => n.copy(docker = true)
+        case n                       => n
+      })
+      val cond = Planner.plan(graph, List(cap), config).jobs("docker").`if`.getOrElse("")
+      assertTrue(
+        cond.contains("deploy-stg"),
+        !cond.contains("refs/tags/v"),
+      )
+    },
+    test("capability + target conditions both present on Aggregate-by-target") {
+      val cap = Capability.deploy(
+        participates = _.id == "serviceA",
+        command = n => s"${n.id}/promote",
+        targets = _ =>
+          List(
+            Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg"))),
+            Target("prod", condition = Some(JobCondition.refStartsWith("refs/tags/v"))),
+          ),
+        needsCapabilities = Nil,
+        gate = Gate.Always,
+        condition = Some(JobCondition.repositoryIs("acme/app")),
+      )
+      val wf   = Planner.plan(sampleGraph, List(cap), config)
+      val stg  = wf.jobs("deploy-stg").`if`.getOrElse("")
+      val prod = wf.jobs("deploy-prod").`if`.getOrElse("")
+      assertTrue(
+        stg.contains("github.repository == 'acme/app'"),
+        stg.contains("deploy-stg"),
+        stg.contains("labels"),
+        prod.contains("github.repository == 'acme/app'"),
+        prod.contains("startsWith(github.ref, 'refs/tags/v')"),
+        !stg.contains("startsWith(github.ref, 'refs/tags/v')"),
+      )
+    },
+    test("OnReleaseTag + Target HasPrLabel still includes tag clause (stage-on-PR footgun)") {
+      val cap = Capability.dockerGraph.copy(
+        gate = Gate.OnReleaseTag,
+        targets = _ => List(Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
+      )
+      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+        case n if n.id == "serviceA" => n.copy(docker = true)
+        case n                       => n
+      })
+      val cond = Planner.plan(graph, List(cap), config).jobs("docker-serviceA-stg").`if`.getOrElse("")
+      assertTrue(
+        cond.contains("startsWith(github.ref, 'refs/tags/v')"),
+        cond.contains("deploy-stg"),
+      )
+    },
+    test("Once capability condition appears on the single job") {
+      val cap = Capability.once(
+        name = "publish",
+        command = "publishSigned; sonaRelease",
+        phase = Phase.Publish,
+        gate = Gate.OnReleaseTag,
+        condition = Some(JobCondition.repositoryIs("early-effect/zipx")),
+      )
+      val cond = Planner.plan(sampleGraph, List(cap), config).jobs("publish").`if`.getOrElse("")
+      assertTrue(
+        cond.contains("refs/tags/v"),
+        cond.contains("early-effect/zipx"),
+      )
+    },
+    test("Once workflowCall job also gets capability condition") {
+      val cap = Capability
+        .once(name = "docs", command = "true", phase = Phase.Publish, gate = Gate.OnReleaseTag)
+        .copy(workflowCall = Some(WorkflowCall("org/repo/.github/workflows/pages.yml@main")))
+        .withCondition(JobCondition.repositoryIs("org/repo"))
+      val job = Planner.plan(sampleGraph, List(cap), config).jobs("docs")
+      assertTrue(
+        job.uses.contains("org/repo/.github/workflows/pages.yml@main"),
+        job.`if`.exists(_.contains("github.repository == 'org/repo'")),
+        job.`if`.exists(_.contains("refs/tags/v")),
+      )
+    },
+    test("Layer jobs each carry capability condition") {
+      val cap = Capability.testLayers.withCondition(JobCondition.varNonEmpty("RUN_LAYERS"))
+      val wf  = Planner.plan(sampleGraph, List(cap), config)
+      val ifs = wf.jobs.values.flatMap(_.`if`).toList
+      assertTrue(ifs.nonEmpty, ifs.forall(_.contains("vars.RUN_LAYERS != ''")))
+    },
+    test("Graph affected Verify ANDs capability condition without dropping affected clauses") {
+      val cap = Capability.testGraph.withCondition(JobCondition.repositoryIs("acme/ci"))
+      val wf  = Planner.plan(
+        sampleGraph,
+        List(cap),
+        config.copy(affected = AffectedMode.AffectedOnPR),
+      )
+      val cond = wf.jobs("test-schema").`if`.getOrElse("")
+      assertTrue(
+        cond.contains("!cancelled()"),
+        cond.contains("needs.affected.outputs.modules"),
+        cond.contains("github.repository == 'acme/ci'"),
+      )
+    },
+    test("two Publish caps keep independent conditions") {
+      val central = Capability.publish
+      val ghp     = Capability.publish
+        .copy(name = "github-packages")
+        .withCondition(JobCondition.repositoryIs("acme/fork"))
+      val wf = Planner.plan(sampleGraph, List(central, ghp), config)
+      assertTrue(
+        wf.jobs.contains("publish"),
+        wf.jobs.contains("github-packages"),
+        !wf.jobs("publish").`if`.exists(_.contains("acme/fork")),
+        wf.jobs("github-packages").`if`.exists(_.contains("acme/fork")),
+      )
+    },
+    test("adding only condition leaves needs and permissions stable") {
+      val base  = Capability.publish
+      val gated = base
+        .copy(permissions = Map("contents" -> "read"))
+        .withCondition(JobCondition.repositoryIs("a/b"))
+      val plainJob =
+        Planner.plan(sampleGraph, List(base.copy(permissions = Map("contents" -> "read"))), config).jobs("publish")
+      val gatedJob = Planner.plan(sampleGraph, List(gated), config).jobs("publish")
+      assertTrue(
+        plainJob.needs == gatedJob.needs,
+        plainJob.permissions == gatedJob.permissions,
+        plainJob.env == gatedJob.env,
+        plainJob.`if` != gatedJob.`if`,
+      )
     },
   )
 end PlannerSpec

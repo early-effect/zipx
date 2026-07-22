@@ -30,7 +30,8 @@ lazy val service = project
 ```
 
 zipx detects `DockerPlugin` and emits a release-gated Aggregate `docker` job joining `…/Docker/publish` (or use
-`dockerGraph`). Multi-registry pushes are a custom capability with targets (see **Custom capabilities**).
+`dockerGraph`). Multi-registry pushes are a custom capability with targets (see **Custom capabilities**). For
+PR-label stage ECR (before merge), see **Job conditions**.
 """,
       exampleValue {
         val wf = Planner.plan(libGraph, List(Capability.docker), config)
@@ -51,7 +52,7 @@ stay independent.
             "prod",
             environment = Some("production"),
             env = Map("TIER" -> EnvValue.plain("prod"), "DEPLOY_ROLE" -> secret"PROD_ROLE"),
-            condition = Some("github.ref == 'refs/heads/main'"),
+            condition = Some(JobCondition.refIs("refs/heads/main")),
           ),
         )
         val deploy = Capability.deploy(

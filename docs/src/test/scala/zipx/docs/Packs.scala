@@ -5,6 +5,7 @@ import specular.ziotest.DocSpecSuite
 import zipx.central.ZipxCentral
 import zipx.core.*
 import zipx.docs.DocsFixtures.*
+import zipx.github.ZipxGitHubPackages
 import zipx.specular.ZipxDocs
 import zio.test.*
 
@@ -34,6 +35,32 @@ zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
           run.exists(_.contains("publishSigned; sonaRelease")),
           user.contains("${{ secrets.SONATYPE_USERNAME }}"),
           gpg,
+        )
+      },
+    ),
+    section("ZipxGitHubPackages")(
+      md"""
+```scala
+zipxCapabilities ++= Seq(
+  ZipxCentral.release,
+  ZipxGitHubPackages.sameRepo(repository = Some("acme/my-fork")),
+)
+// Shared registry PAT: ZipxGitHubPackages.sharedRegistry(tokenSecret = "GH_PACKAGES_TOKEN")
+```
+
+Thin CI wiring (`packages: write` + token + `PUBLISH_GITHUB_PACKAGES=true`). **sbt** owns `publishTo` / Credentials.
+See **Job conditions** for fork gates and multi-publish recipes.
+""",
+      exampleValue {
+        val job = Planner
+          .plan(libGraph, List(ZipxGitHubPackages.sameRepo(repository = Some("acme/fork"))), config)
+          .jobs("github-packages")
+        (job.permissions.get("packages"), job.env.get("PUBLISH_GITHUB_PACKAGES"), job.`if`)
+      }.assert { case (pkgs, flag, cond) =>
+        assertTrue(
+          pkgs.contains("write"),
+          flag.contains("true"),
+          cond.exists(_.contains("acme/fork")),
         )
       },
     ),

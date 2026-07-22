@@ -1,7 +1,7 @@
 package zipx.sbt
 
 import sbt.*
-import zipx.core.{Capability, EnvValue, Gate, ModuleNode, Ordering, Phase, StepContext, Target}
+import zipx.core.{Capability, EnvValue, Gate, JobCondition, ModuleNode, Ordering, Phase, StepContext, Target}
 import zipx.workflow.Step
 import scala.quoted.*
 
@@ -109,8 +109,20 @@ object CapabilityTasks:
       needsCapabilities: List[String] = List("docker"),
       permissions: Map[String, String] = Map.empty,
       env: Map[String, EnvValue] = Map.empty,
+      gate: Gate = Gate.OnReleaseTag,
+      condition: Option[JobCondition] = None,
   ): Capability =
-    Capability.deploy(participates, moduleCommand(command), targets, name, needsCapabilities, permissions, env)
+    Capability.deploy(
+      participates,
+      moduleCommand(command),
+      targets,
+      name,
+      needsCapabilities,
+      permissions,
+      env,
+      gate,
+      condition,
+    )
 
   /** [[Capability.deployGraph]] with the deploy command given as a task key. */
   def deployGraph(
@@ -121,8 +133,20 @@ object CapabilityTasks:
       needsCapabilities: List[String] = List("docker"),
       permissions: Map[String, String] = Map.empty,
       env: Map[String, EnvValue] = Map.empty,
+      gate: Gate = Gate.OnReleaseTag,
+      condition: Option[JobCondition] = None,
   ): Capability =
-    Capability.deployGraph(participates, moduleCommand(command), targets, name, needsCapabilities, permissions, env)
+    Capability.deployGraph(
+      participates,
+      moduleCommand(command),
+      targets,
+      name,
+      needsCapabilities,
+      permissions,
+      env,
+      gate,
+      condition,
+    )
 
   /** [[Capability.custom]] with the command given as a task key (rendered `<module>/<label>`). */
   def custom(
@@ -139,6 +163,7 @@ object CapabilityTasks:
       runsOn: Option[List[String]] = None,
       extraSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
+      condition: Option[JobCondition] = None,
   ): Capability =
     Capability.custom(
       name,
@@ -154,6 +179,7 @@ object CapabilityTasks:
       runsOn,
       extraSteps,
       env = env,
+      condition = condition,
     )
 
   /** [[Capability.once]] with the single build-wide command given as a task key (rendered as its bare `<label>`). */
@@ -166,6 +192,7 @@ object CapabilityTasks:
       extraSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
       needsCapabilities: List[String] = Nil,
+      condition: Option[JobCondition] = None,
   ): Capability =
     Capability.once(
       name,
@@ -176,6 +203,7 @@ object CapabilityTasks:
       extraSteps,
       env = env,
       needsCapabilities = needsCapabilities,
+      condition = condition,
     )
 
 end CapabilityTasks

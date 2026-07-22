@@ -31,7 +31,8 @@ wire `dependsOn` like the existing chain.
 
 The publishable `plugin` project remains for Central publish and scripted tests.
 [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) is a **consumer** (uses
-`publishLocal` or a released `zipx-sbt`). Root dogfood uses Aggregate `ZipxCentral.release`.
+`publishLocal` or a released `zipx-sbt`). Root dogfood uses Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
+both with `JobCondition.repositoryIs("early-effect/zipx")` so fork tag pushes do not publish or deploy Pages.
 """
     ),
     section("Docs site")(
