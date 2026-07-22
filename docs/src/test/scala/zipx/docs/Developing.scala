@@ -44,7 +44,7 @@ Pages deploy on `v*` tags via `ZipxDocs.pages` in the generated workflow.
     ),
     section("Status")(
       md"""
-See [ROADMAP.md](https://github.com/early-effect/zipx/blob/main/ROADMAP.md). The plugin targets sbt 2.0.1 / Scala 3.8.4.
+See [ROADMAP.md](https://github.com/early-effect/zipx/blob/main/ROADMAP.md). The plugin targets sbt 2.0.3 / Scala 3.8.4.
 License: Apache-2.0.
 """
     ),
