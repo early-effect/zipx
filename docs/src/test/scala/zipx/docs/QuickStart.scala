@@ -10,8 +10,8 @@ object QuickStart extends DocSpecSuite:
 
   def doc = page("Quick start")(
     md"""
-Add the plugin, generate the workflow, and commit it. zipx also checks the committed YAML in CI so a build change that
-isn't reflected in the workflow fails the PR.
+The committed workflow is an **artifact of the build**, not a second graph. Add the plugin, generate `ci.yml`, and let
+`zipxWorkflowCheck` fail the PR when someone changes modules without regenerating.
 """,
     section("Install")(
       md"""
@@ -38,9 +38,20 @@ Defaults are **Aggregate**: one root `test` job (`sbt 'test'`) and one publish j
 `DockerPlugin`). For a typical library you write zero module lists, `needs` edges, or project-id strings.
 
 ```scala
-// nothing required — built-in test + publish
-// optional paved path:
-zipxCapabilities += ZipxCentral.release
+// project/plugins.sbt
+addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "<version>")
+
+// build.sbt
+lazy val lib = project.settings(/* publish settings */)
+
+lazy val root = (project in file("."))
+  .aggregate(lib)
+  .settings(
+    // nothing required for Aggregate test + publish
+    // optional paved Central path:
+    zipxCapabilities += ZipxCentral.release,
+    zipxJavaVersion  := "25",
+  )
 ```
 """,
       exampleValue {
