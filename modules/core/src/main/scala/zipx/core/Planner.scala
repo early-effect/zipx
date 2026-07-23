@@ -634,6 +634,10 @@ object Planner:
         val prefix = s"${config.runnerOs}-jdk${config.javaVersion}-sbt-"
         val epoch  = s"$prefix${config.cacheEpoch}-"
         val run    = s"$epoch$${{ github.run_id }}-"
+        // After a v* tag, dynver-ci (and similar) use "<tag>-ci" until the next release. Prefer the tag epoch before
+        // the bare OS+JDK prefix so the first post-tag PR warms from the release job, not an older -ci blob.
+        val priorRelease = priorReleaseEpochKey(prefix, config.cacheEpoch)
+        val restoreKeys  = (run :: epoch :: priorRelease.toList ::: prefix :: Nil).mkString("\n")
         List(
           Step(
             name = Some("Cache sbt"),
@@ -641,11 +645,19 @@ object Planner:
             `with` = ListMap(
               "path"         -> List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n"),
               "key"          -> s"$run$jobSuffix",
-              "restore-keys" -> List(run, epoch, prefix).mkString("\n"),
+              "restore-keys" -> restoreKeys,
             ),
           )
         )
       case _ => Nil
+
+  /** When `cacheEpoch` is a post-tag CI suffix (`*-ci` / `*-SNAPSHOT`), restore from the bare release epoch first. */
+  private[core] def priorReleaseEpochKey(prefix: String, cacheEpoch: String): Option[String] =
+    val release =
+      if cacheEpoch.endsWith("-ci") then Some(cacheEpoch.stripSuffix("-ci"))
+      else if cacheEpoch.endsWith("-SNAPSHOT") then Some(cacheEpoch.stripSuffix("-SNAPSHOT"))
+      else None
+    release.filter(_.nonEmpty).map(e => s"$prefix$e-")
 
   private def cacheContribution(config: PlanConfig): CacheContribution =
     config.cache match

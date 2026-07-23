@@ -117,16 +117,59 @@ object PlannerSpec extends ZIOSpecDefault:
         coreKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-core"),
         apiKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-api"),
         coreKey != apiKey,
-        // Same-run prefix first (accumulated upstream), then epoch, then older epochs.
+        // Same-run, same -ci epoch, prior release epoch (post-tag bridge), then older OS+JDK caches.
         restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-"),
         restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-"),
+        restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-"),
         restore.contains("ubuntu-latest-jdk21-sbt-"),
+        restore.split('\n').toList == List(
+          "ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-",
+          "ubuntu-latest-jdk21-sbt-1.2.3-ci-",
+          "ubuntu-latest-jdk21-sbt-1.2.3-",
+          "ubuntu-latest-jdk21-sbt-",
+        ),
         paths.contains("~/.sbt"),
         paths.contains("~/.cache/sbt"),
         paths.contains("~/.cache/coursier"),
         paths.contains("target"),
         !java.exists(_.`with`.contains("cache")),
         sbt.exists(_.`with`.get("disk-cache").contains("false")),
+      )
+    },
+    test("LocalDir restore-keys bridge -ci / -SNAPSHOT epochs to the prior release epoch") {
+      val prefix = "ubuntu-latest-jdk21-sbt-"
+      def restore(epoch: String) =
+        Planner
+          .plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = epoch, skipMergedPrPush = false))
+          .jobs("test")
+          .steps
+          .find(_.uses.exists(_.startsWith("actions/cache@")))
+          .map(_.`with`("restore-keys"))
+          .getOrElse("")
+      val ci      = restore("1.2.3-ci")
+      val snap    = restore("1.2.3-SNAPSHOT")
+      val release = restore("1.2.3")
+      assertTrue(
+        Planner.priorReleaseEpochKey(prefix, "1.2.3-ci").contains(s"${prefix}1.2.3-"),
+        Planner.priorReleaseEpochKey(prefix, "1.2.3-SNAPSHOT").contains(s"${prefix}1.2.3-"),
+        Planner.priorReleaseEpochKey(prefix, "1.2.3").isEmpty,
+        ci.split('\n').toList == List(
+          s"${prefix}1.2.3-ci-$${{ github.run_id }}-",
+          s"${prefix}1.2.3-ci-",
+          s"${prefix}1.2.3-",
+          prefix,
+        ),
+        snap.split('\n').toList == List(
+          s"${prefix}1.2.3-SNAPSHOT-$${{ github.run_id }}-",
+          s"${prefix}1.2.3-SNAPSHOT-",
+          s"${prefix}1.2.3-",
+          prefix,
+        ),
+        release.split('\n').toList == List(
+          s"${prefix}1.2.3-$${{ github.run_id }}-",
+          s"${prefix}1.2.3-",
+          prefix,
+        ),
       )
     },
     test("cache key is identical across commits with the same epoch+job template, differs across epochs") {
