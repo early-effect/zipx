@@ -156,6 +156,14 @@ lazy val docs = project
     specularMetaProject   := Some(LocalProject("plugin")),
     specularArtifactKind  := "plugin",
     specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
+    // Docs-only (workflow_dispatch) builds are dynver `-ci`; don't advertise that as a Central coord.
+    // Empty string → Specular uses build version (clean v* tags).
+    specularDisplayVersion := {
+      val v = (ThisBuild / version).value
+      if v.endsWith("-ci") || v.endsWith("-SNAPSHOT") then
+        previousStableVersion.value.getOrElse("<version>")
+      else ""
+    },
     // Rebuild site then (re)start DocsServe; use alias docsPreview for continuous watch.
     specularPreview := Def.uncached {
       specularSite.value
