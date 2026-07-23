@@ -31,9 +31,10 @@ object BuildSite extends DocsSite:
     val m = meta
     super.site.copy(
       summaryMarkdown = Some(
-        s"""**zipx** makes the sbt build the single source of truth for GitHub Actions CI.
-It introspects the real module graph and generates Aggregate-first (Layer/Graph when you need them),
-cached workflows — no hand-maintained YAML module lists.
+        s"""**zipx** is for teams tired of maintaining a second copy of the build.
+Hand-written GitHub Actions that re-list modules, or a Bazel graph that restates the same edges, both invent drift.
+zipx keeps you on sbt 2: it reads your real `dependsOn` graph, generates Aggregate-first workflows (Layer/Graph when
+you need them), and fails the PR when committed CI drifts.
 
 Guide: Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
 Action pins → Dependency updates → Docker and deploy → Job conditions → Packs → Settings.
