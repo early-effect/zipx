@@ -226,8 +226,9 @@ object PlannerSpec extends ZIOSpecDefault:
       val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(affected = AffectedMode.Always))
       assertTrue(
         !wf.jobs.contains("affected"),
-        // Verify still skips tag pushes; no affected membership gating.
-        wf.jobs("test-api").`if`.contains("!startsWith(github.ref, 'refs/tags/')"),
+        // Verify still skips tag pushes and workflow_dispatch; no affected membership gating.
+        wf.jobs("test-api").`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
+        wf.jobs("test-api").`if`.exists(_.contains("github.event_name != 'workflow_dispatch'")),
         !wf.jobs("test-api").`if`.exists(_.contains("needs.affected")),
         !wf.jobs("test-api").needs.contains("affected"),
       )
@@ -824,6 +825,7 @@ object PlannerSpec extends ZIOSpecDefault:
         test.needs.contains("verify-gate"),
         test.`if`.exists(_.contains("needs.verify-gate.outputs.run == 'true'")),
         test.`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
+        test.`if`.exists(_.contains("github.event_name != 'workflow_dispatch'")),
       )
     },
     test("skipMergedPrPush does not gate Publish jobs") {
@@ -836,12 +838,13 @@ object PlannerSpec extends ZIOSpecDefault:
         !wf.jobs("publish").`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
       )
     },
-    test("skipMergedPrPush false omits verify-gate but still skips Verify on tags") {
+    test("skipMergedPrPush false omits verify-gate but still skips Verify on tags and dispatch") {
       val wf = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = false))
       assertTrue(
         !wf.jobs.contains("verify-gate"),
         wf.jobs("test").needs.isEmpty,
-        wf.jobs("test").`if`.contains("!startsWith(github.ref, 'refs/tags/')"),
+        wf.jobs("test").`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
+        wf.jobs("test").`if`.exists(_.contains("github.event_name != 'workflow_dispatch'")),
       )
     },
     test("Graph Verify still emits affected setup under AffectedOnPR") {
@@ -994,6 +997,16 @@ object PlannerSpec extends ZIOSpecDefault:
         plainJob.permissions == gatedJob.permissions,
         plainJob.env == gatedJob.env,
         plainJob.`if` != gatedJob.`if`,
+      )
+    },
+    test("andCondition ANDs onto an existing capability condition") {
+      val base = Capability.publish.withCondition(JobCondition.onReleaseTag)
+      val both = base.andCondition(JobCondition.repositoryIs("a/b"))
+      val job  = Planner.plan(sampleGraph, List(both.copy(gate = Gate.Always)), config).jobs("publish")
+      assertTrue(
+        job.`if`.exists(_.contains("refs/tags/v")),
+        job.`if`.exists(_.contains("a/b")),
+        job.`if`.exists(_.contains("&&")),
       )
     },
   )

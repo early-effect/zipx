@@ -53,7 +53,8 @@ lazy val root = (project in file("."))
       val upstream = JobCondition.repositoryIs("early-effect/zipx")
       Seq(
         ZipxCentral.release.withCondition(upstream),
-        ZipxDocs.pages().withCondition(upstream),
+        // andCondition keeps ZipxDocs tag|dispatch filter and layers the fork gate
+        ZipxDocs.pages().andCondition(upstream),
       )
     },
     zipxJavaVersion      := "25",

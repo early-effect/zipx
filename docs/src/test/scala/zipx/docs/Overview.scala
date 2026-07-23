@@ -137,7 +137,7 @@ lazy val root = (project in file("."))
       val upstream = JobCondition.repositoryIs("acme/libs")
       Seq(
         ZipxCentral.release.withCondition(upstream),
-        ZipxDocs.pages().withCondition(upstream),
+        ZipxDocs.pages().andCondition(upstream),
       )
     },
     zipxJavaVersion      := "25",

@@ -4,13 +4,18 @@ import zipx.core.*
 
 /** Early-effect Specular docs paved path for zipx.
   *
-  * Emits a release-gated once-job that calls the org reusable workflow
+  * Emits a once-job that calls the org reusable workflow
   * `early-effect/.github/.github/workflows/specular-docs.yml` (build Specular site → GitHub Pages). Same pattern as
   * peers' thin `docs.yml`, expressed as a capability so generated CI owns it.
   *
+  * Runs on `v*` tags **or** manual `workflow_dispatch` (enable with `zipxWorkflowDispatch := true`). Publish stays
+  * tag-only; Verify is skipped on dispatch so "Run workflow" is docs-cheap.
+  *
   * {{{
   * zipxCapabilities += ZipxDocs.pages()
-  * zipxWorkflowDispatch := true // optional: manual "Run workflow" for docs-only deploys
+  * zipxWorkflowDispatch := true
+  * // Layer a fork gate without wiping the tag|dispatch condition:
+  * zipxCapabilities += ZipxDocs.pages().andCondition(JobCondition.repositoryIs("acme/libs"))
   * }}}
   */
 object ZipxDocs:
@@ -26,7 +31,11 @@ object ZipxDocs:
     "id-token" -> "write",
   )
 
-  /** Deploy Specular docs to GitHub Pages on `v*` tags (and on `workflow_dispatch` when that trigger is enabled).
+  /** Built-in job filter: release tags or manual workflow dispatch. */
+  val deployWhen: JobCondition =
+    JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch
+
+  /** Deploy Specular docs to GitHub Pages on `v*` tags or `workflow_dispatch`.
     *
     * @param sbtProject
     *   sbt project that defines `specularSite` (default `docs`).
@@ -41,10 +50,13 @@ object ZipxDocs:
         name = "docs",
         command = "true", // unused: workflowCall replaces local steps
         phase = Phase.Deploy,
-        gate = Gate.OnReleaseTag,
+        gate = Gate.Always,
         permissions = pagesPermissions,
       )
-      .copy(workflowCall = Some(WorkflowCall(uses = ReusableWorkflow, withInputs = inputs)))
+      .copy(
+        workflowCall = Some(WorkflowCall(uses = ReusableWorkflow, withInputs = inputs)),
+        condition = Some(deployWhen),
+      )
   end pages
 
 end ZipxDocs

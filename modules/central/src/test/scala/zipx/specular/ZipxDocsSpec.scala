@@ -8,7 +8,7 @@ object ZipxDocsSpec extends ZIOSpecDefault:
   private val config = PlanConfig(workflowName = "CI", cacheEpoch = "1.0.0", affected = AffectedMode.Always)
 
   def spec = suite("ZipxDocs")(
-    test("pages emits a reusable-workflow job with Pages permissions, gated on release tags") {
+    test("pages emits a reusable-workflow job with Pages permissions, on tag or workflow_dispatch") {
       val wf  = Planner.plan(ModuleGraph(Nil), List(ZipxDocs.pages()), config)
       val job = wf.jobs("docs")
       assertTrue(
@@ -19,6 +19,22 @@ object ZipxDocsSpec extends ZIOSpecDefault:
         job.permissions.get("pages").contains("write"),
         job.permissions.get("id-token").contains("write"),
         job.`if`.exists(_.contains("refs/tags/v")),
+        job.`if`.exists(_.contains("workflow_dispatch")),
+        job.`if`.exists(_.contains("||")),
+      )
+    },
+    test("pages andCondition layers a fork gate without wiping tag|dispatch") {
+      val job = Planner
+        .plan(
+          ModuleGraph(Nil),
+          List(ZipxDocs.pages().andCondition(JobCondition.repositoryIs("early-effect/zipx"))),
+          config,
+        )
+        .jobs("docs")
+      assertTrue(
+        job.`if`.exists(_.contains("workflow_dispatch")),
+        job.`if`.exists(_.contains("early-effect/zipx")),
+        job.`if`.exists(_.contains("&&")),
       )
     },
     test("pages forwards sbtProject and javaVersion inputs") {

@@ -65,11 +65,14 @@ See **Job conditions** for fork gates and multi-publish recipes.
       md"""
 ```scala
 zipxCapabilities += ZipxDocs.pages()
-zipxWorkflowDispatch := true  // optional: manual docs-only deploys
+zipxWorkflowDispatch := true  // Actions → Run workflow (docs without a release tag)
+
+// Layer a fork gate; andCondition keeps the built-in tag|dispatch filter:
+zipxCapabilities += ZipxDocs.pages().andCondition(JobCondition.repositoryIs("acme/libs"))
 ```
 
-`ZipxDocs.pages` emits a reusable-workflow job on `v*` tags (`early-effect/.github/.../specular-docs.yml@main`).
-No hand-rolled `docs.yml`.
+`ZipxDocs.pages` calls the org reusable workflow on **`v*` tags or `workflow_dispatch`**. Verify is skipped on
+dispatch so a manual run is docs-cheap; publish stays tag-only. No hand-rolled `docs.yml`.
 """,
       exampleValue {
         DocsRender.job("docs")(ZipxDocs.pages())(using ModuleGraph(Nil))
@@ -78,6 +81,7 @@ No hand-rolled `docs.yml`.
           yaml.contains(ZipxDocs.ReusableWorkflow),
           yaml.contains("sbt-project: docs"),
           yaml.contains("pages: write"),
+          yaml.contains("workflow_dispatch"),
         )
       ),
     ),

@@ -6,18 +6,29 @@ package zipx.core
   * the job `if` (fork repo, PR label, branch, repo var, …). Both [[Capability.condition]] and [[Target.condition]] use
   * this AST; the planner renders and ANDs them with gate / affected clauses.
   *
-  * [[Raw]] is the escape hatch for expressions the variants cannot express.
+  * Compose with [[&&]] / [[||]] (or [[JobCondition.and]] / [[JobCondition.or]]). [[Raw]] is the escape hatch for
+  * expressions the variants cannot express.
   */
 enum JobCondition:
   case RepositoryIs(repo: String)
   case VarNonEmpty(name: String)
   case RefIs(ref: String)
   case RefStartsWith(prefix: String)
+  case EventIs(name: String)
   case HasPrLabel(label: String)
   case All(clauses: List[JobCondition])
   case Any(clauses: List[JobCondition])
   case Not(inner: JobCondition)
   case Raw(expression: String)
+
+  /** Conjunction with `other` (renders as `(this) && (other)`). */
+  infix def &&(other: JobCondition): JobCondition = JobCondition.and(this, other)
+
+  /** Disjunction with `other` (renders as `(this) || (other)`). */
+  infix def ||(other: JobCondition): JobCondition = JobCondition.or(this, other)
+
+  /** Negation (renders as `!(this)`). */
+  def unary_! : JobCondition = JobCondition.not(this)
 
   /** Render to the string that lands in a job's `if:` field. */
   def render: String = this match
@@ -29,6 +40,8 @@ enum JobCondition:
       s"github.ref == '${JobCondition.requireLiteral("ref", ref)}'"
     case JobCondition.RefStartsWith(prefix) =>
       s"startsWith(github.ref, '${JobCondition.requireLiteral("ref prefix", prefix)}')"
+    case JobCondition.EventIs(name) =>
+      s"github.event_name == '${JobCondition.requireIdent("event", name)}'"
     case JobCondition.HasPrLabel(label) =>
       s"contains(github.event.pull_request.labels.*.name, '${JobCondition.requireLiteral("label", label)}')"
     case JobCondition.All(clauses) =>
@@ -54,6 +67,15 @@ object JobCondition:
 
   /** `startsWith(github.ref, 'prefix')`. */
   def refStartsWith(prefix: String): JobCondition = RefStartsWith(requireLiteral("ref prefix", prefix))
+
+  /** `github.event_name == 'name'` (e.g. `pull_request`, `workflow_dispatch`). */
+  def eventIs(name: String): JobCondition = EventIs(requireIdent("event", name))
+
+  /** Manual **Actions → Run workflow** (requires `zipxWorkflowDispatch := true`). */
+  def onWorkflowDispatch: JobCondition = eventIs("workflow_dispatch")
+
+  /** Release tag refs (`refs/tags/v…`), same shape as [[Gate.OnReleaseTag]]. */
+  def onReleaseTag: JobCondition = refStartsWith("refs/tags/v")
 
   /** PR has a label with this exact name. */
   def hasPrLabel(label: String): JobCondition = HasPrLabel(requireLiteral("label", label))
