@@ -18,6 +18,7 @@ object BuildSite extends DocsSite:
     CustomCapabilities.doc,
     Verify.doc,
     Caching.doc,
+    RemoteCacheForTeams.doc,
     ActionPinsDoc.doc,
     DependencyUpdates.doc,
     DockerAndDeploy.doc,
@@ -40,7 +41,7 @@ Especially compelling if you have maintained a second copy of the build (disconn
 the power is for every Scala team on Actions, and especially monorepos.
 
 Guide: Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
-Action pins → Dependency updates → Docker and deploy → Job conditions → Packs → Settings.
+Remote cache for teams → Action pins → Dependency updates → Docker and deploy → Job conditions → Packs → Settings.
 """
       ),
       installSnippets = Vector(

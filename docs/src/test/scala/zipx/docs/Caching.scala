@@ -14,7 +14,8 @@ object Caching extends DocSpecSuite:
 sbt 2.x caches task results **across JVM runs** (content-addressed, machine-wide; remote backends also share declared
 outputs). That is why Aggregate stays cheap on a cold CI runner: zipx restores the cache before `sbt test`, keyed by a
 **commit-stable epoch** (`zipxCacheEpoch`, defaulting to `version`), so every push within a PR reuses prior hits.
-Cutting a release tag rolls the epoch. Remote backends make the same story stronger across machines. This pairs with
+Cutting a release tag rolls the epoch. Remote backends make the same story stronger across machines, including
+**developer laptops** when CI hydrates a shared store (see **Remote cache for teams**). This pairs with
 [`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci).
 """,
     section("Backends")(
@@ -29,6 +30,7 @@ zipxCache := CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUD
   job id; restore-keys prefer the same run, then the epoch. No infrastructure.
 - **BazelRemoteSidecar** — `buchgr/bazel-remote` as a job service; shared across the run via Bazel gRPC.
 - **ManagedRemote** — point sbt at BuildBuddy / EngFlow / NativeLink; auth header from a named repository secret.
+  This is the path for **CI-hydrated caches that developers reuse** (see **Remote cache for teams**).
 
 The remote-cache transport is bundled with zipx. For remote backends zipx also sets `Global / cacheVersion` from
 `(JDK, OS)` so heterogeneous runners cannot poison the shared cache.

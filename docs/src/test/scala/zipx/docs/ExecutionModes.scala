@@ -3,7 +3,6 @@ package zipx.docs
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
-import zipx.docs.DocsFixtures.*
 import zio.test.*
 
 /** Aggregate, Layer, and Graph: the main CI-cost lever. */
@@ -17,7 +16,8 @@ sources, and reruns only suites that failed, are new, or transitively depend on 
 another project). Task results are content-addressed and **survive JVM restarts**: sbt's machine-wide cache, plus
 zipx's **epoch-keyed** CI restore (`zipxCacheEpoch`), means a cold runner still hits prior task/test results across
 pushes in the same epoch. Remote cache backends push that reuse across machines. You get a large share of "don't redo
-unaffected work" from **one Aggregate job**, without paying for N runners.
+unaffected work" from **one Aggregate job**, without paying for N runners. Pair that with a CI-hydrated remote cache
+so teammate laptops share the same digests (see **Remote cache for teams**).
 
 Graph mode buys a different kind of selectivity: path-based **affected** gating, per-module `needs`, Scala matrix
 isolation, and independent logs/statuses. Pick Graph when the **workflow** needs those boundaries, not merely to avoid
