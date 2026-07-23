@@ -10,14 +10,15 @@ object QuickStart extends DocSpecSuite:
 
   def doc = page("Quick start")(
     md"""
-The committed workflow is an **artifact of the build**, not a second graph. Add the plugin, generate `ci.yml`, and let
-`zipxWorkflowCheck` fail the PR when someone changes modules without regenerating.
+Describe CI in the build, then generate it. Add the plugin, write `ci.yml` with `zipxWorkflowGenerate`, and let
+`zipxWorkflowCheck` fail the PR when the committed workflow no longer matches the graph. Works for a single Aggregate
+library as well as a monorepo; no hand-rolled module matrices required.
 """,
     section("Install")(
       md"""
 ```scala
 // project/plugins.sbt
-addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "<version>")
+addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "<version>")
 ```
 
 Generate and commit:
@@ -39,7 +40,7 @@ Defaults are **Aggregate**: one root `test` job (`sbt 'test'`) and one publish j
 
 ```scala
 // project/plugins.sbt
-addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "<version>")
+addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "<version>")
 
 // build.sbt
 lazy val lib = project.settings(/* publish settings */)
@@ -92,7 +93,7 @@ Workflows pin GitHub Actions to commit SHAs. To track upstream action releases w
 2. Add Dependabot for `package-ecosystem: github-actions`
 3. On Dependabot PRs run `sbt zipxActionsPull`, or set `zipxDependabotSync := true` for hands-off sync
 
-Staying on jar defaults needs no pin file — just upgrade `zipx-sbt` when pins move.
+Staying on jar defaults needs no pin file — just upgrade `sbt-zipx` when pins move.
 """
     ),
   )

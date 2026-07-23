@@ -31,17 +31,23 @@ object BuildSite extends DocsSite:
     val m = meta
     super.site.copy(
       summaryMarkdown = Some(
-        s"""**zipx** is for teams tired of maintaining a second copy of the build.
-Hand-written GitHub Actions that re-list modules, or a Bazel graph that restates the same edges, both invent drift.
-zipx keeps you on sbt 2: it reads your real `dependsOn` graph, generates Aggregate-first workflows (Layer/Graph when
-you need them), and fails the PR when committed CI drifts.
+        s"""**zipx** generates GitHub Actions from your real sbt graph. Aggregate-first works for libraries *and*
+multi-service monorepos; Layer/Graph when you need waves, per-module isolation, or multi-environment deploys. Typed
+capabilities cover test, Central, GitHub Packages, docker, and deploy so you do not hand-roll YAML module lists.
+Drift fails the PR via `zipxWorkflowCheck`.
+
+Especially compelling if you have maintained a second copy of the build (disconnected CI or a restated Bazel graph);
+the power is for every Scala team on Actions, and especially monorepos.
 
 Guide: Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
 Action pins → Dependency updates → Docker and deploy → Job conditions → Packs → Settings.
 """
       ),
       installSnippets = Vector(
-        ArtifactKind.defaultInstall(m, ArtifactKind.Plugin),
+        {
+          val install = ArtifactKind.defaultInstall(m, ArtifactKind.Plugin)
+          CodeSnippet(install.heading, s"// project/plugins.sbt\n${install.code}")
+        },
         CodeSnippet(
           "Generate & check",
           """sbt zipxWorkflowGenerate
@@ -57,6 +63,12 @@ sbt zipxActionsPull   # after Dependabot bumps workflow uses:""",
       ),
       logo = Some(EarlyEffectTheme.logoHref),
       logoLink = Some("https://www.earlyeffect.rocks/"),
+      brand = Some(
+        Brand(
+          name = m.title.getOrElse("zipx"),
+          links = Vector(EarlyEffectTheme.github("https://github.com/early-effect/zipx")),
+        )
+      ),
     )
   end site
 
@@ -74,13 +86,5 @@ sbt zipxActionsPull   # after Dependabot bumps workflow uses:""",
     )
 
   override def afterBuild(out: Path, result: SiteOutput): Task[Unit] =
-    for
-      _ <- EarlyEffectTheme.writeLogo(out)
-      _ <- ZIO.attempt {
-        val themeCss = out.resolve("assets/theme.css")
-        val extra    = DocTables.contributionBlocks.map(_._2).mkString("\n")
-        val prior    = java.nio.file.Files.readString(themeCss)
-        java.nio.file.Files.writeString(themeCss, prior + "\n/* zipx doc tables (Ascent GlobalStyle) */\n" + extra)
-      }
-    yield ()
+    EarlyEffectTheme.writeLogo(out)
 end BuildSite

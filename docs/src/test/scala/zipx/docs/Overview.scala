@@ -3,7 +3,6 @@ package zipx.docs
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
-import zipx.docs.DocsFixtures.*
 import zipx.workflow.Render
 import zio.test.*
 
@@ -14,24 +13,50 @@ object Overview extends DocSpecSuite:
 
   def doc = page("Overview")(
     md"""
-If your team has been burned by sbt, you are not alone. Slow CI, opaque failures, and “just put it in YAML”
-muscle memory make it rational to look for an exit. Many orgs try Bazel next, hoping hermetic builds and remote
-cache will buy peace. Others keep sbt but **hand-maintain GitHub Actions** that re-list every module, edge, and
-recipe in a second place.
+**zipx** is an [sbt 2](https://www.scala-sbt.org/) plugin (Scala 3) that turns your real `dependsOn` / `.aggregate`
+graph into GitHub Actions CI. Generate the workflow from the build, commit it, and let `zipxWorkflowCheck` keep it
+honest. The graph *is* the CI topology. How aggressively that topology fans out is an explicit **execution mode**
+(Aggregate by default; Layer or Graph when you need waves, per-module isolation, or multi-environment deploys).
 
-Both escapes invent another copy of the build. That second copy is where the pain moves.
+That power is for **everyone** who ships Scala on GitHub Actions: a single-library publish path, a multi-module
+monorepo with several services, Central and GitHub Packages side by side, docker and deploy stages you describe in
+Scala. Modes are how you schedule work; the graph stays the source of truth. You get typed capabilities, commit-stable
+caching, and SHA-pinned actions without hand-rolling YAML module lists.
 
-**zipx** is an [sbt 2](https://www.scala-sbt.org/) plugin (Scala 3) that refuses the second copy. It reads the
-`dependsOn` / `.aggregate` graph you already maintain and **generates** (then **check-verifies**) your GitHub Actions
-workflow. The graph *is* the CI topology. How aggressively that topology fans out is an explicit **execution mode**
-(Aggregate by default for cost; Layer or Graph when you need waves or per-module isolation).
+It is *extra* compelling if you have already paid the tax of a second copy of the build (disconnected CI, or a Bazel
+graph that restates the same edges). zipx does not ask you to flee sbt. It makes the build you already write the
+source of truth for CI.
 """,
-    section("The pain this solves")(
+    section("What you gain")(
       md"""
-### Disconnected CI (YAML that redeclares the build)
+### Monorepos that stay honest
 
-A common monorepo pattern: a hand-maintained workflow (sometimes plus an external config and a small resolver script)
-that lists modules, string commands, and publish steps **again**, separate from `build.sbt`.
+In a multi-module repo, edges already live in `build.sbt`. zipx turns them into jobs, `needs`, publish order, and
+(when you opt into Graph) affected-only PRs. Add a module the way you always do; regenerate; CI tracks the graph
+instead of a hand-maintained matrix.
+
+### Libraries that skip hand-rolled release YAML
+
+Even a small Aggregate library benefits: one root `test` job, a release-gated publish (or `ZipxCentral.release` /
+`ZipxGitHubPackages`), docs Pages when you want them. No separate `release.yml` that drifts from who actually
+`publishes`. Fork gates and job conditions are Scala, not pasted `if:` strings.
+
+### CI as a generated artifact
+
+`zipxWorkflowGenerate` writes `.github/workflows/ci.yml`. `zipxWorkflowCheck` fails the PR when the committed file
+no longer matches the build. Drift becomes a red check, not a surprise on tag day.
+"""
+    ),
+    section("Especially if you have lived the alternatives")(
+      md"""
+Many teams arrive here with scar tissue. Slow or opaque sbt CI made “just put it in YAML” feel rational. Bazel looked
+like peace (hermeticity, remote cache) and delivered a **second graph** in BUILD files while CI still needed hand
+wiring. Others kept sbt but **re-listed** every module and recipe in workflows (sometimes plus an external config and
+resolver script).
+
+Those approaches invent another copy of the build. The wins of zipx are clearest when you recognize that tax.
+
+### Disconnected CI (YAML that redeclares the build)
 
 Sketch of the “before”:
 
@@ -56,7 +81,7 @@ jobs:
       - run: sbt '$${{{ matrix.module }}}/publish'
 ```
 
-What goes wrong, over and over:
+Typical failure modes:
 
 - **Two sources of truth drift**: add, rename, or re-wire a module in sbt; CI silently keeps the old list.
 - **Publish order is not modeled**: the real graph exists only in sbt, so release jobs fan out flat and hope the
@@ -66,10 +91,8 @@ What goes wrong, over and over:
 
 ### Bazel as a second graph
 
-Leaving sbt for Bazel is often well intentioned: clearer caching, hermeticity, a serious remote-build story. The tax
-shows up later. Scala engineers still think in modules and `dependsOn`, but the org now owns **BUILD files, macros,
-and CI glue** that restate the same edges. Graph maintenance becomes the new full-time job; CI is still something you
-wire by hand on top.
+Leaving sbt for Bazel is often well intentioned. The tax shows up later: Scala engineers still think in modules and
+`dependsOn`, but the org owns BUILD files, macros, and CI glue that restate the same edges.
 
 Sketch of the “before” (edges restated outside sbt):
 
@@ -80,11 +103,11 @@ scala_library(name = "api", deps = [":schema"], srcs = [...])
 scala_library(name = "service", deps = [":api"], srcs = [...])
 ```
 
-You did not escape graph pain. You moved it into a language fewer application engineers live in every day, while CI
-still needs its own wiring.
+zipx’s answer is not “Bazel is wrong.” It is that **one graph in sbt is enough** for CI topology when the build already
+knows the truth.
 """
     ),
-    section("Why zipx instead")(
+    section("One graph, generated CI")(
       md"""
 | Approach | When you add a module you… |
 |---|---|
@@ -92,15 +115,14 @@ still needs its own wiring.
 | Bazel second graph | Edit BUILD (and usually CI) |
 | **zipx** | Edit `build.sbt`; run `zipxWorkflowGenerate` / `zipxWorkflowCheck` |
 
-zipx keeps you on sbt 2: the graph your team already writes. Topology (jobs, `needs`, gates, targets, cache keys) is
-**derived**. What to run is still your tasks, expressed as typed **capabilities** in Scala, not another YAML dialect
-for the same edges.
+Topology (jobs, `needs`, gates, targets, cache keys) is **derived**. What to run is still your tasks, expressed as
+typed **capabilities** in Scala: test, Central, GitHub Packages, docker, deploy, or stages you invent.
 
-Fuller sketch of the “after”:
+Fuller sketch:
 
 ```scala
 // project/plugins.sbt
-addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "<version>")
+addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "<version>")
 
 // build.sbt
 lazy val schema  = project.settings(/* … */)
@@ -110,7 +132,7 @@ lazy val service = project.dependsOn(api).enablePlugins(DockerPlugin)
 lazy val root = (project in file("."))
   .aggregate(schema, api, service)
   .settings(
-    // Built-in Aggregate test + publish; paved Central path when you need it:
+    // Built-in Aggregate test + publish; paved Central (and/or Packages) when you need it:
     zipxCapabilities ++= {
       val upstream = JobCondition.repositoryIs("acme/libs")
       Seq(
@@ -145,11 +167,11 @@ From the loaded sbt build, zipx emits:
     section("Default Aggregate shape")(
       md"""
 For a typical library, defaults are enough: Aggregate `test` + `publish`. Optional packs replace the built-in publish
-job with a paved Central release.
+job with a paved Central release (or add GitHub Packages alongside it).
 
 ```scala
 // project/plugins.sbt
-addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "<version>")
+addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "<version>")
 
 // build.sbt
 lazy val lib = project.settings(publishMavenStyle := true)
@@ -177,7 +199,7 @@ Generated Aggregate jobs (live output from the planner):
     ),
     section("Why stay on sbt 2")(
       md"""
-Fleeing sbt was rational on older toolchains. sbt 2 is a different substrate, and zipx is built for it:
+zipx is built for sbt 2 as a capable substrate, not a compromise:
 
 - a machine-wide, content-addressed action cache (what makes Graph fan-out practical when you need it)
 - optional Bazel-**gRPC remote cache** transport (`sbt-remote-cache`, bundled). That is cache plumbing, not “adopt
@@ -185,7 +207,7 @@ Fleeing sbt was rational on older toolchains. sbt 2 is a different substrate, an
 - Scala 3 plugins, so `zipx-core` / `zipx-workflow` are ordinary unit-tested libraries with no sbt on the classpath
 - common settings: a bare `zipxTestTask := "testFull"` applies to every module; any module can override
 
-You keep the ergonomics Scala teams already know. You stop maintaining a second graph for CI.
+You keep the ergonomics Scala teams already know. CI stops being a second language for the same edges.
 """
     ),
     section("Architecture")(
@@ -194,7 +216,7 @@ Three layers:
 
 - **`zipx-workflow`**: GitHub Actions AST + deterministic YAML printer
 - **`zipx-core`**: pure planner (`ModuleGraph` → `Workflow`)
-- **`zipx-sbt`**: AutoPlugin; the only layer that touches `sbt.*`
+- **`sbt-zipx`**: AutoPlugin; the only layer that touches `sbt.*`
 
 The plugin owns topology. The build owns *what* to run (capabilities).
 """

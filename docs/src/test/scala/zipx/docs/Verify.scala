@@ -35,7 +35,10 @@ zipxVerifyClean := VerifyClean.CleanFull // None (default) | Clean | CleanFull
     section("Affected-only PRs (Graph only)")(
       md"""
 `zipxAffectedOnPR` (default `true`) emits an `affected` setup job only when a **Graph** Verify capability is present.
-Aggregate and Layer always run their full stage command.
+Aggregate and Layer always invoke their full stage command (they do not skip GitHub jobs). That is not the same as
+"always recompile and retest everything": sbt 2's incremental `test` and cross-run task cache (restored by zipx at the
+epoch, or via remote cache) still skip unaffected work, even on a cold JVM. See **Execution modes** ("Two kinds of
+affected").
 
 ```scala
 zipxAffectedOnPR := true   // default with Graph Verify

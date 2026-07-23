@@ -75,7 +75,7 @@ If `zipxDependabotSync := true`, also commit `.github/workflows/zipx-action-pins
       md"""
 | Goal | What to do |
 |---|---|
-| Stay on zipx release defaults | No pin file; upgrade `zipx-sbt` when we bump pins |
+| Stay on zipx release defaults | No pin file; upgrade `sbt-zipx` when we bump pins |
 | Track actions with low friction | Commit `.github/zipx/action-pins.yml`; enable Dependabot; run `sbt zipxActionsPull` on bump PRs |
 | Fully hands-off | `zipxDependabotSync := true` (generates the sync workflow) + Dependabot |
 | One-off exotic pin | `zipxActions := ActionPins.Defaults.copy(...)` in `build.sbt` |

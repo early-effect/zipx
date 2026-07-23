@@ -50,7 +50,7 @@ lazy val metaPlugin = project
   .enablePlugins(SbtPlugin)
   .dependsOn(metaCore, metaCentral)
   .settings(
-    name           := "meta-zipx-sbt",
+    name           := "meta-sbt-zipx",
     publish / skip := true,
     scalacOptions ++= Dependencies.commonScalacOptions,
     addSbtPlugin(Dependencies.remoteCachePlugin),
