@@ -58,7 +58,37 @@ object JobConditionSpec extends ZIOSpecDefault:
           (a && b).render == JobCondition.and(a, b).render,
           (b || c).render == JobCondition.or(b, c).render,
           (!a).render == JobCondition.not(a).render,
-          (JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch && a).render.contains("||"),
+        )
+      },
+      test("infix && binds tighter than || (Boolean precedence)") {
+        val a = JobCondition.repositoryIs("a/b")
+        val b = JobCondition.onWorkflowDispatch
+        val c = JobCondition.onReleaseTag
+        // a || b && c ≡ a || (b && c), not (a || b) && c
+        assertTrue(
+          (a || b && c) == (a || (b && c)),
+          (a || b && c) != ((a || b) && c),
+          (a || b && c) == JobCondition.or(a, JobCondition.and(b, c)),
+        )
+      },
+      test("infix && and || are left-associative") {
+        val a = JobCondition.repositoryIs("a/b")
+        val b = JobCondition.onWorkflowDispatch
+        val c = JobCondition.onReleaseTag
+        assertTrue(
+          (a && b && c) == ((a && b) && c),
+          (a && b && c) == JobCondition.and(JobCondition.and(a, b), c),
+          (a || b || c) == ((a || b) || c),
+          (a || b || c) == JobCondition.or(JobCondition.or(a, b), c),
+        )
+      },
+      test("prefix ! binds tighter than && / ||") {
+        val a = JobCondition.repositoryIs("a/b")
+        val b = JobCondition.onWorkflowDispatch
+        assertTrue(
+          (!a && b) == ((!a) && b),
+          (!a || b) == ((!a) || b),
+          (!a && b) == JobCondition.and(JobCondition.not(a), b),
         )
       },
       test("Not wraps inner") {

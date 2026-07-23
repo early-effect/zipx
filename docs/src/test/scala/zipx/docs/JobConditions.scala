@@ -36,8 +36,9 @@ val upstreamOnly =
 val notFork = !JobCondition.repositoryIs("acme/other")
 ```
 
-`JobCondition.and` / `or` / `not` remain available; infix `&&` / `||` / `!` are the usual style. Typed leaves also
-include `eventIs`, `onWorkflowDispatch`, and `onReleaseTag`.
+`JobCondition.and` / `or` / `not` remain available; infix `&&` / `||` / `!` are the usual style. Precedence matches
+Boolean ops: `&&` binds tighter than `||` (`a || b && c` ≡ `a || (b && c)`); both are left-associative. Parenthesize
+when you mean `(a || b) && c`. Typed leaves also include `eventIs`, `onWorkflowDispatch`, and `onReleaseTag`.
 """,
       exampleValue {
         val c = (JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch) &&

@@ -6,8 +6,9 @@ package zipx.core
   * the job `if` (fork repo, PR label, branch, repo var, …). Both [[Capability.condition]] and [[Target.condition]] use
   * this AST; the planner renders and ANDs them with gate / affected clauses.
   *
-  * Compose with [[&&]] / [[||]] (or [[JobCondition.and]] / [[JobCondition.or]]). [[Raw]] is the escape hatch for
-  * expressions the variants cannot express.
+  * Compose with [[&&]] / [[||]] (or [[JobCondition.and]] / [[JobCondition.or]]). Infix `&&` / `||` follow Boolean
+  * precedence (`&&` tighter than `||`, both left-associative). [[Raw]] is the escape hatch for expressions the variants
+  * cannot express.
   */
 enum JobCondition:
   case RepositoryIs(repo: String)
@@ -21,13 +22,20 @@ enum JobCondition:
   case Not(inner: JobCondition)
   case Raw(expression: String)
 
-  /** Conjunction with `other` (renders as `(this) && (other)`). */
+  /** Conjunction with `other` (renders as `(this) && (other)`).
+    *
+    * Infix precedence matches Boolean ops: `&&` binds tighter than `||`, both left-associative
+    * (`a || b && c` ≡ `a || (b && c)`; `a && b && c` ≡ `(a && b) && c`).
+    */
   infix def &&(other: JobCondition): JobCondition = JobCondition.and(this, other)
 
-  /** Disjunction with `other` (renders as `(this) || (other)`). */
+  /** Disjunction with `other` (renders as `(this) || (other)`).
+    *
+    * Lower precedence than [[&&]] (same as Boolean `||` vs `&&`). Parenthesize when you mean `(a || b) && c`.
+    */
   infix def ||(other: JobCondition): JobCondition = JobCondition.or(this, other)
 
-  /** Negation (renders as `!(this)`). */
+  /** Negation (renders as `!(this)`). Prefix `!` binds tighter than [[&&]] / [[||]]. */
   def unary_! : JobCondition = JobCondition.not(this)
 
   /** Render to the string that lands in a job's `if:` field. */

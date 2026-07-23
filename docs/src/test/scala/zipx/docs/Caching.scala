@@ -27,7 +27,9 @@ zipxCache := CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUD
 ```
 
 - **LocalDir** — persist local cache dirs and `target/` with `actions/cache`. Primary key is OS + JDK + epoch + run id +
-  job id; restore-keys prefer the same run, then the epoch. No infrastructure.
+  job id; restore-keys prefer the same run, then the epoch, then (for dynver-ci style `*-ci` / `*-SNAPSHOT` epochs) the
+  prior release epoch so the first post-tag PR can warm from the tag build, then any older OS+JDK sbt cache. No
+  infrastructure.
 - **BazelRemoteSidecar** — `buchgr/bazel-remote` as a job service; shared across the run via Bazel gRPC.
 - **ManagedRemote** — point sbt at BuildBuddy / EngFlow / NativeLink; auth header from a named repository secret.
   This is the path for **CI-hydrated caches that developers reuse** (see **Remote cache for teams**).
