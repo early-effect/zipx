@@ -67,6 +67,8 @@ object ZipxPlugin extends AutoPlugin:
         zipx.specular.ZipxDocs.pages(sbtProject, javaVersion)
       def ReusableWorkflow = zipx.specular.ZipxDocs.ReusableWorkflow
       def pagesPermissions = zipx.specular.ZipxDocs.pagesPermissions
+      def deployWhen       = zipx.specular.ZipxDocs.deployWhen
+    end ZipxDocs
     // GitHub Packages paved path (token env + packages: write; sbt owns publishTo).
     object ZipxGitHubPackages:
       def sameRepo(

@@ -22,6 +22,13 @@ object JobConditionSpec extends ZIOSpecDefault:
           JobCondition.refStartsWith("refs/tags/v").render == "startsWith(github.ref, 'refs/tags/v')"
         )
       },
+      test("EventIs / onWorkflowDispatch / onReleaseTag") {
+        assertTrue(
+          JobCondition.eventIs("workflow_dispatch").render == "github.event_name == 'workflow_dispatch'",
+          JobCondition.onWorkflowDispatch.render == "github.event_name == 'workflow_dispatch'",
+          JobCondition.onReleaseTag.render == "startsWith(github.ref, 'refs/tags/v')",
+        )
+      },
       test("HasPrLabel") {
         assertTrue(
           JobCondition
@@ -41,6 +48,17 @@ object JobConditionSpec extends ZIOSpecDefault:
         val c = JobCondition.or(JobCondition.refIs("refs/heads/main"), JobCondition.refStartsWith("refs/tags/v"))
         assertTrue(
           c.render == "(github.ref == 'refs/heads/main') || (startsWith(github.ref, 'refs/tags/v'))"
+        )
+      },
+      test("infix && / || / unary_! match and/or/not") {
+        val a = JobCondition.repositoryIs("a/b")
+        val b = JobCondition.onWorkflowDispatch
+        val c = JobCondition.onReleaseTag
+        assertTrue(
+          (a && b).render == JobCondition.and(a, b).render,
+          (b || c).render == JobCondition.or(b, c).render,
+          (!a).render == JobCondition.not(a).render,
+          (JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch && a).render.contains("||"),
         )
       },
       test("Not wraps inner") {

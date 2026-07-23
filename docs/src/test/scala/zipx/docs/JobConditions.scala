@@ -20,9 +20,37 @@ object JobConditions extends DocSpecSuite:
 [[Gate]] is still the timeline (`Always` vs `OnReleaseTag`). The planner **ANDs** Gate clauses with capability and
 target conditions.
 
-Default on every capability and target: `condition = None` (no extra filter). Prefer `withCondition(...)` on
-built-ins and pack vals.
+Default on every capability and target: `condition = None` (no extra filter). Prefer `withCondition(...)` to set a
+filter, or `andCondition(...)` to layer onto a pack that already ships one (e.g. `ZipxDocs.pages`).
 """,
+    section("Compose with && and ||")(
+      md"""
+```scala
+val deployDocs =
+  JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch
+
+val upstreamOnly =
+  JobCondition.repositoryIs("acme/libs") && deployDocs
+
+// Negation:
+val notFork = !JobCondition.repositoryIs("acme/other")
+```
+
+`JobCondition.and` / `or` / `not` remain available; infix `&&` / `||` / `!` are the usual style. Typed leaves also
+include `eventIs`, `onWorkflowDispatch`, and `onReleaseTag`.
+""",
+      exampleValue {
+        val c = (JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch) &&
+          JobCondition.repositoryIs("early-effect/zipx")
+        Render.renderMapping(ListMap("if" -> c.render))
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("workflow_dispatch"),
+          yaml.contains("refs/tags/v"),
+          yaml.contains("early-effect/zipx"),
+        )
+      ),
+    ),
     section("Defaults and Gate vs condition")(
       md"""
 | Capability | Default `Gate` | Default `JobCondition` |
@@ -30,6 +58,7 @@ built-ins and pack vals.
 | test / testJoined / Layers / Graph | `Always` | `None` |
 | publish / docker / deploy | `OnReleaseTag` | `None` |
 | ZipxCentral / ZipxGitHubPackages | `OnReleaseTag` | `None` (unless you pass one) |
+| ZipxDocs.pages | `Always` | `onReleaseTag` or `onWorkflowDispatch` |
 
 **Important:** Gate and JobCondition are ANDed. A capability with `Gate.OnReleaseTag` will **not** run on a PR even if
 a Target has `HasPrLabel`. For stage-on-PR + prod-on-tag, use `Gate.Always` with per-Target conditions, or two
@@ -261,10 +290,10 @@ Target(
     section("Raw escape hatch")(
       md"""
 ```scala
-JobCondition.raw("(github.event_name == 'workflow_dispatch')")
+JobCondition.raw("always()")
 ```
 
-Prefer typed leaves when possible; `Raw` is for expressions the AST does not cover yet.
+Prefer typed leaves and `&&` / `||` when possible; `Raw` is for expressions the AST does not cover yet.
 """,
       exampleValue {
         Render.renderMapping(ListMap("if" -> JobCondition.raw("always()").render))

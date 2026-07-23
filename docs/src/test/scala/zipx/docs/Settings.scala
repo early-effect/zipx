@@ -50,13 +50,13 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
       md"""
 `Capability` fields: `name`, `phase`, `ordering`, `gate`, `participates`, `command`, `matrixed`, `targets`,
 `needsCapabilities`, `permissions`, `runsOn`, `extraSteps`, `scope` (`Aggregate` / `Layer` / `Graph` / `Once`),
-`env`, `workflowCall`, `condition` (`Option[JobCondition]`, default `None`; prefer `withCondition(...)` on
-built-ins).
+`env`, `workflowCall`, `condition` (`Option[JobCondition]`, default `None`; prefer `withCondition(...)` to set, or
+`andCondition(...)` to layer onto packs that already ship a condition). Compose with `JobCondition` `&&` / `||` / `!`.
 
 Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Layers`, `.*Graph`, `.deploy` /
 `.deployGraph`, `.custom`, `.once`. Packs: `ZipxCentral.*`, `ZipxGitHubPackages.*`, `ZipxDocs.pages`. A `Target` is
 `(name, environment, env, condition)` with typed `EnvValue`s and `JobCondition`. Job env merge: cache → capability →
-target. See **Job conditions** for recipes (fork gate, PR-label stage ECR, multi-publish).
+target. See **Job conditions** for recipes (fork gate, PR-label stage ECR, multi-publish, docs on dispatch).
 """
     ),
     section("Tasks")(

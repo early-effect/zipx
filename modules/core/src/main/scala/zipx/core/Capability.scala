@@ -139,6 +139,12 @@ final case class Capability(
   /** Set or clear the optional job `if` filter. */
   def withCondition(condition: Option[JobCondition]): Capability =
     copy(condition = condition)
+
+  /** AND `extra` onto any existing [[condition]] (or set it when none). Prefer this when layering filters on a pack
+    * that already ships a condition (e.g. [[zipx.specular.ZipxDocs.pages]]).
+    */
+  def andCondition(extra: JobCondition): Capability =
+    copy(condition = Some(condition.fold(extra)(_ && extra)))
 end Capability
 
 object Capability:

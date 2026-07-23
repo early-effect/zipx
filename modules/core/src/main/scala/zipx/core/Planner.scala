@@ -159,8 +159,10 @@ object Planner:
       ),
     )
 
-  /** Wire Verify jobs: never run on tag pushes (release tags only need Publish/Deploy). When [[usesVerifyGate]], also
-    * need the gate and run when it was skipped/failed or outputs run=true (fail-open for PRs / API errors).
+  /** Wire Verify jobs: never run on tag pushes (release tags only need Publish/Deploy) or on `workflow_dispatch`
+    * (manual runs are for docs-only deploys when [[zipx.specular.ZipxDocs.pages]] is enabled). When
+    * [[usesVerifyGate]], also need the gate and run when it was skipped/failed or outputs run=true (fail-open for PRs
+    * / API errors).
     */
   private def applyVerifyGate(
       needs: List[String],
@@ -170,12 +172,13 @@ object Planner:
   ): (List[String], Option[String]) =
     if phase != Phase.Verify then (needs, cond)
     else
-      val notOnTag = "!startsWith(github.ref, 'refs/tags/')"
-      if !usesVerifyGate then (needs, andConditions(Some(notOnTag), cond))
+      val notOnTagOrDispatch =
+        "!startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch'"
+      if !usesVerifyGate then (needs, andConditions(Some(notOnTagOrDispatch), cond))
       else
         val gatedNeeds = (verifyGateJobId :: needs).distinct.sorted
         val gateCond   =
-          s"!cancelled() && $notOnTag && ((needs.$verifyGateJobId.result != 'success') || (needs.$verifyGateJobId.outputs.run == 'true'))"
+          s"!cancelled() && $notOnTagOrDispatch && ((needs.$verifyGateJobId.result != 'success') || (needs.$verifyGateJobId.outputs.run == 'true'))"
         (gatedNeeds, andConditions(Some(gateCond), cond))
 
   private def affectedSetupJob(config: PlanConfig, usesVerifyGate: Boolean): Job =
