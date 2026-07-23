@@ -16,32 +16,60 @@ object CustomCapabilities extends DocSpecSuite:
   def doc = page("Custom capabilities")(
     md"""
 `zipxCapabilities` is append-able — any sbt task becomes a CI stage. Beyond the built-ins you mainly use
-`Capability.once` and `Capability.custom`.
+`Capability.once` / `Capability.custom`, or the typed `zipxTasks` / `cmd` helpers from the plugin.
 """,
     section("Once gates")(
       md"""
 `Capability.once` emits a **single build-wide job** (not per module), e.g. format/lint that every test job waits on:
-""",
-      exampleValue {
-        val fmt  = Capability.once("fmt", "scalafmtCheckAll")
-        val test = Capability.test.copy(needsCapabilities = List("fmt"))
-        val wf   = Planner.plan(libGraph, List(fmt, test), config)
-        (wf.jobs.contains("fmt"), wf.jobs("test").needs)
-      }.assert { case (hasFmt, needs) =>
-        assertTrue(hasFmt, needs.contains("fmt"))
-      },
-      md"""
+
 ```scala
-zipxCapabilities += Capability.once("fmt", "scalafmtCheckAll")
+zipxCapabilities += zipxTasks.once("fmt", scalafmtCheckAll)
 zipxCapabilities += Capability.test.copy(needsCapabilities = List("fmt"))
-// or: Capability.testGraph.copy(needsCapabilities = List("fmt"))
+// or Layers: Capability.testLayers.copy(needsCapabilities = List("fmt"))
 ```
 """,
+      exampleValue {
+        DocsRender.jobs("fmt", "test")(
+          Capability.once("fmt", "scalafmtCheckAll"),
+          Capability.test.copy(needsCapabilities = List("fmt")),
+        )
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("fmt:"),
+          yaml.contains("scalafmtCheckAll"),
+          yaml.contains("test:"),
+          yaml.contains("- fmt"),
+        )
+      ),
     ),
     section("Custom stages (Graph by default)")(
       md"""
 `Capability.custom` exposes all topology knobs and defaults to **Graph** so target fan-out matches multi-registry
 examples. Same `name` as a built-in **replaces** it.
+
+```scala
+zipxCapabilities += Capability
+  .custom(
+    name = "docker",
+    command = cmd"$${Docker / publish}",
+    participates = _.docker,
+    phase = Phase.Publish,
+    targets = _ => List(
+      Target("us", env = Map("REGISTRY" -> EnvValue.plain("us.example"), "DEPLOY_ROLE" -> secret"US_ROLE")),
+      Target("eu", env = Map("REGISTRY" -> EnvValue.plain("eu.example"), "DEPLOY_ROLE" -> secret"EU_ROLE")),
+    ),
+    permissions = Map("id-token" -> "write", "contents" -> "read"),
+  )
+  .copy(
+    extraSteps = _ => List(
+      Step(
+        name = Some("Login"),
+        uses = Some("aws-actions/configure-aws-credentials@v6"),
+        `with` = Map("role-to-assume" -> "$${{ env.DEPLOY_ROLE }}"),
+      )
+    )
+  )
+```
 """,
       exampleValue {
         val docker = Capability
@@ -67,19 +95,15 @@ examples. Same `name` as a built-in **replaces** it.
                 )
               )
           )
-        val wf = Planner.plan(libGraph, List(docker), config)
-        (
-          wf.jobs.keys.filter(_.startsWith("docker-")).toList.sorted,
-          wf.jobs("docker-service-us").env.get("DEPLOY_ROLE"),
-          wf.jobs("docker-service-us").steps.exists(_.name.contains("Login")),
-        )
-      }.assert { case (ids, role, hasLogin) =>
+        DocsRender.jobs("docker-service-us", "docker-service-eu")(docker)
+      }.assert(yaml =>
         assertTrue(
-          ids == List("docker-service-eu", "docker-service-us"),
-          role.contains("${{ secrets.US_ROLE }}"),
-          hasLogin,
+          yaml.contains("docker-service-us:"),
+          yaml.contains("docker-service-eu:"),
+          yaml.contains("DEPLOY_ROLE: ${{ secrets.US_ROLE }}"),
+          yaml.contains("Login"),
         )
-      },
+      ),
       md"""
 Also override `runsOn = Some(List("self-hosted", "linux"))` and `permissions` — the same knobs built-ins use.
 """,

@@ -22,34 +22,34 @@ zipxVerifyClean := VerifyClean.CleanFull // None (default) | Clean | CleanFull
 ```
 """,
       exampleValue {
-        val cleanCfg = config.copy(verifyClean = VerifyClean.CleanFull)
-        val agg      = Planner.plan(libGraph, List(Capability.test), cleanCfg)
-        val graph    = Planner.plan(libGraph, List(Capability.testGraph), cleanCfg)
-        (
-          agg.jobs("test").steps.last.run,
-          graph.jobs("test-schema").steps.last.run,
-        )
-      }.assert { case (aggRun, graphRun) =>
+        given PlanConfig = config.copy(verifyClean = VerifyClean.CleanFull)
+        DocsRender.jobs("test")(Capability.test) + "\n---\n" +
+          DocsRender.job("test-schema")(Capability.testGraph)
+      }.assert(yaml =>
         assertTrue(
-          aggRun.exists(_.contains("cleanFull; test")),
-          graphRun.exists(_.contains("cleanFull; schema/test")),
+          yaml.contains("cleanFull; test"),
+          yaml.contains("cleanFull; schema/test"),
         )
-      },
+      ),
     ),
     section("Affected-only PRs (Graph only)")(
       md"""
 `zipxAffectedOnPR` (default `true`) emits an `affected` setup job only when a **Graph** Verify capability is present.
 Aggregate and Layer always run their full stage command.
+
+```scala
+zipxAffectedOnPR := true   // default with Graph Verify
+```
 """,
       exampleValue {
-        val on = config.copy(affected = AffectedMode.AffectedOnPR)
-        (
-          Planner.plan(libGraph, List(Capability.test), on).jobs.contains("affected"),
-          Planner.plan(libGraph, List(Capability.testGraph), on).jobs.contains("affected"),
+        given PlanConfig = config.copy(affected = AffectedMode.AffectedOnPR)
+        DocsRender.body(Capability.test) + "\n---\n" + DocsRender.body(Capability.testGraph)
+      }.assert(yaml =>
+        assertTrue(
+          !yaml.split("---")(0).contains("affected:"),
+          yaml.split("---")(1).contains("affected:"),
         )
-      }.assert { case (aggHas, graphHas) =>
-        assertTrue(!aggHas, graphHas)
-      },
+      ),
       md"""
 Changed files → owning module (longest base-dir prefix) → reverse-dependency closure. A `.sbt` change or anything under
 `project/` forces a full build. On push/tag everything builds unless `zipxAffectedOnPush` is enabled.
@@ -59,16 +59,20 @@ Changed files → owning module (longest base-dir prefix) → reverse-dependency
       md"""
 By default (`zipxSkipMergedPrPush := true`), a push to `main` that lands a merged PR does **not** re-run Verify.
 Direct pushes still Verify. **Tag pushes never run Verify** (release tags only need Publish / Deploy).
+
+```scala
+zipxSkipMergedPrPush := true  // default
+```
 """,
       exampleValue {
-        val wf = Planner.plan(libGraph, List(Capability.test), config.copy(skipMergedPrPush = true))
-        (
-          wf.jobs.contains("verify-gate"),
-          wf.jobs("test").`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
+        given PlanConfig = config.copy(skipMergedPrPush = true)
+        DocsRender.jobs("verify-gate", "test")(Capability.test)
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("verify-gate:"),
+          yaml.contains("!startsWith(github.ref, 'refs/tags/')"),
         )
-      }.assert { case (gate, skipTags) =>
-        assertTrue(gate, skipTags)
-      },
+      ),
     ),
   )
 end Verify

@@ -128,7 +128,7 @@ zipxCapabilities += zipxTasks
             "DEPLOY_ROLE" -> secret"${e.roleSecret}",
             "TIER"        -> EnvValue.plain(e.tier),
           ),
-          condition = Some("github.ref == 'refs/heads/main'"),
+          condition = Some(JobCondition.refIs("refs/heads/main")),
         )
       ),
     needsCapabilities = List("docker"), // deploy waits on the (multi-registry) image publish
