@@ -78,7 +78,7 @@ Selectable via `zipxCache`:
 - **`BazelRemoteSidecar(image, port)`** — emits a `services:` block running `buchgr/bazel-remote` (gRPC) plus `env ZIPX_REMOTE_CACHE=grpc://localhost:<port>`. Verified rendering the nested `services:` mapping end-to-end.
 - **`ManagedRemote(uri, headerSecret)`** — no sidecar; sets `ZIPX_REMOTE_CACHE` + `ZIPX_REMOTE_CACHE_HEADER` (from a repo secret) for a managed gRPC backend (BuildBuddy/EngFlow/NativeLink).
 
-The plugin reads those env vars at load and wires `Global / remoteCache` + `remoteCacheHeaders` + `Global / cacheVersion` (inert when unset). The transport is bundled (zipx-sbt depends on `sbt-remote-cache`), and `cacheVersion` folds JDK+OS to keep heterogeneous remote pools sound — see the follow-ups section above.
+The plugin reads those env vars at load and wires `Global / remoteCache` + `remoteCacheHeaders` + `Global / cacheVersion` (inert when unset). The transport is bundled (sbt-zipx depends on `sbt-remote-cache`), and `cacheVersion` folds JDK+OS to keep heterogeneous remote pools sound — see the follow-ups section above.
 
 ### M6 — Environments, approval gates & multi-target deploys ✅
 
@@ -283,7 +283,7 @@ Generated CI owns GPG import + `publishSigned; sonaRelease` (Aggregate) or Graph
 ## Post-milestone follow-ups (all done)
 
 - **Remote-cache correctness (`cacheVersion`).** For remote backends, `Global / cacheVersion` = a stable FNV-1a hash of `(jdkMajor, os)` — the axes sbt does NOT auto-hash — so a heterogeneous runner pool can't poison the shared cache. The commit epoch is excluded (cross-epoch reuse is the point of a persistent remote cache); the epoch still keys the local `actions/cache`.
-- **Remote-cache transport is bundled.** `zipx-sbt` depends on `org.scala-sbt:sbt-remote-cache`, whose `RemoteCachePlugin` triggers on AllRequirements — so consumers need no extra `addSbtPlugin` line. It's a no-op until `Global / remoteCache` is set (only when the CI job exports `ZIPX_REMOTE_CACHE`), so local builds are unaffected. (Required a `libraryDependencySchemes += "org.scala-sbt" % "compiler-interface" % "always"` to silence a false eviction between the sbt-2.x and zinc-1.x versioning of `compiler-interface`.)
+- **Remote-cache transport is bundled.** `sbt-zipx` depends on `org.scala-sbt:sbt-remote-cache`, whose `RemoteCachePlugin` triggers on AllRequirements — so consumers need no extra `addSbtPlugin` line. It's a no-op until `Global / remoteCache` is set (only when the CI job exports `ZIPX_REMOTE_CACHE`), so local builds are unaffected. (Required a `libraryDependencySchemes += "org.scala-sbt" % "compiler-interface" % "always"` to silence a false eviction between the sbt-2.x and zinc-1.x versioning of `compiler-interface`.)
 - **`zipxPublishOrder` task** prints the contracted publish layers (`ModuleGraph.subsetLayers(_.publishes)`), e.g. `L0: models / L1: coreLib / L2: client`.
 - **Opt-in push-time affected (`zipxAffectedOnPush`, default false).** When on, pushes also restrict to affected modules by diffing the push `before` sha, guarded against force-push / branch-create (all-zero sha → build everything). Default remains: PRs are affected-scoped, pushes/tags build all.
 

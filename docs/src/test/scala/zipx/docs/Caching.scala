@@ -11,9 +11,10 @@ object Caching extends DocSpecSuite:
 
   def doc = page("Caching")(
     md"""
-sbt 2.x has a machine-wide, content-addressed build cache. zipx persists it in CI. The cache key uses a
-**commit-stable epoch** (`zipxCacheEpoch`, defaulting to `version`) so every push within a PR reuses the cache.
-Cutting a release tag rolls the epoch. This pairs with
+sbt 2.x caches task results **across JVM runs** (content-addressed, machine-wide; remote backends also share declared
+outputs). That is why Aggregate stays cheap on a cold CI runner: zipx restores the cache before `sbt test`, keyed by a
+**commit-stable epoch** (`zipxCacheEpoch`, defaulting to `version`), so every push within a PR reuses prior hits.
+Cutting a release tag rolls the epoch. Remote backends make the same story stronger across machines. This pairs with
 [`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci).
 """,
     section("Backends")(
@@ -33,12 +34,12 @@ The remote-cache transport is bundled with zipx. For remote backends zipx also s
 `(JDK, OS)` so heterogeneous runners cannot poison the shared cache.
 """,
       exampleValue {
-        val local = DocsRender.job("test")(Capability.test)(
-          using libGraph,
+        val local = DocsRender.job("test")(Capability.test)(using
+          libGraph,
           config.copy(cache = CacheBackend.LocalDir),
         )
-        val remote = DocsRender.job("test")(Capability.test)(
-          using libGraph,
+        val remote = DocsRender.job("test")(Capability.test)(using
+          libGraph,
           config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")),
         )
         local + "\n---\n" + remote

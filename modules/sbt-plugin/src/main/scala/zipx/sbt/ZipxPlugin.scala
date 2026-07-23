@@ -203,7 +203,7 @@ object ZipxPlugin extends AutoPlugin:
   /** Wires sbt's remote cache from the environment the generated workflow sets up (`ZIPX_REMOTE_CACHE`,
     * `ZIPX_REMOTE_CACHE_HEADER`). Inert when the env is unset (local dev / LocalDir backend).
     *
-    * The gRPC transport (`sbt.plugins.RemoteCachePlugin`) is bundled transitively via zipx-sbt's dependency on
+    * The gRPC transport (`sbt.plugins.RemoteCachePlugin`) is bundled transitively via sbt-zipx's dependency on
     * `sbt-remote-cache`, and triggers on AllRequirements — but its store is a no-op until `Global / remoteCache` is
     * `Some`, which only happens here when the CI job sets `ZIPX_REMOTE_CACHE`. So local builds are unaffected.
     */

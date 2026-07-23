@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/early-effect/zipx/actions/workflows/ci.yml/badge.svg)](https://github.com/early-effect/zipx/actions/workflows/ci.yml)
 [![Docs](https://img.shields.io/badge/docs-earlyeffect.rocks-blue)](https://www.earlyeffect.rocks/zipx/)
-[![Maven Central](https://img.shields.io/maven-central/v/rocks.earlyeffect/zipx-sbt_sbt2_3?logo=apachemaven)](https://central.sonatype.com/artifact/rocks.earlyeffect/zipx-sbt_sbt2_3)
+[![Maven Central](https://img.shields.io/maven-central/v/rocks.earlyeffect/sbt-zipx_sbt2_3?logo=apachemaven)](https://central.sonatype.com/artifact/rocks.earlyeffect/sbt-zipx_sbt2_3)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 **The build describes its own CI.** zipx is an sbt 2.x plugin (Scala 3) that generates a GitHub Actions workflow directly from your sbt build graph — no hand-maintained YAML, no module list to keep in sync, no per-module command strings to copy-paste.
@@ -22,7 +22,7 @@ You declare modules and `dependsOn` once in `build.sbt`. zipx introspects that g
 
 ```scala
 // project/plugins.sbt
-addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "<version>")
+addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "<version>")
 ```
 
 ```

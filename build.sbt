@@ -104,7 +104,7 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
   .enablePlugins(SbtPlugin)
   .dependsOn(core, central)
   .settings(
-    name        := "zipx-sbt",
+    name        := "sbt-zipx",
     description := "sbt 2 AutoPlugin: the build describes its own GitHub Actions CI",
     scalacOptions ++= commonScalacOptions,
     publishMavenStyle    := true,
@@ -118,6 +118,9 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
   )
 
 // Docs-as-tests site (Specular + early-effect theme). Deployed via ZipxDocs.pages in generated CI.
+lazy val specularPreview =
+  taskKey[Unit]("Build specularSite then serve with sbt-reload (prefer alias: docsPreview)")
+
 lazy val docs = project
   .in(file("docs"))
   .dependsOn(core, central)
@@ -134,11 +137,30 @@ lazy val docs = project
       "rocks.earlyeffect" %% "early-effect-docs-theme" % specularVersion % Test,
     ) ++ zioDeps,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
-    Test / mainClass      := Some("specular.site.DocsServe"),
+    Test / mainClass       := Some("specular.site.DocsServe"),
+    Test / run / mainClass := (Test / mainClass).value,
+    Test / runReloadArgs   := Seq(specularPort.value.toString),
+    // runReload forks with the docs project as cwd, so relative target/site would miss the
+    // repo-root site written by specularSite. Point DocsServe at specularSiteDirectory.
+    Test / run / javaOptions ++= {
+      val dir = specularSiteDirectory.value.getAbsolutePath
+      Seq(
+        "--sun-misc-unsafe-memory-access=allow",
+        "--enable-native-access=ALL-UNNAMED",
+        s"-Dspecular.site.dir=$dir",
+        s"-Dspecular.site.port=${specularPort.value}",
+      )
+    },
     specularBuildMain     := "zipx.docs.BuildSite",
     specularMetaProject   := Some(LocalProject("plugin")),
     specularArtifactKind  := "plugin",
     specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
+    // Rebuild site then (re)start DocsServe; use alias docsPreview for continuous watch.
+    specularPreview := Def.uncached {
+      specularSite.value
+      (Test / runReload).value
+    },
   )
 
+addCommandAlias("docsPreview", "~docs/specularPreview")
 addCommandAlias("release", "; publishSigned; sonaRelease")
