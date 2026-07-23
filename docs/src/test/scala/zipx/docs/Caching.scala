@@ -33,19 +33,22 @@ The remote-cache transport is bundled with zipx. For remote backends zipx also s
 `(JDK, OS)` so heterogeneous runners cannot poison the shared cache.
 """,
       exampleValue {
-        val local  = Planner.plan(libGraph, List(Capability.test), config.copy(cache = CacheBackend.LocalDir))
-        val remote = Planner.plan(
-          libGraph,
-          List(Capability.test),
+        val local = DocsRender.job("test")(Capability.test)(
+          using libGraph,
+          config.copy(cache = CacheBackend.LocalDir),
+        )
+        val remote = DocsRender.job("test")(Capability.test)(
+          using libGraph,
           config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")),
         )
-        (
-          local.jobs("test").steps.exists(_.uses.exists(_.contains("actions/cache"))),
-          remote.jobs("test").env.get("ZIPX_REMOTE_CACHE"),
+        local + "\n---\n" + remote
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("actions/cache"),
+          yaml.contains("ZIPX_REMOTE_CACHE: grpcs://cache.example") ||
+            yaml.contains("ZIPX_REMOTE_CACHE: \"grpcs://cache.example\""),
         )
-      }.assert { case (hasCacheAction, remoteUri) =>
-        assertTrue(hasCacheAction, remoteUri.contains("grpcs://cache.example"))
-      },
+      ),
     ),
     section("Action pins")(
       md"""

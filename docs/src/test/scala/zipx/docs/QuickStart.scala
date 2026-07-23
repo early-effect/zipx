@@ -2,7 +2,7 @@ package zipx.docs
 
 import specular.*
 import specular.ziotest.DocSpecSuite
-import zipx.core.{Capability, ModuleGraph, ModuleNode, Planner}
+import zipx.core.*
 import zio.test.*
 
 /** Install and generate. */
@@ -36,19 +36,35 @@ Inspect what zipx sees: `sbt zipxGraph` and `sbt zipxPublishOrder`.
       md"""
 Defaults are **Aggregate**: one root `test` job (`sbt 'test'`) and one publish job (plus docker when any module enables
 `DockerPlugin`). For a typical library you write zero module lists, `needs` edges, or project-id strings.
+
+```scala
+// nothing required — built-in test + publish
+// optional paved path:
+zipxCapabilities += ZipxCentral.release
+```
 """,
       exampleValue {
-        val g  = ModuleGraph(List(ModuleNode("lib", publishes = true, crossScalaVersions = List("3.8.4"))))
-        val wf = Planner.plan(g, List(Capability.test, Capability.publish), DocsFixtures.config)
-        (wf.jobs.keySet.toList.sorted, wf.jobs("test").steps.last.run)
-      }.assert { case (ids, run) =>
-        assertTrue(ids == List("publish", "test"), run.exists(_.contains("'test'")))
-      },
+        val g = ModuleGraph(List(ModuleNode("lib", publishes = true, crossScalaVersions = List("3.8.4"))))
+        DocsRender.jobs("test", "publish")(Capability.test, Capability.publish)(using g)
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("test:"),
+          yaml.contains("publish:"),
+          yaml.contains("run: sbt 'test'"),
+          yaml.contains("refs/tags/v"),
+        )
+      ),
     ),
     section("Bare settings (sbt 2.0)")(
       md"""
 zipx reads build-level settings from the root project's scope, so write plain bare settings — no `ThisBuild /` prefix.
 A bare `zipxTestTask := "testFull"` applies to every module; any module can override it in its own `.settings(...)`.
+
+```scala
+zipxJavaVersion := "25"
+zipxTestTask    := "testFull"
+zipxWorkflowDispatch := true
+```
 """
     ),
     section("Self-checking")(

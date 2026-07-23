@@ -63,16 +63,13 @@ If `zipxDependabotSync := true`, also commit `.github/workflows/zipx-action-pins
           """checkout: actions/checkout@abc123 # v9.0.0
             |setupSbt: sbt/setup-sbt@def456 # v1.9.9
             |""".stripMargin
-        val pins = ActionPinFile.parse(text)
-        (pins.checkout, pins.setupSbt, pins.versions.get("checkout"), pins.versions.get("setupSbt"))
-      }.assert { case (checkout, setupSbt, checkoutVer, setupSbtVer) =>
+        ActionPinFile.render(ActionPinFile.parse(text))
+      }.assert(yaml =>
         assertTrue(
-          checkout == "actions/checkout@abc123",
-          setupSbt == "sbt/setup-sbt@def456",
-          checkoutVer.contains("v9.0.0"),
-          setupSbtVer.contains("v1.9.9"),
+          yaml.contains("checkout: actions/checkout@abc123 # v9.0.0"),
+          yaml.contains("setupSbt: sbt/setup-sbt@def456 # v1.9.9"),
         )
-      },
+      ),
     ),
     section("Friction ladder")(
       md"""

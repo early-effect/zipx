@@ -35,15 +35,14 @@ An alternative with no workflow is installing the public [Scala Steward GitHub A
 on the org/repo. zipx’s opt-in is the self-hosted Action path so pins and schedule stay in the build.
 """,
       exampleValue {
-        val out = ScalaStewardWorkflow.render(ActionPins.Defaults, "ubuntu-latest")
-        (
-          Cron.weekly(DayOfWeek.Sunday).render,
-          out.contains("scala-steward-org/scala-steward-action@"),
-          out.contains("workflow_dispatch"),
+        ScalaStewardWorkflow.render(ActionPins.Defaults, "ubuntu-latest")
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("cron: 0 0 * * 0") || yaml.contains("""cron: "0 0 * * 0""""),
+          yaml.contains("scala-steward-org/scala-steward-action@"),
+          yaml.contains("workflow_dispatch"),
         )
-      }.assert { case (cron, hasAction, hasDispatch) =>
-        assertTrue(cron == "0 0 * * 0", hasAction, hasDispatch)
-      },
+      ),
     ),
     section("Typed cron")(
       md"""
@@ -60,14 +59,18 @@ Cron.raw("0 */6 * * *")                 // escape hatch
 `Cron` / `DayOfWeek` are re-exported from the plugin `autoImport`.
 """,
       exampleValue {
-        (
-          Cron.weekly(DayOfWeek.Monday, hour = 6, minute = 30).render,
-          Cron.daily(hour = 3).render,
-          Cron.raw("0 */6 * * *").render,
+        List(
+          s"weekly: ${Cron.weekly(DayOfWeek.Monday, hour = 6, minute = 30).render}",
+          s"daily:  ${Cron.daily(hour = 3).render}",
+          s"raw:    ${Cron.raw("0 */6 * * *").render}",
+        ).mkString("\n")
+      }.assert(text =>
+        assertTrue(
+          text.contains("weekly: 30 6 * * 1"),
+          text.contains("daily:  0 3 * * *"),
+          text.contains("raw:    0 */6 * * *"),
         )
-      }.assert { case (weekly, daily, raw) =>
-        assertTrue(weekly == "30 6 * * 1", daily == "0 3 * * *", raw == "0 */6 * * *")
-      },
+      ),
     ),
   )
 end DependencyUpdates

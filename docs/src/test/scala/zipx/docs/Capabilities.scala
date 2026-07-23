@@ -33,22 +33,31 @@ Capabilities run **Verify → Publish → Deploy**. A capability can depend on a
 
 `zipxCapabilities += ...` merges with built-ins; the **same `name` replaces** a built-in (e.g. turn Aggregate docker
 into a multi-registry Graph capability).
+
+```scala
+zipxCapabilities += Capability.publish.copy(
+  env = Map(
+    "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
+    "SONATYPE_USERNAME" -> secret"SONATYPE_USERNAME",
+  )
+)
+```
 """,
       exampleValue {
-        val pub = Capability.publish.copy(env =
-          Map(
-            "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
-            "SONATYPE_USERNAME" -> EnvValue.secret("SONATYPE_USERNAME"),
+        DocsRender.job("publish")(
+          Capability.publish.copy(
+            env = Map(
+              "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
+              "SONATYPE_USERNAME" -> EnvValue.secret("SONATYPE_USERNAME"),
+            )
           )
         )
-        val job = Planner.plan(libGraph, List(pub), config).jobs("publish")
-        (job.env.get("PGP_PASSPHRASE"), job.env.get("SONATYPE_USERNAME"))
-      }.assert { case (pgp, user) =>
+      }.assert(yaml =>
         assertTrue(
-          pgp.contains("${{ secrets.PGP_PASSPHRASE }}"),
-          user.contains("${{ secrets.SONATYPE_USERNAME }}"),
+          yaml.contains("PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}"),
+          yaml.contains("SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}"),
         )
-      },
+      ),
     ),
     section("Verify knobs")(
       md"""

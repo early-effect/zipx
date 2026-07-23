@@ -183,5 +183,58 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("workflow_dispatch: null"),
       )
     },
+    test("renderBody is render without the generated-by header") {
+      val body = Render.renderBody(sample)
+      val full = Render.render(sample)
+      assertTrue(
+        !body.startsWith("#"),
+        full == s"${Render.header}\n$body\n",
+      )
+    },
+    test("renderJob matches the jobs: slice of renderBody") {
+      val body = Render.renderBody(sample)
+      val job  = Render.renderJob("test-core", sample.jobs("test-core"))
+      // Indent job fragment as it appears under jobs: (2 spaces).
+      val indented = job.linesIterator.map(l => if l.isEmpty then l else s"  $l").mkString("\n")
+      assertTrue(
+        body.contains(indented),
+        job.contains("test-core:"),
+        job.contains("if: github.ref == 'refs/heads/main'"),
+        job.contains("MY_TOKEN: abc"),
+        !job.contains("name: CI"),
+        !job.contains("jobs:"),
+      )
+    },
+    test("renderJobs preserves ListMap order and matches each renderJob") {
+      val both = Render.renderJobs(sample.jobs)
+      assertTrue(
+        both.indexOf("test-workflow:") < both.indexOf("test-core:"),
+        both.contains(Render.renderJob("test-workflow", sample.jobs("test-workflow")).trim) ||
+          both.startsWith("test-workflow:"),
+        Render.renderJobs(ListMap("test-core" -> sample.jobs("test-core"))) ==
+          Render.renderJob("test-core", sample.jobs("test-core")),
+      )
+    },
+    test("renderSteps encodes a step sequence") {
+      val steps = Render.renderSteps(
+        List(
+          Step(uses = Some("actions/checkout@v4")),
+          Step(name = Some("Test"), run = Some("sbt test")),
+        )
+      )
+      assertTrue(
+        steps.contains("- uses: actions/checkout@v4"),
+        steps.contains("- name: Test"),
+        steps.contains("run: sbt test"),
+      )
+    },
+    test("renderMapping prints a flat string map") {
+      val out = Render.renderMapping(ListMap("packages" -> "write", "contents" -> "read"))
+      assertTrue(
+        out.contains("packages: write"),
+        out.contains("contents: read"),
+        Render.renderMapping(Map.empty) == "",
+      )
+    },
   )
 end RenderSpec

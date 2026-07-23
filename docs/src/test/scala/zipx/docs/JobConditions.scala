@@ -6,7 +6,10 @@ import zipx.central.ZipxCentral
 import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zipx.github.ZipxGitHubPackages
+import zipx.workflow.Render
 import zio.test.*
+
+import scala.collection.immutable.ListMap
 
 /** Typed job `if:` predicates and concrete recipes. */
 object JobConditions extends DocSpecSuite:
@@ -17,7 +20,8 @@ object JobConditions extends DocSpecSuite:
 [[Gate]] is still the timeline (`Always` vs `OnReleaseTag`). The planner **ANDs** Gate clauses with capability and
 target conditions.
 
-Default on every capability and target: `condition = None` (no extra filter).
+Default on every capability and target: `condition = None` (no extra filter). Prefer `withCondition(...)` on
+built-ins and pack vals.
 """,
     section("Defaults and Gate vs condition")(
       md"""
@@ -30,21 +34,26 @@ Default on every capability and target: `condition = None` (no extra filter).
 **Important:** Gate and JobCondition are ANDed. A capability with `Gate.OnReleaseTag` will **not** run on a PR even if
 a Target has `HasPrLabel`. For stage-on-PR + prod-on-tag, use `Gate.Always` with per-Target conditions, or two
 capabilities.
+
+```scala
+// Footgun: OnReleaseTag ∧ HasPrLabel still requires a v* tag
+Capability.dockerGraph.copy(
+  gate = Gate.OnReleaseTag,
+  targets = _ => List(Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
+)
+```
 """,
       exampleValue {
-        val footgun = Capability.dockerGraph.copy(
-          gate = Gate.OnReleaseTag,
-          targets = _ => List(Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
-        )
-        val graph = libGraph.copy(nodes = libGraph.nodes.map {
-          case n if n.id == "service" => n.copy(docker = true)
-          case n                      => n
-        })
-        Planner.plan(graph, List(footgun), config).jobs("docker-service-stg").`if`
-      }.assert(cond =>
+        DocsRender.job("docker-service-stg")(
+          Capability.dockerGraph.copy(
+            gate = Gate.OnReleaseTag,
+            targets = _ => List(Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
+          )
+        )(using dockerLibGraph)
+      }.assert(yaml =>
         assertTrue(
-          cond.exists(_.contains("refs/tags/v")),
-          cond.exists(_.contains("deploy-stg")),
+          yaml.contains("refs/tags/v"),
+          yaml.contains("deploy-stg"),
         )
       ),
     ),
@@ -57,12 +66,13 @@ zipxCapabilities += Capability.publish.withCondition(
 ```
 """,
       exampleValue {
-        val cap = Capability.publish.withCondition(JobCondition.repositoryIs("acme/my-fork"))
-        Planner.plan(libGraph, List(cap), config).jobs("publish").`if`
-      }.assert(cond =>
+        DocsRender.job("publish")(
+          Capability.publish.withCondition(JobCondition.repositoryIs("acme/my-fork"))
+        )
+      }.assert(yaml =>
         assertTrue(
-          cond.exists(_.contains("github.repository == 'acme/my-fork'")),
-          cond.exists(_.contains("refs/tags/v")),
+          yaml.contains("github.repository == 'acme/my-fork'"),
+          yaml.contains("refs/tags/v"),
         )
       ),
     ),
@@ -71,15 +81,21 @@ zipxCapabilities += Capability.publish.withCondition(
 Mechanoid-style: only publish when a repo variable is set.
 
 ```scala
-ZipxGitHubPackages.sameRepo(
+zipxCapabilities += ZipxGitHubPackages.sameRepo(
   condition = Some(JobCondition.varNonEmpty("PUBLISH_PACKAGES_REPO")),
 )
-// or combine with repositoryIs via the factory's repository= / condition=
 ```
 """,
       exampleValue {
-        JobCondition.varNonEmpty("PUBLISH_PACKAGES_REPO").render
-      }.assert(r => assertTrue(r == "vars.PUBLISH_PACKAGES_REPO != ''")),
+        DocsRender.job("github-packages")(
+          ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.varNonEmpty("PUBLISH_PACKAGES_REPO")))
+        )
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("vars.PUBLISH_PACKAGES_REPO != ''"),
+          yaml.contains("PUBLISH_GITHUB_PACKAGES: \"true\"") || yaml.contains("PUBLISH_GITHUB_PACKAGES: true"),
+        )
+      ),
     ),
     section("Multi-publish: Central + GitHub Packages")(
       md"""
@@ -94,24 +110,19 @@ zipxCapabilities ++= Seq(
 ```
 """,
       exampleValue {
-        val wf = Planner.plan(
-          libGraph,
-          List(ZipxCentral.release, ZipxGitHubPackages.sameRepo(repository = Some("acme/fork"))),
-          config,
+        DocsRender.jobs("publish", "github-packages")(
+          ZipxCentral.release,
+          ZipxGitHubPackages.sameRepo(repository = Some("acme/fork")),
         )
-        (
-          wf.jobs.keySet.toList.sorted,
-          wf.jobs("github-packages").env.get("PUBLISH_GITHUB_PACKAGES"),
-          wf.jobs("github-packages").permissions.get("packages"),
-        )
-      }.assert { case (ids, flag, pkgs) =>
+      }.assert(yaml =>
         assertTrue(
-          ids.contains("publish"),
-          ids.contains("github-packages"),
-          flag.contains("true"),
-          pkgs.contains("write"),
+          yaml.contains("publish:"),
+          yaml.contains("github-packages:"),
+          yaml.contains("PUBLISH_GITHUB_PACKAGES"),
+          yaml.contains("packages: write"),
+          yaml.contains("acme/fork"),
         )
-      },
+      ),
     ),
     section("PR → stage/dev ECR before merge")(
       md"""
@@ -128,7 +139,7 @@ Publish container images to stg/dev ECR from a labeled PR **without** waiting fo
 zipxCapabilities += Capability
   .custom(
     name = "docker",
-    command = n => s"$${n.id}/Docker/publish",
+    command = cmd"$${Docker / publish}",
     participates = _.docker,
     phase = Phase.Publish,
     gate = Gate.Always,
@@ -166,65 +177,86 @@ zipxCapabilities += Capability
 Add label `deploy-stg` on the PR → only the stg job's `if` is true; prod still waits for a `v*` tag.
 """,
       exampleValue {
-        val graph = libGraph.copy(nodes = libGraph.nodes.map {
-          case n if n.id == "service" => n.copy(docker = true)
-          case n                      => n
-        })
-        val cap = Capability.custom(
-          name = "docker",
-          command = n => s"${n.id}/Docker/publish",
-          participates = _.docker,
-          gate = Gate.Always,
-          targets = _ =>
-            List(
-              Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg"))),
-              Target("prod", condition = Some(JobCondition.refStartsWith("refs/tags/v"))),
-            ),
-          permissions = Map("id-token" -> "write"),
-        )
-        val wf = Planner.plan(graph, List(cap), config)
-        (
-          wf.jobs("docker-service-stg").`if`,
-          wf.jobs("docker-service-prod").`if`,
-        )
-      }.assert { case (stg, prod) =>
+        val cap = Capability
+          .custom(
+            name = "docker",
+            command = n => s"${n.id}/Docker/publish",
+            participates = _.docker,
+            gate = Gate.Always,
+            targets = _ =>
+              List(
+                Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg"))),
+                Target("prod", condition = Some(JobCondition.refStartsWith("refs/tags/v"))),
+              ),
+            permissions = Map("id-token" -> "write"),
+          )
+        DocsRender.jobs("docker-service-stg", "docker-service-prod")(cap)(using dockerLibGraph)
+      }.assert(yaml =>
         assertTrue(
-          stg.exists(_.contains("deploy-stg")),
-          !stg.exists(_.contains("startsWith(github.ref, 'refs/tags/v')")),
-          prod.exists(_.contains("startsWith(github.ref, 'refs/tags/v')")),
+          yaml.contains("deploy-stg"),
+          yaml.contains("docker-service-stg:"),
+          yaml.contains("docker-service-prod:"),
+          yaml.contains("startsWith(github.ref, 'refs/tags/v')"),
         )
-      },
+      ),
     ),
     section("Capability-level docker-stg")(
       md"""
 Alternate to per-Target conditions: a separate capability name so it does not replace builtin `docker`.
 
 ```scala
-Capability.dockerGraph.copy(
-  name = "docker-stg",
-  gate = Gate.Always,
-  condition = Some(JobCondition.hasPrLabel("deploy-stg")),
-)
+zipxCapabilities += Capability.dockerGraph
+  .copy(name = "docker-stg", gate = Gate.Always)
+  .withCondition(JobCondition.hasPrLabel("deploy-stg"))
 ```
 """,
       exampleValue {
-        val cap = Capability.dockerGraph.copy(
-          name = "docker-stg",
-          gate = Gate.Always,
-          condition = Some(JobCondition.hasPrLabel("deploy-stg")),
+        DocsRender.job("docker-stg-service")(
+          Capability.dockerGraph
+            .copy(name = "docker-stg", gate = Gate.Always)
+            .withCondition(JobCondition.hasPrLabel("deploy-stg"))
+        )(using dockerLibGraph)
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("docker-stg-service:"),
+          yaml.contains("deploy-stg"),
+          !yaml.contains("refs/tags/v"),
         )
-        cap.condition.map(_.render)
-      }.assert(r => assertTrue(r.exists(_.contains("deploy-stg")))),
+      ),
     ),
     section("Main-only target")(
       md"""
 ```scala
-Target("prod", environment = Some("production"), condition = Some(JobCondition.refIs("refs/heads/main")))
+Target(
+  "prod",
+  environment = Some("production"),
+  condition = Some(JobCondition.refIs("refs/heads/main")),
+)
 ```
 """,
       exampleValue {
-        JobCondition.refIs("refs/heads/main").render
-      }.assert(r => assertTrue(r == "github.ref == 'refs/heads/main'")),
+        DocsRender.job("deploy-prod")(
+          Capability.deploy(
+            participates = _.id == "service",
+            command = n => s"${n.id}/promote",
+            targets = _ =>
+              List(
+                Target(
+                  "prod",
+                  environment = Some("production"),
+                  condition = Some(JobCondition.refIs("refs/heads/main")),
+                )
+              ),
+            needsCapabilities = Nil,
+            gate = Gate.Always,
+          )
+        )
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("environment: production"),
+          yaml.contains("github.ref == 'refs/heads/main'"),
+        )
+      ),
     ),
     section("Raw escape hatch")(
       md"""
@@ -235,8 +267,8 @@ JobCondition.raw("(github.event_name == 'workflow_dispatch')")
 Prefer typed leaves when possible; `Raw` is for expressions the AST does not cover yet.
 """,
       exampleValue {
-        JobCondition.raw("always()").render
-      }.assert(r => assertTrue(r == "always()")),
+        Render.renderMapping(ListMap("if" -> JobCondition.raw("always()").render))
+      }.assert(yaml => assertTrue(yaml.contains("if: always()"))),
     ),
   )
 end JobConditions

@@ -27,16 +27,14 @@ zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
 ```
 """,
       exampleValue {
-        val wf  = Planner.plan(libGraph, List(ZipxCentral.release), config)
-        val job = wf.jobs("publish")
-        (job.steps.last.run, job.env.get("SONATYPE_USERNAME"), job.steps.exists(_.name.contains("Import signing key")))
-      }.assert { case (run, user, gpg) =>
+        DocsRender.job("publish")(ZipxCentral.release)
+      }.assert(yaml =>
         assertTrue(
-          run.exists(_.contains("publishSigned; sonaRelease")),
-          user.contains("${{ secrets.SONATYPE_USERNAME }}"),
-          gpg,
+          yaml.contains("publishSigned; sonaRelease"),
+          yaml.contains("SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}"),
+          yaml.contains("Import signing key"),
         )
-      },
+      ),
     ),
     section("ZipxGitHubPackages")(
       md"""
@@ -52,17 +50,16 @@ Thin CI wiring (`packages: write` + token + `PUBLISH_GITHUB_PACKAGES=true`). **s
 See **Job conditions** for fork gates and multi-publish recipes.
 """,
       exampleValue {
-        val job = Planner
-          .plan(libGraph, List(ZipxGitHubPackages.sameRepo(repository = Some("acme/fork"))), config)
-          .jobs("github-packages")
-        (job.permissions.get("packages"), job.env.get("PUBLISH_GITHUB_PACKAGES"), job.`if`)
-      }.assert { case (pkgs, flag, cond) =>
-        assertTrue(
-          pkgs.contains("write"),
-          flag.contains("true"),
-          cond.exists(_.contains("acme/fork")),
+        DocsRender.job("github-packages")(
+          ZipxGitHubPackages.sameRepo(repository = Some("acme/fork"))
         )
-      },
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("packages: write"),
+          yaml.contains("PUBLISH_GITHUB_PACKAGES"),
+          yaml.contains("acme/fork"),
+        )
+      ),
     ),
     section("ZipxDocs")(
       md"""
@@ -75,14 +72,14 @@ zipxWorkflowDispatch := true  // optional: manual docs-only deploys
 No hand-rolled `docs.yml`.
 """,
       exampleValue {
-        val job = Planner.plan(ModuleGraph(Nil), List(ZipxDocs.pages()), config).jobs("docs")
-        (job.uses, job.`with`.get("sbt-project"))
-      }.assert { case (uses, project) =>
+        DocsRender.job("docs")(ZipxDocs.pages())(using ModuleGraph(Nil))
+      }.assert(yaml =>
         assertTrue(
-          uses.contains(ZipxDocs.ReusableWorkflow),
-          project.contains("docs"),
+          yaml.contains(ZipxDocs.ReusableWorkflow),
+          yaml.contains("sbt-project: docs"),
+          yaml.contains("pages: write"),
         )
-      },
+      ),
     ),
   )
 end Packs

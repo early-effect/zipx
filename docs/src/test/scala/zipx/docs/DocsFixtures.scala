@@ -27,4 +27,8 @@ object DocsFixtures:
       ),
     )
   )
+
+  /** Same as [[libGraph]] (service already has `docker = true`). Alias for deploy/docker recipes. */
+  val dockerLibGraph: ModuleGraph = libGraph
+
 end DocsFixtures

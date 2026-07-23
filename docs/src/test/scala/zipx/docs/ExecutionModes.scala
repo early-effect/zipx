@@ -50,17 +50,27 @@ ZipxCentral.publishSigned + ZipxCentral.releaseOnce  // Graph + staging
 Same-name override: a user capability whose `name` matches a built-in **replaces** it.
 """
     ),
-    section("Planner shape")(
+    section("Aggregate vs Graph job shape")(
       md"""
-Aggregate Verify is one Once job. Graph Verify fans out per module:
+```scala
+zipxCapabilities += Capability.test        // one root job
+// or
+zipxCapabilities += Capability.testGraph   // one job per module
+```
 """,
       exampleValue {
-        val agg   = Planner.plan(libGraph, List(Capability.test), config)
-        val graph = Planner.plan(libGraph, List(Capability.testGraph), config)
-        (agg.jobs.keySet.toList, graph.jobs.keys.filter(_.startsWith("test-")).toList.sorted)
-      }.assert { case (aggIds, graphIds) =>
-        assertTrue(aggIds == List("test"), graphIds == List("test-api", "test-schema", "test-service"))
-      },
+        DocsRender.jobs("test")(Capability.test) + "\n---\n" +
+          DocsRender.jobs("test-schema", "test-api", "test-service")(Capability.testGraph)
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("test:"),
+          yaml.contains("test-schema:"),
+          yaml.contains("test-api:"),
+          yaml.contains("test-service:"),
+          yaml.contains("run: sbt 'test'"),
+          yaml.contains("schema/test"),
+        )
+      ),
     ),
     section("Modules batch; targets do not")(
       md"""

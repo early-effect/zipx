@@ -2,8 +2,12 @@ package zipx.docs
 
 import specular.*
 import specular.ziotest.DocSpecSuite
-import zipx.core.EnvValue
+import zipx.core.*
+import zipx.docs.DocsFixtures.*
+import zipx.workflow.Render
 import zio.test.*
+
+import scala.collection.immutable.ListMap
 
 /** Why the build should own CI topology. */
 object Overview extends DocSpecSuite:
@@ -31,6 +35,27 @@ From the loaded sbt build, zipx emits:
 - **SHA-pinned** GitHub Actions (`uses:`), with an optional pin file + Dependabot sync path
 """
     ),
+    section("Default Aggregate shape")(
+      md"""
+```scala
+// project/plugins.sbt
+addSbtPlugin("rocks.earlyeffect" % "zipx-sbt" % "<version>")
+
+// build.sbt — defaults are enough for a library; optional paved path:
+zipxCapabilities += ZipxCentral.release
+```
+""",
+      exampleValue {
+        DocsRender.jobs("test", "publish")(Capability.test, Capability.publish)
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("test:"),
+          yaml.contains("publish:"),
+          yaml.contains("run: sbt 'test'"),
+          yaml.contains("startsWith(github.ref, 'refs/tags/v')"),
+        )
+      ),
+    ),
     section("Why sbt 2.0")(
       md"""
 zipx leans on sbt 2.0:
@@ -56,20 +81,30 @@ The plugin owns topology. The build owns *what* to run (capabilities).
       md"""
 Secret *references* are first-class Scala. zipx never stores secret values — only names that render to GitHub Actions
 expressions:
+
+```scala
+env = Map(
+  "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
+  "AWS_REGION"        -> EnvValue.plain("us-west-2"),
+  "DEPLOY_ROLE"       -> EnvValue.env("DEPLOY_ROLE"),
+)
+```
 """,
       exampleValue {
-        (
-          EnvValue.secret("PGP_PASSPHRASE").render,
-          EnvValue.plain("us-west-2").render,
-          EnvValue.env("DEPLOY_ROLE").render,
+        Render.renderMapping(
+          ListMap(
+            "PGP_PASSPHRASE" -> EnvValue.secret("PGP_PASSPHRASE").render,
+            "AWS_REGION"     -> EnvValue.plain("us-west-2").render,
+            "DEPLOY_ROLE"    -> EnvValue.env("DEPLOY_ROLE").render,
+          )
         )
-      }.assert { case (secret, plain, fromEnv) =>
+      }.assert(yaml =>
         assertTrue(
-          secret == "${{ secrets.PGP_PASSPHRASE }}",
-          plain == "us-west-2",
-          fromEnv == "${{ env.DEPLOY_ROLE }}",
+          yaml.contains("PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}"),
+          yaml.contains("AWS_REGION: us-west-2"),
+          yaml.contains("DEPLOY_ROLE: ${{ env.DEPLOY_ROLE }}"),
         )
-      },
+      ),
     ),
   )
 end Overview
