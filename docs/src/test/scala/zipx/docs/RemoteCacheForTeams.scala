@@ -16,16 +16,19 @@ and remote-ready. When zipx CI runs `sbt test` (or publish) against a shared rem
 the commits your team already built. The next laptop (or the next PR job) downloads those results instead of
 recompiling and retesting the same bytecode.
 
-That reverses the usual monorepo tax: every morning you pull a dozen teammates' changes and spend the first hour
+That reverses a familiar monorepo bruise: every morning you pull a dozen teammates' changes and spend the first hour
 building *their* code. With a CI-hydrated cache, most of that work is already a hit. See
 [sbt's caching overview](https://www.scala-sbt.org/2.x/docs/en/concepts/caching.html) for the pure-function mental
-model; this page is the zipx / team angle.
+model; here is the zipx / team angle.
 
-Remote cache is **necessary but not sufficient**: topology (jobs, `needs`, gates) still comes from the sbt graph. A
-cache product alone leaves disconnected CI as a second source of truth (see **Why zipx**).
+Remote cache is necessary but not the whole recovery. Topology (jobs, `needs`, gates) still comes from the sbt graph.
+A cache product alone can leave disconnected CI as a second source of truth (see **Why zipx**). We want both: shared
+digests *and* an honest graph.
 """,
     section("What we claim / what we do not")(
       md"""
+Honest boundaries help you trust the path:
+
 | Claim | Status |
 |---|---|
 | Content-addressed reuse of compile/test across machines | Yes (sbt 2 + Bazel-compat gRPC) |

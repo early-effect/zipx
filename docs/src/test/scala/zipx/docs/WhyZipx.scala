@@ -11,50 +11,57 @@ object WhyZipx extends DocSpecSuite:
 
   def doc = page("Why zipx")(
     md"""
-zipx is not “almost Bazel,” and it is not another sbt acceleration product. It wins with a **different strategy**:
-one sbt graph → generated GitHub Actions + sbt 2 content-addressed cache. Speed follows; the headline is
-**ergonomics** (what humans and AIs must read and keep in sync).
+If your team has lived through hand-maintained CI matrices, a second BUILD graph, or a cache product that made
+**tasks** faster while **humans** still juggled two sources of truth: you are in the right place.
 
-See also **From Bazel**, **Caching**, and **Remote cache for teams**. Live Put/Get is `RemoteCacheItSpec` (same
-`RemoteCacheProof` pins as the YAML examples here).
+zipx is not “almost Bazel,” and it is not another acceleration appliance bolted onto an opaque build. It is a gentler
+path home: **one sbt graph** becomes generated GitHub Actions, with sbt 2’s content-addressed cache along for the ride.
+Speed follows. The headline is **ergonomics**: fewer things to read, sync, and apologize for in review.
+
+When you are ready for the migration stories, see **From Bazel**, **Caching**, and **Remote cache for teams**. Live
+Put/Get is proven by `RemoteCacheItSpec` (same `RemoteCacheProof` pins as the YAML examples here).
 """,
-    section("Strategy triangle")(
+    section("Three paths, one that heals")(
       md"""
-| Approach | Source of truth | What drifts |
+Most teams we meet are somewhere on this triangle. None of the first two are foolish; they were reasonable responses
+to real pain. zipx is the recovery path that keeps your Scala mental model intact.
+
+| Approach | Source of truth | What drifts (the bruise) |
 |---|---|---|
 | Disconnected CI | `build.sbt` **and** hand YAML | Module lists, `needs`, publish order |
 | Bazel second graph | BUILD (+ often CI) | Edges restated outside sbt |
-| **zipx** | `build.sbt` / `.dependsOn` | CI is derived; `zipxWorkflowCheck` fails on drift |
+| **zipx** | `build.sbt` / `.dependsOn` | CI is derived; `zipxWorkflowCheck` catches drift early |
 
-**Message:** refuse the second graph. Still get cross-machine reuse and honest CI topology.
+You do not need a second graph to feel safe. You need one honest graph, and a check that fails when CI lies.
 """
     ),
-    section("Not a Develocity-class cache tool")(
+    section("Faster tasks are not the same as kinder CI")(
       md"""
-Develocity-class tools accelerate an **existing opaque build** (remote build cache, build scans, predictive test
-selection) while CI YAML and module lists often remain a separate maintenance surface. That is a fine acceleration
-layer; it is a different product category.
+Acceleration layers (Develocity-class remote build cache, build scans, predictive test selection) can be wonderful at
+making an **existing** build feel snappier. They earn their keep. They are also a different category of tool: they
+rarely remove the second maintenance surface of hand YAML or restated edges.
 
 | | Acceleration layer | zipx |
 |---|---|---|
 | Primary artifact | Agent/plugin + server + scan UI | Planner + generated workflow from the sbt graph |
 | What you maintain | Build + CI lists + cache config (often independent) | Modules + typed `zipxCapabilities`; CI is derived |
-| Proof of correctness | Faster greens / scan insights | `zipxWorkflowCheck` + docs-as-tests + live cache IT |
+| How you know you’re safe | Faster greens / scan insights | `zipxWorkflowCheck` + docs-as-tests + live cache IT |
 | Scope | Speed / observability of tasks | **CI topology + cache wiring + packs** as one system |
 
-Caching alone does **not** remove the second source of truth. zipx deletes disconnected CI (and refuses a Bazel
-restatement), then uses sbt 2’s cache (optionally remote) so Aggregate stays cheap.
+If mornings still start with “did we update the workflow?”, caching alone will not heal that. zipx retires disconnected
+CI (and skips restating the graph in BUILD), then leans on sbt 2’s cache so Aggregate stays light to live with.
 """
     ),
-    section("Ergonomics: what you open")(
+    section("What you open on a good day")(
       md"""
-**Before:** hand `ci.yml` module matrices, or BUILD files + CI glue, plus cache product config.
+**The hard years:** a hand `ci.yml` module matrix, or BUILD files plus CI glue, plus cache product config. Every “add a
+module” meant a scavenger hunt.
 
-**After:** `build.sbt` + a small typed capability list; generated `.github/workflows/ci.yml` is an **output**
-(checked in, drift-gated).
+**The recovery:** `build.sbt` and a small typed capability list. Generated `.github/workflows/ci.yml` is an **output**
+you commit and drift-gate. Reviewers (and future you) see intent, not archaeology.
 
-Default Aggregate Verify is **one** job (`test`), not one job per module. Escalate to Graph when the **workflow**
-needs isolation, not merely to “make caching work.”
+Default Aggregate Verify is **one** calm job (`test`), not one job per module. Reach for Graph when the **workflow**
+needs isolation, not when you are only trying to make caching feel less lonely.
 """,
       exampleValue {
         val aggregate = DocsRender.body(Capability.test, Capability.publish)
@@ -72,22 +79,25 @@ needs isolation, not merely to “make caching work.”
         )
       ),
     ),
-    section("Good for AI-assisted development and code review")(
+    section("Kind to humans and AI teammates")(
       md"""
-Self-documenting, single-graph builds help agents and reviewers because:
+A self-documenting, single-graph build is easier to nurture, whether the reviewer is a person or an agent:
 
 - **One place to edit** when adding a module (no “also update workflow / BUILD”).
-- **Machine-checkable contract:** `zipxWorkflowCheck` + Specular DocSpecs fail when examples drift from planner output.
-- **Narrow diffs:** capability and graph changes are typed Scala; generated YAML is regeneratable.
-- **Reviewable intent:** packs (`ZipxCentral`, `ZipxDocs`) name the paved path instead of copy-pasted secret/step soup.
+- **A contract that cares:** `zipxWorkflowCheck` + Specular DocSpecs fail when examples drift from planner output.
+- **Narrow diffs:** capability and graph changes are typed Scala; generated YAML is regeneratable when you want a clean
+  re-diff.
+- **Named paved paths:** packs like `ZipxCentral` and `ZipxDocs` say what you meant, instead of a paste of secret/step
+  soup.
 
-Concrete “add a module” path: edit `build.sbt` → `zipxWorkflowGenerate` → PR shows graph + regeneratable workflow.
-Reviewers (human or AI) read the capability list and the graph, not a hand-maintained matrix.
+The everyday loop: edit `build.sbt` → `zipxWorkflowGenerate` → the PR shows the graph and a regeneratable workflow.
+That is the experience we are trying to give you back.
 """
     ),
-    section("Cache wired by the same planner")(
+    section("Cache that travels with the topology")(
       md"""
-Remote backends are not a side config file: the planner emits services/env alongside jobs. Proof pins:
+Remote backends are not a side confessional. The same planner that emits jobs also emits services and env. Shared proof
+pins:
 """,
       exampleValue {
         DocsRender.job("test")(Capability.test)(using

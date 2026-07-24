@@ -39,9 +39,8 @@ multi-service monorepos; Layer/Graph when you need waves, per-module isolation, 
 capabilities cover test, Central, GitHub Packages, docker, and deploy so you do not hand-roll YAML module lists.
 Drift fails the PR via `zipxWorkflowCheck`.
 
-Especially compelling if you have maintained a second copy of the build (disconnected CI or a restated Bazel graph);
-the power is for every Scala team on Actions, and especially monorepos. Start with **Why zipx** for strategy vs Bazel
-and acceleration layers.
+If you have maintained a second copy of the build (disconnected CI or a restated Bazel graph), start with **Why zipx**:
+a kinder path back to one honest graph. The power is for every Scala team on Actions, and especially monorepos.
 
 Guide: Why zipx → Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
 Remote cache for teams → From Bazel → Action pins → Dependency updates → Docker and deploy → Job conditions → Packs →
