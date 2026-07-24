@@ -210,7 +210,7 @@ object ZipxPlugin extends AutoPlugin:
     * `Some`, which only happens here when the CI job sets `ZIPX_REMOTE_CACHE`. So local builds are unaffected.
     */
   private def remoteCacheWiring: Seq[Setting[?]] =
-    sys.env.get("ZIPX_REMOTE_CACHE").filter(_.nonEmpty) match
+    sys.env.get(RemoteCacheProof.envUri).filter(_.nonEmpty) match
       case None         => Nil
       case Some(uriStr) =>
         Seq(
@@ -220,7 +220,7 @@ object ZipxPlugin extends AutoPlugin:
           // two axes into `cacheVersion` (mixed into every key) so heterogeneous runners get disjoint partitions.
           // The commit epoch is deliberately excluded — cross-epoch reuse is the whole point of a persistent remote cache.
           Global / cacheVersion := cacheVersionFor(runtimeJdkMajor, runtimeOs),
-        ) ++ sys.env.get("ZIPX_REMOTE_CACHE_HEADER").filter(_.nonEmpty).toSeq.map { header =>
+        ) ++ sys.env.get(RemoteCacheProof.envHeader).filter(_.nonEmpty).toSeq.map { header =>
           Global / remoteCacheHeaders := Seq(header)
         }
 

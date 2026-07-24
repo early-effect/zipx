@@ -293,14 +293,14 @@ object PlannerSpec extends ZIOSpecDefault:
       val wf = Planner.plan(
         sampleGraph,
         List(Capability.testGraph),
-        config.copy(cache = CacheBackend.BazelRemoteSidecar("buchgr/bazel-remote:latest", 9092)),
+        config.copy(cache = RemoteCacheProof.sidecar),
       )
       val job = wf.jobs("test-core")
       assertTrue(
-        job.services.contains("bazel-remote"),
-        job.services("bazel-remote").image == "buchgr/bazel-remote:latest",
-        job.services("bazel-remote").ports == List("9092:9092"),
-        job.env.get("ZIPX_REMOTE_CACHE").contains("grpc://localhost:9092"),
+        job.services.contains(RemoteCacheProof.serviceName),
+        job.services(RemoteCacheProof.serviceName).image == RemoteCacheProof.image,
+        job.services(RemoteCacheProof.serviceName).ports == List(RemoteCacheProof.portMapping),
+        job.env.get(RemoteCacheProof.envUri).contains(RemoteCacheProof.grpcLocalhost),
         !job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
         // remote backends leave setup-sbt disk-cache at its default (no disk-cache: false)
         !job.steps.exists(s => s.uses.exists(_.startsWith("sbt/setup-sbt@")) && s.`with`.contains("disk-cache")),
@@ -315,8 +315,8 @@ object PlannerSpec extends ZIOSpecDefault:
       val job = wf.jobs("test-core")
       assertTrue(
         job.services.isEmpty,
-        job.env.get("ZIPX_REMOTE_CACHE").contains("grpcs://cache.buildbuddy.io"),
-        job.env.get("ZIPX_REMOTE_CACHE_HEADER").exists(_.contains("secrets.BUILDBUDDY_KEY")),
+        job.env.get(RemoteCacheProof.envUri).contains("grpcs://cache.buildbuddy.io"),
+        job.env.get(RemoteCacheProof.envHeader).exists(_.contains("secrets.BUILDBUDDY_KEY")),
       )
     },
     // ---- M4 docker ----
@@ -601,8 +601,8 @@ object PlannerSpec extends ZIOSpecDefault:
         job.env.get("TIER").contains("prod"),                               // target wins
         job.env.get("SHARED").contains("from-cap"),                         // capability preserved
         job.env.get("EXTRA").contains("only-target"),                       // target-only
-        job.env.get("ZIPX_REMOTE_CACHE").contains("grpcs://cache.example"), // cache preserved
-        job.env.get("ZIPX_REMOTE_CACHE_HEADER").contains("${{ secrets.CACHE_KEY }}"),
+        job.env.get(RemoteCacheProof.envUri).contains("grpcs://cache.example"), // cache preserved
+        job.env.get(RemoteCacheProof.envHeader).contains("${{ secrets.CACHE_KEY }}"),
       )
     },
     test("Once jobs receive capability.env") {
