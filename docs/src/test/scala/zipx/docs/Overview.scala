@@ -23,9 +23,9 @@ monorepo with several services, Central and GitHub Packages side by side, docker
 Scala. Modes are how you schedule work; the graph stays the source of truth. You get typed capabilities, commit-stable
 caching, and SHA-pinned actions without hand-rolling YAML module lists.
 
-It is *extra* compelling if you have already paid the tax of a second copy of the build (disconnected CI, or a Bazel
-graph that restates the same edges). zipx does not ask you to flee sbt. It makes the build you already write the
-source of truth for CI.
+If you already carry scar tissue from a second copy of the build (disconnected CI, or a Bazel graph that restated the
+same edges), you will feel the relief fastest. zipx does not ask you to flee sbt. It makes the build you already write
+the source of truth for CI again. Start with **Why zipx** when you want the recovery framing.
 """,
     section("What you gain")(
       md"""
@@ -49,12 +49,12 @@ no longer matches the build. Drift becomes a red check, not a surprise on tag da
     ),
     section("Especially if you have lived the alternatives")(
       md"""
-Many teams arrive here with scar tissue. Slow or opaque sbt CI made “just put it in YAML” feel rational. Bazel looked
-like peace (hermeticity, remote cache) and delivered a **second graph** in BUILD files while CI still needed hand
-wiring. Others kept sbt but **re-listed** every module and recipe in workflows (sometimes plus an external config and
-resolver script).
+Many teams arrive tired. Slow or opaque sbt CI made “just put it in YAML” feel rational. Bazel looked like peace
+(hermeticity, remote cache) and delivered a **second graph** in BUILD files while CI still needed hand wiring. Others
+kept sbt but **re-listed** every module and recipe in workflows (sometimes plus an external config and resolver
+script).
 
-Those approaches invent another copy of the build. The wins of zipx are clearest when you recognize that tax.
+Those approaches invent another copy of the build. Recognizing that tax is the first step toward something kinder.
 
 ### Disconnected CI (YAML that redeclares the build)
 
@@ -81,7 +81,7 @@ jobs:
       - run: sbt '$${{{ matrix.module }}}/publish'
 ```
 
-Typical failure modes:
+Typical failure modes (the bruises):
 
 - **Two sources of truth drift**: add, rename, or re-wire a module in sbt; CI silently keeps the old list.
 - **Publish order is not modeled**: the real graph exists only in sbt, so release jobs fan out flat and hope the
@@ -103,8 +103,8 @@ scala_library(name = "api", deps = [":schema"], srcs = [...])
 scala_library(name = "service", deps = [":api"], srcs = [...])
 ```
 
-zipx’s answer is not “Bazel is wrong.” It is that **one graph in sbt is enough** for CI topology when the build already
-knows the truth. That is a **different strategy**, not Bazel-parity: see **Why zipx** and **From Bazel**.
+zipx’s answer is not “Bazel was wrong.” It is that **one graph in sbt is enough** for CI topology when the build
+already knows the truth. That is a recovery strategy, not a parity claim: see **Why zipx** and **From Bazel**.
 """
     ),
     section("One graph, generated CI")(
