@@ -12,6 +12,7 @@ object BuildSite extends DocsSite:
 
   def pages = Vector(
     Overview.doc,
+    WhyZipx.doc,
     QuickStart.doc,
     ExecutionModes.doc,
     Capabilities.doc,
@@ -19,6 +20,7 @@ object BuildSite extends DocsSite:
     Verify.doc,
     Caching.doc,
     RemoteCacheForTeams.doc,
+    FromBazel.doc,
     ActionPinsDoc.doc,
     DependencyUpdates.doc,
     DockerAndDeploy.doc,
@@ -38,10 +40,12 @@ capabilities cover test, Central, GitHub Packages, docker, and deploy so you do 
 Drift fails the PR via `zipxWorkflowCheck`.
 
 Especially compelling if you have maintained a second copy of the build (disconnected CI or a restated Bazel graph);
-the power is for every Scala team on Actions, and especially monorepos.
+the power is for every Scala team on Actions, and especially monorepos. Start with **Why zipx** for strategy vs Bazel
+and acceleration layers.
 
-Guide: Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
-Remote cache for teams → Action pins → Dependency updates → Docker and deploy → Job conditions → Packs → Settings.
+Guide: Why zipx → Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
+Remote cache for teams → From Bazel → Action pins → Dependency updates → Docker and deploy → Job conditions → Packs →
+Settings.
 """
       ),
       installSnippets = Vector(

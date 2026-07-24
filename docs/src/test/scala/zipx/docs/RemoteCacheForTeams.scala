@@ -20,7 +20,22 @@ That reverses the usual monorepo tax: every morning you pull a dozen teammates' 
 building *their* code. With a CI-hydrated cache, most of that work is already a hit. See
 [sbt's caching overview](https://www.scala-sbt.org/2.x/docs/en/concepts/caching.html) for the pure-function mental
 model; this page is the zipx / team angle.
+
+Remote cache is **necessary but not sufficient**: topology (jobs, `needs`, gates) still comes from the sbt graph. A
+cache product alone leaves disconnected CI as a second source of truth (see **Why zipx**).
 """,
+    section("What we claim / what we do not")(
+      md"""
+| Claim | Status |
+|---|---|
+| Content-addressed reuse of compile/test across machines | Yes (sbt 2 + Bazel-compat gRPC) |
+| CI hydrates; developers and later jobs Get | Yes (ManagedRemote / long-lived sidecar) |
+| JDK/OS partitioned via `cacheVersion` | Yes (zipx wiring) |
+| Sandboxed hermetic builds / remote **execution** | No (use Graph for job fan-out) |
+
+Live Put/Get is proven by `RemoteCacheItSpec` (Testcontainers + the same `RemoteCacheProof` pins as the YAML below).
+"""
+    ),
     section("What gets shared")(
       md"""
 sbt 2 caches **task results** (and, for remote backends, declared file outputs). Incremental `compile` and `test`
@@ -75,20 +90,29 @@ Backends and generated YAML live on the **Caching** page. The short version:
 
 ```scala
 zipxCache := CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")
+// or proof-pinned sidecar:
+zipxCache := RemoteCacheProof.sidecar
 ```
 
 Then regenerate the workflow, add the repository secret, and confirm CI exports `ZIPX_REMOTE_CACHE`. For a
 zero-infra start, keep **LocalDir** and graduate to ManagedRemote when the team wants laptop reuse of CI digests.
 """,
       exampleValue {
-        DocsRender.job("test")(Capability.test)(using
+        val managed = DocsRender.job("test")(Capability.test)(using
           libGraph,
           config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")),
         )
+        val sidecar = DocsRender.job("test")(Capability.test)(using
+          libGraph,
+          config.copy(cache = RemoteCacheProof.sidecar),
+        )
+        managed + "\n---\n" + sidecar
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("ZIPX_REMOTE_CACHE: grpcs://cache.example") ||
-            yaml.contains("ZIPX_REMOTE_CACHE: \"grpcs://cache.example\"")
+          yaml.contains(s"${RemoteCacheProof.envUri}: grpcs://cache.example") ||
+            yaml.contains(s"${RemoteCacheProof.envUri}: \"grpcs://cache.example\""),
+          RemoteCacheProof.sidecarYamlMustContain.forall(yaml.contains),
+          yaml.contains(RemoteCacheProof.envHeader) || yaml.contains("secrets.CACHE_KEY"),
         )
       ),
     ),

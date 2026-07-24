@@ -55,6 +55,15 @@ lazy val root = (project in file("."))
         ZipxCentral.release.withCondition(upstream),
         // andCondition keeps ZipxDocs tag|dispatch filter and layers the fork gate
         ZipxDocs.pages().andCondition(upstream),
+        // Parallel with Aggregate test (needs verify-gate only): live remote-cache IT.
+        Capability.once(
+          name = "remote-cache-it",
+          command = "it/test",
+          phase = Phase.Verify,
+          gate = Gate.Always,
+          needsCapabilities = Nil,
+          env = Map("ZIPX_IT_DOCKER" -> EnvValue.plain("1")),
+        ),
       )
     },
     zipxJavaVersion      := "25",
@@ -62,6 +71,9 @@ lazy val root = (project in file("."))
     zipxDependabotSync   := true,
     zipxScalaSteward     := true,
   )
+
+// Keep `it` on the build even though it is not aggregated (parallel CI job runs it/test).
+lazy val zipxItRef = LocalProject("it")
 
 // Scala 3. GitHub Actions AST + deterministic YAML renderer.
 lazy val workflow = (project in file("modules/workflow"))
@@ -116,6 +128,33 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     libraryDependencySchemes ++= pluginLibraryDependencySchemes,
     scriptedLaunchOpts ++= Seq("-Xmx1024m", s"-Dplugin.version=${version.value}"),
     scriptedBufferLog := false,
+  )
+
+// Live remote-cache proof (Testcontainers). Not aggregated: Aggregate `sbt test` stays free of Docker IT.
+// Dogfood `remote-cache-it` job runs `it/test` in parallel with `test`.
+lazy val it = project
+  .in(file("modules/it"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(
+    name            := "zipx-it",
+    publish / skip  := true,
+    publishArtifact := false,
+    libraryDependencies ++= testcontainersDeps ++ Seq(
+      "org.slf4j" % "slf4j-nop" % "2.0.17" % Test
+    ),
+    Test / fork := true,
+    // Always mark this module's tests as the live suite; gating still requires Docker at runtime.
+    Test / javaOptions += "-Dzipx.it.docker=1",
+    Test / envVars ++= {
+      val m = scala.collection.mutable.Map.empty[String, String]
+      sys.env.get("PATH").foreach(v => m += "PATH" -> v)
+      sys.env.get("DOCKER_HOST").foreach(v => m += "DOCKER_HOST" -> v)
+      sys.env.get("HOME").foreach(v => m += "HOME" -> v)
+      // Forward when present (fresh GHA runners); sbt server may have been started without it locally.
+      sys.env.get("ZIPX_IT_DOCKER").foreach(v => m += "ZIPX_IT_DOCKER" -> v)
+      m.toMap
+    },
   )
 
 // Docs-as-tests site (Specular + early-effect theme). Deployed via ZipxDocs.pages in generated CI.

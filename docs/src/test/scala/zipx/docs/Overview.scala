@@ -104,7 +104,7 @@ scala_library(name = "service", deps = [":api"], srcs = [...])
 ```
 
 zipx’s answer is not “Bazel is wrong.” It is that **one graph in sbt is enough** for CI topology when the build already
-knows the truth.
+knows the truth. That is a **different strategy**, not Bazel-parity: see **Why zipx** and **From Bazel**.
 """
     ),
     section("One graph, generated CI")(

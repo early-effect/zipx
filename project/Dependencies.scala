@@ -38,6 +38,12 @@ object Dependencies:
   val remoteCachePlugin: ModuleID =
     "org.scala-sbt" % "sbt-remote-cache" % remoteCacheVersion
 
+  val testcontainersVersion = "1.21.4"
+
+  val testcontainersDeps: Seq[ModuleID] = Seq(
+    "org.testcontainers" % "testcontainers" % testcontainersVersion % Test
+  )
+
   /** compiler-interface is on both the sbt-2.x and zinc-1.x schemes; treat as always-compatible. */
   val pluginLibraryDependencySchemes: Seq[ModuleID] = Seq(
     "org.scala-sbt" % "compiler-interface" % "always"

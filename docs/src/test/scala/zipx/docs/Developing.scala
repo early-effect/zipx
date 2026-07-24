@@ -33,6 +33,10 @@ The publishable `plugin` project remains for Central publish and scripted tests.
 [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) is a **consumer** (uses
 `publishLocal` or a released `sbt-zipx`). Root dogfood uses Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
 both with `JobCondition.repositoryIs("early-effect/zipx")` so fork tag pushes do not publish or deploy Pages.
+
+**Remote-cache IT** lives in `modules/it` (not Aggregate). Run `sbt it/test` (Docker required). CI runs it as a parallel
+Verify job (`remote-cache-it`, needs `verify-gate` only). Pins and live Put/Get are documented under **Remote cache for
+teams** / `RemoteCacheProof`.
 """
     ),
     section("Docs site")(

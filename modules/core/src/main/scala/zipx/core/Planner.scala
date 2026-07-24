@@ -667,20 +667,21 @@ object Planner:
       case CacheBackend.BazelRemoteSidecar(image, port) =>
         CacheContribution(
           services = ListMap(
-            "bazel-remote" -> JobService(
+            RemoteCacheProof.serviceName -> JobService(
               image = image,
               ports = List(s"$port:$port"),
-              options = Some(s"--entrypoint bazel-remote"),
+              // Official image entrypoint is already bazel-remote; max_size keeps the ephemeral service bounded.
+              options = Some("--max_size=1"),
             )
           ),
-          env = ListMap("ZIPX_REMOTE_CACHE" -> s"grpc://localhost:$port"),
+          env = ListMap(RemoteCacheProof.envUri -> s"grpc://localhost:$port"),
         )
 
       case CacheBackend.ManagedRemote(uri, headerSecret) =>
         CacheContribution(
           env = ListMap(
-            "ZIPX_REMOTE_CACHE"        -> uri,
-            "ZIPX_REMOTE_CACHE_HEADER" -> EnvValue.secret(headerSecret).render,
+            RemoteCacheProof.envUri    -> uri,
+            RemoteCacheProof.envHeader -> EnvValue.secret(headerSecret).render,
           )
         )
 

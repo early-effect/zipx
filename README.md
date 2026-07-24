@@ -59,12 +59,12 @@ Full guide (Specular):
 
 What's covered:
 
-- Overview and architecture
+- Overview, **Why zipx**, and **From Bazel** (strategy vs second graphs / acceleration layers)
 - Quick start and self-checking
 - **Execution modes** (Aggregate / Layer / Graph)
 - Built-in **capabilities** and **custom capabilities** (`once`, `custom`, `zipxTasks`, `cmd`)
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
-- Caching
+- Caching and **Remote cache for teams** (CI-hydrated digests; live proof via `it/test`)
 - **Action pins** (pin file, Dependabot, `zipxActionsPull`, sync workflow)
 - **Dependency updates** (Scala Steward opt-in)
 - Docker and multi-target deploy
@@ -72,6 +72,8 @@ What's covered:
 - Settings reference and dogfood notes
 
 Runnable reference: [`examples/monorepo`](examples/monorepo). Roadmap: [ROADMAP.md](ROADMAP.md).
+
+Live remote-cache IT (Docker): `sbt it/test` (parallel CI job `remote-cache-it`).
 
 ## License
 
