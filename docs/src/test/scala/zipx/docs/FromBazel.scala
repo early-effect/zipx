@@ -11,9 +11,9 @@ object FromBazel extends DocSpecSuite:
 
   def doc = page("From Bazel")(
     md"""
-This page is **not** Bazel-parity. zipx uses a **different strategy** that fits Scala teams who already have the truth
-in sbt: one graph, generated CI, content-addressed reuse. We agree with Bazel-fluent vocabulary, then refuse the
-second BUILD graph.
+zipx is **not** Bazel-parity. It is a **different strategy** for Scala teams that already have the truth in sbt: one
+graph, generated CI, content-addressed reuse. We agree with Bazel-fluent vocabulary, then refuse the second BUILD
+graph.
 
 For positioning vs disconnected CI and acceleration layers, see **Why zipx**. For team hydration, see **Remote cache
 for teams**.
