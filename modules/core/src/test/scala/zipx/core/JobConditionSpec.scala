@@ -4,6 +4,13 @@ import zio.test.*
 
 object JobConditionSpec extends ZIOSpecDefault:
 
+  /** True when `f` rejects its input with `IllegalArgumentException`. */
+  private def rejects(f: => Any): Boolean =
+    try
+      val _ = f
+      false
+    catch case _: IllegalArgumentException => true
+
   def spec = suite("JobCondition")(
     suite("leaf render")(
       test("RepositoryIs") {
@@ -120,51 +127,32 @@ object JobConditionSpec extends ZIOSpecDefault:
     suite("validation")(
       test("rejects empty / blank literals") {
         assertTrue(
-          try
-            JobCondition.repositoryIs(""); false
-          catch case _: IllegalArgumentException => true, try
-            JobCondition.hasPrLabel("  "); false
-          catch case _: IllegalArgumentException => true, try
-            JobCondition.raw("   "); false
-          catch case _: IllegalArgumentException => true,
+          rejects(JobCondition.repositoryIs("")),
+          rejects(JobCondition.hasPrLabel("  ")),
+          rejects(JobCondition.raw("   ")),
         )
       },
       test("rejects quotes, dollars, whitespace in literals") {
         assertTrue(
-          try
-            JobCondition.repositoryIs("org/repo'"); false
-          catch case _: IllegalArgumentException => true, try
-            JobCondition.repositoryIs("org/repo with space"); false
-          catch case _: IllegalArgumentException => true, try
-            JobCondition.hasPrLabel("a$b"); false
-          catch case _: IllegalArgumentException => true,
+          rejects(JobCondition.repositoryIs("org/repo'")),
+          rejects(JobCondition.repositoryIs("org/repo with space")),
+          rejects(JobCondition.hasPrLabel("a$b")),
         )
       },
       test("rejects unicode / emoji labels") {
-        assertTrue(
-          try
-            JobCondition.hasPrLabel("🚢"); false
-          catch case _: IllegalArgumentException => true
-        )
+        assertTrue(rejects(JobCondition.hasPrLabel("🚢")))
       },
       test("rejects invalid var names") {
         assertTrue(
-          try
-            JobCondition.varNonEmpty("bad-name"); false
-          catch case _: IllegalArgumentException => true, try
-            JobCondition.varNonEmpty(""); false
-          catch case _: IllegalArgumentException => true,
+          rejects(JobCondition.varNonEmpty("bad-name")),
+          rejects(JobCondition.varNonEmpty("")),
         )
       },
       test("rejects empty All / Any") {
         assertTrue(
-          try
-            JobCondition.and(); false
-          catch case _: IllegalArgumentException => true, try
-            JobCondition.or(); false
-          catch case _: IllegalArgumentException => true, try
-            JobCondition.All(Nil).render; false
-          catch case _: IllegalArgumentException => true,
+          rejects(JobCondition.and()),
+          rejects(JobCondition.or()),
+          rejects(JobCondition.All(Nil).render),
         )
       },
       test("accepts owner/repo and dotted labels") {
@@ -175,11 +163,7 @@ object JobConditionSpec extends ZIOSpecDefault:
       },
       test("rejects overlong literals") {
         val long = "a" * 300
-        assertTrue(
-          try
-            JobCondition.refIs(long); false
-          catch case _: IllegalArgumentException => true
-        )
+        assertTrue(rejects(JobCondition.refIs(long)))
       },
     ),
   )

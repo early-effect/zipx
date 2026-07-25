@@ -69,8 +69,7 @@ store is the persistence); LocalDir uses epoch-keyed `actions/cache` instead.
               !sidecar.contains("actions/cache") &&
               !managed.contains("actions/cache") &&
               sidecar.contains(RemoteCacheProof.image)
-            case _ => false
-          ,
+            case _ => false,
         )
       ),
     ),

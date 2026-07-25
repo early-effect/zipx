@@ -71,7 +71,8 @@ needs isolation, not when you are only trying to make caching feel less lonely.
         val parts = yaml.split("---").toList
         assertTrue(
           parts.length == 2,
-          parts(0).contains("test:") || parts(0).contains("\ntest\n") || parts(0).linesIterator.exists(_.trim == "test:"),
+          parts(0).contains("test:") || parts(0).contains("\ntest\n") || parts(0).linesIterator
+            .exists(_.trim == "test:"),
           !parts(0).contains("test-schema:"),
           !parts(0).contains("test-api:"),
           parts(1).contains("test-schema:") || parts(1).contains("test-api:"),
