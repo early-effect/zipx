@@ -32,7 +32,7 @@ the source of truth for CI again. Start with **Why zipx** when you want the reco
 ### Monorepos that stay honest
 
 In a multi-module repo, edges already live in `build.sbt`. zipx turns them into jobs, `needs`, publish order, and
-(when you opt into Graph) affected-only PRs. Add a module the way you always do; regenerate; CI tracks the graph
+(when you opt into Graph) affected-only PRs (fail-open when the diff breaks; see **Affected**). Add a module the way you always do; regenerate; CI tracks the graph
 instead of a hand-maintained matrix.
 
 ### Libraries that skip hand-rolled release YAML

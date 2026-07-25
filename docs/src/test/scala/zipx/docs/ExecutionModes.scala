@@ -33,6 +33,23 @@ compile/test work that sbt (and the restored/remote cache) can already skip.
       md"""
 sbt and zipx answer different questions:
 
+```
+                    PR changes leaf module "client"
+                              │
+          ┌───────────────────┴───────────────────┐
+          ▼                                       ▼
+   Aggregate (sbt 2)                        Graph (zipx)
+   ─────────────────                        ──────────────
+   one `test` job starts                    affected setup
+   Zinc + incremental test                  skips jobs whose
+   + epoch/remote cache                     reverse-dep closure
+   skip work *inside* JVM                   does not include client
+          │                                       │
+          ▼                                       ▼
+   fewer compiles/suites                    fewer GHA jobs
+   (same job still green)                   (per-module status)
+```
+
 | Layer | Question | Who decides |
 |---|---|---|
 | **sbt 2 (inside Aggregate)** | Which sources and test suites need work, given cached task digests? | Incremental compiler + incremental `test` + cross-run task cache |
@@ -42,7 +59,7 @@ Aggregate always starts the stage command (one root `test` job). That is fine: a
 (or a remote cache hits), sbt may compile almost nothing and rerun almost no suites even on a cold JVM. Graph can
 skip entire module jobs when their reverse-dep closure is untouched, and it can show a green check per module. Use
 [`testFull`](https://www.scala-sbt.org/2.x/docs/en/reference/sbt-test.html) (`zipxTestTask := "testFull"`) when CI must
-run every suite every time, uncached. See **Caching** for LocalDir vs remote backends.
+run every suite every time, uncached. See **Caching** and **Affected** (fail-open handoff, who is gated).
 """
     ),
     section("When to use which")(
@@ -114,13 +131,25 @@ For docker/deploy, participants still come from the graph. **Targets** (GitHub `
     ),
     section("Cost intuition")(
       md"""
-For a 4-module library with cross-Scala and release publish:
+For a 4-module library with cross-Scala and release publish (leaf-only PR vs full fan-out):
 
-- **Aggregate:** roughly 2 sbt starts on PR (`test` + optional gates), plus one publish/release job on tags. Each
-  start can still skip unaffected compile/test work when the epoch (or remote) task cache hits, including after a
-  cold JVM.
-- **Graph:** one test job per module × Scala matrix, plus affected setup, plus per-module publish on tags. You pay
-  for more runners and JVM starts to get per-module skip/status/matrix isolation.
+```
+ runners / sbt starts (sketch)
+ ▲
+ │  Graph full     ████████████  (N modules × matrix)
+ │  Graph affected ██            (closure only; leaf PR)
+ │  Aggregate      ██            (1 job; cache skips inside)
+ └──────────────────────────────────────── PR shape ──►
+```
+
+| Mode | Typical PR shape | What you pay for |
+|---|---|---|
+| **Aggregate** | ~2 sbt starts (`test` + optional gates) | JVM start; cache hits skip suites |
+| **Graph (full)** | N modules × Scala matrix + affected setup | Isolation, matrices, per-module status |
+| **Graph (affected leaf)** | setup + closure jobs only | Same isolation, fewer runners when the diff is narrow |
+
+Escalate to Graph when the **workflow** needs job boundaries (matrices, path gating, independent logs), not merely to
+avoid compile work Aggregate + remote cache already skip. Details and fail-open policy: **Affected**.
 """
     ),
   )

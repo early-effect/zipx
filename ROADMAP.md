@@ -69,6 +69,36 @@ Publish capability, publish-edge contraction (nearest same-capability ancestors)
 ### M3 — Affected-only ✅
 A leading `affected` setup job (checkout `fetch-depth: 0`, run `zipxAffectedModules <base>`, output a JSON module array); Verify jobs gated with `if: contains(fromJson(needs.affected.outputs.modules), '<id>') || contains(..., 'all')`. On push/tag the job emits the `"all"` sentinel ⇒ full build. A `.sbt` change or anything under a `project` dir ⇒ full build; unowned files ignored. **The skipped-`needs` hazard** handled with `!cancelled()` + `needs.X.result != 'failure'` so an affected module still runs when an unaffected upstream is skipped. Pure file→module mapping (`Affected`, longest base-dir prefix) is unit-tested including pathological prefix/superstring/diamond cases; the git-diff path (`zipxAffectedModules`) verified against a scratch git repo. Controlled by `zipxAffectedOnPR` (default true).
 
+**Hardening (post-M3):** a failed git diff must **fail open**. Distinguishing `None` (diff did not run) from `Some(Nil)` (diff ran, nothing changed) prevents a bad base ref from emitting `[]` and skipping every Graph Verify job while the PR reports green. The same `"all"` sentinel used for tags/first-push covers that case. Workflow `concurrency` cancels superseded PR runs but **never** cancels `refs/tags/*` (publish is not idempotent). `Gate.AffectedOnly` is rejected at generate time until Publish can opt into composable affected-gating (Deploy stays never-affected; see M6).
+
+```mermaid
+flowchart TD
+  diff[gitDiffNames]
+  diff -->|Some files| modules[affectedModules]
+  diff -->|None failed| allSentinel["emit all sentinel"]
+  modules -->|empty or ids| json[modules JSON]
+  allSentinel --> json
+  json --> gate{Graph Verify if}
+  gate -->|contains id or all| run[job runs]
+  gate -->|neither| skip[job skipped]
+```
+
+```mermaid
+flowchart LR
+  subgraph today [Gated today]
+    GV[Graph Verify]
+  end
+  subgraph release [Release only]
+    Pub[Publish / docker]
+  end
+  subgraph never [Never affected]
+    Dep[Deploy]
+  end
+  PR[PR diff] --> GV
+  Tag[Release tag] --> Pub
+  Tag --> Dep
+```
+
 ### M4 — Docker paved path + POC ✅
 `Capability.docker` runs `<module>/Docker/publish` (sbt-native-packager), release-gated, dependency-ordered, never matrixed. A module opts in simply by enabling `DockerPlugin` — zipx auto-detects it (`thisProject.autoPlugins`) and adds the docker stage only when some module uses it. Demonstrated in [examples/monorepo](examples/monorepo): the `service` module describes its image in the build (`dockerBaseImage`, `Compile / mainClass`, `dockerExposedPorts`) — no Dockerfile, no external `docker build` string. Verified end-to-end: `service/Docker/publishLocal` built `example-service:1.4.2-ci`, and `docker run` printed the greeting through the full `models → coreLib → service` chain.
 
@@ -144,6 +174,22 @@ final case class Capability(             // gains (all defaulting to current beh
 - **M6e:** in `examples/`, wire the sample graph + staging/prod targets and confirm `zipxWorkflowGenerate` produces the full job set with correct needs edges, environments, and gates.
 
 **Resolved design choices:** (1) **`Phase.Deploy` is added** — Verify → Publish → Deploy; deploy is never affected-gated, sorts after publish, and uses `needsCapabilities` for its docker/publish dependency. (2) **Env injection uses the job `env:` block** — each explicit per-target job merges `target.env` into its `env:`, referenced in steps as `${{ env.KEY }}` (secret-valued entries like `${{ secrets.X }}` work as env values); no runtime matrix, so no GHA uniform-object constraint. (3) `zipx-aws` convenience module deferred until a second consumer needs it.
+
+**Open seam — affected Publish (not Deploy).** M6 closed Deploy as never affected-gated. Publish still has the original `Gate` scaladoc intent (“affected-gated publishing on a tag”): on `v*`, Graph publish/docker would run only for the affected closure since the previous tag. That needs composable gates (`OnReleaseTag ∩ Affected`), a shared `affected` setup for non-Verify Graph jobs, and a tag base-ref policy that still **fails open**. Until then the planner rejects `Gate.AffectedOnly` so it cannot silently mean Always. Near-term value proof without Gate changes: expensive Graph Verify capabilities (scripted, MiMa, PR-local docker) that already receive path gating.
+
+```mermaid
+flowchart TB
+  subgraph wave1 [Wave 1 — prove with Verify Graph]
+    S[scripted / MiMa / dockerLocal]
+    S --> AG[existing affected gating]
+  end
+  subgraph wave2 [Wave 2 — Gate composition]
+    G[OnReleaseTag AND Affected]
+    G --> PP[partial publish on tag]
+    G -.->|reject| D[Deploy stays excluded]
+  end
+  wave1 --> wave2
+```
 
 **Capability coverage — what a full CI pipeline needs, and how zipx provides it.** M6 is "done" when a `build.sbt` can generate a complete multi-environment pipeline with no external YAML config. Capability-by-capability:
 
@@ -286,6 +332,8 @@ Generated CI owns GPG import + `publishSigned; sonaRelease` (Aggregate) or Graph
 - **Remote-cache transport is bundled.** `sbt-zipx` depends on `org.scala-sbt:sbt-remote-cache`, whose `RemoteCachePlugin` triggers on AllRequirements — so consumers need no extra `addSbtPlugin` line. It's a no-op until `Global / remoteCache` is set (only when the CI job exports `ZIPX_REMOTE_CACHE`), so local builds are unaffected. (Required a `libraryDependencySchemes += "org.scala-sbt" % "compiler-interface" % "always"` to silence a false eviction between the sbt-2.x and zinc-1.x versioning of `compiler-interface`.)
 - **`zipxPublishOrder` task** prints the contracted publish layers (`ModuleGraph.subsetLayers(_.publishes)`), e.g. `L0: models / L1: coreLib / L2: client`.
 - **Opt-in push-time affected (`zipxAffectedOnPush`, default false).** When on, pushes also restrict to affected modules by diffing the push `before` sha, guarded against force-push / branch-create (all-zero sha → build everything). Default remains: PRs are affected-scoped, pushes/tags build all.
+- **Affected fail-open + concurrency.** Diff failure emits `["all"]` (not `[]`); workflow concurrency cancels superseded PR runs but never release tags (`zipxCancelSupersededRuns`, default true).
+- **`Gate.AffectedOnly` rejected until implemented.** Keeps the Publish-affected design seam visible; generate fails instead of silently running Always.
 
 ## Deviations from the original plan
 

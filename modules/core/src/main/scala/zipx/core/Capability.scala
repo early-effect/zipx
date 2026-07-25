@@ -29,7 +29,18 @@ enum Phase:
 enum Ordering:
   case ParallelWithUpstream, DependencyOrdered
 
-/** When a capability's jobs are allowed to run. Composable in the planner (e.g. affected-gated publishing on a tag). */
+/** When a capability's jobs are allowed to run. Composable in the planner (e.g. affected-gated publishing on a tag).
+  *
+  * Gate is ANDed with the capability's [[Capability.condition]] and with affected-gating.
+  *
+  * [[AffectedOnly]] is a **design seam, not a shipped feature**. Today affected-gating is derived from [[Phase.Verify]]
+  * plus [[PlanConfig.affected]] — never from Gate — so the planner cannot honor it; see the "Affected-only PRs (Graph
+  * only)" docs page and ROADMAP M3/M6. Rather than degrade silently to [[Always]] (a green, untested pipeline is
+  * exactly the failure mode zipx exists to prevent), the planner rejects it with an explaining error. Making it real
+  * means threading affected-gating off Gate so Publish-phase capabilities can opt in — the "affected-gated publishing"
+  * the sentence above anticipates. ROADMAP M6 resolved only the Deploy case (never affected-gated); Publish is still
+  * open.
+  */
 enum Gate:
   case Always, OnReleaseTag, AffectedOnly
 

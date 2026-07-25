@@ -18,6 +18,7 @@ object BuildSite extends DocsSite:
     Capabilities.doc,
     CustomCapabilities.doc,
     Verify.doc,
+    AffectedDoc.doc,
     Caching.doc,
     RemoteCacheForTeams.doc,
     FromBazel.doc,
@@ -43,7 +44,7 @@ Drift fails the PR via `zipxWorkflowCheck`.
 If you have maintained a second copy of the build (disconnected CI or a restated Bazel graph), start with **Why zipx**:
 a kinder path back to one honest graph. The power is for every Scala team on Actions, and especially monorepos.
 
-Guide: Why zipx → Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Caching →
+Guide: Why zipx → Quick start → Execution modes → Capabilities → Custom capabilities → Verify → Affected → Caching →
 Remote cache for teams → From Bazel → Action pins → Dependency updates → Docker and deploy → Job conditions → Packs →
 Settings.
 """

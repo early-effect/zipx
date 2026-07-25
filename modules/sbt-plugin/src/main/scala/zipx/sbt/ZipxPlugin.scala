@@ -166,6 +166,11 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[Boolean](
         "Skip Verify on branch pushes when the commit already belongs to a merged PR (default true)."
       )
+    val zipxCancelSupersededRuns =
+      settingKey[Boolean](
+        "Emit workflow concurrency so a new push cancels an in-flight run on the same ref (default true). " +
+          "Release-tag runs are never cancelled."
+      )
 
     // Tasks.
     val zipxGraph            = taskKey[Unit]("Print the resolved module graph and topological layers.")
@@ -182,24 +187,25 @@ object ZipxPlugin extends AutoPlugin:
   import autoImport.*
 
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
-    zipxCapabilities      := Seq.empty,
-    zipxCache             := CacheBackend.LocalDir,
-    zipxWorkflowName      := "CI",
-    zipxJavaVersion       := "21",
-    zipxRunnerOs          := "ubuntu-latest",
-    zipxScalaMatrix       := true,
-    zipxPushBranches      := Seq("main"),
-    zipxReleaseTagPattern := "v[0-9]+.[0-9]+.[0-9]+",
-    zipxWorkflowPath      := ".github/workflows/ci.yml",
-    zipxAffectedOnPR      := true,
-    zipxAffectedOnPush    := false,
-    zipxSkipMergedPrPush  := true,
-    zipxVerifyClean       := VerifyClean.None,
-    zipxActions           := ActionPins.Defaults,
-    zipxActionsPath       := ActionPinFile.DefaultPath,
-    zipxDependabotSync    := false,
-    zipxScalaSteward      := false,
-    zipxWorkflowDispatch  := false,
+    zipxCapabilities         := Seq.empty,
+    zipxCache                := CacheBackend.LocalDir,
+    zipxWorkflowName         := "CI",
+    zipxJavaVersion          := "21",
+    zipxRunnerOs             := "ubuntu-latest",
+    zipxScalaMatrix          := true,
+    zipxPushBranches         := Seq("main"),
+    zipxReleaseTagPattern    := "v[0-9]+.[0-9]+.[0-9]+",
+    zipxWorkflowPath         := ".github/workflows/ci.yml",
+    zipxAffectedOnPR         := true,
+    zipxAffectedOnPush       := false,
+    zipxSkipMergedPrPush     := true,
+    zipxCancelSupersededRuns := true,
+    zipxVerifyClean          := VerifyClean.None,
+    zipxActions              := ActionPins.Defaults,
+    zipxActionsPath          := ActionPinFile.DefaultPath,
+    zipxDependabotSync       := false,
+    zipxScalaSteward         := false,
+    zipxWorkflowDispatch     := false,
   )
 
   /** Wires sbt's remote cache from the environment the generated workflow sets up (`ZIPX_REMOTE_CACHE`,
@@ -359,6 +365,7 @@ object ZipxPlugin extends AutoPlugin:
       workflowDispatch = read(zipxWorkflowDispatch, false),
       skipMergedPrPush = read(zipxSkipMergedPrPush, true),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
+      cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
     )
   }
 
@@ -565,7 +572,12 @@ object ZipxPlugin extends AutoPlugin:
       val root    = (LocalRootProject / baseDirectory).value
       val baseRef = if base.isEmpty then "HEAD^" else base
       val changed = gitDiffNames(root, baseRef)
-      val modules = Affected.affectedModules(graph, changed).toList.sorted
+      if changed.isEmpty then
+        streams.value.log.warn(
+          s"zipx: could not diff against '$baseRef' — emitting ${jsonArray(Affected.AllSentinel)} so every job runs. " +
+            "Affected-only gating is disabled for this run."
+        )
+      val modules = Affected.outputModules(graph, changed)
       val json    = jsonArray(modules)
       val out     = root / "target" / "zipx-affected.json"
       IO.write(out, json + "\n")
@@ -573,17 +585,21 @@ object ZipxPlugin extends AutoPlugin:
     }
 
   /** Files changed on HEAD since its merge-base with `baseRef` (three-dot diff), repo-root-relative with forward
-    * slashes. Returns empty on any git failure (caller treats an empty change set as "nothing affected").
+    * slashes.
+    *
+    * `None` means the diff **failed** (nonzero exit or no git at all); `Some(Nil)` means it succeeded and found no
+    * changes. [[Affected.outputModules]] relies on that distinction to fail open — collapsing both to `Nil` is what
+    * made a bad base ref skip every Verify job and report the PR green.
     */
-  private def gitDiffNames(root: File, baseRef: String): List[String] =
+  private def gitDiffNames(root: File, baseRef: String): Option[List[String]] =
     try
       val lines = scala.collection.mutable.ListBuffer.empty[String]
       val code  =
         scala.sys.process
           .Process(Seq("git", "diff", "--name-only", s"$baseRef...HEAD"), root)
           .!(scala.sys.process.ProcessLogger(lines += _, _ => ()))
-      if code == 0 then lines.map(_.trim).filter(_.nonEmpty).toList else Nil
-    catch case scala.util.control.NonFatal(_) => Nil
+      if code == 0 then Some(lines.map(_.trim).filter(_.nonEmpty).toList) else None
+    catch case scala.util.control.NonFatal(_) => None
 
   private def jsonArray(items: List[String]): String =
     items.map(s => "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"").mkString("[", ",", "]")

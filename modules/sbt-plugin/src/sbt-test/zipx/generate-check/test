@@ -8,3 +8,19 @@ $ exists .github/workflows/ci.yml
 # Affected handoff for CI: task writes JSON to a file (never rely on capturing sbt stdout).
 > zipxAffectedModules HEAD
 $ exists target/zipx-affected.json
+# Fail OPEN, not closed. This dir is not a git repo, so the diff cannot run. An empty module list here
+# would make every contains-fromJson gate false and skip all verification while the PR reports green.
+> assertAffectedFailsOpen
+# A bogus base ref is the same class of failure: bad ref, missing object, or force-pushed base.
+> zipxAffectedModules deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+> assertAffectedFailsOpen
+# Now make it a real git repo with one commit, so the diff SUCCEEDS and legitimately finds no changes.
+# That must stay empty, proving fail-open keys off diff failure and not merely off an empty result.
+$ exec git init -q .
+$ exec git config user.email scripted@example.com
+$ exec git config user.name scripted
+$ exec git config commit.gpgsign false
+$ exec git add .
+$ exec git commit -q -m fixture
+> zipxAffectedModules HEAD
+> assertAffectedEmptyStaysEmpty

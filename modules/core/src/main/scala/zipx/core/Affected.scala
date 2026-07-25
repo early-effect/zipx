@@ -13,6 +13,14 @@ package zipx.core
   */
 object Affected:
 
+  /** The sentinel module list meaning "gate nothing, run every job".
+    *
+    * The generated job condition tests `contains(fromJson(...), 'all')` alongside the module id, so emitting this
+    * disables affected-gating for the run. [[Planner.affectedScript]] emits it for events with no usable base ref (tag
+    * pushes, `workflow_dispatch`, a branch's first push).
+    */
+  val AllSentinel: List[String] = List("all")
+
   /** Paths that force a full build when changed: build definition and meta-build. */
   private def isBuildFile(path: String): Boolean =
     path.endsWith(".sbt") || path == "project" || path.startsWith("project/") || path.contains("/project/")
@@ -27,6 +35,22 @@ object Affected:
     else
       val seeds = changedFiles.flatMap(owningModule(graph, _)).toSet
       graph.affectedClosure(seeds)
+
+  /** The module ids the `affected` job should publish, given a diff that may have failed.
+    *
+    * `changedFiles` is `None` when the diff could not be computed at all — bad base ref, missing object, force-pushed
+    * base, no git binary. Then this returns [[AllSentinel]]: fail **open** and verify everything.
+    *
+    * Returning an empty list there would fail **closed**, and silently: the generated condition
+    * `contains(fromJson(needs.affected.outputs.modules), '<id>')` is false for every module, so every Verify job skips
+    * and the PR reports green without having been tested. A broken base ref must cost CI minutes, not coverage.
+    *
+    * `Some(Nil)` is different and stays empty — that is a successful diff finding no changed files.
+    */
+  def outputModules(graph: ModuleGraph, changedFiles: Option[List[String]]): List[String] =
+    changedFiles match
+      case None        => AllSentinel
+      case Some(files) => affectedModules(graph, files).toList.sorted
 
   /** The module owning a file, by longest base-dir prefix. Root (baseDir "") only matches files not owned by any deeper
     * module, and even then only if root is a real module — but since root is typically an excluded aggregator, such

@@ -39,6 +39,52 @@ object PlannerSpec extends ZIOSpecDefault:
   )
 
   def spec = suite("Planner")(
+    test("emits workflow-level concurrency so superseded PR pushes are cancelled") {
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config)
+      val c  = wf.concurrency
+      assertTrue(
+        // Regression: Concurrency existed in the AST and rendered, but plan() never constructed one,
+        // so every superseded push kept burning a runner to completion.
+        c.isDefined,
+        // Keyed on ref, so a PR's pushes cancel each other and other branches are untouched...
+        c.exists(_.group.contains("${{ github.ref }}")),
+        // ...and on the workflow name, so sibling workflows in one repo never contend.
+        c.exists(_.group.startsWith("CI-")),
+      )
+    },
+    test("concurrency never cancels a release-tag run") {
+      // A cancelled publish is not idempotent: it can leave a staged-but-unreleased Central bundle behind,
+      // which is strictly worse than a wasted runner. So cancel-in-progress is an expression, not `true`.
+      val c = Planner.plan(sampleGraph, List(Capability.testGraph), config).concurrency
+      assertTrue(
+        c.exists(_.cancelInProgress == "${{ !startsWith(github.ref, 'refs/tags/') }}"),
+        c.exists(_.cancelInProgress != "true"),
+      )
+    },
+    test("concurrency is omitted when cancelSupersededRuns is off") {
+      val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(cancelSupersededRuns = false))
+      assertTrue(wf.concurrency.isEmpty)
+    },
+    test("Gate.AffectedOnly is rejected, not silently treated as Always") {
+      // It is an unimplemented design seam (ROADMAP M3/M6: "affected-gated publishing" was never built).
+      // Affected-gating comes from Phase.Verify + PlanConfig.affected, so the planner cannot honor it —
+      // and a capability that runs on every event while its Gate claims otherwise is exactly the
+      // silently-green pipeline zipx exists to prevent.
+      val cap = Capability.publish.copy(gate = Gate.AffectedOnly)
+      val err = scala.util.Try(Planner.plan(sampleGraph, List(cap), config)).failed.get
+      assertTrue(
+        err.getMessage.contains("Gate.AffectedOnly is not implemented"),
+        err.getMessage.contains("publish"),
+        // Points at the setting that actually controls affected-gating.
+        err.getMessage.contains("zipxAffectedOnPR"),
+      )
+    },
+    test("the supported gates still plan cleanly") {
+      assertTrue(
+        Planner.plan(sampleGraph, List(Capability.publish.copy(gate = Gate.Always)), config).jobs.nonEmpty,
+        Planner.plan(sampleGraph, List(Capability.publish.copy(gate = Gate.OnReleaseTag)), config).jobs.nonEmpty,
+      )
+    },
     test("emits one test job per CI-relevant module") {
       val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config)
       assertTrue(

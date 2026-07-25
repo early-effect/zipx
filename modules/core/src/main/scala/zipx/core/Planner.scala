@@ -67,14 +67,27 @@ object Planner:
   private def joinCommands(capability: Capability, nodes: List[ModuleNode]): String =
     nodes.map(capability.command).mkString("; ")
 
-  /** Guards against a `needsCapabilities` cycle among capabilities. */
+  /** Guards against a `needsCapabilities` cycle among capabilities, and against gates the planner cannot honor. */
   private def validateCapabilities(capabilities: List[Capability]): Unit =
+    // `Gate.AffectedOnly` is an unimplemented design seam (see [[Gate]]): affected-gating is derived from
+    // Phase.Verify + PlanConfig.affected, not from Gate. Fail loudly at generate time rather than emit a
+    // workflow that quietly runs the capability always — a silently-green pipeline is the worst outcome.
+    capabilities.filter(_.gate == Gate.AffectedOnly) match
+      case Nil => ()
+      case bad =>
+        sys.error(
+          s"zipx: Gate.AffectedOnly is not implemented, so capabilities ${bad.map(_.name).sorted.mkString(", ")} " +
+            "would silently run on every event. Affected-gating is controlled by zipxAffectedOnPR / " +
+            "zipxAffectedOnPush on Graph Verify capabilities, not by Gate. Use Gate.Always (Verify capabilities are " +
+            "affected-gated automatically) or Gate.OnReleaseTag."
+        )
     val names    = capabilities.map(_.name).toSet
     val capGraph = ModuleGraph(
       capabilities.map(c => ModuleNode(c.name, dependsOn = c.needsCapabilities.filter(names.contains)))
     )
     capGraph.topologicalSort
     ()
+  end validateCapabilities
 
   val affectedJobId   = "affected"
   val verifyGateJobId = "verify-gate"
@@ -125,8 +138,24 @@ object Planner:
       name = config.workflowName,
       on = triggersFor(config, capabilities),
       jobs = jobs,
+      concurrency = Option.when(config.cancelSupersededRuns)(concurrencyFor(config)),
     )
   end plan
+
+  /** Workflow-level `concurrency`: one in-flight run per ref, superseded runs cancelled.
+    *
+    * The group folds in the workflow name (so sibling workflows in the same repo never contend) and `github.ref` (so a
+    * PR's pushes cancel each other while other branches are untouched).
+    *
+    * `cancel-in-progress` is an expression rather than `true`: a release-tag run must never be cancelled. Publishing is
+    * not idempotent, and a half-cancelled run can leave a staged-but-unreleased Central bundle behind — far worse than
+    * a wasted runner.
+    */
+  private def concurrencyFor(config: PlanConfig): Concurrency =
+    Concurrency(
+      group = s"${config.workflowName}-$${{ github.ref }}",
+      cancelInProgress = "${{ !startsWith(github.ref, 'refs/tags/') }}",
+    )
 
   /** Cheap gate: on branch pushes, ask whether this SHA already belongs to a PR merged into the same branch. Merge and
     * squash both associate the landed commit with the merged PR; a direct push typically does not. Fail-open: if the
