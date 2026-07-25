@@ -12,7 +12,8 @@ object Verify extends DocSpecSuite:
   def doc = page("Verify")(
     md"""
 Verify is the test/build phase. Aggregate defaults to a root Once job; Layer and Graph use per-module (or per-wave)
-commands. Two settings configure the command for **all** modes.
+commands. Two settings configure the command for **all** modes. Path-based job skipping lives on the **Affected**
+page (Graph only, fail-open handoff, concurrency).
 """,
     section("Test task and optional clean")(
       md"""
@@ -38,10 +39,18 @@ zipxVerifyClean := VerifyClean.CleanFull // None (default) | Clean | CleanFull
 Aggregate and Layer always invoke their full stage command (they do not skip GitHub jobs). That is not the same as
 "always recompile and retest everything": sbt 2's incremental `test` and cross-run task cache (restored by zipx at the
 epoch, or via remote cache) still skip unaffected work, even on a cold JVM. See **Execution modes** ("Two kinds of
-affected").
+affected") and the **Affected** page for the fail-open handoff and who is gated today.
 
 ```scala
 zipxAffectedOnPR := true   // default with Graph Verify
+```
+
+```
+Aggregate/Layer          Graph Verify
+─────────────────        ─────────────────────────
+ always start job         affected setup job
+ sbt cache skips work     skip whole module jobs
+ inside the JVM           when reverse-dep untouched
 ```
 """,
       exampleValue {
@@ -55,7 +64,8 @@ zipxAffectedOnPR := true   // default with Graph Verify
       ),
       md"""
 Changed files → owning module (longest base-dir prefix) → reverse-dependency closure. A `.sbt` change or anything under
-`project/` forces a full build. On push/tag everything builds unless `zipxAffectedOnPush` is enabled.
+`project/` forces a full build. On push/tag everything builds unless `zipxAffectedOnPush` is enabled. If the diff
+**cannot run**, zipx emits `["all"]` (fail open) so a bad base ref never reports a green, untested PR.
 """,
     ),
     section("Skip Verify after merge / on tags")(

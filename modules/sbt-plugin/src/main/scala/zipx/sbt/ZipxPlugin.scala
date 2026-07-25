@@ -166,6 +166,11 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[Boolean](
         "Skip Verify on branch pushes when the commit already belongs to a merged PR (default true)."
       )
+    val zipxCancelSupersededRuns =
+      settingKey[Boolean](
+        "Emit workflow concurrency so a new push cancels an in-flight run on the same ref (default true). " +
+          "Release-tag runs are never cancelled."
+      )
 
     // Tasks.
     val zipxGraph            = taskKey[Unit]("Print the resolved module graph and topological layers.")
@@ -182,24 +187,25 @@ object ZipxPlugin extends AutoPlugin:
   import autoImport.*
 
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
-    zipxCapabilities      := Seq.empty,
-    zipxCache             := CacheBackend.LocalDir,
-    zipxWorkflowName      := "CI",
-    zipxJavaVersion       := "21",
-    zipxRunnerOs          := "ubuntu-latest",
-    zipxScalaMatrix       := true,
-    zipxPushBranches      := Seq("main"),
-    zipxReleaseTagPattern := "v[0-9]+.[0-9]+.[0-9]+",
-    zipxWorkflowPath      := ".github/workflows/ci.yml",
-    zipxAffectedOnPR      := true,
-    zipxAffectedOnPush    := false,
-    zipxSkipMergedPrPush  := true,
-    zipxVerifyClean       := VerifyClean.None,
-    zipxActions           := ActionPins.Defaults,
-    zipxActionsPath       := ActionPinFile.DefaultPath,
-    zipxDependabotSync    := false,
-    zipxScalaSteward      := false,
-    zipxWorkflowDispatch  := false,
+    zipxCapabilities         := Seq.empty,
+    zipxCache                := CacheBackend.LocalDir,
+    zipxWorkflowName         := "CI",
+    zipxJavaVersion          := "21",
+    zipxRunnerOs             := "ubuntu-latest",
+    zipxScalaMatrix          := true,
+    zipxPushBranches         := Seq("main"),
+    zipxReleaseTagPattern    := "v[0-9]+.[0-9]+.[0-9]+",
+    zipxWorkflowPath         := ".github/workflows/ci.yml",
+    zipxAffectedOnPR         := true,
+    zipxAffectedOnPush       := false,
+    zipxSkipMergedPrPush     := true,
+    zipxCancelSupersededRuns := true,
+    zipxVerifyClean          := VerifyClean.None,
+    zipxActions              := ActionPins.Defaults,
+    zipxActionsPath          := ActionPinFile.DefaultPath,
+    zipxDependabotSync       := false,
+    zipxScalaSteward         := false,
+    zipxWorkflowDispatch     := false,
   )
 
   /** Wires sbt's remote cache from the environment the generated workflow sets up (`ZIPX_REMOTE_CACHE`,
@@ -359,6 +365,7 @@ object ZipxPlugin extends AutoPlugin:
       workflowDispatch = read(zipxWorkflowDispatch, false),
       skipMergedPrPush = read(zipxSkipMergedPrPush, true),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
+      cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
     )
   }
 

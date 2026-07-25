@@ -32,6 +32,7 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxAffectedOnPR` | `Boolean` | `true` | affected setup when Graph Verify present |
 | `zipxAffectedOnPush` | `Boolean` | `false` | also scope pushes |
 | `zipxSkipMergedPrPush` | `Boolean` | `true` | skip Verify on merged-PR pushes |
+| `zipxCancelSupersededRuns` | `Boolean` | `true` | workflow concurrency; never cancel release tags |
 | `zipxVerifyClean` | `VerifyClean` | `None` | optional clean before Verify commands |
 """
     ),
