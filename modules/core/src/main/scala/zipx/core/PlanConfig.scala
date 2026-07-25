@@ -42,6 +42,10 @@ enum AffectedMode:
   *   Avoids running tests twice after a PR merge.
   * @param verifyClean
   *   optional `clean` / `cleanFull` prepended to every Verify-phase sbt command (Aggregate, Layer, and Graph).
+  * @param cancelSupersededRuns
+  *   when true (default), emit workflow-level `concurrency` keyed on ref so pushing again to a PR cancels the still-
+  *   running earlier build. Never cancels release-tag runs — the group folds in the ref, and a half-cancelled publish
+  *   is worse than a wasted runner.
   */
 final case class PlanConfig(
     workflowName: String = "CI",
@@ -58,4 +62,5 @@ final case class PlanConfig(
     workflowDispatch: Boolean = false,
     skipMergedPrPush: Boolean = true,
     verifyClean: VerifyClean = VerifyClean.None,
+    cancelSupersededRuns: Boolean = true,
 )

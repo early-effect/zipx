@@ -139,3 +139,20 @@ assertGraph := {
   )
   assert(content.contains("SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}"), "Secret() helper should render")
 }
+
+// A broken diff must fail OPEN: emit the `["all"]` sentinel so every Verify job still runs.
+// Emitting `[]` instead would make every generated `contains(fromJson(...), '<id>')` gate false, skipping
+// all verification while the PR reports green. Scripted runs in a temp dir that is not a git repo, so any
+// base ref is genuinely undiffable here — no mocking needed.
+val assertAffectedFailsOpen = taskKey[Unit]("a diff that cannot run emits the all-sentinel")
+assertAffectedFailsOpen := {
+  val json = IO.read((LocalRootProject / baseDirectory).value / "target" / "zipx-affected.json").trim
+  assert(json == """["all"]""", s"""expected ["all"] when the diff fails, got $json""")
+}
+
+// A diff that succeeds and finds nothing is NOT a failure: it stays empty and gates everything out.
+val assertAffectedEmptyStaysEmpty = taskKey[Unit]("a successful empty diff stays empty")
+assertAffectedEmptyStaysEmpty := {
+  val json = IO.read((LocalRootProject / baseDirectory).value / "target" / "zipx-affected.json").trim
+  assert(json == "[]", s"expected [] for a successful diff with no changes, got $json")
+}

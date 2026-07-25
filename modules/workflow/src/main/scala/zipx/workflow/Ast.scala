@@ -160,7 +160,13 @@ final case class Step(
     workingDirectory: Option[String] = None,
 ) derives Schema
 
+/** Workflow- or job-level `concurrency`.
+  *
+  * `cancelInProgress` is a String, not a Boolean, because GitHub accepts an expression there and the useful policies
+  * need one — "cancel superseded runs, but never a release publish" is `${{ !startsWith(github.ref, 'refs/tags/') }}`.
+  * Pass `"true"` / `"false"` for the constant cases.
+  */
 final case class Concurrency(
     group: String,
-    cancelInProgress: Boolean = false,
+    cancelInProgress: String = "false",
 ) derives Schema

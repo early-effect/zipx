@@ -74,6 +74,21 @@ object RenderSpec extends ZIOSpecDefault:
     test("is deterministic — rendering twice yields identical bytes") {
       assertTrue(Render.render(sample) == Render.render(sample))
     },
+    test("renders the concurrency block, keeping an expression in cancel-in-progress unquoted-safe") {
+      val wf = sample.copy(concurrency =
+        Some(Concurrency("CI-${{ github.ref }}", "${{ !startsWith(github.ref, 'refs/tags/') }}"))
+      )
+      val out = Render.render(wf)
+      assertTrue(
+        out.contains("concurrency:"),
+        out.contains("group: CI-${{ github.ref }}"),
+        // kebab-cased by the deriver, as GitHub Actions requires
+        out.contains("cancel-in-progress:"),
+        out.contains("!startsWith(github.ref, 'refs/tags/')"),
+        // Omitted entirely when absent — no stray `concurrency: null`.
+        !Render.render(sample).contains("concurrency"),
+      )
+    },
     test("prunes empty collections (no `{}` or `[]` in output)") {
       val out = Render.render(sample)
       assertTrue(!out.contains("{}"), !out.contains("[]"))

@@ -52,6 +52,42 @@ object AffectedSpec extends ZIOSpecDefault:
     test("files under no module are ignored (empty affected set)") {
       assertTrue(Affected.affectedModules(graph, List("docs/readme.md", ".github/CODEOWNERS")) == Set.empty)
     },
+    // ---- Fail-open on a broken diff ----
+    // The generated condition is `contains(fromJson(needs.affected.outputs.modules), '<id>')`, so an empty
+    // module list skips every Verify job and the PR reports green untested. A diff that could not run must
+    // therefore cost CI minutes, not coverage.
+    test("a failed diff (None) emits the 'all' sentinel, not an empty list") {
+      assertTrue(
+        Affected.outputModules(graph, None) == List("all"),
+        Affected.outputModules(graph, None) == Affected.AllSentinel,
+        // The bug: had this been empty, every module's `contains(...)` gate would be false.
+        Affected.outputModules(graph, None).nonEmpty,
+        graph.ids.forall(id => !Affected.outputModules(graph, None).contains(id)),
+      )
+    },
+    test("the sentinel satisfies the generated job condition for every module") {
+      // Mirrors Planner's `contains(fromJson(modules), '<id>') || contains(fromJson(modules), 'all')`.
+      val emitted                               = Affected.outputModules(graph, None)
+      def gatePasses(moduleId: String): Boolean =
+        emitted.contains(moduleId) || emitted.contains("all")
+      assertTrue(graph.ids.forall(gatePasses))
+    },
+    test("a successful diff finding nothing (Some(Nil)) stays empty — it is not a failure") {
+      assertTrue(
+        Affected.outputModules(graph, Some(Nil)).isEmpty,
+        // ...and so gates nothing, which is the correct, deliberate skip.
+        graph.ids.forall(id => !Affected.outputModules(graph, Some(Nil)).contains(id)),
+      )
+    },
+    test("a successful diff is unaffected by the fail-open path") {
+      assertTrue(
+        Affected.outputModules(graph, Some(List("client/src/main/scala/Client.scala"))) == List("client"),
+        Affected.outputModules(graph, Some(List("build.sbt"))) == graph.ids.toList.sorted,
+        // Sorted, so the emitted JSON is deterministic across runs.
+        Affected.outputModules(graph, Some(List("models/x.scala"))) ==
+          List("client", "coreLib", "models", "service"),
+      )
+    },
     test("longest-prefix wins when base dirs would otherwise overlap") {
       val nested = ModuleGraph(
         List(
