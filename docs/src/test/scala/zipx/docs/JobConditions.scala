@@ -20,6 +20,17 @@ object JobConditions extends DocSpecSuite:
 [[Gate]] is still the timeline (`Always` vs `OnReleaseTag`). The planner **ANDs** Gate clauses with capability and
 target conditions.
 
+```mermaid
+flowchart TD
+  Cap[Capability] --> Gate[Gate · Always or OnReleaseTag]
+  Cap --> Cond[JobCondition · optional]
+  Gate --> And[planner AND]
+  Cond --> And
+  And --> If([job if:])
+  class Cap,Gate,Cond warn
+  class And,If happy
+```
+
 Default on every capability and target: `condition = None` (no extra filter). Prefer `withCondition(...)` to set a
 filter, or `andCondition(...)` to layer onto a pack that already ships one (e.g. `ZipxDocs.pages`).
 """,

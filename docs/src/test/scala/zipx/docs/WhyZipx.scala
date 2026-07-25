@@ -26,6 +26,19 @@ Put/Get is proven by `RemoteCacheItSpec` (same `RemoteCacheProof` pins as the YA
 Most teams we meet are somewhere on this triangle. None of the first two are foolish; they were reasonable responses
 to real pain. zipx is the recovery path that keeps your Scala mental model intact.
 
+```mermaid
+flowchart TD
+  Pain([Slow or opaque CI]) --> Disc[Disconnected CI · hand YAML]
+  Disc --> DriftD([two sources of truth])
+  DriftD -.->|or| Bazel[Bazel second graph · BUILD + CI glue]
+  Bazel --> DriftB([edges restated outside sbt])
+  DriftB -.->|or| Zipx[zipx · one sbt graph]
+  Zipx --> Heal([Derived ci.yml · zipxWorkflowCheck])
+  class Disc,DriftD,Bazel,DriftB sad
+  class Zipx,Heal happy
+  class Pain warn
+```
+
 | Approach | Source of truth | What drifts (the bruise) |
 |---|---|---|
 | Disconnected CI | `build.sbt` **and** hand YAML | Module lists, `needs`, publish order |

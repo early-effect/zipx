@@ -14,6 +14,20 @@ object DockerAndDeploy extends DocSpecSuite:
     md"""
 Services opt into images by enabling [sbt-native-packager](https://github.com/sbt/sbt-native-packager)'s
 `DockerPlugin`. Deploying to multiple environments fans out over typed **targets**.
+
+```mermaid
+flowchart TD
+  Svc([1 · service + DockerPlugin]) --> DockerJob[2 · docker job · Docker publish]
+  DockerJob --> Staging[3a · deploy-staging]
+  DockerJob --> Prod[3b · deploy-prod]
+  Staging --> EnvS[(GitHub Environment · staging)]
+  Prod --> EnvP[(GitHub Environment · production)]
+  class Svc,DockerJob happy
+  class Staging,Prod,EnvS,EnvP warn
+```
+
+Green is the image path (plugin → Aggregate `Docker/publish`). Amber is the target fan-out: one deploy job per
+`Target`, each wired to its own GitHub Environment (approvals stay independent).
 """,
     section("Docker paved path")(
       md"""

@@ -12,6 +12,20 @@ The **root** build loads zipx from **source** via a meta-build mirror (`project/
 """,
     section("Dogfood layout")(
       md"""
+```mermaid
+flowchart TD
+  Modules([1 · modules sources]) --> Meta[2 · project meta mirrors]
+  Meta --> Root([3 · root sbt load])
+  Modules --> Plugin[2b · plugin project]
+  Plugin --> Central([3b · Central + scripted])
+  class Modules warn
+  class Meta,Root happy
+  class Plugin,Central warn
+```
+
+Same trees under `modules/*/src`: the green path is dogfood (`project/meta-*` mirrors → root loads from
+source). The amber path is the publishable `plugin` project for Central and scripted.
+
 - `project/meta-{workflow,core,central,plugin}` compile the same `modules/*/src/main/scala` trees
 - Shared versions live in [`project/Dependencies.scala`](https://github.com/early-effect/zipx/blob/main/project/Dependencies.scala)
 - `project/project/Dependencies.scala` and `Dogfood.scala` are **symlinks** — edit only the real files under `project/`

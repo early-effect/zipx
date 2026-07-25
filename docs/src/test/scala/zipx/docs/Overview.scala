@@ -54,6 +54,18 @@ Many teams arrive tired. Slow or opaque sbt CI made “just put it in YAML” fe
 kept sbt but **re-listed** every module and recipe in workflows (sometimes plus an external config and resolver
 script).
 
+```mermaid
+flowchart TD
+  Tired([Tired of CI drift]) --> YAML[Hand-maintained YAML]
+  Tired --> Bazel[BUILD second graph]
+  YAML --> Tax[Two sources of truth]
+  Bazel --> Tax
+  Tax --> Zipx[zipx: one graph]
+  class Tired warn
+  class YAML,Bazel,Tax sad
+  class Zipx happy
+```
+
 Those approaches invent another copy of the build. Recognizing that tax is the first step toward something kinder.
 
 ### Disconnected CI (YAML that redeclares the build)
@@ -109,6 +121,19 @@ already knows the truth. That is a recovery strategy, not a parity claim: see **
     ),
     section("One graph, generated CI")(
       md"""
+```mermaid
+flowchart TD
+  Build[build.sbt · dependsOn and aggregate] --> Zipx[sbt-zipx]
+  Zipx --> Gen[zipxWorkflowGenerate]
+  Gen --> Yaml[ci.yml committed]
+  Zipx --> Check[zipxWorkflowCheck]
+  Check -->|drift?| Fail([PR fails])
+  Yaml --> GHA[GitHub Actions]
+  class Fail sad
+  class Check warn
+  class Build,Zipx,Gen,Yaml,GHA happy
+```
+
 | Approach | When you add a module you… |
 |---|---|
 | Disconnected CI | Edit workflow YAML (and often an external config / script) |
@@ -213,6 +238,20 @@ You keep the ergonomics Scala teams already know. CI stops being a second langua
     section("Architecture")(
       md"""
 Three layers:
+
+```mermaid
+flowchart TD
+  Plugin[sbt-zipx · AutoPlugin]
+  Graph[ModuleGraph · from dependsOn]
+  Core[zipx-core · Planner]
+  Workflow[zipx-workflow · YAML AST]
+  Ci([committed ci.yml])
+  Plugin --> Graph
+  Plugin --> Core
+  Graph --> Core
+  Core --> Workflow
+  Workflow --> Ci
+```
 
 - **`zipx-workflow`**: GitHub Actions AST + deterministic YAML printer
 - **`zipx-core`**: pure planner (`ModuleGraph` → `Workflow`)

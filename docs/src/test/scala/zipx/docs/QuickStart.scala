@@ -13,6 +13,16 @@ object QuickStart extends DocSpecSuite:
 Describe CI in the build, then generate it. Add the plugin, write `ci.yml` with `zipxWorkflowGenerate`, and let
 `zipxWorkflowCheck` fail the PR when the committed workflow no longer matches the graph. Works for a single Aggregate
 library as well as a monorepo; no hand-rolled module matrices required.
+
+```mermaid
+flowchart LR
+  Plugin[addSbtPlugin sbt-zipx] --> Gen[zipxWorkflowGenerate]
+  Gen --> Commit[commit ci.yml]
+  Commit --> PR[open PR]
+  PR --> Check[zipxWorkflowCheck]
+  Check --> Green([honest CI])
+  class Plugin,Gen,Commit,PR,Check,Green happy
+```
 """,
     section("Install")(
       md"""

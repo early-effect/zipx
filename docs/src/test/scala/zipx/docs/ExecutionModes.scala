@@ -33,21 +33,16 @@ compile/test work that sbt (and the restored/remote cache) can already skip.
       md"""
 sbt and zipx answer different questions:
 
-```
-                    PR changes leaf module "client"
-                              │
-          ┌───────────────────┴───────────────────┐
-          ▼                                       ▼
-   Aggregate (sbt 2)                        Graph (zipx)
-   ─────────────────                        ──────────────
-   one `test` job starts                    affected setup
-   Zinc + incremental test                  skips jobs whose
-   + epoch/remote cache                     reverse-dep closure
-   skip work *inside* JVM                   does not include client
-          │                                       │
-          ▼                                       ▼
-   fewer compiles/suites                    fewer GHA jobs
-   (same job still green)                   (per-module status)
+```mermaid
+flowchart TD
+  Change[PR changes leaf module client] --> A1[Aggregate · one test job starts]
+  A1 --> A2[Zinc + incremental test · epoch or remote cache]
+  A2 --> A3([fewer compiles and suites · same job still green])
+  A3 -.->|or Graph| G1[Graph · affected setup]
+  G1 --> G2[skip jobs outside · reverse-dep closure]
+  G2 --> G3([fewer GHA jobs · per-module status])
+  class A1,A2,A3 happy
+  class G1,G2,G3 warn
 ```
 
 | Layer | Question | Who decides |
@@ -64,6 +59,23 @@ run every suite every time, uncached. See **Caching** and **Affected** (fail-ope
     ),
     section("When to use which")(
       md"""
+```mermaid
+stateDiagram-v2
+  [*] --> Choose
+  Choose --> Aggregate: default
+  Choose --> Layer: ordered waves
+  Choose --> Graph: isolation
+  Aggregate --> Done
+  Layer --> Done
+  Graph --> Done
+  note right of Choose
+    Need CI from the sbt graph.
+    Does the workflow need
+    per-module isolation,
+    matrices, or path gating?
+  end note
+```
+
 zipx is built for **all sorts of sbt repos**, and especially **monorepos**: the same typed capabilities scale from a
 single library to many services. Modes choose *how* work is scheduled in GitHub Actions, not whether zipx understands
 your graph.
@@ -132,15 +144,6 @@ For docker/deploy, participants still come from the graph. **Targets** (GitHub `
     section("Cost intuition")(
       md"""
 For a 4-module library with cross-Scala and release publish (leaf-only PR vs full fan-out):
-
-```
- runners / sbt starts (sketch)
- ▲
- │  Graph full     ████████████  (N modules × matrix)
- │  Graph affected ██            (closure only; leaf PR)
- │  Aggregate      ██            (1 job; cache skips inside)
- └──────────────────────────────────────── PR shape ──►
-```
 
 | Mode | Typical PR shape | What you pay for |
 |---|---|---|
