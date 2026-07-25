@@ -45,12 +45,13 @@ affected") and the **Affected** page for the fail-open handoff and who is gated 
 zipxAffectedOnPR := true   // default with Graph Verify
 ```
 
-```
-Aggregate/Layer          Graph Verify
-─────────────────        ─────────────────────────
- always start job         affected setup job
- sbt cache skips work     skip whole module jobs
- inside the JVM           when reverse-dep untouched
+```mermaid
+flowchart TD
+  A1[Aggregate or Layer · always start job] --> A2([sbt cache skips work · inside the JVM])
+  A2 -.->|or Graph| G1[Graph Verify · affected setup]
+  G1 --> G2([skip whole module jobs · reverse-dep untouched])
+  class A1,A2 happy
+  class G1,G2 warn
 ```
 """,
       exampleValue {

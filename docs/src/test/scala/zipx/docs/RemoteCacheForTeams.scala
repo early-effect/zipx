@@ -59,6 +59,18 @@ multi-environment isolation (see **Execution modes**), not merely to "make cachi
       md"""
 Typical loop with a **ManagedRemote** (or long-lived sidecar) backend:
 
+```mermaid
+flowchart TD
+  CI([1 · CI Aggregate · sbt test]) -->|Put digests on miss| Cache[(ManagedRemote)]
+  CI -->|Get on later PR jobs| Cache
+  Dev([2 · Developer laptop]) -->|Get after git pull| Cache
+  class CI warn
+  class Dev,Cache happy
+```
+
+CI is the hydrator (amber): misses compile onsite, then **Put**s digests. Later PR jobs and laptops (green) **Get**
+the same entries when JDK/OS `cacheVersion` and digests match.
+
 1. A PR or `main` job runs Aggregate `sbt test` with `ZIPX_REMOTE_CACHE` set.
 2. Misses compile/test onsite; successes write action-cache entries and outputs to the remote store.
 3. Teammates (and later CI jobs) with the same JDK/OS `cacheVersion` and matching digests **Get** those entries.

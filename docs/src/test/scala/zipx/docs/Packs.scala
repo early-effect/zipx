@@ -15,6 +15,21 @@ object Packs extends DocSpecSuite:
   def doc = page("Packs")(
     md"""
 Org paved paths are capabilities (secret *names* only; values stay in GitHub):
+
+```mermaid
+flowchart TD
+  Caps([zipxCapabilities]) --> Central[ZipxCentral.release]
+  Caps --> Packages[ZipxGitHubPackages]
+  Caps --> Docs[ZipxDocs.pages]
+  Central --> Sonatype[(Maven Central)]
+  Packages --> GH[(GitHub Packages)]
+  Docs --> Pages[(GitHub Pages)]
+  class Caps warn
+  class Central,Packages,Docs,Sonatype,GH,Pages happy
+```
+
+Amber is the knob (`zipxCapabilities += …`). Each green pack is a paved Publish/docs capability that lands in its
+destination; you only name secrets in code, values stay in GitHub.
 """,
     section("ZipxCentral")(
       md"""

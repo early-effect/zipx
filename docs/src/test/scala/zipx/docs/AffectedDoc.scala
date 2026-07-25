@@ -17,22 +17,41 @@ jobs are path-gated. Publish and Deploy stay release-gated; Deploy is never affe
 """,
     section("Closure flow")(
       md"""
-```
- changed files (git diff)
-         │
-         ▼
- owning module (longest baseDir prefix)
-         │
-         ▼
- reverse-dependency closure  ──►  modules JSON
-         │
-         ▼
- Graph Verify job `if:` contains(id) || contains('all')
+```mermaid
+flowchart TD
+  Diff([1 · git diff]) --> Own[2 · owning module]
+  Own --> Closure[3 · reverse-dep closure]
+  Closure --> Json[4 · modules JSON]
+  Json --> Gate([5 · Graph Verify gate])
+  class Diff,Own,Closure,Json warn
+  class Gate happy
 ```
 
-A leaf change runs only that leaf. Changing a shared library runs the library and every transitive dependent. A
-`.sbt` change or anything under `project/` forces the full module set. Unowned paths (README, `.github/…`) affect
-nothing unless they are build files.
+### From git diff to owning module
+
+The `affected` job takes the PR's changed paths (repo-root-relative, from `git diff` against the base
+ref) and maps each file to at most one module:
+
+1. **Build files force everything.** If any path ends in `.sbt` or sits under a `project/` directory
+   (root or nested), the whole module set is affected. Plugins and the graph may have changed, so nothing
+   is safe to skip.
+2. **Otherwise: longest `baseDir` prefix.** Each module's `baseDir` is a path prefix. A file is owned by
+   the matching module whose `baseDir` is longest (most specific). Matching is directory-aware:
+   `core/` owns `core/src/X.scala`, but not `core-lib/…` or `core-extra/…`. Nested bases win:
+   `mods/inner/X.scala` belongs to `mods/inner`, not `mods`.
+3. **Unowned paths seed nothing.** `README.md`, `.github/…`, and other files outside every module
+   `baseDir` are ignored (unless step 1 applies). Aggregators with empty `baseDir` never own files.
+
+Those owning modules are the **seeds**. Step 3 of the chart expands them to the reverse-dependency
+closure; step 5 gates each Graph Verify job on whether its id (or `all`) appears in the published JSON.
+
+| Changed path | Owning module | After closure (example) |
+|---|---|---|
+| `client/src/…` | `client` (leaf) | just `client` |
+| `models/src/…` | `models` | `models` + every transitive dependent |
+| `mods/inner/X.scala` | `inner` (longer than `mods`) | `inner` + dependents |
+| `README.md` | none | empty (no Graph Verify) |
+| `build.sbt` / `project/plugins.sbt` | (build file) | **all** modules |
 
 ```scala
 zipxAffectedOnPR   := true   // default; emits `affected` only when Graph Verify is present
@@ -56,20 +75,21 @@ The affected handoff must never turn a broken git diff into a green, untested PR
 (`[]`): “diff succeeded and found nothing” versus “diff could not run.” Empty JSON makes every
 `contains(..., '<id>')` false, so every Graph Verify job skips.
 
-```
-                    gitDiffNames
-                         │
-           ┌─────────────┴─────────────┐
-           ▼                           ▼
-     Some(files)                      None
-   (diff ran)                   (diff failed)
-           │                           │
-           ▼                           ▼
-   affectedModules              emit ["all"]
-   (may be [])                  fail OPEN
-           │                           │
-           ▼                           ▼
-   write modules JSON          every Verify job runs
+```mermaid
+flowchart TD
+  Diff[gitDiffNames] --> SomeFiles{Some files?}
+  Diff --> None[None · diff failed]
+  SomeFiles -->|yes| Aff[affectedModules · may be empty]
+  SomeFiles -->|empty Nil| Empty[emit empty list]
+  Aff --> Write[write modules JSON]
+  Empty --> Skip([skip Graph Verify · deliberate])
+  None --> All[emit all]
+  All --> Run([every Verify job runs · fail OPEN])
+  Write --> Gate([gate per module])
+  class Diff,SomeFiles warn
+  class None,All,Run happy
+  class Empty,Skip warn
+  class Aff,Write,Gate happy
 ```
 
 | Diff outcome | Value | Emitted | CI result |
@@ -84,24 +104,6 @@ that run.
     ),
     section("Who is gated today")(
       md"""
-```
-                 ┌──────────────┐
-  PlanConfig     │ AffectedOnPR │
-  + Graph Verify └──────┬───────┘
-                        │
-                        ▼
-              ┌─────────────────┐
-              │  affected job   │
-              └────────┬────────┘
-         ┌─────────────┼─────────────┐
-         ▼             ▼             ▼
-   Graph Verify   Aggregate/     Publish /
-   (path-gated)   Layer Verify   Deploy
-                  (always run    (release tag;
-                   stage cmd)    Deploy never
-                                 affected)
-```
-
 | Capability shape | Path-affected? | Why |
 |---|---|---|
 | `Capability.testGraph` (and other Graph + Verify) | Yes | Per-module jobs can skip |
@@ -119,14 +121,14 @@ silently mean Always.
 Existing machinery already path-gates any `phase = Verify` + `scope = Graph` capability. The next proof is not a
 new Gate: put expensive Verify stages on Graph (scripted, MiMa, PR-local docker builds) and measure leaf-PR skips.
 
-```
-Wave 1 (no Gate change)          Wave 2 (design)
-────────────────────────         ────────────────────────
-scripted Graph Verify            composable gates so
-mimaReportBinaryIssues           OnReleaseTag ∩ Affected
-dockerLocal on PR (Verify)       works for publish/docker
-                                 (tag base ≠ PR base;
-                                  Deploy stays excluded)
+```mermaid
+flowchart TD
+  W1[Wave 1: Graph Verify proofs · scripted, MiMa, dockerLocal] --> W2[Wave 2: composable OnReleaseTag and Affected]
+  W2 --> P[Publish or docker on tag]
+  W2 --> X[Deploy stays excluded]
+  class W1 warn
+  class W2,P happy
+  class X warn
 ```
 
 Partial monorepo publish on a tag is the headline Wave 2 win; until Gate can compose with release, keep Publish on
@@ -143,9 +145,12 @@ concurrency:
   cancel-in-progress: $${{ !startsWith(github.ref, 'refs/tags/') }}
 ```
 
-```
-  push to PR branch ──► cancel in-flight run on that ref
-  push of release tag ─► never cancel (publish is not idempotent)
+```mermaid
+flowchart LR
+  PR[push to PR branch] --> Cancel([cancel in-flight run · on that ref])
+  Tag[push of release tag] --> Keep([never cancel · publish is not idempotent])
+  class PR,Cancel warn
+  class Tag,Keep happy
 ```
 
 A half-cancelled Central publish can leave a staged-but-unreleased bundle; that is worse than a wasted runner. Opt

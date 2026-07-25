@@ -25,6 +25,18 @@ upgrade** use a small pin file plus optional Dependabot automation — the same 
       md"""
 When generating a workflow, zipx picks pins in this order:
 
+```mermaid
+flowchart TD
+  Start[Generate workflow] --> Explicit{zipxActions != Defaults?}
+  Explicit -->|yes| UseExplicit[Use zipxActions]
+  Explicit -->|no| File{pin file exists?}
+  File -->|yes| UseFile[Use action-pins.yml]
+  File -->|no| UseJar[ActionPins.Defaults]
+  class Start,Explicit,File warn
+  class UseExplicit warn
+  class UseFile,UseJar happy
+```
+
 1. **`zipxActions`** — only when set *away from* `ActionPins.Defaults` (one-off / escape hatch in `build.sbt`)
 2. **Pin file** — if `zipxActionsPath` points at an existing file (default `.github/zipx/action-pins.yml`)
 3. **`ActionPins.Defaults`** — embedded classpath resource from the zipx release you depend on

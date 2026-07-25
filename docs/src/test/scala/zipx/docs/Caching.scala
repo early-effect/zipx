@@ -18,6 +18,24 @@ Cutting a release tag rolls the epoch. Remote backends make the same story stron
 **developer laptops** when CI hydrates a shared store (see **Remote cache for teams**). This pairs with
 [`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci).
 
+```mermaid
+flowchart TD
+  Push([1 · git push]) --> Restore[2 · restore epoch cache]
+  Restore --> Sbt[3 · sbt test]
+  Sbt --> Hits{4 · digest hits?}
+  Hits -->|yes| Skip([skip compile and suites])
+  Hits -->|no| Work([run work · write digests])
+  Work --> Store[(LocalDir or remote)]
+  Skip --> Store
+  class Push,Restore,Sbt,Hits warn
+  class Work sad
+  class Skip,Store happy
+```
+
+Miss path (amber → red) pays compile/test and writes digests; hit path (green) reuses them. Both land in the same
+backend: `LocalDir` via `actions/cache`, or a remote gRPC store. The restore key is the commit-stable epoch
+(`zipxCacheEpoch`), so PR pushes share hits and a release tag rolls a fresh namespace.
+
 zipx wires cache into **generated jobs** (same planner as topology). It is not a standalone acceleration appliance: the
 goal is CI-from-graph plus content-addressed reuse, not a second product to configure beside hand-maintained YAML.
 """,
