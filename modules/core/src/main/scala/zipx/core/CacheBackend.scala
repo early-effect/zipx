@@ -12,8 +12,8 @@ enum CacheBackend:
     * `target/sona-staging`) with `actions/cache` (pin via [[ActionPins.cache]]). Primary key is OS + JDK +
     * [[PlanConfig.cacheEpoch]] + `github.run_id` + job id so each job in a run can save; restore-keys prefer the same
     * run (accumulated upstream jobs), then the same epoch from prior runs, then (when the epoch ends in `-ci` /
-    * `-SNAPSHOT`) the prior release epoch so the first post-tag PR can warm from the tag build, then any older
-    * OS+JDK sbt cache. Disables setup-sbt `disk-cache` and setup-java `cache: sbt` so caching is not also pinned to
+    * `-SNAPSHOT`) the prior release epoch so the first post-tag PR can warm from the tag build, then any older OS+JDK
+    * sbt cache. Disables setup-sbt `disk-cache` and setup-java `cache: sbt` so caching is not also pinned to
     * `hashFiles`.
     */
   case LocalDir

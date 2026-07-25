@@ -17,8 +17,8 @@ import scala.collection.immutable.ListMap
   *   - A final [[prune]] pass drops empty mappings/sequences (an empty `env`/`with`/`needs`) so they don't render as
   *     `{}` / `[]`, while preserving explicit `null`.
   *
-  * Fragment helpers ([[renderJob]], [[renderJobs]], [[renderSteps]], [[renderMapping]]) share the same encode + prune
-  * + print pipeline as full-file [[render]], so doc snippets and unit tests match committed `ci.yml` bytes.
+  * Fragment helpers ([[renderJob]], [[renderJobs]], [[renderSteps]], [[renderMapping]]) share the same encode + prune +
+  * print pipeline as full-file [[render]], so doc snippets and unit tests match committed `ci.yml` bytes.
   */
 object Render:
 

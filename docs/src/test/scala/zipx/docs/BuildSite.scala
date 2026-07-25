@@ -31,8 +31,9 @@ object BuildSite extends DocsSite:
   )
 
   override def site: SiteModel =
-    val m = meta
-    super.site.copy(
+    val m       = meta
+    val branded = EarlyEffectTheme.brand(super.site)
+    branded.copy(
       summaryMarkdown = Some(
         s"""**zipx** generates GitHub Actions from your real sbt graph. Aggregate-first works for libraries *and*
 multi-service monorepos; Layer/Graph when you need waves, per-module isolation, or multi-environment deploys. Typed
@@ -65,8 +66,6 @@ zipxDependabotSync := true
 sbt zipxActionsPull   # after Dependabot bumps workflow uses:""",
         ),
       ),
-      logo = Some(EarlyEffectTheme.logoHref),
-      logoLink = Some("https://www.earlyeffect.rocks/"),
       brand = Some(
         Brand(
           name = m.title.getOrElse("zipx"),
@@ -77,17 +76,7 @@ sbt zipxActionsPull   # after Dependabot bumps workflow uses:""",
   end site
 
   override def layers: ZLayer[Any, Nothing, SiteBuilder] =
-    ZLayer.make[SiteBuilder](
-      MarkdownRenderer.live,
-      ExampleRunner.live,
-      HtmlSsr.live,
-      SiteWriter.live,
-      NavBuilder.live,
-      EarlyEffectTheme.live,
-      PageTemplate.live,
-      LandingTemplate.live,
-      SiteBuilder.live,
-    )
+    EarlyEffectTheme.layers
 
   override def afterBuild(out: Path, result: SiteOutput): Task[Unit] =
     EarlyEffectTheme.writeLogo(out)

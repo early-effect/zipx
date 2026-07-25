@@ -160,9 +160,8 @@ object Planner:
     )
 
   /** Wire Verify jobs: never run on tag pushes (release tags only need Publish/Deploy) or on `workflow_dispatch`
-    * (manual runs are for docs-only deploys when [[zipx.specular.ZipxDocs.pages]] is enabled). When
-    * [[usesVerifyGate]], also need the gate and run when it was skipped/failed or outputs run=true (fail-open for PRs
-    * / API errors).
+    * (manual runs are for docs-only deploys when [[zipx.specular.ZipxDocs.pages]] is enabled). When [[usesVerifyGate]],
+    * also need the gate and run when it was skipped/failed or outputs run=true (fail-open for PRs / API errors).
     */
   private def applyVerifyGate(
       needs: List[String],

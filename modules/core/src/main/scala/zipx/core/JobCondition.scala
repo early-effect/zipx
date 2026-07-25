@@ -24,8 +24,8 @@ enum JobCondition:
 
   /** Conjunction with `other` (renders as `(this) && (other)`).
     *
-    * Infix precedence matches Boolean ops: `&&` binds tighter than `||`, both left-associative
-    * (`a || b && c` ≡ `a || (b && c)`; `a && b && c` ≡ `(a && b) && c`).
+    * Infix precedence matches Boolean ops: `&&` binds tighter than `||`, both left-associative (`a || b && c` ≡
+    * `a || (b && c)`; `a && b && c` ≡ `(a && b) && c`).
     */
   infix def &&(other: JobCondition): JobCondition = JobCondition.and(this, other)
 

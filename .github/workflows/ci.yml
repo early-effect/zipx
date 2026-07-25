@@ -59,11 +59,11 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.0.9-ci-${{ github.run_id }}-test
+          key: ubuntu-latest-jdk25-sbt-0.0.10-ci-${{ github.run_id }}-test
           restore-keys: |
-            ubuntu-latest-jdk25-sbt-0.0.9-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk25-sbt-0.0.9-ci-
-            ubuntu-latest-jdk25-sbt-0.0.9-
+            ubuntu-latest-jdk25-sbt-0.0.10-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.0.10-ci-
+            ubuntu-latest-jdk25-sbt-0.0.10-
             ubuntu-latest-jdk25-sbt-
       - name: test
         run: sbt 'test'
@@ -95,11 +95,11 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.0.9-ci-${{ github.run_id }}-remote-cache-it
+          key: ubuntu-latest-jdk25-sbt-0.0.10-ci-${{ github.run_id }}-remote-cache-it
           restore-keys: |
-            ubuntu-latest-jdk25-sbt-0.0.9-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk25-sbt-0.0.9-ci-
-            ubuntu-latest-jdk25-sbt-0.0.9-
+            ubuntu-latest-jdk25-sbt-0.0.10-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.0.10-ci-
+            ubuntu-latest-jdk25-sbt-0.0.10-
             ubuntu-latest-jdk25-sbt-
       - name: remote-cache-it
         run: sbt 'it/test'
@@ -132,11 +132,11 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk25-sbt-0.0.9-ci-${{ github.run_id }}-publish
+          key: ubuntu-latest-jdk25-sbt-0.0.10-ci-${{ github.run_id }}-publish
           restore-keys: |
-            ubuntu-latest-jdk25-sbt-0.0.9-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk25-sbt-0.0.9-ci-
-            ubuntu-latest-jdk25-sbt-0.0.9-
+            ubuntu-latest-jdk25-sbt-0.0.10-ci-${{ github.run_id }}-
+            ubuntu-latest-jdk25-sbt-0.0.10-ci-
+            ubuntu-latest-jdk25-sbt-0.0.10-
             ubuntu-latest-jdk25-sbt-
       - name: Import signing key
         run: |

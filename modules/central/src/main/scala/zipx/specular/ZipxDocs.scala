@@ -4,9 +4,9 @@ import zipx.core.*
 
 /** Early-effect Specular docs paved path for zipx.
   *
-  * Emits a once-job that calls the org reusable workflow
-  * `early-effect/.github/.github/workflows/specular-docs.yml` (build Specular site → GitHub Pages). Same pattern as
-  * peers' thin `docs.yml`, expressed as a capability so generated CI owns it.
+  * Emits a once-job that calls the org reusable workflow `early-effect/.github/.github/workflows/specular-docs.yml`
+  * (build Specular site → GitHub Pages). Same pattern as peers' thin `docs.yml`, expressed as a capability so generated
+  * CI owns it.
   *
   * Runs on `v*` tags **or** manual `workflow_dispatch` (enable with `zipxWorkflowDispatch := true`). Publish stays
   * tag-only; Verify is skipped on dispatch so "Run workflow" is docs-cheap.

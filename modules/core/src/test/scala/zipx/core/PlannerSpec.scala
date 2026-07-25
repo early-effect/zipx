@@ -137,7 +137,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("LocalDir restore-keys bridge -ci / -SNAPSHOT epochs to the prior release epoch") {
-      val prefix = "ubuntu-latest-jdk21-sbt-"
+      val prefix                 = "ubuntu-latest-jdk21-sbt-"
       def restore(epoch: String) =
         Planner
           .plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = epoch, skipMergedPrPush = false))
@@ -598,9 +598,9 @@ object PlannerSpec extends ZIOSpecDefault:
       )
       val job = wf.jobs("ship-serviceA-prod")
       assertTrue(
-        job.env.get("TIER").contains("prod"),                               // target wins
-        job.env.get("SHARED").contains("from-cap"),                         // capability preserved
-        job.env.get("EXTRA").contains("only-target"),                       // target-only
+        job.env.get("TIER").contains("prod"),                                   // target wins
+        job.env.get("SHARED").contains("from-cap"),                             // capability preserved
+        job.env.get("EXTRA").contains("only-target"),                           // target-only
         job.env.get(RemoteCacheProof.envUri).contains("grpcs://cache.example"), // cache preserved
         job.env.get(RemoteCacheProof.envHeader).contains("${{ secrets.CACHE_KEY }}"),
       )
