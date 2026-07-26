@@ -11,7 +11,7 @@ object PlannerSpec extends ZIOSpecDefault:
   // M3 tests opt into AffectedOnPR explicitly via config.copy(...).
   private val config = PlanConfig(
     workflowName = "CI",
-    cacheEpoch = "1.2.3-ci",
+    cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
   )
@@ -186,7 +186,11 @@ object PlannerSpec extends ZIOSpecDefault:
       val prefix                 = "ubuntu-latest-jdk21-sbt-"
       def restore(epoch: String) =
         Planner
-          .plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = epoch, skipMergedPrPush = false))
+          .plan(
+            sampleGraph,
+            List(Capability.test),
+            config.copy(cacheEpoch = CacheEpoch.Fixed(epoch), skipMergedPrPush = false),
+          )
           .jobs("test")
           .steps
           .find(_.uses.exists(_.startsWith("actions/cache@")))
@@ -221,7 +225,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("cache key is identical across commits with the same epoch+job template, differs across epochs") {
       def keyFor(epoch: String) =
         Planner
-          .plan(sampleGraph, List(Capability.testGraph), config.copy(cacheEpoch = epoch))
+          .plan(sampleGraph, List(Capability.testGraph), config.copy(cacheEpoch = CacheEpoch.Fixed(epoch)))
           .jobs("test-core")
           .steps
           .find(_.uses.exists(_.startsWith("actions/cache@")))
@@ -229,6 +233,57 @@ object PlannerSpec extends ZIOSpecDefault:
       assertTrue(
         keyFor("1.2.3-ci") == keyFor("1.2.3-ci"),
         keyFor("1.2.3-ci") != keyFor("1.3.0"),
+      )
+    },
+    test("GitTags resolves epoch at runtime and wires step outputs into cache keys") {
+      val wf = Planner.plan(
+        sampleGraph,
+        List(Capability.test),
+        config.copy(cacheEpoch = CacheEpoch.GitTags()),
+      )
+      val steps    = wf.jobs("test").steps
+      val resolve  = steps.find(_.id.contains(CacheEpoch.GitTagsStepId))
+      val cache    = steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val checkout =
+        steps.find(_.uses.exists(_.contains("checkout")))
+      val key     = cache.map(_.`with`("key")).getOrElse("")
+      val restore = cache.map(_.`with`("restore-keys")).getOrElse("")
+      val run     = resolve.flatMap(_.run).getOrElse("")
+      assertTrue(
+        checkout.exists(_.`with`.get("fetch-tags").contains("true")),
+        checkout.exists(_.`with`.get("fetch-depth").contains("0")),
+        resolve.exists(_.name.contains("Resolve cache epoch")),
+        run.contains("git describe --tags --abbrev=0 --match"),
+        run.contains("GITHUB_OUTPUT"),
+        run.contains("::warning title=zipx cache epoch::"),
+        run.contains("fewer than origin"),
+        key.contains("ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-test"),
+        restore.split('\n').toList == List(
+          "ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-",
+          "ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-",
+          "ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-",
+          "ubuntu-latest-jdk21-sbt-",
+        ),
+        // Resolve step must precede the cache action.
+        steps.indexWhere(_.id.contains(CacheEpoch.GitTagsStepId)) <
+          steps.indexWhere(_.uses.exists(_.startsWith("actions/cache@"))),
+      )
+    },
+    test("Script epoch strategy uses the caller step id and run body") {
+      val custom = CacheEpoch.Script(
+        run = """echo "epoch=9.9.9-ci" >> "$GITHUB_OUTPUT"
+                |echo "release=9.9.9" >> "$GITHUB_OUTPUT"
+                |""".stripMargin,
+        stepId = "my-epoch",
+      )
+      val wf      = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = custom))
+      val steps   = wf.jobs("test").steps
+      val resolve = steps.find(_.id.contains("my-epoch"))
+      val key     = steps.find(_.uses.exists(_.startsWith("actions/cache@"))).map(_.`with`("key")).getOrElse("")
+      assertTrue(
+        resolve.flatMap(_.run).exists(_.contains("epoch=9.9.9-ci")),
+        key.contains("${{ steps.my-epoch.outputs.epoch }}"),
+        key.contains("-test"),
       )
     },
     test("release triggers include the tag pattern; PR/test-only builds do not gate on tags") {
@@ -253,6 +308,7 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs.keys.head == "affected", // emitted first
         wf.jobs("affected").outputs.contains("modules"),
         wf.jobs("affected").steps.exists(_.`with`.get("fetch-depth").contains("0")),
+        wf.jobs("affected").steps.exists(_.`with`.get("fetch-tags").contains("true")),
       )
     },
     test("verify jobs gate on affected-set membership (with the `all` sentinel escape hatch)") {

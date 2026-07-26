@@ -19,6 +19,8 @@ object ZipxPlugin extends AutoPlugin:
     // Re-export the core cache-backend ADT so users can write `zipxCache := CacheBackend.LocalDir` etc.
     type CacheBackend = zipx.core.CacheBackend
     val CacheBackend = zipx.core.CacheBackend
+    type CacheEpoch = zipx.core.CacheEpoch
+    val CacheEpoch = zipx.core.CacheEpoch
     type ActionPins = zipx.core.ActionPins
     val ActionPins = zipx.core.ActionPins
     // Re-export schedule helpers so companion workflows can use typed cron.
@@ -119,11 +121,14 @@ object ZipxPlugin extends AutoPlugin:
     val zipxWorkflowName = settingKey[String]("Name of the generated GitHub Actions workflow.")
     val zipxWorkflowPath =
       settingKey[String]("Workflow file path relative to the build root (default .github/workflows/ci.yml).")
-    val zipxJavaVersion  = settingKey[String]("JDK major version for the CI matrix and cache key.")
-    val zipxRunnerOs     = settingKey[String]("GitHub Actions runner label (default ubuntu-latest).")
-    val zipxScalaMatrix  = settingKey[Boolean]("Expand a per-module Scala matrix over crossScalaVersions.")
-    val zipxCacheEpoch   = settingKey[String]("Commit-stable cache epoch (default: version). Rolls on release tags.")
-    val zipxPushBranches = settingKey[Seq[String]]("Branches whose pushes trigger CI.")
+    val zipxJavaVersion = settingKey[String]("JDK major version for the CI matrix and cache key.")
+    val zipxRunnerOs    = settingKey[String]("GitHub Actions runner label (default ubuntu-latest).")
+    val zipxScalaMatrix = settingKey[Boolean]("Expand a per-module Scala matrix over crossScalaVersions.")
+    val zipxCacheEpoch  =
+      settingKey[CacheEpoch](
+        "LocalDir cache epoch strategy (default CacheEpoch.GitTags). Use CacheEpoch.Fixed(version.value) to bake at generate time."
+      )
+    val zipxPushBranches      = settingKey[Seq[String]]("Branches whose pushes trigger CI.")
     val zipxReleaseTagPattern = settingKey[String]("Tag glob that gates publishing.")
     val zipxActions           =
       settingKey[ActionPins](
@@ -189,6 +194,7 @@ object ZipxPlugin extends AutoPlugin:
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
     zipxCapabilities         := Seq.empty,
     zipxCache                := CacheBackend.LocalDir,
+    zipxCacheEpoch           := CacheEpoch.GitTags(),
     zipxWorkflowName         := "CI",
     zipxJavaVersion          := "21",
     zipxRunnerOs             := "ubuntu-latest",
@@ -250,9 +256,6 @@ object ZipxPlugin extends AutoPlugin:
     hash & Long.MaxValue // keep it non-negative for readability in logs
 
   override def buildSettings: Seq[Setting[?]] = Seq(
-    // Note: zipxCacheEpoch's default is NOT set here — it's resolved in planConfig from the root project's `version`
-    // (via scope delegation) so a bare `version := ...` (a per-project common setting in sbt 2.0) is honored. An
-    // explicit `zipxCacheEpoch := ...` (any scope) still wins.
     zipxGraph        := graphTask.value,
     zipxPublishOrder := publishOrderTask.value,
     // Side-effecting file write → Unit task key + Def.uncached, matching the established sbt-2.x plugin pattern
@@ -346,10 +349,7 @@ object ZipxPlugin extends AutoPlugin:
   private def planConfig: Def.Initialize[Task[PlanConfig]] = Def.task {
     val extracted                                  = Project.extract(state.value)
     def read[A](key: SettingKey[A], default: A): A = readBuildSetting(extracted, key, default)
-    // Epoch defaults to the root project's `version` (delegates project→ThisBuild→Global) so a bare `version := ...`
-    // is honored; an explicit zipxCacheEpoch wins.
-    val rootVersion = read(version, "0.0.0")
-    val root        = (LocalRootProject / baseDirectory).value
+    val root                                       = (LocalRootProject / baseDirectory).value
     PlanConfig(
       workflowName = read(zipxWorkflowName, "CI"),
       scalaMatrix = read(zipxScalaMatrix, true),
@@ -358,7 +358,7 @@ object ZipxPlugin extends AutoPlugin:
       affected = if read(zipxAffectedOnPR, true) then AffectedMode.AffectedOnPR else AffectedMode.Always,
       affectedOnPush = read(zipxAffectedOnPush, false),
       cache = read(zipxCache, CacheBackend.LocalDir),
-      cacheEpoch = read(zipxCacheEpoch, rootVersion),
+      cacheEpoch = read(zipxCacheEpoch, CacheEpoch.GitTags()),
       pushBranches = read(zipxPushBranches, Seq("main")).toList,
       releaseTagPattern = read(zipxReleaseTagPattern, "v[0-9]+.[0-9]+.[0-9]+"),
       actions = resolveActionPins(extracted, root),

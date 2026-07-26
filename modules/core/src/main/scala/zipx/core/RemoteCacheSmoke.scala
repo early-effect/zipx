@@ -16,7 +16,7 @@ object RemoteCacheSmoke:
       javaVersion = javaVersion,
       runnerOs = runnerOs,
       cache = RemoteCacheProof.sidecar,
-      cacheEpoch = "0.0.0",
+      cacheEpoch = CacheEpoch.Fixed("0.0.0"),
       skipMergedPrPush = false,
       scalaMatrix = false,
     )

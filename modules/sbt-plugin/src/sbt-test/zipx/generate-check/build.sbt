@@ -1,6 +1,8 @@
 // Bare settings (sbt 2.0 common settings): apply to every module, overridable per module. No `ThisBuild /` needed.
 scalaVersion := "3.8.4"
 version      := "1.0.0-ci"
+// Keep Fixed so scripted asserts stay on a literal epoch (default is now GitTags at runtime).
+zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
 // A build-wide default test task; `client` overrides it back to plain `test` below to prove per-module override.
 zipxTestTask := "testFull"
 
