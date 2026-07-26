@@ -1,9 +1,9 @@
 import sbt.*
 import sbt.Keys.*
 
-/** Helpers for the meta-build source mirror (projects live in `dogfood.sbt`).
+/** Helpers for the meta-build source mirror (projects live in dogfood.sbt).
   *
-  * `project/project/Dogfood.scala` is a symlink to this file so meta-meta `.sbt` files can call it.
+  * Visible to project/ .sbt files via unmanagedSources in project/project/build.sbt (same pattern as Dependencies).
   */
 object Dogfood:
 

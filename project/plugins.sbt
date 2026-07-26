@@ -1,6 +1,6 @@
 // Dogfood: zipx is loaded from source via project/dogfood.sbt (meta-* mirrors).
 // After changing modules/{workflow,core,central,sbt-plugin} sources used by the plugin: `reload`.
-// Versions / library deps: project/Dependencies.scala (shared with build.sbt).
+// Versions / library deps: project/Dependencies.scala (shared with build.sbt via project/project/build.sbt).
 
 addSbtPlugin("rocks.earlyeffect" % "sbt-dynver-ci" % "0.2.2")
 addSbtPlugin("org.scalameta"     % "sbt-scalafmt"  % "2.6.2")

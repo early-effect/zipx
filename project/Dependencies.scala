@@ -5,9 +5,9 @@ import sbt.*
   * Keep library deps used by modules workflow/core/central/sbt-plugin here so project/dogfood.sbt and build.sbt cannot
   * drift.
   *
-  * Layering note: .sbt files under project/ are the meta-meta build and cannot see .scala files under project/
-  * directly. project/project/Dependencies.scala is a symlink to this file so dogfood.sbt can use it. Docs/Specular-only
-  * deps stay in build.sbt.
+  * Layering: project/ .sbt files sit one level above project/ .scala files, so dogfood cannot import this object by
+  * default. project/project/build.sbt adds this file (and Dogfood.scala) via unmanagedSources (same source, no
+  * symlink). Docs/Specular-only deps stay in build.sbt.
   */
 object Dependencies:
 

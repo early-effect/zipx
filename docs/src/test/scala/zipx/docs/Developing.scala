@@ -28,7 +28,9 @@ source). The amber path is the publishable `plugin` project for Central and scri
 
 - `project/meta-{workflow,core,central,plugin}` compile the same `modules/*/src/main/scala` trees
 - Shared versions live in [`project/Dependencies.scala`](https://github.com/early-effect/zipx/blob/main/project/Dependencies.scala)
-- `project/project/Dependencies.scala` and `Dogfood.scala` are **symlinks** — edit only the real files under `project/`
+- `project/*.sbt` cannot see `project/*.scala` directly (sbt layering).
+  [`project/project/build.sbt`](https://github.com/early-effect/zipx/blob/main/project/project/build.sbt)
+  pulls `Dependencies.scala` / `Dogfood.scala` onto that classpath via `unmanagedSources` (no symlinks)
 
 **After changing** sources under `modules/{workflow,core,central,sbt-plugin}`: `reload`, then `zipxWorkflowGenerate` if
 planner output changed.

@@ -1,6 +1,7 @@
 // Meta-build source mirror of workflow → core → central → plugin.
 // Compiles modules/*/src/main/scala into project/meta-* targets (no publishLocal for root dogfood).
-// After changing those sources: reload. Shared deps: Dependencies.scala.
+// After changing those sources: reload. Shared deps: project/Dependencies.scala
+// (on this classpath via project/project/build.sbt unmanagedSources).
 
 ThisBuild / scalaVersion := Dependencies.scala3Version
 
