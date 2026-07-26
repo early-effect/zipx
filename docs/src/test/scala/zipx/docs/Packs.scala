@@ -4,7 +4,6 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.central.ZipxCentral
 import zipx.core.*
-import zipx.docs.DocsFixtures.*
 import zipx.github.ZipxGitHubPackages
 import zipx.specular.ZipxDocs
 import zio.test.*

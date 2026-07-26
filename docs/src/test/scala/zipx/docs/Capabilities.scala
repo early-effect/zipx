@@ -4,7 +4,6 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zipx.core.EnvValue.secret
-import zipx.docs.DocsFixtures.*
 import zio.test.*
 
 /** Built-in capabilities and how they compose. */

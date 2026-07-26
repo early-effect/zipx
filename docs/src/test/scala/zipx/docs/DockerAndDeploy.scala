@@ -4,7 +4,6 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zipx.core.EnvValue.secret
-import zipx.docs.DocsFixtures.*
 import zio.test.*
 
 /** Docker paved path and multi-target deploy. */

@@ -1,7 +1,6 @@
 package zipx.docs
 
 import earlyeffect.docs.EarlyEffectTheme
-import specular.*
 import specular.site.*
 import zio.*
 
