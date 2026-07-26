@@ -57,7 +57,7 @@ object PipelineSpec extends ZIOSpecDefault:
         )
     )
 
-  private val config = PlanConfig(cacheEpoch = "9.9.9", affected = AffectedMode.Always, skipMergedPrPush = false)
+  private val config = PlanConfig(cacheEpoch = CacheEpoch.Fixed("9.9.9"), affected = AffectedMode.Always, skipMergedPrPush = false)
 
   private val wf =
     Planner.plan(graph, List(Capability.testGraph, Capability.publishGraph, Capability.dockerGraph, deploy), config)

@@ -218,7 +218,7 @@ object Planner:
       `if` = cond,
       outputs = ListMap("modules" -> "${{ steps.compute.outputs.modules }}"),
       steps = List(
-        Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0"))
+        Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
       ) ++ jdkAndSbtSteps(config) ++ List(
         Step(
           id = Some("compute"),
@@ -639,7 +639,7 @@ object Planner:
     val cacheSteps =
       if cache.steps.isEmpty then localDirCacheSteps(config, jobSuffix) else cache.steps
     List(
-      Step(uses = Some(config.actions.checkout), `with` = ListMap("fetch-depth" -> "0"))
+      Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
     ) ++ jdkAndSbtSteps(config) ++ cacheSteps ++ capability.extraSteps(
       StepContext(node, target, hasMatrix, config.actions)
     ) ++ List(
@@ -656,30 +656,90 @@ object Planner:
       env: ListMap[String, String] = ListMap.empty,
   )
 
+  /** Full history + tags so affected diffs and [[CacheEpoch.GitTags]] can see release tags. */
+  private val checkoutWith: ListMap[String, String] =
+    ListMap("fetch-depth" -> "0", "fetch-tags" -> "true")
+
   private def localDirCacheSteps(config: PlanConfig, jobSuffix: String): List[Step] =
     config.cache match
       case CacheBackend.LocalDir =>
         val prefix = s"${config.runnerOs}-jdk${config.javaVersion}-sbt-"
-        val epoch  = s"$prefix${config.cacheEpoch}-"
-        val run    = s"$epoch$${{ github.run_id }}-"
-        // After a v* tag, dynver-ci (and similar) use "<tag>-ci" until the next release. Prefer the tag epoch before
-        // the bare OS+JDK prefix so the first post-tag PR warms from the release job, not an older -ci blob.
-        val priorRelease = priorReleaseEpochKey(prefix, config.cacheEpoch)
-        val restoreKeys  = (run :: epoch :: priorRelease.toList ::: prefix :: Nil).mkString("\n")
-        List(
-          Step(
-            name = Some("Cache sbt"),
-            uses = Some(config.actions.cache),
-            `with` = ListMap(
-              "path"         -> List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n"),
-              "key"          -> s"$run$jobSuffix",
-              "restore-keys" -> restoreKeys,
-            ),
-          )
-        )
+        val paths  = List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n")
+        config.cacheEpoch match
+          case CacheEpoch.Fixed(value) =>
+            val epoch        = s"$prefix$value-"
+            val run          = s"$epoch$${{ github.run_id }}-"
+            val priorRelease = priorReleaseEpochKey(prefix, value)
+            val restoreKeys  = (run :: epoch :: priorRelease.toList ::: prefix :: Nil).mkString("\n")
+            List(
+              Step(
+                name = Some("Cache sbt"),
+                uses = Some(config.actions.cache),
+                `with` = ListMap(
+                  "path"         -> paths,
+                  "key"          -> s"$run$jobSuffix",
+                  "restore-keys" -> restoreKeys,
+                ),
+              )
+            )
+
+          case CacheEpoch.GitTags(tagMatch) =>
+            runtimeEpochCacheSteps(
+              prefix = prefix,
+              paths = paths,
+              jobSuffix = jobSuffix,
+              stepId = CacheEpoch.GitTagsStepId,
+              resolveRun = CacheEpoch.gitTagsResolveScript(tagMatch),
+              cacheAction = config.actions.cache,
+            )
+
+          case CacheEpoch.Script(run, stepId) =>
+            runtimeEpochCacheSteps(
+              prefix = prefix,
+              paths = paths,
+              jobSuffix = jobSuffix,
+              stepId = stepId,
+              resolveRun = run,
+              cacheAction = config.actions.cache,
+            )
+        end match
+
       case _ => Nil
 
-  /** When `cacheEpoch` is a post-tag CI suffix (`*-ci` / `*-SNAPSHOT`), restore from the bare release epoch first. */
+  /** Resolve step + cache action whose key/restore-keys reference `steps.<id>.outputs.{epoch,release}`. */
+  private def runtimeEpochCacheSteps(
+      prefix: String,
+      paths: String,
+      jobSuffix: String,
+      stepId: String,
+      resolveRun: String,
+      cacheAction: String,
+  ): List[Step] =
+    val epochExpr   = s"$${{ steps.$stepId.outputs.epoch }}"
+    val releaseExpr = s"$${{ steps.$stepId.outputs.release }}"
+    val epoch       = s"$prefix$epochExpr-"
+    val run         = s"$epoch$${{ github.run_id }}-"
+    val release     = s"$prefix$releaseExpr-"
+    val restoreKeys = List(run, epoch, release, prefix).mkString("\n")
+    List(
+      Step(
+        id = Some(stepId),
+        name = Some("Resolve cache epoch"),
+        run = Some(resolveRun),
+      ),
+      Step(
+        name = Some("Cache sbt"),
+        uses = Some(cacheAction),
+        `with` = ListMap(
+          "path"         -> paths,
+          "key"          -> s"$run$jobSuffix",
+          "restore-keys" -> restoreKeys,
+        ),
+      ),
+    )
+  end runtimeEpochCacheSteps
+
+  /** When a Fixed epoch is a post-tag CI suffix (`*-ci` / `*-SNAPSHOT`), restore from the bare release epoch first. */
   private[core] def priorReleaseEpochKey(prefix: String, cacheEpoch: String): Option[String] =
     val release =
       if cacheEpoch.endsWith("-ci") then Some(cacheEpoch.stripSuffix("-ci"))

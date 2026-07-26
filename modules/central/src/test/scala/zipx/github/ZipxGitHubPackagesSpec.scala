@@ -7,7 +7,7 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
 
   private val config = PlanConfig(
     workflowName = "CI",
-    cacheEpoch = "1.0.0",
+    cacheEpoch = CacheEpoch.Fixed("1.0.0"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
   )

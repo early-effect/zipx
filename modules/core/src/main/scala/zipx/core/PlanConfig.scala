@@ -25,8 +25,9 @@ enum AffectedMode:
   * @param cache
   *   the cache backend strategy.
   * @param cacheEpoch
-  *   the commit-stable cache "epoch" (defaults to the build `version`). Mid-PR commits keep the same epoch so the sbt
-  *   action cache is reused; cutting a release tag rolls it. See project plan.
+  *   how LocalDir picks its commit-stable cache namespace ([[CacheEpoch]]; default [[CacheEpoch.GitTags]]). Mid-PR
+  *   commits share hits; a release tag rolls the namespace. Prefer runtime tags so keys stay fresh without regenerating
+  *   the workflow; use [[CacheEpoch.Fixed]] to bake a literal at generate time.
   * @param pushBranches
   *   branches whose pushes trigger the workflow.
   * @param releaseTagPattern
@@ -55,7 +56,7 @@ final case class PlanConfig(
     affected: AffectedMode = AffectedMode.AffectedOnPR,
     affectedOnPush: Boolean = false,
     cache: CacheBackend = CacheBackend.LocalDir,
-    cacheEpoch: String = "0.0.0",
+    cacheEpoch: CacheEpoch = CacheEpoch.GitTags(),
     pushBranches: List[String] = List("main"),
     releaseTagPattern: String = "v[0-9]+.[0-9]+.[0-9]+",
     actions: ActionPins = ActionPins.Defaults,

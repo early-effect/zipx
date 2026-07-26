@@ -26,7 +26,7 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxScalaSteward` | `Boolean` | `false` | also generate `.github/workflows/zipx-scala-steward.yml` |
 | `zipxWorkflowDispatch` | `Boolean` | `false` | emit `on.workflow_dispatch` |
 | `zipxCache` | `CacheBackend` | `LocalDir` | cache strategy |
-| `zipxCacheEpoch` | `String` | `version` | commit-stable cache epoch |
+| `zipxCacheEpoch` | `CacheEpoch` | `GitTags()` | LocalDir epoch strategy (runtime tags by default) |
 | `zipxPushBranches` | `Seq[String]` | `Seq("main")` | push triggers |
 | `zipxReleaseTagPattern` | `String` | `v[0-9]+.[0-9]+.[0-9]+` | publish gate |
 | `zipxAffectedOnPR` | `Boolean` | `true` | affected setup when Graph Verify present |

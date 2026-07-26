@@ -5,7 +5,7 @@ import zipx.core.*
 
 object ZipxDocsSpec extends ZIOSpecDefault:
 
-  private val config = PlanConfig(workflowName = "CI", cacheEpoch = "1.0.0", affected = AffectedMode.Always)
+  private val config = PlanConfig(workflowName = "CI", cacheEpoch = CacheEpoch.Fixed("1.0.0"), affected = AffectedMode.Always)
 
   def spec = suite("ZipxDocs")(
     test("pages emits a reusable-workflow job with Pages permissions, on tag or workflow_dispatch") {

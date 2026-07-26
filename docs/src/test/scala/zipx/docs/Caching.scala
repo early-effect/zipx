@@ -13,10 +13,10 @@ object Caching extends DocSpecSuite:
     md"""
 sbt 2.x caches task results **across JVM runs** (content-addressed, machine-wide; remote backends also share declared
 outputs). That is why Aggregate stays cheap on a cold CI runner: zipx restores the cache before `sbt test`, keyed by a
-**commit-stable epoch** (`zipxCacheEpoch`, defaulting to `version`), so every push within a PR reuses prior hits.
-Cutting a release tag rolls the epoch. Remote backends make the same story stronger across machines, including
-**developer laptops** when CI hydrates a shared store (see **Remote cache for teams**). This pairs with
-[`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci).
+**commit-stable epoch** (`zipxCacheEpoch`, default `CacheEpoch.GitTags()`). Every push within a PR reuses prior hits;
+cutting a release tag rolls the epoch **without regenerating** `ci.yml`. Remote backends make the same story stronger
+across machines, including **developer laptops** when CI hydrates a shared store (see **Remote cache for teams**).
+This pairs with [`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci).
 
 ```mermaid
 flowchart TD
@@ -39,6 +39,26 @@ backend: `LocalDir` via `actions/cache`, or a remote gRPC store. The restore key
 zipx wires cache into **generated jobs** (same planner as topology). It is not a standalone acceleration appliance: the
 goal is CI-from-graph plus content-addressed reuse, not a second product to configure beside hand-maintained YAML.
 """,
+    section("Epoch strategies")(
+      md"""
+```scala
+zipxCacheEpoch := CacheEpoch.GitTags()                 // default: resolve from git tags on the runner
+zipxCacheEpoch := CacheEpoch.GitTags(tagMatch = "v*")  // same, explicit match glob
+zipxCacheEpoch := CacheEpoch.Fixed(version.value)      // bake at generate time (old behaviour)
+zipxCacheEpoch := CacheEpoch.Script(myEpochShell)      // custom shell; must write epoch= and release=
+```
+
+**GitTags (default):** a `Resolve cache epoch` step runs after checkout (`fetch-depth: 0`, `fetch-tags: true`). On a
+`v*` tag ref, epoch = release = tag without `v`. Otherwise the latest matching tag becomes release and epoch is
+`$${release}-ci`. If local tags lag `origin` (or none match), the step emits an Actions `::warning` titled
+`zipx cache epoch` so shallow/missing tags are obvious in the run summary.
+
+**Fixed:** embeds a literal into the workflow at `zipxWorkflowGenerate` (useful for scripted tests or unusual versioning).
+Prefer GitTags so post-tag PRs warm from the release cache without a regenerate commit.
+
+**Script:** supply your own shell; write `epoch=` and `release=` to `$$GITHUB_OUTPUT`. Restore-keys use both outputs.
+"""
+    ),
     section("Backends")(
       md"""
 ```scala
@@ -47,13 +67,13 @@ zipxCache := CacheBackend.BazelRemoteSidecar(RemoteCacheProof.image, RemoteCache
 zipxCache := CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
 ```
 
-- **LocalDir** — persist local cache dirs and `target/` with `actions/cache`. Primary key is OS + JDK + epoch + run id +
-  job id; restore-keys prefer the same run, then the epoch, then (for dynver-ci style `*-ci` / `*-SNAPSHOT` epochs) the
-  prior release epoch so the first post-tag PR can warm from the tag build, then any older OS+JDK sbt cache. No
-  infrastructure.
-- **BazelRemoteSidecar** — pinned `buchgr/bazel-remote-cache` as a job service; shared across the run via Bazel gRPC.
+- **LocalDir**: persist local cache dirs and `target/` with `actions/cache`. Primary key is OS + JDK + epoch + run id +
+  job id; restore-keys prefer the same run, then the epoch, then the prior release epoch (Fixed: strip `-ci` /
+  `-SNAPSHOT`; GitTags/Script: `steps.*.outputs.release`) so the first post-tag PR can warm from the tag build, then
+  any older OS+JDK sbt cache. No infrastructure.
+- **BazelRemoteSidecar**: pinned `buchgr/bazel-remote-cache` as a job service; shared across the run via Bazel gRPC.
   Proof pins live in `RemoteCacheProof` (docs, planner tests, and `RemoteCacheItSpec` share them).
-- **ManagedRemote** — point sbt at BuildBuddy / EngFlow / NativeLink; auth header from a named repository secret.
+- **ManagedRemote**: point sbt at BuildBuddy / EngFlow / NativeLink; auth header from a named repository secret.
   This is the path for **CI-hydrated caches that developers reuse** (see **Remote cache for teams**).
 
 The remote-cache transport is bundled with zipx. For remote backends zipx also sets `Global / cacheVersion` from
