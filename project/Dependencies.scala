@@ -34,19 +34,20 @@ object Dependencies:
     "dev.zio" %% "zio-blocks-schema-yaml" % zioBlocksVersion,
   )
 
-  /** Bundled so consumers need one `addSbtPlugin` line for zipx. */
+  /** Bundled so consumers need one `addSbtPlugin` line for zipx.
+    *
+    * Drop `org.scala-sbt` transitives: the published POM re-lists `sbt` as a compile dependency, which pulls
+    * `compiler-interface` into every consumer meta-build and collides with zinc 1.x schemes from other plugins. Host
+    * sbt already provides that stack; remote-cache only needs its own jar plus shaded-remoteapis.
+    */
   val remoteCachePlugin: ModuleID =
-    "org.scala-sbt" % "sbt-remote-cache" % remoteCacheVersion
+    ("org.scala-sbt" % "sbt-remote-cache" % remoteCacheVersion)
+      .excludeAll(ExclusionRule(organization = "org.scala-sbt"))
 
   val testcontainersVersion = "1.21.4"
 
   val testcontainersDeps: Seq[ModuleID] = Seq(
     "org.testcontainers" % "testcontainers" % testcontainersVersion % Test
-  )
-
-  /** compiler-interface is on both the sbt-2.x and zinc-1.x schemes; treat as always-compatible. */
-  val pluginLibraryDependencySchemes: Seq[ModuleID] = Seq(
-    "org.scala-sbt" % "compiler-interface" % "always"
   )
 
 end Dependencies
