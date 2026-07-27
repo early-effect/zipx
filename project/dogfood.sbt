@@ -55,7 +55,6 @@ lazy val metaPlugin = project
     publish / skip := true,
     scalacOptions ++= Dependencies.commonScalacOptions,
     addSbtPlugin(Dependencies.remoteCachePlugin),
-    libraryDependencySchemes ++= Dependencies.pluginLibraryDependencySchemes,
   )
   .settings(Dogfood.mirrorMainScala("sbt-plugin"))
 

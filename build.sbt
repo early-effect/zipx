@@ -125,7 +125,6 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     // Bundle the remote-cache transport so consumers need one addSbtPlugin line — RemoteCachePlugin triggers on
     // AllRequirements but is a no-op until Global/remoteCache is set (which zipx does only from the CI env).
     addSbtPlugin(remoteCachePlugin),
-    libraryDependencySchemes ++= pluginLibraryDependencySchemes,
     scriptedLaunchOpts ++= Seq("-Xmx1024m", s"-Dplugin.version=${version.value}"),
     scriptedBufferLog := false,
   )
