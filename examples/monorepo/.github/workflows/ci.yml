@@ -38,7 +38,7 @@ jobs:
     needs:
       - fmt
       - verify-gate
-    if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,7 +48,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -63,6 +63,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: test
         run: sbt 'models/test'
@@ -81,7 +82,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -96,6 +97,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: test
         run: sbt 'coreLib/test'
@@ -114,7 +116,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -129,6 +131,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: test
         run: sbt 'client/test; service/test'
@@ -137,7 +140,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - verify-gate
-    if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -147,7 +150,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -162,6 +165,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: fmt
         run: sbt 'scalafmtCheckAll'
@@ -178,7 +182,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -193,6 +197,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: publish
         run: sbt '+models/publish'
@@ -211,7 +216,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -226,6 +231,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: publish
         run: sbt '+coreLib/publish'
@@ -244,7 +250,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -259,6 +265,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: publish
         run: sbt '+client/publish'
@@ -281,7 +288,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -296,6 +303,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: Login to registry
         uses: aws-actions/configure-aws-credentials@v6
@@ -322,7 +330,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -337,6 +345,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: Login to registry
         uses: aws-actions/configure-aws-credentials@v6
@@ -368,7 +377,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -383,6 +392,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -414,7 +424,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0 # v1.5.2
+      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
         with:
           disk-cache: "false"
       - name: Cache sbt
@@ -429,6 +439,7 @@ jobs:
           restore-keys: |
             ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
             ubuntu-latest-jdk21-sbt-1.4.2-ci-
+            ubuntu-latest-jdk21-sbt-1.4.2-
             ubuntu-latest-jdk21-sbt-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6

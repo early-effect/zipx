@@ -1,6 +1,6 @@
 # zipx — Roadmap
 
-A self-describing CI plugin for Scala monorepos: a set of Scala 3 libraries plus an **sbt 2.x (2.0.1) AutoPlugin** that lets a Scala monorepo *describe its own* fast, concurrent, dependency-ordered GitHub Actions pipeline — test, library publish, and docker-image publish — with pluggable Bazel-style caching.
+A self-describing CI plugin for Scala monorepos: a set of Scala 3 libraries plus an **sbt 2.x AutoPlugin** that lets a Scala monorepo *describe its own* fast, concurrent, dependency-ordered GitHub Actions pipeline — test, library publish, and docker-image publish — with pluggable Bazel-style caching.
 
 **Status legend:** ✅ done · 🚧 in progress · ⬜ not started
 

@@ -140,7 +140,7 @@ lazy val it = project
     publish / skip  := true,
     publishArtifact := false,
     libraryDependencies ++= testcontainersDeps ++ Seq(
-      "org.slf4j" % "slf4j-nop" % "2.0.17" % Test
+      "org.slf4j" % "slf4j-nop" % "2.0.18" % Test
     ),
     Test / fork := true,
     // Always mark this module's tests as the live suite; gating still requires Docker at runtime.

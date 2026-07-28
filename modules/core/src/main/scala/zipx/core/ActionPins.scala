@@ -59,7 +59,7 @@ object ActionPins:
   private[core] val BootstrapSetupJava: String =
     "actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95"
   private[core] val BootstrapSetupSbt: String =
-    "sbt/setup-sbt@6444f4c8111de4b9059c3975def104b03cfaa5f0"
+    "sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e"
   private[core] val BootstrapCache: String =
     "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
   private[core] val BootstrapUploadArtifact: String =
@@ -72,7 +72,7 @@ object ActionPins:
   private[core] val BootstrapVersions: Map[String, String] = Map(
     "checkout"         -> "v7.0.1",
     "setupJava"        -> "v5.6.0",
-    "setupSbt"         -> "v1.5.2",
+    "setupSbt"         -> "v1.5.5",
     "cache"            -> "v6.1.0",
     "uploadArtifact"   -> "v7.0.1",
     "downloadArtifact" -> "v8.0.1",
