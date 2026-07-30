@@ -78,3 +78,9 @@ Live remote-cache IT (Docker): `sbt it/test` (parallel CI job `remote-cache-it`)
 ## License
 
 Apache-2.0
+
+## Development
+
+```bash
+./scripts/install-git-hooks  # once per clone: pre-commit runs scalafmtCheckAll
+```
