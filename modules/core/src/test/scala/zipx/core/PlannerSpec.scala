@@ -1119,6 +1119,22 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs("cache-rehydrate").env.get("ONLY").contains("rh"),
       )
     },
+    test("PlanConfig.env is omitted on workflow_call caller jobs") {
+      val docs = Capability
+        .once(name = "docs", command = "true", phase = Phase.Publish, gate = Gate.OnReleaseTag)
+        .copy(workflowCall = Some(WorkflowCall("org/repo/.github/workflows/pages.yml@main")))
+      val wf = Planner.plan(
+        sampleGraph,
+        List(Capability.test, docs),
+        config.copy(env = Map("SHARED" -> EnvValue.plain("everywhere"))),
+      )
+      assertTrue(
+        wf.jobs("test").env.get("SHARED").contains("everywhere"),
+        wf.jobs("docs").uses.contains("org/repo/.github/workflows/pages.yml@main"),
+        wf.jobs("docs").env.isEmpty,
+        wf.jobs("docs").runsOn.isEmpty,
+      )
+    },
     test("Graph Verify still emits affected setup under AffectedOnPR") {
       val wf = Planner.plan(
         sampleGraph,

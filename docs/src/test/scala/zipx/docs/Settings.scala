@@ -36,7 +36,7 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxCacheRehydrateTask` | `String` | `"compile"` | sbt command for the rehydrate job |
 | `zipxCacheRehydrateExtraSteps` | `StepContext => List[Step]` | empty | opt-in steps on rehydrate (after cache, before task) |
 | `zipxCacheRehydrateEnv` | `Map[String, EnvValue]` | empty | rehydrate-only env overlay (wins over `zipxEnv`) |
-| `zipxEnv` | `Map[String, EnvValue]` | empty | build-wide job env (every job; capability/target overlay) |
+| `zipxEnv` | `Map[String, EnvValue]` | empty | build-wide job env (normal jobs; not workflow_call callers) |
 | `zipxCancelSupersededRuns` | `Boolean` | `true` | workflow concurrency; never cancel release tags |
 | `zipxVerifyClean` | `VerifyClean` | `None` | optional clean before Verify commands |
 | `zipxVerifyCleanLabel` | `Option[String]` | `Some("clean")` | PR label that prepends `cleanFull` when verifyClean is None |
@@ -67,8 +67,9 @@ only to override that derivation.
 Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Layers`, `.*Graph`, `.deploy` /
 `.deployGraph`, `.custom`, `.once`. Packs: `ZipxCentral.*`, `ZipxGitHubPackages.*`, `ZipxDocs.pages`. A `Target` is
 `(name, environment, env, condition)` with typed `EnvValue`s and `JobCondition`. Job env merge: `zipxEnv` → cache
-backend → capability → target (`zipxCacheRehydrateEnv` overlays `zipxEnv` on rehydrate only). See **Job conditions**
-for recipes (fork gate, PR-label stage ECR, multi-publish, docs on dispatch).
+backend → capability → target (`zipxCacheRehydrateEnv` overlays `zipxEnv` on rehydrate only). `zipxEnv` is omitted on
+reusable-workflow caller jobs (`workflowCall` / `uses:`). See **Job conditions** for recipes (fork gate, PR-label
+stage ECR, multi-publish, docs on dispatch).
 """
     ),
     section("Tasks")(

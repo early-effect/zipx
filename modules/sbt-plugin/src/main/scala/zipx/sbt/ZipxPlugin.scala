@@ -197,7 +197,7 @@ object ZipxPlugin extends AutoPlugin:
       )
     val zipxEnv =
       settingKey[Map[String, EnvValue]](
-        "Build-wide job env merged into every generated job (default empty). Capability/target env overlay this."
+        "Build-wide job env for normal generated jobs (default empty). Capability/target env overlay this. Omitted on workflow_call callers."
       )
     val zipxCancelSupersededRuns =
       settingKey[Boolean](

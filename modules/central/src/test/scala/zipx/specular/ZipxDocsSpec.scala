@@ -47,5 +47,19 @@ object ZipxDocsSpec extends ZIOSpecDefault:
         job.`with`.get("java-version").contains("25"),
       )
     },
+    test("pages omits PlanConfig.env so GHA accepts the uses: caller job") {
+      val job = Planner
+        .plan(
+          ModuleGraph(Nil),
+          List(ZipxDocs.pages()),
+          config.copy(env = Map("PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.plain("/tmp/browsers"))),
+        )
+        .jobs("docs")
+      assertTrue(
+        job.uses.contains(ZipxDocs.ReusableWorkflow),
+        job.env.isEmpty,
+        job.runsOn.isEmpty,
+      )
+    },
   )
 end ZipxDocsSpec
