@@ -167,7 +167,7 @@ lazy val docs = project
   .settings(
     name            := "zipx-docs",
     publish / skip  := true,
-    publishArtifact := false, // zipx derives publish jobs from publishArtifact
+    publishArtifact := false, // also honored; prefer publish/skip for opt-out
     scalacOptions ++= commonScalacOptions,
     libraryDependencies ++= Seq(
       "rocks.earlyeffect" %% "specular-core"           % specularVersion % Test,
@@ -198,9 +198,12 @@ lazy val docs = project
     // Empty string → Specular uses build version (clean v* tags).
     specularDisplayVersion := {
       val v = (ThisBuild / version).value
-      if v.endsWith("-ci") || v.endsWith("-SNAPSHOT") then
+      if (v.endsWith("-ci") || v.endsWith("-SNAPSHOT")) then {
         previousStableVersion.value.getOrElse("<version>")
-      else ""
+      }
+      else {
+        ""
+      }
     },
     // Rebuild site then (re)start DocsServe; use alias docsPreview for continuous watch.
     specularPreview := Def.uncached {

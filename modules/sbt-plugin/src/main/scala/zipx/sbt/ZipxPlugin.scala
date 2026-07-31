@@ -313,12 +313,16 @@ object ZipxPlugin extends AutoPlugin:
 
     val nodes = refs.map { ref =>
       def read[A](key: SettingKey[A], default: A): A = extracted.getOpt(ref / key).getOrElse(default)
-      // Derive publishing from `publishArtifact` (a Setting, unlike the `publish`/`skip` Tasks), unless the user forces
-      // it via `zipxPublish := Some(_)`; aggregators never publish by default. (CI-relevance is defaulted in
-      // projectSettings via thisProject.aggregate.)
+      // `publish / skip` is a TaskKey, so evaluate it (unlike publishArtifact, a Setting). zipxPublish := Some(_)
+      // wins as an explicit override; aggregators never publish by default. Also honor publishArtifact := false
+      // (common for apps) so existing builds keep working. (CI-relevance is defaulted in projectSettings via
+      // thisProject.aggregate.)
       val publishes =
-        read[Option[Boolean]](zipxPublish, None)
-          .getOrElse(!aggregatorIds.contains(ref.project) && read(publishArtifact, true))
+        read[Option[Boolean]](zipxPublish, None).getOrElse {
+          !aggregatorIds.contains(ref.project) &&
+          !extracted.runTask(ref / publish / skip, st)._2 &&
+          read(publishArtifact, true)
+        }
       val crossVersions =
         read(crossScalaVersions, Nil) match
           case Nil      => List(read(scalaVersion, "")).filter(_.nonEmpty)

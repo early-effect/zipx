@@ -43,10 +43,14 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | Setting | Type | Default | Purpose |
 |---|---|---|---|
 | `zipxCiRelevant` | `Boolean` | `true` (false for aggregators) | include in test participation |
-| `zipxPublish` | `Option[Boolean]` | derived from `publishArtifact` | force publish on/off |
+| `zipxPublish` | `Option[Boolean]` | derived from `publish / skip` (+ `publishArtifact`) | force publish on/off |
 | `zipxDocker` | `Boolean` | derived from `DockerPlugin` | build a docker image |
 | `zipxTestTask` | `String` | `"test"` | Aggregate root Verify + Graph/Layer task |
 | `zipxPublishTask` | `String` | `"publish"` | publish task |
+
+By default a module is in the publish graph when it is not an aggregator, `publish / skip` is false, and
+`publishArtifact` is true. Prefer `publish / skip := true` for non-publishers; set `zipxPublish := Some(false/true)`
+only to override that derivation.
 """
     ),
     section("Capability model")(
