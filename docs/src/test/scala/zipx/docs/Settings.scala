@@ -36,6 +36,7 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxCacheRehydrateTask` | `String` | `"compile"` | sbt command for the rehydrate job |
 | `zipxCancelSupersededRuns` | `Boolean` | `true` | workflow concurrency; never cancel release tags |
 | `zipxVerifyClean` | `VerifyClean` | `None` | optional clean before Verify commands |
+| `zipxVerifyCleanLabel` | `Option[String]` | `Some("clean")` | PR label that prepends `cleanFull` when verifyClean is None |
 """
     ),
     section("Per-project")(

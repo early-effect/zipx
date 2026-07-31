@@ -157,7 +157,14 @@ jobs:
             ubuntu-latest-jdk25-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk25-sbt-
       - name: test
-        run: sbt 'test'
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; test'
+          else
+            sbt 'test'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
   remote-cache-it:
     name: remote-cache-it
     runs-on: ubuntu-latest
@@ -220,7 +227,14 @@ jobs:
             ubuntu-latest-jdk25-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk25-sbt-
       - name: remote-cache-it
-        run: sbt 'it/test'
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; it/test'
+          else
+            sbt 'it/test'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
   publish:
     name: publish
     runs-on: ubuntu-latest

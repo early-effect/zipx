@@ -21,6 +21,14 @@ page (Graph only, fail-open handoff, concurrency).
 zipxTestTask    := "testFull"            // Aggregate root; Graph/Layer per-module task
 zipxVerifyClean := VerifyClean.CleanFull // None (default) | Clean | CleanFull
 ```
+
+For a **one-off** LocalDir / action-cache bust without making clean permanent, leave `zipxVerifyClean` at
+`None` (default) and add the GitHub PR label **`clean`**. Verify then runs `cleanFull; <task>` only on that PR.
+Override the label name with `zipxVerifyCleanLabel`, or set it to `None` to disable.
+
+```scala
+zipxVerifyCleanLabel := Some("clean")  // default
+```
 """,
       exampleValue {
         given PlanConfig = config.copy(verifyClean = VerifyClean.CleanFull)
@@ -30,6 +38,16 @@ zipxVerifyClean := VerifyClean.CleanFull // None (default) | Clean | CleanFull
         assertTrue(
           yaml.contains("cleanFull; test"),
           yaml.contains("cleanFull; schema/test"),
+        )
+      ),
+      exampleValue {
+        given PlanConfig = config.copy(verifyCleanLabel = Some("clean"))
+        DocsRender.jobs("test")(Capability.test)
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("ZIPX_VERIFY_CLEAN_FULL"),
+          yaml.contains("labels.*.name"),
+          yaml.contains("cleanFull; test"),
         )
       ),
     ),

@@ -9,11 +9,13 @@ object PlannerSpec extends ZIOSpecDefault:
 
   // Base config for M1/M2 tests: Always mode keeps job graphs focused (no affected setup job / gating).
   // M3 tests opt into AffectedOnPR explicitly via config.copy(...).
+  // verifyCleanLabel off here so command assertions stay single-line; label tests opt in via copy.
   private val config = PlanConfig(
     workflowName = "CI",
     cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
+    verifyCleanLabel = None,
   )
 
   // A deploy-style capability on serviceA fanning out to staging + prod (prod carries a GitHub Environment).
@@ -893,6 +895,42 @@ object PlannerSpec extends ZIOSpecDefault:
     test("verifyClean.Clean prefixes Graph module commands") {
       val wf = Planner.plan(sampleGraph, List(Capability.testGraph), config.copy(verifyClean = VerifyClean.Clean))
       assertTrue(wf.jobs("test-api").steps.last.run.exists(_.contains("clean; api/test")))
+    },
+    test("verifyCleanLabel emits runtime cleanFull when PR has the label") {
+      val wf = Planner.plan(
+        sampleGraph,
+        List(Capability.test),
+        config.copy(verifyCleanLabel = Some("clean")),
+      )
+      val step = wf.jobs("test").steps.find(_.name.contains("test")).get
+      assertTrue(
+        step.env.get("ZIPX_VERIFY_CLEAN_FULL").exists { e =>
+          e.contains("pull_request") && e.contains("labels.*.name") && e.contains("'clean'")
+        },
+        step.run.exists(_.contains("cleanFull; test")),
+        step.run.exists(_.contains("""sbt 'test'""")),
+        step.run.exists(_.contains("""ZIPX_VERIFY_CLEAN_FULL" = "true"""")),
+      )
+    },
+    test("verifyCleanLabel does not apply to Publish or when static verifyClean is set") {
+      val labeled = config.copy(verifyCleanLabel = Some("clean"))
+      val pub     = Planner.plan(sampleGraph, List(Capability.publish), labeled)
+      val static  =
+        Planner.plan(sampleGraph, List(Capability.test), labeled.copy(verifyClean = VerifyClean.CleanFull))
+      assertTrue(
+        !pub.jobs("publish").steps.exists(_.env.contains("ZIPX_VERIFY_CLEAN_FULL")),
+        !pub.jobs("publish").steps.exists(_.run.exists(_.contains("cleanFull"))),
+        static.jobs("test").steps.last.run.contains("sbt 'cleanFull; test'"),
+        !static.jobs("test").steps.exists(_.env.contains("ZIPX_VERIFY_CLEAN_FULL")),
+      )
+    },
+    test("verifyCleanLabel None keeps a single sbt line") {
+      val wf   = Planner.plan(sampleGraph, List(Capability.test), config.copy(verifyCleanLabel = None))
+      val step = wf.jobs("test").steps.find(_.name.contains("test")).get
+      assertTrue(
+        step.run.contains("sbt 'test'"),
+        !step.env.contains("ZIPX_VERIFY_CLEAN_FULL"),
+      )
     },
     test("Aggregate publish emits one release-gated job with joined publish commands") {
       val wf  = Planner.plan(sampleGraph, List(Capability.publish), config)

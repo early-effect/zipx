@@ -162,6 +162,11 @@ object ZipxPlugin extends AutoPlugin:
     val zipxVerifyClean = settingKey[VerifyClean](
       "Optional clean/cleanFull prepended to every Verify sbt command (default None)."
     )
+    val zipxVerifyCleanLabel =
+      settingKey[Option[String]](
+        "When zipxVerifyClean is None, prepend cleanFull on PRs that have this label (default Some(\"clean\")). " +
+          "None disables. One-off cache bust."
+      )
 
     val zipxAffectedOnPR =
       settingKey[Boolean]("Whether Verify jobs run only for affected modules on PRs (default true).")
@@ -218,6 +223,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxCacheRehydrateTask    := "compile",
     zipxCancelSupersededRuns  := true,
     zipxVerifyClean           := VerifyClean.None,
+    zipxVerifyCleanLabel      := Some("clean"),
     zipxActions               := ActionPins.Defaults,
     zipxActionsPath           := ActionPinFile.DefaultPath,
     zipxDependabotSync        := false,
@@ -382,6 +388,7 @@ object ZipxPlugin extends AutoPlugin:
       cacheRehydrateOnMerge = read(zipxCacheRehydrateOnMerge, true),
       cacheRehydrateTask = read(zipxCacheRehydrateTask, "compile"),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
+      verifyCleanLabel = read(zipxVerifyCleanLabel, Some("clean")),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
     )
   }

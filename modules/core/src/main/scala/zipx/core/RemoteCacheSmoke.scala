@@ -19,6 +19,7 @@ object RemoteCacheSmoke:
       cacheEpoch = CacheEpoch.Fixed("0.0.0"),
       skipMergedPrPush = false,
       scalaMatrix = false,
+      verifyCleanLabel = None,
     )
 
   def plan(javaVersion: String = "21", runnerOs: String = "ubuntu-latest"): Workflow =
