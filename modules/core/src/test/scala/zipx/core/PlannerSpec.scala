@@ -1074,6 +1074,51 @@ object PlannerSpec extends ZIOSpecDefault:
         !remote.jobs.contains("cache-rehydrate"),
       )
     },
+    test("cacheRehydrate extraSteps and env are opt-in and sit between cache and sbt") {
+      val browserSetup: StepContext => List[Step] = ctx =>
+        List(
+          Step(name = Some("Install browsers"), run = Some(s"echo setup-${ctx.node.id}"))
+        )
+      val withExtras = config.copy(
+        skipMergedPrPush = true,
+        cacheRehydrateExtraSteps = browserSetup,
+        cacheRehydrateEnv = Map(
+          "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.expr("${{ github.workspace }}/target/ms-playwright")
+        ),
+      )
+      val rehydrate = Planner.plan(sampleGraph, List(Capability.test), withExtras).jobs("cache-rehydrate")
+      val names     = rehydrate.steps.flatMap(_.name)
+      val cacheIdx  = rehydrate.steps.indexWhere(_.uses.exists(_.contains("actions/cache")))
+      val extraIdx  = rehydrate.steps.indexWhere(_.name.contains("Install browsers"))
+      val cmdIdx    = rehydrate.steps.indexWhere(_.run.exists(_.contains("sbt 'compile'")))
+      val plain     = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = true))
+      assertTrue(
+        rehydrate.env.get("PLAYWRIGHT_BROWSERS_PATH").contains("${{ github.workspace }}/target/ms-playwright"),
+        names.contains("Install browsers"),
+        cacheIdx >= 0 && extraIdx > cacheIdx && cmdIdx > extraIdx,
+        // Defaults stay empty; Verify capability extraSteps are not auto-copied.
+        plain.jobs("cache-rehydrate").env.isEmpty,
+        !plain.jobs("cache-rehydrate").steps.exists(_.name.contains("Install browsers")),
+      )
+    },
+    test("PlanConfig.env is build-wide; cacheRehydrateEnv overlays it") {
+      val wf = Planner.plan(
+        sampleGraph,
+        List(Capability.test, Capability.publish),
+        config.copy(
+          skipMergedPrPush = true,
+          env = Map("SHARED" -> EnvValue.plain("everywhere")),
+          cacheRehydrateEnv = Map("SHARED" -> EnvValue.plain("rehydrate-only"), "ONLY" -> EnvValue.plain("rh")),
+        ),
+      )
+      assertTrue(
+        wf.jobs("test").env.get("SHARED").contains("everywhere"),
+        wf.jobs("publish").env.get("SHARED").contains("everywhere"),
+        wf.jobs("verify-gate").env.get("SHARED").contains("everywhere"),
+        wf.jobs("cache-rehydrate").env.get("SHARED").contains("rehydrate-only"),
+        wf.jobs("cache-rehydrate").env.get("ONLY").contains("rh"),
+      )
+    },
     test("Graph Verify still emits affected setup under AffectedOnPR") {
       val wf = Planner.plan(
         sampleGraph,
