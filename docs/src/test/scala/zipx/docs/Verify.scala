@@ -100,17 +100,18 @@ path, then `compile` (override with `zipxCacheRehydrateTask`). No full test, no 
 `zipxCacheRehydrateOnMerge := false` to opt out; remote backends never emit it.
 
 To also warm **non-sbt** blobs that live under `target/` (e.g. Playwright browsers), opt into rehydrate-only
-hooks. They are **not** copied from Verify capability `extraSteps` / `env`; assign the same function/map when you
-want parity:
+`extraSteps`. Prefer build-wide **`zipxEnv`** for vars needed on Verify **and** rehydrate; use
+`zipxCacheRehydrateEnv` only for merge-only overlays. Neither is copied from Verify capability `extraSteps` /
+`env`; assign the same setup function when you want step parity:
 
 ```scala
 zipxSkipMergedPrPush := true  // default
 zipxCacheRehydrateOnMerge := true  // default; LocalDir only
 zipxCacheRehydrateTask := "compile"  // default
-zipxCacheRehydrateExtraSteps := browserSetup  // after cache restore, before compile
-zipxCacheRehydrateEnv := Map(
+zipxEnv := Map(
   "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.expr("$${{ github.workspace }}/target/ms-playwright"),
 )
+zipxCacheRehydrateExtraSteps := browserSetup  // after cache restore, before compile
 ```
 """,
       exampleValue {
@@ -127,12 +128,12 @@ zipxCacheRehydrateEnv := Map(
       exampleValue {
         given PlanConfig = config.copy(
           skipMergedPrPush = true,
-          cacheRehydrateExtraSteps = _ => List(Step(name = Some("Install browsers"), run = Some("npm ci"))),
-          cacheRehydrateEnv = Map(
+          env = Map(
             "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.expr("${{ github.workspace }}/target/ms-playwright")
           ),
+          cacheRehydrateExtraSteps = _ => List(Step(name = Some("Install browsers"), run = Some("npm ci"))),
         )
-        DocsRender.jobs("cache-rehydrate")(Capability.test)
+        DocsRender.jobs("cache-rehydrate", "test")(Capability.test)
       }.assert(yaml =>
         assertTrue(
           yaml.contains("Install browsers"),

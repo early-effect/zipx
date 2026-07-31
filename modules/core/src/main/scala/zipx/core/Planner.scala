@@ -172,6 +172,7 @@ object Planner:
       runsOn = List(config.runnerOs),
       `if` = Some("""github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')"""),
       permissions = ListMap("contents" -> "read", "pull-requests" -> "read"),
+      env = EnvValue.renderAll(config.env),
       outputs = ListMap("run" -> "${{ steps.check.outputs.run }}"),
       steps = List(
         Step(
@@ -213,7 +214,7 @@ object Planner:
       `if` = Some(
         s"needs.$verifyGateJobId.result == 'success' && needs.$verifyGateJobId.outputs.run == 'false'"
       ),
-      env = EnvValue.renderAll(config.cacheRehydrateEnv),
+      env = EnvValue.renderAll(config.env) ++ EnvValue.renderAll(config.cacheRehydrateEnv),
       steps = List(
         Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
       ) ++ jdkAndSbtSteps(config) ++ localDirCacheSteps(config, cacheRehydrateJobId) ++
@@ -254,6 +255,7 @@ object Planner:
       runsOn = List(config.runnerOs),
       needs = needs,
       `if` = cond,
+      env = EnvValue.renderAll(config.env),
       outputs = ListMap("modules" -> "${{ steps.compute.outputs.modules }}"),
       steps = List(
         Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
@@ -336,6 +338,7 @@ object Planner:
           needs = needs,
           `if` = cond,
           permissions = ListMap.from(capability.permissions),
+          env = EnvValue.renderAll(config.env),
           uses = Some(call.uses),
           `with` = ListMap.from(call.withInputs),
         )
@@ -348,7 +351,7 @@ object Planner:
           `if` = cond,
           permissions = ListMap.from(capability.permissions),
           services = cache.services,
-          env = mergeEnv(cache.env, capability.env, Map.empty),
+          env = mergeEnv(config.env, cache.env, capability.env, Map.empty),
           steps = stepsFor(
             capability,
             syntheticNode,
@@ -395,7 +398,7 @@ object Planner:
               `if` = baseCond,
               permissions = ListMap.from(capability.permissions),
               services = cache.services,
-              env = mergeEnv(cache.env, capability.env, Map.empty),
+              env = mergeEnv(config.env, cache.env, capability.env, Map.empty),
               steps = stepsFor(
                 capability,
                 nodes.head,
@@ -420,7 +423,7 @@ object Planner:
               environment = target.environment,
               permissions = ListMap.from(capability.permissions),
               services = cache.services,
-              env = mergeEnv(cache.env, capability.env, target.env),
+              env = mergeEnv(config.env, cache.env, capability.env, target.env),
               steps = stepsFor(
                 capability,
                 nodes.head,
@@ -472,7 +475,7 @@ object Planner:
           `if` = cond,
           permissions = ListMap.from(capability.permissions),
           services = cache.services,
-          env = mergeEnv(cache.env, capability.env, Map.empty),
+          env = mergeEnv(config.env, cache.env, capability.env, Map.empty),
           steps = stepsFor(
             capability,
             layerNodes.head,
@@ -559,7 +562,7 @@ object Planner:
         permissions = ListMap.from(capability.permissions),
         strategy = matrix,
         services = cache.services,
-        env = mergeEnv(cache.env, capability.env, targetEnv),
+        env = mergeEnv(config.env, cache.env, capability.env, targetEnv),
         steps = stepsFor(
           capability,
           node,
@@ -590,11 +593,12 @@ object Planner:
   end graphJobsFor
 
   private def mergeEnv(
+      plan: Map[String, EnvValue],
       cache: ListMap[String, String],
       capability: Map[String, EnvValue],
       target: Map[String, EnvValue],
   ): ListMap[String, String] =
-    cache ++ EnvValue.renderAll(capability) ++ EnvValue.renderAll(target)
+    EnvValue.renderAll(plan) ++ cache ++ EnvValue.renderAll(capability) ++ EnvValue.renderAll(target)
 
   private def andConditions(a: Option[String], b: Option[String]): Option[String] =
     (a, b) match

@@ -1101,6 +1101,24 @@ object PlannerSpec extends ZIOSpecDefault:
         !plain.jobs("cache-rehydrate").steps.exists(_.name.contains("Install browsers")),
       )
     },
+    test("PlanConfig.env is build-wide; cacheRehydrateEnv overlays it") {
+      val wf = Planner.plan(
+        sampleGraph,
+        List(Capability.test, Capability.publish),
+        config.copy(
+          skipMergedPrPush = true,
+          env = Map("SHARED" -> EnvValue.plain("everywhere")),
+          cacheRehydrateEnv = Map("SHARED" -> EnvValue.plain("rehydrate-only"), "ONLY" -> EnvValue.plain("rh")),
+        ),
+      )
+      assertTrue(
+        wf.jobs("test").env.get("SHARED").contains("everywhere"),
+        wf.jobs("publish").env.get("SHARED").contains("everywhere"),
+        wf.jobs("verify-gate").env.get("SHARED").contains("everywhere"),
+        wf.jobs("cache-rehydrate").env.get("SHARED").contains("rehydrate-only"),
+        wf.jobs("cache-rehydrate").env.get("ONLY").contains("rh"),
+      )
+    },
     test("Graph Verify still emits affected setup under AffectedOnPR") {
       val wf = Planner.plan(
         sampleGraph,

@@ -193,7 +193,11 @@ object ZipxPlugin extends AutoPlugin:
       )
     val zipxCacheRehydrateEnv =
       settingKey[Map[String, EnvValue]](
-        "Optional env for the cache-rehydrate job (default empty). Typed EnvValue map."
+        "Optional env for the cache-rehydrate job only (default empty). Overlay on zipxEnv."
+      )
+    val zipxEnv =
+      settingKey[Map[String, EnvValue]](
+        "Build-wide job env merged into every generated job (default empty). Capability/target env overlay this."
       )
     val zipxCancelSupersededRuns =
       settingKey[Boolean](
@@ -233,6 +237,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxCacheRehydrateTask       := "compile",
     zipxCacheRehydrateExtraSteps := (_ => Nil),
     zipxCacheRehydrateEnv        := Map.empty,
+    zipxEnv                      := Map.empty,
     zipxCancelSupersededRuns     := true,
     zipxVerifyClean              := VerifyClean.None,
     zipxVerifyCleanLabel         := Some("clean"),
@@ -401,6 +406,7 @@ object ZipxPlugin extends AutoPlugin:
       cacheRehydrateTask = read(zipxCacheRehydrateTask, "compile"),
       cacheRehydrateExtraSteps = read(zipxCacheRehydrateExtraSteps, (_ => Nil)),
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
+      env = read(zipxEnv, Map.empty),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
       verifyCleanLabel = read(zipxVerifyCleanLabel, Some("clean")),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),

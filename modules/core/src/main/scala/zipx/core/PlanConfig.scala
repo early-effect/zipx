@@ -55,7 +55,11 @@ enum AffectedMode:
   *   empty). Same shape as capability `extraSteps`. Not copied from Verify capabilities; assign the same function
   *   explicitly when you want parity (e.g. Playwright browser install under `target/`).
   * @param cacheRehydrateEnv
-  *   optional job `env` for the rehydrate job (default empty). Typed [[EnvValue]]s including secrets / exprs.
+  *   optional job `env` for the rehydrate job only (default empty). Overlay on [[env]]; wins on key clash.
+  * @param env
+  *   build-wide job `env` merged into every generated job (default empty). Typed [[EnvValue]]s. Capability and target
+  *   env overlay this (more specific wins). Prefer this for vars needed on Verify **and** rehydrate (e.g. Playwright
+  *   browsers path under `target/`).
   * @param verifyClean
   *   optional `clean` / `cleanFull` prepended to every Verify-phase sbt command (Aggregate, Layer, and Graph).
   * @param verifyCleanLabel
@@ -85,6 +89,7 @@ final case class PlanConfig(
     cacheRehydrateTask: String = "compile",
     cacheRehydrateExtraSteps: StepContext => List[Step] = _ => Nil,
     cacheRehydrateEnv: Map[String, EnvValue] = Map.empty,
+    env: Map[String, EnvValue] = Map.empty,
     verifyClean: VerifyClean = VerifyClean.None,
     verifyCleanLabel: Option[String] = Some("clean"),
     cancelSupersededRuns: Boolean = true,
