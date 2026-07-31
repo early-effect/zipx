@@ -195,9 +195,17 @@ object Planner:
 
   /** When verify-gate skips Verify after a merged PR, run a minimal LocalDir cache restore/save so the default branch
     * gets an `actions/cache` entry later PRs can restore from. Fail-closed: only runs when the gate succeeds with
-    * `run=false`. Does not touch Publish/Deploy needs or conditions; no consumer `extraSteps` / [[verifyClean]].
+    * `run=false`. Does not touch Publish/Deploy needs or conditions; no [[verifyClean]]. Optional
+    * [[PlanConfig.cacheRehydrateExtraSteps]] / [[PlanConfig.cacheRehydrateEnv]] are opt-in only (not copied from Verify
+    * capabilities).
     */
   private def cacheRehydrateJob(config: PlanConfig): Job =
+    val ctx = StepContext(
+      node = ModuleNode(id = cacheRehydrateJobId, publishes = false, ciRelevant = false),
+      target = None,
+      matrixed = false,
+      actions = config.actions,
+    )
     Job(
       name = Some(cacheRehydrateJobId),
       runsOn = List(config.runnerOs),
@@ -205,15 +213,18 @@ object Planner:
       `if` = Some(
         s"needs.$verifyGateJobId.result == 'success' && needs.$verifyGateJobId.outputs.run == 'false'"
       ),
+      env = EnvValue.renderAll(config.cacheRehydrateEnv),
       steps = List(
         Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
-      ) ++ jdkAndSbtSteps(config) ++ localDirCacheSteps(config, cacheRehydrateJobId) ++ List(
-        Step(
-          name = Some(cacheRehydrateJobId),
-          run = Some(s"sbt '${config.cacheRehydrateTask}'"),
-        )
-      ),
+      ) ++ jdkAndSbtSteps(config) ++ localDirCacheSteps(config, cacheRehydrateJobId) ++
+        config.cacheRehydrateExtraSteps(ctx) ++ List(
+          Step(
+            name = Some(cacheRehydrateJobId),
+            run = Some(s"sbt '${config.cacheRehydrateTask}'"),
+          )
+        ),
     )
+  end cacheRehydrateJob
 
   /** Wire Verify jobs: never run on tag pushes (release tags only need Publish/Deploy) or on `workflow_dispatch`
     * (manual runs are for docs-only deploys when [[zipx.specular.ZipxDocs.pages]] is enabled). When [[usesVerifyGate]],

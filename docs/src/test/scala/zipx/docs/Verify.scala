@@ -4,6 +4,7 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zipx.docs.DocsFixtures.*
+import zipx.workflow.Step
 import zio.test.*
 
 /** Verify-phase knobs shared by Aggregate, Layer, and Graph. */
@@ -95,13 +96,21 @@ Direct pushes still Verify. **Tag pushes never run Verify** (release tags only n
 With **LocalDir**, that skip would otherwise leave `main` without an `actions/cache` save (PR caches are
 branch-scoped; later PRs only warm from the default branch). So by default zipx also emits a minimal
 `cache-rehydrate` job that runs **only** when verify-gate skips Verify: same checkout / JDK / LocalDir cache
-path, then `compile` (override with `zipxCacheRehydrateTask`). No full test, no `verifyClean`, no consumer
-`extraSteps`. Set `zipxCacheRehydrateOnMerge := false` to opt out; remote backends never emit it.
+path, then `compile` (override with `zipxCacheRehydrateTask`). No full test, no `verifyClean`. Set
+`zipxCacheRehydrateOnMerge := false` to opt out; remote backends never emit it.
+
+To also warm **non-sbt** blobs that live under `target/` (e.g. Playwright browsers), opt into rehydrate-only
+hooks. They are **not** copied from Verify capability `extraSteps` / `env`; assign the same function/map when you
+want parity:
 
 ```scala
 zipxSkipMergedPrPush := true  // default
 zipxCacheRehydrateOnMerge := true  // default; LocalDir only
 zipxCacheRehydrateTask := "compile"  // default
+zipxCacheRehydrateExtraSteps := browserSetup  // after cache restore, before compile
+zipxCacheRehydrateEnv := Map(
+  "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.expr("$${{ github.workspace }}/target/ms-playwright"),
+)
 ```
 """,
       exampleValue {
@@ -113,6 +122,23 @@ zipxCacheRehydrateTask := "compile"  // default
           yaml.contains("cache-rehydrate:"),
           yaml.contains("needs.verify-gate.outputs.run == 'false'"),
           yaml.contains("!startsWith(github.ref, 'refs/tags/')"),
+        )
+      ),
+      exampleValue {
+        given PlanConfig = config.copy(
+          skipMergedPrPush = true,
+          cacheRehydrateExtraSteps = _ => List(Step(name = Some("Install browsers"), run = Some("npm ci"))),
+          cacheRehydrateEnv = Map(
+            "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.expr("${{ github.workspace }}/target/ms-playwright")
+          ),
+        )
+        DocsRender.jobs("cache-rehydrate")(Capability.test)
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("Install browsers"),
+          yaml.contains("PLAYWRIGHT_BROWSERS_PATH"),
+          yaml.contains("npm ci"),
+          yaml.contains("sbt 'compile'"),
         )
       ),
     ),

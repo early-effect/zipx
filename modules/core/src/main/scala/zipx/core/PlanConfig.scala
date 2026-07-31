@@ -1,5 +1,7 @@
 package zipx.core
 
+import zipx.workflow.Step
+
 /** Whether Verify-phase jobs (test/build) run for every module or only for affected modules on pull requests. */
 enum AffectedMode:
   case Always, AffectedOnPR
@@ -47,8 +49,13 @@ enum AffectedMode:
   *   `actions/cache` save so the next PR can restore from main; GitHub does not share PR-scoped caches across refs.
   *   Inert for remote cache backends and when skip-on-merge is off.
   * @param cacheRehydrateTask
-  *   sbt command for the rehydrate job (default `compile`). Not a full Verify: no `zipxTestTask`, no [[verifyClean]],
-  *   no consumer `extraSteps`.
+  *   sbt command for the rehydrate job (default `compile`). Not a full Verify: no `zipxTestTask`, no [[verifyClean]].
+  * @param cacheRehydrateExtraSteps
+  *   optional steps on the rehydrate job only, after LocalDir cache restore and before [[cacheRehydrateTask]] (default
+  *   empty). Same shape as capability `extraSteps`. Not copied from Verify capabilities; assign the same function
+  *   explicitly when you want parity (e.g. Playwright browser install under `target/`).
+  * @param cacheRehydrateEnv
+  *   optional job `env` for the rehydrate job (default empty). Typed [[EnvValue]]s including secrets / exprs.
   * @param verifyClean
   *   optional `clean` / `cleanFull` prepended to every Verify-phase sbt command (Aggregate, Layer, and Graph).
   * @param verifyCleanLabel
@@ -76,6 +83,8 @@ final case class PlanConfig(
     skipMergedPrPush: Boolean = true,
     cacheRehydrateOnMerge: Boolean = true,
     cacheRehydrateTask: String = "compile",
+    cacheRehydrateExtraSteps: StepContext => List[Step] = _ => Nil,
+    cacheRehydrateEnv: Map[String, EnvValue] = Map.empty,
     verifyClean: VerifyClean = VerifyClean.None,
     verifyCleanLabel: Option[String] = Some("clean"),
     cancelSupersededRuns: Boolean = true,

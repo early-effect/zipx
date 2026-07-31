@@ -34,6 +34,8 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxSkipMergedPrPush` | `Boolean` | `true` | skip Verify on merged-PR pushes |
 | `zipxCacheRehydrateOnMerge` | `Boolean` | `true` | LocalDir: rehydrate default-branch cache when Verify skips after merge |
 | `zipxCacheRehydrateTask` | `String` | `"compile"` | sbt command for the rehydrate job |
+| `zipxCacheRehydrateExtraSteps` | `StepContext => List[Step]` | empty | opt-in steps on rehydrate (after cache, before task) |
+| `zipxCacheRehydrateEnv` | `Map[String, EnvValue]` | empty | opt-in env for the rehydrate job |
 | `zipxCancelSupersededRuns` | `Boolean` | `true` | workflow concurrency; never cancel release tags |
 | `zipxVerifyClean` | `VerifyClean` | `None` | optional clean before Verify commands |
 | `zipxVerifyCleanLabel` | `Option[String]` | `Some("clean")` | PR label that prepends `cleanFull` when verifyClean is None |

@@ -4,6 +4,7 @@ import sbt.*
 import sbt.Keys.*
 import zipx.core.*
 import zipx.workflow.Render
+import zipx.workflow.Step
 
 /** zipx — the build describes its own GitHub Actions CI.
   *
@@ -185,6 +186,15 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[String](
         "sbt command for the cache-rehydrate job (default compile). Not full Verify."
       )
+    val zipxCacheRehydrateExtraSteps =
+      settingKey[StepContext => List[Step]](
+        "Optional steps on cache-rehydrate after LocalDir restore and before the rehydrate task (default empty). " +
+          "Not copied from Verify capabilities."
+      )
+    val zipxCacheRehydrateEnv =
+      settingKey[Map[String, EnvValue]](
+        "Optional env for the cache-rehydrate job (default empty). Typed EnvValue map."
+      )
     val zipxCancelSupersededRuns =
       settingKey[Boolean](
         "Emit workflow concurrency so a new push cancels an in-flight run on the same ref (default true). " +
@@ -206,29 +216,31 @@ object ZipxPlugin extends AutoPlugin:
   import autoImport.*
 
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
-    zipxCapabilities          := Seq.empty,
-    zipxCache                 := CacheBackend.LocalDir,
-    zipxCacheEpoch            := CacheEpoch.GitTags(),
-    zipxWorkflowName          := "CI",
-    zipxJavaVersion           := "21",
-    zipxRunnerOs              := "ubuntu-latest",
-    zipxScalaMatrix           := true,
-    zipxPushBranches          := Seq("main"),
-    zipxReleaseTagPattern     := "v[0-9]+.[0-9]+.[0-9]+",
-    zipxWorkflowPath          := ".github/workflows/ci.yml",
-    zipxAffectedOnPR          := true,
-    zipxAffectedOnPush        := false,
-    zipxSkipMergedPrPush      := true,
-    zipxCacheRehydrateOnMerge := true,
-    zipxCacheRehydrateTask    := "compile",
-    zipxCancelSupersededRuns  := true,
-    zipxVerifyClean           := VerifyClean.None,
-    zipxVerifyCleanLabel      := Some("clean"),
-    zipxActions               := ActionPins.Defaults,
-    zipxActionsPath           := ActionPinFile.DefaultPath,
-    zipxDependabotSync        := false,
-    zipxScalaSteward          := false,
-    zipxWorkflowDispatch      := false,
+    zipxCapabilities             := Seq.empty,
+    zipxCache                    := CacheBackend.LocalDir,
+    zipxCacheEpoch               := CacheEpoch.GitTags(),
+    zipxWorkflowName             := "CI",
+    zipxJavaVersion              := "21",
+    zipxRunnerOs                 := "ubuntu-latest",
+    zipxScalaMatrix              := true,
+    zipxPushBranches             := Seq("main"),
+    zipxReleaseTagPattern        := "v[0-9]+.[0-9]+.[0-9]+",
+    zipxWorkflowPath             := ".github/workflows/ci.yml",
+    zipxAffectedOnPR             := true,
+    zipxAffectedOnPush           := false,
+    zipxSkipMergedPrPush         := true,
+    zipxCacheRehydrateOnMerge    := true,
+    zipxCacheRehydrateTask       := "compile",
+    zipxCacheRehydrateExtraSteps := (_ => Nil),
+    zipxCacheRehydrateEnv        := Map.empty,
+    zipxCancelSupersededRuns     := true,
+    zipxVerifyClean              := VerifyClean.None,
+    zipxVerifyCleanLabel         := Some("clean"),
+    zipxActions                  := ActionPins.Defaults,
+    zipxActionsPath              := ActionPinFile.DefaultPath,
+    zipxDependabotSync           := false,
+    zipxScalaSteward             := false,
+    zipxWorkflowDispatch         := false,
   )
 
   /** Wires sbt's remote cache from the environment the generated workflow sets up (`ZIPX_REMOTE_CACHE`,
@@ -387,6 +399,8 @@ object ZipxPlugin extends AutoPlugin:
       skipMergedPrPush = read(zipxSkipMergedPrPush, true),
       cacheRehydrateOnMerge = read(zipxCacheRehydrateOnMerge, true),
       cacheRehydrateTask = read(zipxCacheRehydrateTask, "compile"),
+      cacheRehydrateExtraSteps = read(zipxCacheRehydrateExtraSteps, (_ => Nil)),
+      cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
       verifyCleanLabel = read(zipxVerifyCleanLabel, Some("clean")),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
