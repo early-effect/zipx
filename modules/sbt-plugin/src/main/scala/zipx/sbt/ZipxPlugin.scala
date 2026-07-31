@@ -171,6 +171,15 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[Boolean](
         "Skip Verify on branch pushes when the commit already belongs to a merged PR (default true)."
       )
+    val zipxCacheRehydrateOnMerge =
+      settingKey[Boolean](
+        "On merged-PR pushes (when skipMergedPrPush skips Verify), run a minimal LocalDir cache-rehydrate job " +
+          "so the default branch gets an actions/cache save for later PRs (default true; inert for remote caches)."
+      )
+    val zipxCacheRehydrateTask =
+      settingKey[String](
+        "sbt command for the cache-rehydrate job (default compile). Not full Verify."
+      )
     val zipxCancelSupersededRuns =
       settingKey[Boolean](
         "Emit workflow concurrency so a new push cancels an in-flight run on the same ref (default true). " +
@@ -192,26 +201,28 @@ object ZipxPlugin extends AutoPlugin:
   import autoImport.*
 
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
-    zipxCapabilities         := Seq.empty,
-    zipxCache                := CacheBackend.LocalDir,
-    zipxCacheEpoch           := CacheEpoch.GitTags(),
-    zipxWorkflowName         := "CI",
-    zipxJavaVersion          := "21",
-    zipxRunnerOs             := "ubuntu-latest",
-    zipxScalaMatrix          := true,
-    zipxPushBranches         := Seq("main"),
-    zipxReleaseTagPattern    := "v[0-9]+.[0-9]+.[0-9]+",
-    zipxWorkflowPath         := ".github/workflows/ci.yml",
-    zipxAffectedOnPR         := true,
-    zipxAffectedOnPush       := false,
-    zipxSkipMergedPrPush     := true,
-    zipxCancelSupersededRuns := true,
-    zipxVerifyClean          := VerifyClean.None,
-    zipxActions              := ActionPins.Defaults,
-    zipxActionsPath          := ActionPinFile.DefaultPath,
-    zipxDependabotSync       := false,
-    zipxScalaSteward         := false,
-    zipxWorkflowDispatch     := false,
+    zipxCapabilities          := Seq.empty,
+    zipxCache                 := CacheBackend.LocalDir,
+    zipxCacheEpoch            := CacheEpoch.GitTags(),
+    zipxWorkflowName          := "CI",
+    zipxJavaVersion           := "21",
+    zipxRunnerOs              := "ubuntu-latest",
+    zipxScalaMatrix           := true,
+    zipxPushBranches          := Seq("main"),
+    zipxReleaseTagPattern     := "v[0-9]+.[0-9]+.[0-9]+",
+    zipxWorkflowPath          := ".github/workflows/ci.yml",
+    zipxAffectedOnPR          := true,
+    zipxAffectedOnPush        := false,
+    zipxSkipMergedPrPush      := true,
+    zipxCacheRehydrateOnMerge := true,
+    zipxCacheRehydrateTask    := "compile",
+    zipxCancelSupersededRuns  := true,
+    zipxVerifyClean           := VerifyClean.None,
+    zipxActions               := ActionPins.Defaults,
+    zipxActionsPath           := ActionPinFile.DefaultPath,
+    zipxDependabotSync        := false,
+    zipxScalaSteward          := false,
+    zipxWorkflowDispatch      := false,
   )
 
   /** Wires sbt's remote cache from the environment the generated workflow sets up (`ZIPX_REMOTE_CACHE`,
@@ -364,6 +375,8 @@ object ZipxPlugin extends AutoPlugin:
       actions = resolveActionPins(extracted, root),
       workflowDispatch = read(zipxWorkflowDispatch, false),
       skipMergedPrPush = read(zipxSkipMergedPrPush, true),
+      cacheRehydrateOnMerge = read(zipxCacheRehydrateOnMerge, true),
+      cacheRehydrateTask = read(zipxCacheRehydrateTask, "compile"),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
     )

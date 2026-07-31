@@ -41,6 +41,14 @@ enum AffectedMode:
   *   when true (default), Verify jobs skip on a push to a branch if that commit already belongs to a PR merged into the
   *   same branch (merge or squash). Direct pushes to main still run; PRs, tags, and `workflow_dispatch` are unaffected.
   *   Avoids running tests twice after a PR merge.
+  * @param cacheRehydrateOnMerge
+  *   when true (default) and [[skipMergedPrPush]] is on with [[CacheBackend.LocalDir]], emit a minimal
+  *   `cache-rehydrate` job that runs only when verify-gate skips Verify (merged-PR push). Recreates a default-branch
+  *   `actions/cache` save so the next PR can restore from main; GitHub does not share PR-scoped caches across refs.
+  *   Inert for remote cache backends and when skip-on-merge is off.
+  * @param cacheRehydrateTask
+  *   sbt command for the rehydrate job (default `compile`). Not a full Verify: no `zipxTestTask`, no [[verifyClean]],
+  *   no consumer `extraSteps`.
   * @param verifyClean
   *   optional `clean` / `cleanFull` prepended to every Verify-phase sbt command (Aggregate, Layer, and Graph).
   * @param cancelSupersededRuns
@@ -62,6 +70,8 @@ final case class PlanConfig(
     actions: ActionPins = ActionPins.Defaults,
     workflowDispatch: Boolean = false,
     skipMergedPrPush: Boolean = true,
+    cacheRehydrateOnMerge: Boolean = true,
+    cacheRehydrateTask: String = "compile",
     verifyClean: VerifyClean = VerifyClean.None,
     cancelSupersededRuns: Boolean = true,
 )

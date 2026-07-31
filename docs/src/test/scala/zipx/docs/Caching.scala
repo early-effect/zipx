@@ -70,7 +70,10 @@ zipxCache := CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUD
 - **LocalDir**: persist local cache dirs and `target/` with `actions/cache`. Primary key is OS + JDK + epoch + run id +
   job id; restore-keys prefer the same run, then the epoch, then the prior release epoch (Fixed: strip `-ci` /
   `-SNAPSHOT`; GitTags/Script: `steps.*.outputs.release`) so the first post-tag PR can warm from the tag build, then
-  any older OS+JDK sbt cache. No infrastructure.
+  any older OS+JDK sbt cache. No infrastructure. GitHub scopes cache entries to the branch that saved them; other PRs
+  restore from the **default branch**. With `zipxSkipMergedPrPush`, Verify does not run on the merge push, so by
+  default a minimal `cache-rehydrate` job recreates a main-scoped save (see **Verify**). You cannot copy a PR cache
+  onto main via the API.
 - **BazelRemoteSidecar**: pinned `buchgr/bazel-remote-cache` as a job service; shared across the run via Bazel gRPC.
   Proof pins live in `RemoteCacheProof` (docs, planner tests, and `RemoteCacheItSpec` share them).
 - **ManagedRemote**: point sbt at BuildBuddy / EngFlow / NativeLink; auth header from a named repository secret.

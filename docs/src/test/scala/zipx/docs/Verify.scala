@@ -74,16 +74,26 @@ Changed files → owning module (longest base-dir prefix) → reverse-dependency
 By default (`zipxSkipMergedPrPush := true`), a push to `main` that lands a merged PR does **not** re-run Verify.
 Direct pushes still Verify. **Tag pushes never run Verify** (release tags only need Publish / Deploy).
 
+With **LocalDir**, that skip would otherwise leave `main` without an `actions/cache` save (PR caches are
+branch-scoped; later PRs only warm from the default branch). So by default zipx also emits a minimal
+`cache-rehydrate` job that runs **only** when verify-gate skips Verify: same checkout / JDK / LocalDir cache
+path, then `compile` (override with `zipxCacheRehydrateTask`). No full test, no `verifyClean`, no consumer
+`extraSteps`. Set `zipxCacheRehydrateOnMerge := false` to opt out; remote backends never emit it.
+
 ```scala
 zipxSkipMergedPrPush := true  // default
+zipxCacheRehydrateOnMerge := true  // default; LocalDir only
+zipxCacheRehydrateTask := "compile"  // default
 ```
 """,
       exampleValue {
         given PlanConfig = config.copy(skipMergedPrPush = true)
-        DocsRender.jobs("verify-gate", "test")(Capability.test)
+        DocsRender.jobs("verify-gate", "cache-rehydrate", "test")(Capability.test)
       }.assert(yaml =>
         assertTrue(
           yaml.contains("verify-gate:"),
+          yaml.contains("cache-rehydrate:"),
+          yaml.contains("needs.verify-gate.outputs.run == 'false'"),
           yaml.contains("!startsWith(github.ref, 'refs/tags/')"),
         )
       ),
