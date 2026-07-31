@@ -89,8 +89,9 @@ object Planner:
     ()
   end validateCapabilities
 
-  val affectedJobId   = "affected"
-  val verifyGateJobId = "verify-gate"
+  val affectedJobId       = "affected"
+  val verifyGateJobId     = "verify-gate"
+  val cacheRehydrateJobId = "cache-rehydrate"
 
   def plan(graph: ModuleGraph, capabilities: List[Capability], config: PlanConfig): Workflow =
     validateCapabilities(capabilities)
@@ -102,6 +103,9 @@ object Planner:
 
     val hasVerify      = capabilities.exists(_.phase == Phase.Verify)
     val usesVerifyGate = config.skipMergedPrPush && hasVerify
+    // LocalDir only: recreate a default-branch actions/cache save when Verify is skipped after merge.
+    val usesCacheRehydrate =
+      usesVerifyGate && config.cacheRehydrateOnMerge && config.cache == CacheBackend.LocalDir
 
     val byName = capabilities.map(c => c.name -> c).toMap
 
@@ -126,7 +130,8 @@ object Planner:
 
     val leading =
       List(
-        Option.when(usesVerifyGate)(verifyGateJobId -> verifyGateJob(config)),
+        Option.when(usesVerifyGate)(verifyGateJobId         -> verifyGateJob(config)),
+        Option.when(usesCacheRehydrate)(cacheRehydrateJobId -> cacheRehydrateJob(config)),
         Option.when(usesAffected)(
           affectedJobId -> affectedSetupJob(config, usesVerifyGate)
         ),
@@ -184,6 +189,28 @@ object Planner:
                |  echo "run=true" >> "$GITHUB_OUTPUT"
                |fi""".stripMargin
           ),
+        )
+      ),
+    )
+
+  /** When verify-gate skips Verify after a merged PR, run a minimal LocalDir cache restore/save so the default branch
+    * gets an `actions/cache` entry later PRs can restore from. Fail-closed: only runs when the gate succeeds with
+    * `run=false`. Does not touch Publish/Deploy needs or conditions; no consumer `extraSteps` / [[verifyClean]].
+    */
+  private def cacheRehydrateJob(config: PlanConfig): Job =
+    Job(
+      name = Some(cacheRehydrateJobId),
+      runsOn = List(config.runnerOs),
+      needs = List(verifyGateJobId),
+      `if` = Some(
+        s"needs.$verifyGateJobId.result == 'success' && needs.$verifyGateJobId.outputs.run == 'false'"
+      ),
+      steps = List(
+        Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
+      ) ++ jdkAndSbtSteps(config) ++ localDirCacheSteps(config, cacheRehydrateJobId) ++ List(
+        Step(
+          name = Some(cacheRehydrateJobId),
+          run = Some(s"sbt '${config.cacheRehydrateTask}'"),
         )
       ),
     )

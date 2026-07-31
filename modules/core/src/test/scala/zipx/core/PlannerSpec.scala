@@ -987,9 +987,53 @@ object PlannerSpec extends ZIOSpecDefault:
       val wf = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = false))
       assertTrue(
         !wf.jobs.contains("verify-gate"),
+        !wf.jobs.contains("cache-rehydrate"),
         wf.jobs("test").needs.isEmpty,
         wf.jobs("test").`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
         wf.jobs("test").`if`.exists(_.contains("github.event_name != 'workflow_dispatch'")),
+      )
+    },
+    test("cacheRehydrateOnMerge emits inverted-gate LocalDir job on merged-PR skip") {
+      val wf        = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = true))
+      val rehydrate = wf.jobs("cache-rehydrate")
+      assertTrue(
+        rehydrate.needs == List("verify-gate"),
+        rehydrate.`if`.contains(
+          "needs.verify-gate.result == 'success' && needs.verify-gate.outputs.run == 'false'"
+        ),
+        rehydrate.steps.exists(_.uses.exists(_.contains("actions/cache"))),
+        rehydrate.steps.exists(_.run.contains("sbt 'compile'")),
+        !rehydrate.steps.exists(_.run.exists(_.contains("test"))),
+      )
+    },
+    test("cacheRehydrateOnMerge uses configurable task and does not gate Publish") {
+      val wf = Planner.plan(
+        sampleGraph,
+        List(Capability.test, Capability.publish),
+        config.copy(skipMergedPrPush = true, cacheRehydrateTask = "Test/compile"),
+      )
+      assertTrue(
+        wf.jobs("cache-rehydrate").steps.exists(_.run.contains("sbt 'Test/compile'")),
+        !wf.jobs("publish").needs.contains("cache-rehydrate"),
+        !wf.jobs("publish").needs.contains("verify-gate"),
+      )
+    },
+    test("cacheRehydrateOnMerge false or remote cache omits rehydrate job") {
+      val off = Planner.plan(
+        sampleGraph,
+        List(Capability.test),
+        config.copy(skipMergedPrPush = true, cacheRehydrateOnMerge = false),
+      )
+      val remote = Planner.plan(
+        sampleGraph,
+        List(Capability.test),
+        config.copy(skipMergedPrPush = true, cache = RemoteCacheProof.sidecar),
+      )
+      assertTrue(
+        off.jobs.contains("verify-gate"),
+        !off.jobs.contains("cache-rehydrate"),
+        remote.jobs.contains("verify-gate"),
+        !remote.jobs.contains("cache-rehydrate"),
       )
     },
     test("Graph Verify still emits affected setup under AffectedOnPR") {
