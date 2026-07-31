@@ -51,6 +51,10 @@ enum AffectedMode:
   *   no consumer `extraSteps`.
   * @param verifyClean
   *   optional `clean` / `cleanFull` prepended to every Verify-phase sbt command (Aggregate, Layer, and Graph).
+  * @param verifyCleanLabel
+  *   when [[verifyClean]] is [[VerifyClean.None]], optionally prepend `cleanFull` at workflow runtime if the PR has
+  *   this GitHub label (default `Some("clean")`). One-off LocalDir/action-cache bust without a permanent clean setting.
+  *   `None` disables the label check. Ignored when [[verifyClean]] is already `Clean` / `CleanFull`.
   * @param cancelSupersededRuns
   *   when true (default), emit workflow-level `concurrency` keyed on ref so pushing again to a PR cancels the still-
   *   running earlier build. Never cancels release-tag runs — the group folds in the ref, and a half-cancelled publish
@@ -73,5 +77,6 @@ final case class PlanConfig(
     cacheRehydrateOnMerge: Boolean = true,
     cacheRehydrateTask: String = "compile",
     verifyClean: VerifyClean = VerifyClean.None,
+    verifyCleanLabel: Option[String] = Some("clean"),
     cancelSupersededRuns: Boolean = true,
 )

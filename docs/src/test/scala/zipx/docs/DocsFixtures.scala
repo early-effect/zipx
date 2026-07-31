@@ -5,7 +5,8 @@ import zipx.core.*
 /** Small graphs for DocSpec planner examples (not the full core Fixtures monorepo). */
 object DocsFixtures:
 
-  val config: PlanConfig = PlanConfig(cacheEpoch = CacheEpoch.Fixed("0.1.0-ci"), skipMergedPrPush = false)
+  val config: PlanConfig =
+    PlanConfig(cacheEpoch = CacheEpoch.Fixed("0.1.0-ci"), skipMergedPrPush = false, verifyCleanLabel = None)
 
   val libGraph: ModuleGraph = ModuleGraph(
     List(

@@ -659,23 +659,60 @@ object Planner:
       commandOverride: Option[String],
       jobSuffix: String,
   ): List[Step] =
-    val scalaArg = if hasMatrix then "++${{ matrix.scala }} " else ""
-    val raw      = commandOverride.getOrElse(capability.command(node))
-    val command  =
-      if capability.phase == Phase.Verify then config.verifyClean.prefixCommand(raw) else raw
+    val scalaArg    = if hasMatrix then "++${{ matrix.scala }} " else ""
+    val raw         = commandOverride.getOrElse(capability.command(node))
+    val commandStep =
+      if capability.phase == Phase.Verify then verifyCommandStep(capability.name, scalaArg, raw, config)
+      else
+        Step(
+          name = Some(capability.name),
+          run = Some(s"sbt '$scalaArg$raw'"),
+        )
     val cacheSteps =
       if cache.steps.isEmpty then localDirCacheSteps(config, jobSuffix) else cache.steps
     List(
       Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
     ) ++ jdkAndSbtSteps(config) ++ cacheSteps ++ capability.extraSteps(
       StepContext(node, target, hasMatrix, config.actions)
-    ) ++ List(
-      Step(
-        name = Some(capability.name),
-        run = Some(s"sbt '$scalaArg$command'"),
-      )
-    ) ++ capability.postSteps(StepContext(node, target, hasMatrix, config.actions))
+    ) ++ List(commandStep) ++ capability.postSteps(
+      StepContext(node, target, hasMatrix, config.actions)
+    )
   end stepsFor
+
+  /** Verify sbt step: static [[VerifyClean]] prefix when set; otherwise optional runtime `cleanFull` when the PR has
+    * [[PlanConfig.verifyCleanLabel]].
+    */
+  private def verifyCommandStep(name: String, scalaArg: String, raw: String, config: PlanConfig): Step =
+    config.verifyClean match
+      case VerifyClean.None =>
+        config.verifyCleanLabel match
+          case Some(label) =>
+            val safe = JobCondition.hasPrLabel(label) match
+              case JobCondition.HasPrLabel(l) => l
+              case other                      =>
+                throw IllegalArgumentException(s"expected HasPrLabel, got $other")
+            val cleanCmd = VerifyClean.CleanFull.prefixCommand(raw)
+            Step(
+              name = Some(name),
+              env = ListMap(
+                verifyCleanFullEnv ->
+                  s"$${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, '$safe') }}"
+              ),
+              run = Some(
+                s"""|if [ "$$$verifyCleanFullEnv" = "true" ]; then
+                    |  sbt '$scalaArg$cleanCmd'
+                    |else
+                    |  sbt '$scalaArg$raw'
+                    |fi""".stripMargin
+              ),
+            )
+          case None =>
+            Step(name = Some(name), run = Some(s"sbt '$scalaArg$raw'"))
+      case mode =>
+        val command = mode.prefixCommand(raw)
+        Step(name = Some(name), run = Some(s"sbt '$scalaArg$command'"))
+
+  private val verifyCleanFullEnv = "ZIPX_VERIFY_CLEAN_FULL"
 
   private case class CacheContribution(
       steps: List[Step] = Nil,
