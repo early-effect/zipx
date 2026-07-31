@@ -25,7 +25,8 @@ lazy val client = project
 lazy val service = project
   .dependsOn(api)
   .settings(
-    publishArtifact := false // non-publishing → test job only, no publish job
+    // Honor sbt's publish/skip (no zipxPublish := Some(false) required).
+    publish / skip := true // non-publishing → test job only, no publish job
   )
 
 lazy val root = (project in file("."))
