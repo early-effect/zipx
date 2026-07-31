@@ -57,9 +57,10 @@ enum AffectedMode:
   * @param cacheRehydrateEnv
   *   optional job `env` for the rehydrate job only (default empty). Overlay on [[env]]; wins on key clash.
   * @param env
-  *   build-wide job `env` merged into every generated job (default empty). Typed [[EnvValue]]s. Capability and target
+  *   build-wide job `env` merged into normal generated jobs (default empty). Typed [[EnvValue]]s. Capability and target
   *   env overlay this (more specific wins). Prefer this for vars needed on Verify **and** rehydrate (e.g. Playwright
-  *   browsers path under `target/`).
+  *   browsers path under `target/`). Not applied to reusable-workflow caller jobs ([[Capability.workflowCall]]); GHA
+  *   forbids job-level `env` alongside `uses:`.
   * @param verifyClean
   *   optional `clean` / `cleanFull` prepended to every Verify-phase sbt command (Aggregate, Layer, and Graph).
   * @param verifyCleanLabel

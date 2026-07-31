@@ -332,13 +332,13 @@ object Planner:
     val cond          = andConditions(base, JobCondition.renderOpt(capability.condition))
     capability.workflowCall match
       case Some(call) =>
+        // GHA forbids job-level env (and runs-on) on reusable-workflow caller jobs.
         capability.name -> Job(
           name = Some(capability.name),
           runsOn = Nil,
           needs = needs,
           `if` = cond,
           permissions = ListMap.from(capability.permissions),
-          env = EnvValue.renderAll(config.env),
           uses = Some(call.uses),
           `with` = ListMap.from(call.withInputs),
         )
