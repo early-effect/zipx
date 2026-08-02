@@ -83,6 +83,16 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       val self = ModuleGraph(List(ModuleNode("a", dependsOn = List("a"))))
       assertTrue(scala.util.Try(self.topologicalSort).isFailure)
     },
+    test("three-node cycle is detected") {
+      val cyclic = ModuleGraph(
+        List(
+          ModuleNode("a", dependsOn = List("c")),
+          ModuleNode("b", dependsOn = List("a")),
+          ModuleNode("c", dependsOn = List("b")),
+        )
+      )
+      assertTrue(scala.util.Try(cyclic.topologicalSort).isFailure)
+    },
     test("external dependsOn ids are dropped from directDeps") {
       val g = ModuleGraph(List(ModuleNode("a", dependsOn = List("outside", "b")), ModuleNode("b")))
       assertTrue(g.directDeps("a") == List("b"), g.transitiveDeps("a") == Set("b"))

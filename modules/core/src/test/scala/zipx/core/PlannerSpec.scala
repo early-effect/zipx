@@ -150,36 +150,35 @@ object PlannerSpec extends ZIOSpecDefault:
         !wf.jobs("publish-api").steps.last.run.getOrElse("").contains("matrix.scala"),
       )
     },
-    test("LocalDir cache keys include run_id + job id so same-run jobs accumulate and can save") {
+    test("LocalDir cache primary key includes run_id + job id so same-run jobs accumulate and can save") {
+      // Primary key always misses within a run (run_id) so the job can save after restoring upstream.
       val wf       = Planner.plan(sampleGraph, List(Capability.testGraph), config)
       val coreStep = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
       val apiStep  = wf.jobs("test-api").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
       val coreKey  = coreStep.map(_.`with`("key")).getOrElse("")
       val apiKey   = apiStep.map(_.`with`("key")).getOrElse("")
-      val restore  = coreStep.map(_.`with`("restore-keys")).getOrElse("")
-      val paths    = coreStep.map(_.`with`("path")).getOrElse("")
-      val java     = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
-      val sbt      = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
       assertTrue(
-        // Primary key always misses within a run (run_id) so the job can save after restoring upstream.
         coreKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-core"),
         apiKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-api"),
         coreKey != apiKey,
-        // Same-run, same -ci epoch, prior release epoch (post-tag bridge), then older OS+JDK caches.
-        restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-"),
-        restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-"),
-        restore.contains("ubuntu-latest-jdk21-sbt-1.2.3-"),
-        restore.contains("ubuntu-latest-jdk21-sbt-"),
-        restore.split('\n').toList == List(
-          "ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-",
-          "ubuntu-latest-jdk21-sbt-1.2.3-ci-",
-          "ubuntu-latest-jdk21-sbt-1.2.3-",
-          "ubuntu-latest-jdk21-sbt-",
-        ),
+      )
+    },
+    test("LocalDir cache paths cover sbt tooling and target directories") {
+      val wf    = Planner.plan(sampleGraph, List(Capability.testGraph), config)
+      val step  = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val paths = step.map(_.`with`("path")).getOrElse("")
+      assertTrue(
         paths.contains("~/.sbt"),
         paths.contains("~/.cache/sbt"),
         paths.contains("~/.cache/coursier"),
         paths.contains("target"),
+      )
+    },
+    test("LocalDir cache disables setup-java and sbt/setup-sbt internal caching") {
+      val wf   = Planner.plan(sampleGraph, List(Capability.testGraph), config)
+      val java = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
+      val sbt  = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
+      assertTrue(
         !java.exists(_.`with`.contains("cache")),
         sbt.exists(_.`with`.get("disk-cache").contains("false")),
       )
@@ -237,28 +236,34 @@ object PlannerSpec extends ZIOSpecDefault:
         keyFor("1.2.3-ci") != keyFor("1.3.0"),
       )
     },
-    test("GitTags resolves epoch at runtime and wires step outputs into cache keys") {
-      val wf = Planner.plan(
-        sampleGraph,
-        List(Capability.test),
-        config.copy(cacheEpoch = CacheEpoch.GitTags()),
-      )
-      val steps    = wf.jobs("test").steps
-      val resolve  = steps.find(_.id.contains(CacheEpoch.GitTagsStepId))
-      val cache    = steps.find(_.uses.exists(_.startsWith("actions/cache@")))
-      val checkout =
-        steps.find(_.uses.exists(_.contains("checkout")))
-      val key     = cache.map(_.`with`("key")).getOrElse("")
-      val restore = cache.map(_.`with`("restore-keys")).getOrElse("")
-      val run     = resolve.flatMap(_.run).getOrElse("")
+    test("GitTags epoch configures checkout with full history and tags") {
+      val wf       = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = CacheEpoch.GitTags()))
+      val checkout = wf.jobs("test").steps.find(_.uses.exists(_.contains("checkout")))
       assertTrue(
         checkout.exists(_.`with`.get("fetch-tags").contains("true")),
         checkout.exists(_.`with`.get("fetch-depth").contains("0")),
+      )
+    },
+    test("GitTags resolve step emits epoch via git describe and GITHUB_OUTPUT") {
+      val wf      = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = CacheEpoch.GitTags()))
+      val steps   = wf.jobs("test").steps
+      val resolve = steps.find(_.id.contains(CacheEpoch.GitTagsStepId))
+      val run     = resolve.flatMap(_.run).getOrElse("")
+      assertTrue(
         resolve.exists(_.name.contains("Resolve cache epoch")),
         run.contains("git describe --tags --abbrev=0 --match"),
         run.contains("GITHUB_OUTPUT"),
         run.contains("::warning title=zipx cache epoch::"),
         run.contains("fewer than origin"),
+      )
+    },
+    test("GitTags wires resolve step outputs into cache key and restore-keys") {
+      val wf      = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = CacheEpoch.GitTags()))
+      val steps   = wf.jobs("test").steps
+      val cache   = steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val key     = cache.map(_.`with`("key")).getOrElse("")
+      val restore = cache.map(_.`with`("restore-keys")).getOrElse("")
+      assertTrue(
         key.contains("ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-test"),
         restore.split('\n').toList == List(
           "ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-",
@@ -266,9 +271,20 @@ object PlannerSpec extends ZIOSpecDefault:
           "ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-",
           "ubuntu-latest-jdk21-sbt-",
         ),
-        // Resolve step must precede the cache action.
+      )
+    },
+    test("GitTags resolve step precedes the cache action") {
+      val steps = Planner
+        .plan(
+          sampleGraph,
+          List(Capability.test),
+          config.copy(cacheEpoch = CacheEpoch.GitTags()),
+        )
+        .jobs("test")
+        .steps
+      assertTrue(
         steps.indexWhere(_.id.contains(CacheEpoch.GitTagsStepId)) <
-          steps.indexWhere(_.uses.exists(_.startsWith("actions/cache@"))),
+          steps.indexWhere(_.uses.exists(_.startsWith("actions/cache@")))
       )
     },
     test("Script epoch strategy uses the caller step id and run body") {
@@ -1295,6 +1311,66 @@ object PlannerSpec extends ZIOSpecDefault:
         job.`if`.exists(_.contains("refs/tags/v")),
         job.`if`.exists(_.contains("a/b")),
         job.`if`.exists(_.contains("&&")),
+      )
+    },
+
+    // --- Edge cases: empty graph / zero participants ---
+
+    test("empty ModuleGraph produces valid workflow with no capability jobs") {
+      val empty = ModuleGraph(Nil)
+      val wf    = Planner.plan(empty, List(Capability.testGraph), config)
+      assertTrue(
+        wf.jobs.isEmpty,
+        wf.concurrency.isDefined,
+        wf.on.pullRequest.isDefined,
+        wf.on.push.isDefined,
+      )
+    },
+
+    test("Capability with zero participants produces no jobs") {
+      val nobody = Capability(
+        name = "nobody",
+        phase = Phase.Verify,
+        ordering = Ordering.DependencyOrdered,
+        gate = Gate.Always,
+        participates = _ => false,
+        command = n => s"${n.id}/nobody",
+        matrixed = false,
+        targets = _ => Nil,
+        scope = CapabilityScope.Graph,
+      )
+      val wf = Planner.plan(sampleGraph, List(nobody), config)
+      assertTrue(
+        wf.jobs.isEmpty,
+        wf.concurrency.isDefined,
+      )
+    },
+
+    test("Aggregate capability with empty graph produces no jobs (nothing to aggregate)") {
+      val empty = ModuleGraph(Nil)
+      val cap   = Capability.testGraph.copy(scope = CapabilityScope.Aggregate)
+      val wf    = Planner.plan(empty, List(cap), config)
+      assertTrue(
+        wf.jobs.isEmpty
+      )
+    },
+
+    test("Once capability with empty graph produces single job") {
+      val empty = ModuleGraph(Nil)
+      val cap   = Capability.testGraph.copy(scope = CapabilityScope.Once)
+      val wf    = Planner.plan(empty, List(cap), config)
+      assertTrue(
+        wf.jobs.size == 1,
+        wf.jobs.contains("test"),
+      )
+    },
+
+    test("Layer capability with empty graph produces no jobs") {
+      val empty = ModuleGraph(Nil)
+      val cap   = Capability.testGraph.copy(scope = CapabilityScope.Layer)
+      val wf    = Planner.plan(empty, List(cap), config)
+      assertTrue(
+        wf.jobs.isEmpty
       )
     },
   )

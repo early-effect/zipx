@@ -16,8 +16,30 @@ object FixtureRunner:
   /** Classpath resource root for the tiny sbt fixture. */
   private val FixtureResource = "remote-cache-fixture"
 
+  /** Suite-scoped boot + coursier so successive fixture runs do not re-download the launcher. */
+  private lazy val SharedTooling: Path =
+    val root = Files.createTempDirectory("zipx-it-sbt-tooling-")
+    Files.createDirectories(root.resolve("boot"))
+    Files.createDirectories(root.resolve("coursier"))
+    root
+
   final case class RunResult(exitCode: Int, out: String, elapsedMs: Long):
     def ok: Boolean = exitCode == 0
+
+    /** Output after the in-session [[wipeItCaches]] marker (empty if wipe never ran). */
+    def afterWipe: String =
+      val marker = "ZIPX_IT_WIPE"
+      out.indexOf(marker) match
+        case -1 => ""
+        case i  => out.substring(i + marker.length)
+
+    /** Put/Get phase durations from `itStamp` markers (`before; put; afterWipe; get; end` => 3 stamps). */
+    def phaseMs: Option[(Long, Long)] =
+      val stamps =
+        raw"ZIPX_IT_STAMP (\d+)".r.findAllMatchIn(out).map(_.group(1).toLong).toVector
+      if stamps.size >= 3 then Some((stamps(1) - stamps(0), stamps(2) - stamps(1)))
+      else None
+  end RunResult
 
   def dockerAvailable: Boolean =
     Try(Process(Seq("docker", "info")).!(ProcessLogger(_ => (), _ => ())) == 0).getOrElse(false)
@@ -36,13 +58,13 @@ object FixtureRunner:
     copyResourceTree(FixtureResource, root)
     root
 
+  /** One sbt process; `script` is a `;`-joined command string (`compile`, `wipeItCaches`, `set ...`, …). */
   def runSbt(
       fixtureDir: Path,
       grpcUri: String,
-      tasks: Seq[String],
+      script: String,
       home: Path,
       extraEnv: Map[String, String] = Map.empty,
-      cacheVersionOverride: Option[Long] = None,
   ): RunResult =
     Files.createDirectories(home)
     val log    = new StringBuilder
@@ -53,16 +75,17 @@ object FixtureRunner:
       line =>
         log.append(line).append('\n'); (),
     )
-    val env = scala.collection.mutable.Map.from(sys.env) ++ extraEnv ++ Map(
+    val bootDir     = SharedTooling.resolve("boot").toAbsolutePath.toString
+    val coursierDir = SharedTooling.resolve("coursier").toAbsolutePath.toString
+    val env         = scala.collection.mutable.Map.from(sys.env) ++ extraEnv ++ Map(
       RemoteCacheProof.envUri -> grpcUri,
       "HOME"                  -> home.toAbsolutePath.toString,
-      "SBT_OPTS"              -> "-Xmx512m",
+      "COURSIER_CACHE"        -> coursierDir,
+      "SBT_OPTS"              -> s"-Xmx512m -Dsbt.boot.directory=$bootDir",
     )
-    cacheVersionOverride.foreach(v => env("ZIPX_CACHE_VERSION") = v.toString)
 
-    // Avoid thin-client attach to an unrelated sbt server; one scripted command string.
-    val script  = tasks.mkString("; ")
-    val cmd     = Seq("sbt", "-Dsbt.client=false", "--batch", script)
+    // Foreground server: thin client reuses a background server across fixtures and breaks isolation.
+    val cmd     = Seq("sbt", "--server", "--batch", s"-Dsbt.boot.directory=$bootDir", script)
     val started = System.nanoTime()
     val code    =
       Process(cmd, fixtureDir.toFile, env.toSeq*).!(logger)
@@ -70,6 +93,7 @@ object FixtureRunner:
     RunResult(code, log.toString, elapsed)
   end runSbt
 
+  /** Drop project outputs + sbt action cache; keep boot/coursier (shared tooling) intact. */
   def wipeLocalCaches(fixtureDir: Path, home: Path): Unit =
     deleteTree(fixtureDir.resolve("target"))
     deleteTree(fixtureDir.resolve("project/target"))
