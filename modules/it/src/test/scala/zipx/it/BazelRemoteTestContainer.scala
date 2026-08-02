@@ -23,8 +23,16 @@ final case class BazelRemoteTestContainer(config: BazelRemoteContainerConfig):
     val c: GenericContainer[?] = new GenericContainer(DockerImageName.parse(config.image))
     c.withExposedPorts(Integer.valueOf(config.grpcPort), Integer.valueOf(config.httpPort))
     c.withCommand(s"--max_size=${config.maxSizeGb}", "--dir=/data")
-    c.waitingFor(Wait.forListeningPort().withStartupTimeout(Duration.ofMinutes(2)))
+    // ListeningPort alone races: gRPC can accept before HTTP /status is up.
+    c.waitingFor(
+      Wait
+        .forHttp("/status")
+        .forPort(config.httpPort)
+        .forStatusCode(200)
+        .withStartupTimeout(Duration.ofMinutes(2))
+    )
     c
+  end container
 
   def start: BazelRemoteTestContainer =
     container.start()
@@ -52,7 +60,13 @@ object BazelRemoteTestContainer:
 
   val layer: ZLayer[BazelRemoteContainerConfig, Nothing, BazelRemoteTestContainer] =
     base >>> ZLayer.scoped:
-      ZIO.acquireRelease(ZIO.service[BazelRemoteTestContainer].map(_.start))(_.stop)
+      ZIO.acquireRelease(
+        for
+          c            <- ZIO.service[BazelRemoteTestContainer]
+          (dur, ready) <- ZIO.attempt(c.start).orDie.timed
+          _            <- ZIO.succeed(s"${dur.toMillis}ms image=${c.config.image}").debug("bazel-remote start")
+        yield ready
+      )(_.stop)
 
   val default: ZLayer[Any, Nothing, BazelRemoteTestContainer] =
     BazelRemoteContainerConfig.default >>> layer

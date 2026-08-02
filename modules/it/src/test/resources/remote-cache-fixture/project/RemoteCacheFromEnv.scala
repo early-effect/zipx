@@ -1,23 +1,41 @@
 import sbt.*
 import sbt.Keys.*
 
-/** Mirrors zipx plugin env wiring: ZIPX_REMOTE_CACHE (+ optional ZIPX_CACHE_VERSION override for IT). */
+/** Mirrors zipx plugin env wiring for the IT fixture.
+  *
+  * `Global / cacheVersion` is load-time only (safe for remote-cache keying). Override order:
+  *   1. `.it-cache-version` in the project base (written by `writeItCacheVersion111` / `222`, then `reload`)
+  *   2. `ZIPX_CACHE_VERSION` env
+  *   3. JDK/OS FNV hash (same idea as ZipxPlugin)
+  */
 object RemoteCacheFromEnv extends AutoPlugin:
   override def trigger = allRequirements
 
-  override def globalSettings: Seq[Setting[?]] =
+  override def projectSettings: Seq[Setting[?]] =
     sys.env.get("ZIPX_REMOTE_CACHE").filter(_.nonEmpty) match
-      case None => Nil
+      case None         => Nil
       case Some(uriStr) =>
-        val version: Long = sys.env.get("ZIPX_CACHE_VERSION").flatMap(_.toLongOption).getOrElse {
-          cacheVersionFor(
-            sys.props.getOrElse("java.specification.version", "unknown"),
-            sys.props.getOrElse("os.name", "unknown").toLowerCase.split(' ').head,
-          )
-        }
         Seq(
-          Global / remoteCache    := Some(uri(uriStr)),
-          Global / cacheVersion   := version,
+          Global / remoteCache  := Some(uri(uriStr)),
+          Global / cacheVersion := {
+            val itFile = baseDirectory.value / ".it-cache-version"
+            if itFile.isFile then
+              IO.read(itFile)
+                .trim
+                .toLongOption
+                .getOrElse:
+                  sys.error(s"invalid cache version in $itFile")
+            else
+              sys.env
+                .get("ZIPX_CACHE_VERSION")
+                .flatMap(_.toLongOption)
+                .getOrElse:
+                  cacheVersionFor(
+                    sys.props.getOrElse("java.specification.version", "unknown"),
+                    sys.props.getOrElse("os.name", "unknown").toLowerCase.split(' ').head,
+                  )
+            end if
+          },
         )
 
   private def cacheVersionFor(jdk: String, os: String): Long =
