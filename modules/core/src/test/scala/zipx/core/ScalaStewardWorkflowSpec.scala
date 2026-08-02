@@ -8,13 +8,18 @@ object ScalaStewardWorkflowSpec extends ZIOSpecDefault:
     test("renders weekly schedule, workflow_dispatch, and pinned steward action") {
       val pins = ActionPins.Defaults
       val out  = ScalaStewardWorkflow.render(pins, "ubuntu-latest")
+
+      // Version comment is dynamic: annotateUses appends "# <version>" from pins.versions
+      val expectedVersionComment =
+        pins.versions.get("scalaSteward").map(v => s"# $v").getOrElse("")
+
       assertTrue(
         out.contains("name: Scala Steward"),
         out.contains("schedule:"),
-        out.contains("cron: 0 0 * * 0") || out.contains("""cron: "0 0 * * 0""""),
+        out.matches("(?s).*cron:\\s+\"0 0 \\* \\* 0\".*"),
         out.contains("workflow_dispatch: null"),
         out.contains(s"uses: ${pins.scalaSteward}"),
-        out.contains("# v2.92.0") || pins.versions.get("scalaSteward").isEmpty,
+        if expectedVersionComment.nonEmpty then out.contains(expectedVersionComment) else true,
         out.contains("contents: write"),
         out.contains("pull-requests: write"),
       )
@@ -25,7 +30,7 @@ object ScalaStewardWorkflowSpec extends ZIOSpecDefault:
         "ubuntu-latest",
         schedule = zipx.workflow.Cron.weekly(zipx.workflow.DayOfWeek.Monday, hour = 6),
       )
-      assertTrue(out.contains("cron: 0 6 * * 1") || out.contains("""cron: "0 6 * * 1""""))
+      assertTrue(out.matches("(?s).*cron:\\s+\"0 6 \\* \\* 1\".*"))
     },
   )
 end ScalaStewardWorkflowSpec
