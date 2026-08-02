@@ -7,7 +7,7 @@ object RemoteCacheFromEnv extends AutoPlugin:
 
   override def globalSettings: Seq[Setting[?]] =
     sys.env.get("ZIPX_REMOTE_CACHE").filter(_.nonEmpty) match
-      case None => Nil
+      case None         => Nil
       case Some(uriStr) =>
         val version: Long = sys.env.get("ZIPX_CACHE_VERSION").flatMap(_.toLongOption).getOrElse {
           cacheVersionFor(
@@ -16,8 +16,8 @@ object RemoteCacheFromEnv extends AutoPlugin:
           )
         }
         Seq(
-          Global / remoteCache    := Some(uri(uriStr)),
-          Global / cacheVersion   := version,
+          Global / remoteCache  := Some(uri(uriStr)),
+          Global / cacheVersion := version,
         )
 
   private def cacheVersionFor(jdk: String, os: String): Long =
