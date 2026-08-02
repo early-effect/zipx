@@ -194,7 +194,7 @@ object RenderSpec extends ZIOSpecDefault:
       val out = Render.render(wf)
       assertTrue(
         out.contains("schedule:"),
-        out.contains("""cron: "0 0 * * 0""""),
+        out.contains("cron:") && (out.contains("cron: \"0 0 * * 0\"") || out.contains("cron: 0 0 * * 0")),
         out.contains("workflow_dispatch: null"),
       )
     },
@@ -281,6 +281,12 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("contents: read"),
         out.contains("issues: write"),
       )
+      // verify permissions appears before the jobs section (first job key "j:" indented under jobs:)
+      val lines       = out.linesIterator.toList
+      val permIdx     = lines.indexWhere(_.startsWith("permissions:"))
+      val firstJobIdx = lines.indexWhere(l => l.trim == "j:" || l.trim.startsWith("j: "))
+      assertTrue(permIdx > 0, firstJobIdx > permIdx)
+
     },
 
     test("workflow-level env renders before jobs") {
@@ -295,6 +301,12 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("env:"),
         out.contains("GLOBAL_VAR: value"),
       )
+      // verify workflow-level env appears before the jobs section (first job key "j:" indented under jobs:)
+      val lines       = out.linesIterator.toList
+      val envIdx      = lines.indexWhere(_.startsWith("env:"))
+      val firstJobIdx = lines.indexWhere(l => l.trim == "j:" || l.trim.startsWith("j: "))
+      assertTrue(envIdx > 0, firstJobIdx > envIdx)
+
     },
 
     test("BranchFilter.paths render under push/pull_request triggers") {

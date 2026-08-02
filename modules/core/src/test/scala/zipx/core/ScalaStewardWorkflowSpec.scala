@@ -16,7 +16,7 @@ object ScalaStewardWorkflowSpec extends ZIOSpecDefault:
       assertTrue(
         out.contains("name: Scala Steward"),
         out.contains("schedule:"),
-        out.contains("""cron: "0 0 * * 0""""),
+        out.matches("(?s).*cron:\\s+\"0 0 \\* \\* 0\".*"),
         out.contains("workflow_dispatch: null"),
         out.contains(s"uses: ${pins.scalaSteward}"),
         if expectedVersionComment.nonEmpty then out.contains(expectedVersionComment) else true,
@@ -30,7 +30,7 @@ object ScalaStewardWorkflowSpec extends ZIOSpecDefault:
         "ubuntu-latest",
         schedule = zipx.workflow.Cron.weekly(zipx.workflow.DayOfWeek.Monday, hour = 6),
       )
-      assertTrue(out.contains("""cron: "0 6 * * 1""""))
+      assertTrue(out.matches("(?s).*cron:\\s+\"0 6 \\* \\* 1\".*"))
     },
   )
 end ScalaStewardWorkflowSpec

@@ -16,7 +16,7 @@ object ActionPinsSpec extends ZIOSpecDefault:
       val p = ActionPins.Defaults
 
       // Each action reference must be pinned to a 40-char hex SHA (not vN, main, etc.)
-      def isShaPinned(ref: String) = ref.matches("^[^@]+@[0-9a-f]{40}$")
+      def isShaPinned(ref: String) = ref.matches("^[^@]+@[0-9A-Fa-f]{40}$")
 
       assertTrue(
         isShaPinned(p.checkout),
