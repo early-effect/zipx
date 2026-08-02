@@ -165,6 +165,66 @@ object JobConditionSpec extends ZIOSpecDefault:
         val long = "a" * 300
         assertTrue(rejects(JobCondition.refIs(long)))
       },
+
+      // --- Property-based: exhaustive character set checks ---
+      test("repositoryIs succeeds for strings of only allowed characters") {
+        val validInputs = List(
+          "org/repo",
+          "my-org/my-repo_v2",
+          "a/b+c-d:e.f_g@h:i",
+          "A-Z_0-9.test/ok",
+        )
+        assertTrue(validInputs.map(s => scala.util.Try(JobCondition.repositoryIs(s)).isSuccess).forall(identity))
+      },
+
+      test("repositoryIs rejects any string containing a disallowed character") {
+        // requireLiteral trims leading/trailing whitespace first, so embed chars in the middle.
+        val disallowedChars =
+          List("'", "\"", "$", " ", "\t", "\n", "(", ")", "{", "}", "|", "&", ";", "`", "!", "?", "#")
+        assertTrue(
+          disallowedChars.map(c => rejects(JobCondition.repositoryIs(s"org/repo${c}name"))).forall(identity)
+        )
+      },
+
+      test("hasPrLabel succeeds for strings of only allowed characters") {
+        val validLabels =
+          List("deploy-stg", "release/v2", "ship:now", "a_b.c+d@e:f-g:h:i:j:k:l:m:n:o:p:q:r:s:t:u:v:w:x:y:z")
+        assertTrue(validLabels.map(s => scala.util.Try(JobCondition.hasPrLabel(s)).isSuccess).forall(identity))
+      },
+
+      test("hasPrLabel rejects any string containing a disallowed character") {
+        // requireLiteral trims leading/trailing whitespace first, so embed chars in the middle.
+        val disallowedChars =
+          List("'", "\"", "$", " ", "\t", "\n", "(", ")", "{", "}", "|", "&", ";", "`", "!", "?", "#")
+        assertTrue(
+          disallowedChars.map(c => rejects(JobCondition.hasPrLabel(s"label${c}name"))).forall(identity)
+        )
+      },
+
+      test("refIs and refStartsWith accept valid GitHub ref patterns") {
+        val validRefs = List(
+          "refs/heads/main",
+          "refs/tags/v1.0.0",
+          "refs/pull/42/head",
+          "feature/my-branch_v2",
+        )
+        assertTrue(
+          validRefs.map(s => scala.util.Try(JobCondition.refIs(s)).isSuccess).forall(identity),
+          validRefs.map(s => scala.util.Try(JobCondition.refStartsWith(s)).isSuccess).forall(identity),
+        )
+      },
+
+      test("render is deterministic for complex conditions") {
+        val cond = JobCondition.and(
+          JobCondition.repositoryIs("org/repo"),
+          JobCondition.or(
+            JobCondition.onWorkflowDispatch,
+            JobCondition.hasPrLabel("deploy-stg"),
+          ),
+        )
+        val renders = List.fill(50)(cond.render)
+        assertTrue(renders.distinct.size == 1)
+      },
     ),
   )
 end JobConditionSpec
