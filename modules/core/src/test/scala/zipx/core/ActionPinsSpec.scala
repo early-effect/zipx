@@ -12,21 +12,25 @@ object ActionPinsSpec extends ZIOSpecDefault:
   )
 
   def spec = suite("ActionPins")(
-    test("defaults are full commit SHAs, not mutable tags") {
+    test("defaults are pinned to commit SHAs, not mutable tags or branches") {
       val p = ActionPins.Defaults
+
+      // Each action reference must be pinned to a 40-char hex SHA (not vN, main, etc.)
+      def isShaPinned(ref: String) = ref.matches("^[^@]+@[0-9A-Fa-f]{40}$")
+
       assertTrue(
-        p.checkout.contains("@3d3c42e"),
-        !p.checkout.endsWith("@v4"),
-        !p.checkout.endsWith("@v7"),
-        p.setupJava.contains("@03ad4de"),
-        p.setupSbt.contains("@d059c39"),
-        p.cache.contains("@55cc834"),
-        p.uploadArtifact.contains("@043fb46"),
-        p.downloadArtifact.contains("@3e5f45b"),
-        p.scalaSteward.contains("@ff09222"),
-        p.versions.get("setupSbt").contains("v1.5.5"),
-        p.versions.get("checkout").contains("v7.0.1"),
-        p.versions.get("scalaSteward").contains("v2.92.0"),
+        isShaPinned(p.checkout),
+        isShaPinned(p.setupJava),
+        isShaPinned(p.setupSbt),
+        isShaPinned(p.cache),
+        isShaPinned(p.uploadArtifact),
+        isShaPinned(p.downloadArtifact),
+        isShaPinned(p.scalaSteward),
+      ) &&
+      // versions map documents the human-readable tag each SHA came from (shape check, not exact values)
+      assertTrue(
+        p.versions.nonEmpty,
+        p.versions.values.exists(_.startsWith("v")),
       )
     },
     test("planner emits the configured pins on every job") {

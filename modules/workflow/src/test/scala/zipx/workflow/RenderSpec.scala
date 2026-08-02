@@ -194,7 +194,7 @@ object RenderSpec extends ZIOSpecDefault:
       val out = Render.render(wf)
       assertTrue(
         out.contains("schedule:"),
-        out.contains("cron: 0 0 * * 0") || out.contains("""cron: "0 0 * * 0""""),
+        out.contains("cron:") && (out.contains("cron: \"0 0 * * 0\"") || out.contains("cron: 0 0 * * 0")),
         out.contains("workflow_dispatch: null"),
       )
     },
@@ -250,6 +250,85 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("contents: read"),
         Render.renderMapping(Map.empty) == "",
       )
+    },
+
+    // --- Edge cases for Triggers.workflowCall, workflow-level fields, BranchFilter.paths ---
+
+    test("Triggers.workflowCall renders workflow_call trigger") {
+      val wf = Workflow(
+        name = "Reusable",
+        on = Triggers(workflowCall = true),
+        jobs = ListMap("run" -> Job(steps = List(Step(run = Some("echo hi"))))),
+      )
+      val out = Render.render(wf)
+      assertTrue(
+        out.contains("workflow_call: null"),
+        !out.contains("push:"),
+        !out.contains("pull_request:"),
+      )
+    },
+
+    test("workflow-level permissions render before jobs") {
+      val wf = Workflow(
+        name = "CI",
+        on = Triggers(push = Some(BranchFilter(branches = List("main")))),
+        permissions = ListMap("contents" -> "read", "issues" -> "write"),
+        jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
+      )
+      val out = Render.render(wf)
+      assertTrue(
+        out.contains("permissions:"),
+        out.contains("contents: read"),
+        out.contains("issues: write"),
+      )
+      // verify permissions appears before the jobs section (first job key "j:" indented under jobs:)
+      val lines       = out.linesIterator.toList
+      val permIdx     = lines.indexWhere(_.startsWith("permissions:"))
+      val firstJobIdx = lines.indexWhere(l => l.trim == "j:" || l.trim.startsWith("j: "))
+      assertTrue(permIdx > 0, firstJobIdx > permIdx)
+
+    },
+
+    test("workflow-level env renders before jobs") {
+      val wf = Workflow(
+        name = "CI",
+        on = Triggers(push = Some(BranchFilter(branches = List("main")))),
+        env = ListMap("GLOBAL_VAR" -> "value"),
+        jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
+      )
+      val out = Render.render(wf)
+      assertTrue(
+        out.contains("env:"),
+        out.contains("GLOBAL_VAR: value"),
+      )
+      // verify workflow-level env appears before the jobs section (first job key "j:" indented under jobs:)
+      val lines       = out.linesIterator.toList
+      val envIdx      = lines.indexWhere(_.startsWith("env:"))
+      val firstJobIdx = lines.indexWhere(l => l.trim == "j:" || l.trim.startsWith("j: "))
+      assertTrue(envIdx > 0, firstJobIdx > envIdx)
+
+    },
+
+    test("BranchFilter.paths render under push/pull_request triggers") {
+      val wf = Workflow(
+        name = "CI",
+        on = Triggers(
+          push = Some(BranchFilter(paths = List(".github/**", "modules/**"))),
+          pullRequest = Some(BranchFilter(paths = List("modules/**"))),
+        ),
+        jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
+      )
+      val out = Render.render(wf)
+      assertTrue(
+        out.contains("paths:"),
+        out.contains(".github/**"),
+        out.contains("modules/**"),
+      )
+    },
+
+    test("is deterministic — rendering 100 times yields identical bytes") {
+      val results = List.fill(100)(Render.render(sample))
+      assertTrue(results.distinct.size == 1)
     },
   )
 end RenderSpec
