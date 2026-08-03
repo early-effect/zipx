@@ -3,7 +3,7 @@ package zipx.core
 import zio.test.*
 import zipx.workflow.*
 
-/** M6e — end-to-end capability proof. Plans the FULL set of capabilities (test → publish → docker → gated multi-target
+/** M6e: end-to-end capability proof. Plans the FULL set of capabilities (test → publish → docker → gated multi-target
   * deploy) together on the sample graph and asserts the complete pipeline holds. Where the per-capability specs check
   * one behavior in isolation, this catches interaction bugs: phase ordering across capabilities, cross-capability
   * `needs`, and that a realistic multi-environment build generates entirely from the model with no external config.

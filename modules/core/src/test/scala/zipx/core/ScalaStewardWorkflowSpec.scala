@@ -32,5 +32,25 @@ object ScalaStewardWorkflowSpec extends ZIOSpecDefault:
       )
       assertTrue(out.matches("(?s).*cron:\\s+\"0 6 \\* \\* 1\".*"))
     },
+    test("no configPath renders a single step: no checkout, no with:") {
+      val out = ScalaStewardWorkflow.render(ActionPins.Defaults, "ubuntu-latest")
+      assertTrue(
+        !out.contains("Checkout"),
+        !out.contains(ActionPins.Defaults.checkout),
+        !out.contains("with:"),
+        !out.contains("repo-config"),
+      )
+    },
+    test("configPath adds a checkout step ahead of steward and passes repo-config") {
+      val pins = ActionPins.Defaults
+      val out  = ScalaStewardWorkflow.render(pins, "ubuntu-latest", configPath = Some(".github/.scala-steward.conf"))
+      // The action reads repo-config off the runner filesystem and never checks out itself,
+      // so checkout must come first or the config is silently ignored.
+      assertTrue(
+        out.contains(s"uses: ${pins.checkout}"),
+        out.indexOf(pins.checkout) < out.indexOf(pins.scalaSteward),
+        out.contains("repo-config: .github/.scala-steward.conf"),
+      )
+    },
   )
 end ScalaStewardWorkflowSpec

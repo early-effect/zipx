@@ -5,15 +5,15 @@ import scala.collection.immutable.ListMap
 /** A value injected into a GitHub Actions job's `env:` block.
   *
   * Typed so consumers stop hand-writing `${{ secrets.X }}` strings. zipx owns *rendering* to GHA expressions; the build
-  * owns *which* secrets/names. Secret *values* never appear in the model — only references.
+  * owns *which* secrets/names. Secret *values* never appear in the model, only references.
   *
-  *   - [[EnvValue.Plain]] — a literal string (region, tier, URI, …).
-  *   - [[EnvValue.FromSecret]] — `${{ secrets.NAME }}` (GitHub Actions secret reference).
-  *   - [[EnvValue.FromEnv]] — `${{ env.NAME }}` (reference another job/env key; rare, but useful for chaining).
-  *   - [[EnvValue.Expr]] — escape hatch for a raw GHA expression the other variants can't express.
+  *   - [[EnvValue.Plain]]: a literal string (region, tier, URI, …).
+  *   - [[EnvValue.FromSecret]]: `${{ secrets.NAME }}` (GitHub Actions secret reference).
+  *   - [[EnvValue.FromEnv]]: `${{ env.NAME }}` (reference another job/env key; rare, but useful for chaining).
+  *   - [[EnvValue.Expr]]: escape hatch for a raw GHA expression the other variants can't express.
   *
   * Prefer the smart constructors [[EnvValue.secret]], [[EnvValue.env]], [[EnvValue.plain]], [[EnvValue.expr]] (and the
-  * `secret"NAME"` interpolator) over assembling cases by hand — constructors validate names.
+  * `secret"NAME"` interpolator) over assembling cases by hand; constructors validate names.
   */
 enum EnvValue:
   case Plain(value: String)
@@ -66,7 +66,7 @@ object EnvValue:
 
 end EnvValue
 
-/** Convenience aliases for secret references — `Secret("PGP_PASSPHRASE")` / `Secret.ref("…")`. */
+/** Convenience aliases for secret references: `Secret("PGP_PASSPHRASE")` / `Secret.ref("…")`. */
 object Secret:
   def apply(name: String): EnvValue = EnvValue.secret(name)
   def ref(name: String): EnvValue   = EnvValue.secret(name)

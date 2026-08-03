@@ -6,7 +6,7 @@ import zipx.core.*
 import zipx.workflow.Render
 import zipx.workflow.Step
 
-/** zipx — the build describes its own GitHub Actions CI.
+/** zipx: the build describes its own GitHub Actions CI.
   *
   * Introspects the sbt build graph (`buildDependencies`, per-project settings) into a [[zipx.core.ModuleGraph]], then
   * uses [[zipx.core.Planner]] to generate a workflow YAML that fans out per-module jobs wired by `needs` derived from
@@ -29,6 +29,12 @@ object ZipxPlugin extends AutoPlugin:
     val Cron = zipx.workflow.Cron
     type DayOfWeek = zipx.workflow.DayOfWeek
     val DayOfWeek = zipx.workflow.DayOfWeek
+    // Re-export the Scala Steward grouping model so builds can extend zipxStewardGrouping.
+    type StewardGroup = zipx.core.StewardGroup
+    val StewardGroup = zipx.core.StewardGroup
+    type StewardFilter = zipx.core.StewardFilter
+    val StewardFilter      = zipx.core.StewardFilter
+    val ScalaStewardConfig = zipx.core.ScalaStewardConfig
 
     // Re-export the capability/target model so users can define and append custom capabilities in build.sbt.
     type Capability = zipx.core.Capability
@@ -49,7 +55,7 @@ object ZipxPlugin extends AutoPlugin:
     val CapabilityScope = zipx.core.CapabilityScope
     type VerifyClean = zipx.core.VerifyClean
     val VerifyClean = zipx.core.VerifyClean
-    // Typed env / secret references — prefer these over hand-written "${{ secrets.X }}" strings.
+    // Typed env / secret references. Prefer these over hand-written "${{ secrets.X }}" strings.
     type EnvValue = zipx.core.EnvValue
     val EnvValue = zipx.core.EnvValue
     val Secret   = zipx.core.Secret
@@ -146,6 +152,12 @@ object ZipxPlugin extends AutoPlugin:
     val zipxScalaSteward =
       settingKey[Boolean](
         "When true, also generate .github/workflows/zipx-scala-steward.yml (weekly Scala Steward via GITHUB_TOKEN)."
+      )
+    val zipxStewardGrouping =
+      settingKey[Seq[StewardGroup]](
+        "Scala Steward pullRequests.grouping written to .github/.scala-steward.conf so updates land in a few PRs " +
+          "instead of one each (default ScalaStewardConfig.Defaults). Empty disables the config file. " +
+          "Set it here, not in the repo's .scala-steward.conf: this list is matched first and ends in a catch-all."
       )
     val zipxWorkflowDispatch =
       settingKey[Boolean]("Emit on.workflow_dispatch so the workflow can be run manually (default false).")
@@ -245,6 +257,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxActionsPath              := ActionPinFile.DefaultPath,
     zipxDependabotSync           := false,
     zipxScalaSteward             := false,
+    zipxStewardGrouping          := ScalaStewardConfig.Defaults,
     zipxWorkflowDispatch         := false,
   )
 
@@ -252,7 +265,7 @@ object ZipxPlugin extends AutoPlugin:
     * `ZIPX_REMOTE_CACHE_HEADER`). Inert when the env is unset (local dev / LocalDir backend).
     *
     * The gRPC transport (`sbt.plugins.RemoteCachePlugin`) is bundled transitively via sbt-zipx's dependency on
-    * `sbt-remote-cache`, and triggers on AllRequirements — but its store is a no-op until `Global / remoteCache` is
+    * `sbt-remote-cache`, and triggers on AllRequirements, but its store is a no-op until `Global / remoteCache` is
     * `Some`, which only happens here when the CI job sets `ZIPX_REMOTE_CACHE`. So local builds are unaffected.
     */
   private def remoteCacheWiring: Seq[Setting[?]] =
@@ -264,7 +277,7 @@ object ZipxPlugin extends AutoPlugin:
           // sbt's content-addressed cache key hashes sources/classpath/scalacOptions but NOT the JDK or OS. For a shared
           // remote cache this is unsafe: a JDK-21 runner and a JDK-17 runner would read each other's blobs. Fold those
           // two axes into `cacheVersion` (mixed into every key) so heterogeneous runners get disjoint partitions.
-          // The commit epoch is deliberately excluded — cross-epoch reuse is the whole point of a persistent remote cache.
+          // The commit epoch is deliberately excluded: cross-epoch reuse is the whole point of a persistent remote cache.
           Global / cacheVersion := cacheVersionFor(runtimeJdkMajor, runtimeOs),
         ) ++ sys.env.get(RemoteCacheProof.envHeader).filter(_.nonEmpty).toSeq.map { header =>
           Global / remoteCacheHeaders := Seq(header)
@@ -305,7 +318,7 @@ object ZipxPlugin extends AutoPlugin:
   )
 
   override def projectSettings: Seq[Setting[?]] = Seq(
-    // An aggregator (aggregates ≥1 project) is a container, not a testable/publishable module — off by default.
+    // An aggregator (aggregates ≥1 project) is a container, not a testable/publishable module, off by default.
     // These are plain settings, so users can override per project (e.g. `zipxCiRelevant := true`).
     zipxCiRelevant  := thisProject.value.aggregate.isEmpty,
     zipxPublish     := None,
@@ -329,7 +342,7 @@ object ZipxPlugin extends AutoPlugin:
     // Only projects in the root build unit, sorted by id for determinism.
     val refs = structure.allProjectRefs.sortBy(_.project)
 
-    // Aggregators (aggregate ≥1 project) are containers, not publishable modules — never publish by default.
+    // Aggregators (aggregate ≥1 project) are containers, not publishable modules, never publish by default.
     val aggregatorIds: Set[String]                 = structure.allProjects.filter(_.aggregate.nonEmpty).map(_.id).toSet
     val resolvedById: Map[String, ResolvedProject] = structure.allProjects.map(p => p.id -> p).toMap
     val buildRoot                                  = (LocalRootProject / baseDirectory).value.toPath
@@ -476,16 +489,31 @@ object ZipxPlugin extends AutoPlugin:
     end if
   }
 
+  /** The Steward grouping config to generate, or None when grouping is disabled. Shared by generate and check so the
+    * two cannot disagree about whether the config file should exist.
+    */
+  private def stewardGrouping(extracted: Extracted): Option[String] =
+    val groups = readBuildSetting(extracted, zipxStewardGrouping, ScalaStewardConfig.Defaults).toList
+    Option.when(groups.nonEmpty)(ScalaStewardConfig.render(groups))
+
   private def writeStewardWorkflowIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
     val extracted   = Project.extract(state.value)
     val enabled     = readBuildSetting(extracted, zipxScalaSteward, false)
     val root        = (LocalRootProject / baseDirectory).value
     val stewardFile = root / ScalaStewardWorkflow.DefaultPath
     if enabled then
-      val cfg  = planConfig.value
-      val body = ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs)
+      val cfg        = planConfig.value
+      val log        = streams.value.log
+      val maybeConf  = stewardGrouping(extracted)
+      val configPath = maybeConf.map(_ => ScalaStewardWorkflow.DefaultConfigPath)
+      maybeConf.foreach { conf =>
+        val confFile = root / ScalaStewardWorkflow.DefaultConfigPath
+        IO.write(confFile, conf)
+        log.info(s"zipx wrote ${confFile.getPath}")
+      }
+      val body = ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs, configPath = configPath)
       IO.write(stewardFile, body)
-      streams.value.log.info(s"zipx wrote ${stewardFile.getPath}")
+      log.info(s"zipx wrote ${stewardFile.getPath}")
     else if stewardFile.exists then ()
     end if
   }
@@ -590,10 +618,23 @@ object ZipxPlugin extends AutoPlugin:
       streams.value.log.info(s"zipx: ${syncFile.getPath} is up to date.")
     end if
     if readBuildSetting(extracted, zipxScalaSteward, false) then
-      val root            = (LocalRootProject / baseDirectory).value
-      val stewardFile     = root / ScalaStewardWorkflow.DefaultPath
-      val cfg             = planConfig.value
-      val expectedSteward = ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs)
+      val root        = (LocalRootProject / baseDirectory).value
+      val stewardFile = root / ScalaStewardWorkflow.DefaultPath
+      val cfg         = planConfig.value
+      val maybeConf   = stewardGrouping(extracted)
+      val configPath  = maybeConf.map(_ => ScalaStewardWorkflow.DefaultConfigPath)
+      // Checked before the workflow itself: the action silently ignores a missing config at the
+      // default path, so this drift check is the only thing that catches it.
+      maybeConf.foreach { expectedConf =>
+        val confFile   = root / ScalaStewardWorkflow.DefaultConfigPath
+        val actualConf = if confFile.exists then IO.read(confFile) else ""
+        if actualConf != expectedConf then
+          sys.error(
+            s"${confFile.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
+          )
+        streams.value.log.info(s"zipx: ${confFile.getPath} is up to date.")
+      }
+      val expectedSteward = ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs, configPath = configPath)
       val actualSteward   = if stewardFile.exists then IO.read(stewardFile) else ""
       if actualSteward != expectedSteward then
         sys.error(
@@ -603,11 +644,11 @@ object ZipxPlugin extends AutoPlugin:
     end if
   }
 
-  /** `zipxAffectedModules <base-ref>` — diff against the base ref, map changed files to owning modules, expand the
+  /** `zipxAffectedModules <base-ref>`: diff against the base ref, map changed files to owning modules, expand the
     * reverse-dependency closure, and write the affected module ids as a JSON array to
     * `<base>/target/zipx-affected.json` (also printed for local use). The generated workflow's `affected` job reads
-    * that stable path so sbt's log lines never pollute `GITHUB_OUTPUT`. (Do not use `(target).value` — under sbt 2 it
-    * is a versioned `target/out/...` tree.)
+    * that stable path so sbt's log lines never pollute `GITHUB_OUTPUT`. (Do not use `(target).value`; under sbt 2 it is
+    * a versioned `target/out/...` tree.)
     */
   private def affectedModulesTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
@@ -618,7 +659,7 @@ object ZipxPlugin extends AutoPlugin:
       val changed = gitDiffNames(root, baseRef)
       if changed.isEmpty then
         streams.value.log.warn(
-          s"zipx: could not diff against '$baseRef' — emitting ${jsonArray(Affected.AllSentinel)} so every job runs. " +
+          s"zipx: could not diff against '$baseRef', emitting ${jsonArray(Affected.AllSentinel)} so every job runs. " +
             "Affected-only gating is disabled for this run."
         )
       val modules = Affected.outputModules(graph, changed)
@@ -632,8 +673,8 @@ object ZipxPlugin extends AutoPlugin:
     * slashes.
     *
     * `None` means the diff **failed** (nonzero exit or no git at all); `Some(Nil)` means it succeeded and found no
-    * changes. [[Affected.outputModules]] relies on that distinction to fail open — collapsing both to `Nil` is what
-    * made a bad base ref skip every Verify job and report the PR green.
+    * changes. [[Affected.outputModules]] relies on that distinction to fail open; collapsing both to `Nil` is what made
+    * a bad base ref skip every Verify job and report the PR green.
     */
   private def gitDiffNames(root: File, baseRef: String): Option[List[String]] =
     try

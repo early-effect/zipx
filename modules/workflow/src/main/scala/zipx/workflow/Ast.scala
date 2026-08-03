@@ -6,13 +6,13 @@ import scala.collection.immutable.ListMap
 /** A GitHub Actions workflow, modeled as an algebraic data type.
   *
   * The sub-types (`Job`, `Step`, `Strategy`, `Container`, `Concurrency`) `derive Schema` and are rendered by
-  * zio-blocks' YAML deriver, which kebab-cases every field name — exactly what GitHub Actions wants for job/step keys
+  * zio-blocks' YAML deriver, which kebab-cases every field name, exactly what GitHub Actions wants for job/step keys
   * (`runs-on`, `timeout-minutes`, `fail-fast`, ...). See [[Render]] for the one place derivation cannot reach: the
   * `on:` triggers block, whose keys (`pull_request`, `workflow_dispatch`, ...) use underscores that kebab-casing would
   * mangle.
   *
   * Map fields use plain `Map` (zio-blocks derives `Schema[Map]` but not `Schema[ListMap]`); populate them with
-  * `ListMap` to keep insertion order deterministic — the derived codec preserves it.
+  * `ListMap` to keep insertion order deterministic; the derived codec preserves it.
   */
 final case class Workflow(
     name: String,
@@ -113,7 +113,7 @@ final case class BranchFilter(
 final case class Job(
     name: Option[String] = None,
     // One or more runner labels. A single label renders as a scalar (`runs-on: ubuntu-latest`); multiple render as a
-    // YAML sequence (`runs-on: [self-hosted, linux]` in block form) — see Render.jobsYaml.
+    // YAML sequence (`runs-on: [self-hosted, linux]` in block form). See Render.jobsYaml.
     // Empty when this job is a reusable-workflow call ([[uses]]); prune drops the empty sequence.
     runsOn: List[String] = List("ubuntu-latest"),
     needs: List[String] = Nil,
@@ -132,7 +132,7 @@ final case class Job(
     `with`: Map[String, String] = ListMap.empty,
 ) derives Schema
 
-/** A GitHub Actions service container (a sidecar running for the duration of a job) — e.g. a `bazel-remote` gRPC cache.
+/** A GitHub Actions service container (a sidecar running for the duration of a job), e.g. a `bazel-remote` gRPC cache.
   */
 final case class JobService(
     image: String,
@@ -145,7 +145,7 @@ final case class Strategy(
     matrix: Map[String, List[String]] = ListMap.empty,
 ) derives Schema
 
-/** A single step. A GitHub Actions step is a flat mapping with optional keys — modeling it as one case class with
+/** A single step. A GitHub Actions step is a flat mapping with optional keys; modeling it as one case class with
   * all-optional fields (rather than a `uses`-vs-`run` sum type) avoids variant discriminator wrappers and matches the
   * on-disk shape exactly. `None`/empty fields are omitted at render time.
   */
@@ -163,7 +163,7 @@ final case class Step(
 /** Workflow- or job-level `concurrency`.
   *
   * `cancelInProgress` is a String, not a Boolean, because GitHub accepts an expression there and the useful policies
-  * need one — "cancel superseded runs, but never a release publish" is `${{ !startsWith(github.ref, 'refs/tags/') }}`.
+  * need one: "cancel superseded runs, but never a release publish" is `${{ !startsWith(github.ref, 'refs/tags/') }}`.
   * Pass `"true"` / `"false"` for the constant cases.
   */
 final case class Concurrency(

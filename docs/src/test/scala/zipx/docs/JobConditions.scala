@@ -170,7 +170,7 @@ zipxCapabilities ++= Seq(
 Publish container images to stg/dev ECR from a labeled PR **without** waiting for merge or a release tag.
 
 1. Ensure `pull_request` triggers fire (zipx default). If labels are added after open, also allow
-   `types: [opened, synchronize, reopened, labeled]` (zipx does not auto-emit that yet — set triggers in a companion
+   `types: [opened, synchronize, reopened, labeled]` (zipx does not auto-emit that yet; set triggers in a companion
    workflow or extend PlanConfig later).
 2. Use a custom docker capability with **`Gate.Always`** and **per-Target** conditions.
 3. Point Target env at the ECR registry + OIDC role; keep `Docker/publish` as the command (native-packager / `REGISTRY`

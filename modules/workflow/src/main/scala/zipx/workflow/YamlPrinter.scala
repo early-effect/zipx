@@ -7,7 +7,7 @@ import zio.blocks.schema.yaml.{Yaml, YamlTag}
   *
   * Why our own printer instead of zio-blocks' `YamlWriter`: GitHub Actions needs multi-line values (notably
   * `actions/cache`'s `path:`) rendered as literal block scalars (`|`), but `YamlWriter` escapes newlines into `\n`
-  * inside a quoted scalar — which `actions/cache` would read as a single literal path. This printer mirrors
+  * inside a quoted scalar, which `actions/cache` would read as a single literal path. This printer mirrors
   * `YamlWriter`'s block layout and scalar-quoting rules exactly (so non-multiline output is byte-identical) and adds
   * literal block scalars for any string containing a newline. Owning the serializer also decouples zipx's byte-stable
   * output from zio-blocks' (pre-1.0) writer internals.
@@ -46,8 +46,8 @@ object YamlPrinter:
         first = false
       }
 
-  /** Emit the value part of `key:` — nested collections drop to the next indent, scalars go inline (or as a block
-    * scalar when multi-line).
+  /** Emit the value part of `key:`. Nested collections drop to the next indent, scalars go inline (or as a block scalar
+    * when multi-line).
     */
   private def writeMappedValue(sb: java.lang.StringBuilder, value: Yaml, indent: Int): Unit =
     value match
@@ -90,7 +90,7 @@ object YamlPrinter:
       }
 
   /** A YAML literal block scalar (`|`): each source line is emitted at `contentIndent`. Trailing-newline handling uses
-    * clip (the default `|`), which keeps a single final newline — fine for `actions/cache` path lists.
+    * clip (the default `|`), which keeps a single final newline, fine for `actions/cache` path lists.
     */
   private def writeBlockScalar(sb: java.lang.StringBuilder, value: String, contentIndent: Int): Unit =
     sb.append(" |")

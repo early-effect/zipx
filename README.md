@@ -5,7 +5,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/rocks.earlyeffect/sbt-zipx_sbt2_3?logo=apachemaven)](https://central.sonatype.com/artifact/rocks.earlyeffect/sbt-zipx_sbt2_3)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**The build describes its own CI.** zipx is an sbt 2.x plugin (Scala 3) that generates a GitHub Actions workflow directly from your sbt build graph — no hand-maintained YAML, no module list to keep in sync, no per-module command strings to copy-paste.
+**The build describes its own CI.** zipx is an sbt 2.x plugin (Scala 3) that generates a GitHub Actions workflow directly from your sbt build graph: no hand-maintained YAML, no module list to keep in sync, no per-module command strings to copy-paste.
 
 You declare modules and `dependsOn` once in `build.sbt`. zipx introspects that graph and emits a workflow that:
 
@@ -14,7 +14,7 @@ You declare modules and `dependsOn` once in `build.sbt`. zipx introspects that g
 - **caches sbt's build state** with a commit-stable key (local or remote);
 - **builds & publishes docker images** via sbt-native-packager when `DockerPlugin` is enabled;
 - **deploys to multiple environments** with GitHub Environment approval (targets fan out; modules can batch);
-- **extends with custom capabilities** — lint gates, multi-registry pushes, stages you invent in Scala;
+- **extends with custom capabilities**: lint gates, multi-registry pushes, stages you invent in Scala;
 - **checks itself in CI**: a committed workflow that drifts from the build fails the build;
 - **pins GitHub Actions to commit SHAs**, with an optional pin file + Dependabot sync so consumers can bump actions without waiting on a zipx release.
 

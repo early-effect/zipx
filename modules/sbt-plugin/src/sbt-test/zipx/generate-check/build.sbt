@@ -7,7 +7,7 @@ zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
 zipxTestTask := "testFull"
 
 // A small cross-published monorepo: a models lib, an api that depends on it, and a client
-// that depends on api — plus a non-publishing service.
+// that depends on api, plus a non-publishing service.
 lazy val schema = project
   .settings(crossScalaVersions := Seq("2.13.16", "3.8.4"))
 
@@ -33,13 +33,13 @@ lazy val root = (project in file("."))
   .aggregate(schema, api, client, service)
   .settings(publish / skip := true)
 
-// A real build-wide task, referenced as a TYPED key (not a string) via zipxTasks.once — proves the typed,
+// A real build-wide task, referenced as a TYPED key (not a string) via zipxTasks.once, proving the typed,
 // IDE-friendly capability API renders to the same `<label>` command.
 val lintAll = taskKey[Unit]("a build-wide lint gate")
 lintAll := ()
 zipxCapabilities += zipxTasks.once("lint", lintAll)
 
-// A typed CONFIG-SCOPED key (`Compile / compile`) — proves zipxTasks renders the config axis: <module>/Compile/compile.
+// A typed CONFIG-SCOPED key (`Compile / compile`), proving zipxTasks renders the config axis: <module>/Compile/compile.
 zipxCapabilities += zipxTasks.custom(
   name = "compileCheck",
   command = Compile / compile,
@@ -65,7 +65,7 @@ zipxCapabilities += Capability.custom(
   gate = Gate.Always,
 )
 
-// A publish-style capability carrying typed secrets (M7) — no raw "${{ secrets.X }}" strings.
+// A publish-style capability carrying typed secrets (M7), no raw "${{ secrets.X }}" strings.
 // Graph modes exercise affected / matrix / per-module needs (scripted asserts those shapes).
 zipxCapabilities ++= Seq(
   Capability.testGraph,
@@ -146,7 +146,7 @@ assertGraph := {
 // A broken diff must fail OPEN: emit the `["all"]` sentinel so every Verify job still runs.
 // Emitting `[]` instead would make every generated `contains(fromJson(...), '<id>')` gate false, skipping
 // all verification while the PR reports green. Scripted runs in a temp dir that is not a git repo, so any
-// base ref is genuinely undiffable here — no mocking needed.
+// base ref is genuinely undiffable here, no mocking needed.
 val assertAffectedFailsOpen = taskKey[Unit]("a diff that cannot run emits the all-sentinel")
 assertAffectedFailsOpen := {
   val json = IO.read((LocalRootProject / baseDirectory).value / "target" / "zipx-affected.json").trim

@@ -80,12 +80,12 @@ zipx is built for **all sorts of sbt repos**, and especially **monorepos**: the 
 single library to many services. Modes choose *how* work is scheduled in GitHub Actions, not whether zipx understands
 your graph.
 
-- **Aggregate** — the default, and often enough even for multi-service monorepos. One root `test` job, one
+- **Aggregate**: the default, and often enough even for multi-service monorepos. One root `test` job, one
   `publish` / `ZipxCentral.release` (modules batched where that makes sense). Lean on sbt 2 incrementality and
   epoch/remote caching; escalate only when the **workflow** needs Graph's boundaries.
-- **Layer** — dependency-ordered waves (L0 → L1 → L2) with fewer sbt starts than Graph. Inspect with `zipxGraph` /
+- **Layer**: dependency-ordered waves (L0 → L1 → L2) with fewer sbt starts than Graph. Inspect with `zipxGraph` /
   `zipxPublishOrder`.
-- **Graph** — when CI itself needs per-module or per-destination isolation: multi-environment deploys, independent
+- **Graph**: when CI itself needs per-module or per-destination isolation: multi-environment deploys, independent
   approvals/logs/status, per-module Scala matrices, or path-based affected gating at the job level. See
   [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo).
 """

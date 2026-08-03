@@ -37,3 +37,9 @@ build.sbt.semanticdb
 .mcp.json
 .claude/
 .cursor/
+
+# Playwright MCP scratch: local browsing only, not a project dependency
+.playwright-mcp/
+node_modules/
+package.json
+package-lock.json

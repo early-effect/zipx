@@ -1,12 +1,12 @@
 package zipx.core
 
-/** A build module as zipx sees it — the sbt-agnostic projection of an sbt project.
+/** A build module as zipx sees it: the sbt-agnostic projection of an sbt project.
   *
   * The sbt plugin ([[zipx.sbt]]) builds these from `Project.extract(state).structure`; the pure core plans over them so
   * the whole planner is unit-testable without sbt on the classpath.
   *
   * @param id
-  *   the sbt project id (e.g. "schema"); the single source of truth for a module's identity — never re-declared.
+  *   the sbt project id (e.g. "schema"); the single source of truth for a module's identity, never re-declared.
   * @param dependsOn
   *   direct classpath dependencies (from sbt `dependsOn` / `buildDependencies.classpathRefs`). Drives `needs` edges.
   * @param publishes
@@ -42,7 +42,7 @@ final case class ModuleNode(
 final case class ModuleGraph(nodes: List[ModuleNode]):
   private val byId: Map[String, ModuleNode] = nodes.map(n => n.id -> n).toMap
 
-  /** All node ids, sorted — the canonical deterministic ordering used everywhere planning must be stable. */
+  /** All node ids, sorted: the canonical deterministic ordering used everywhere planning must be stable. */
   val ids: List[String] = nodes.map(_.id).sorted
 
   def get(id: String): Option[ModuleNode] = byId.get(id)
@@ -61,7 +61,7 @@ final case class ModuleGraph(nodes: List[ModuleNode]):
           go(next ++ t, seen ++ next)
     go(List(id), Set.empty) - id
 
-  /** Direct reverse dependencies — modules that directly depend on `id`. */
+  /** Direct reverse dependencies: modules that directly depend on `id`. */
   def directDependents(id: String): List[String] =
     ids.filter(other => directDeps(other).contains(id))
 
@@ -90,7 +90,7 @@ final case class ModuleGraph(nodes: List[ModuleNode]):
 
   /** Topological layers over the subset of modules matching `include`, with edges *contracted* through excluded
     * intermediates: an included node depends on the nearest included ancestors reachable through any chain of excluded
-    * nodes. This is the publish-ordering view — e.g. layers of just the publishing modules. Empty when nothing matches.
+    * nodes. This is the publish-ordering view, e.g. layers of just the publishing modules. Empty when nothing matches.
     */
   def subsetLayers(include: ModuleNode => Boolean): List[List[String]] =
     val included: Set[String]                             = nodes.filter(include).map(_.id).toSet

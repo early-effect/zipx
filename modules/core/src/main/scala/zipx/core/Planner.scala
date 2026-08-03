@@ -71,7 +71,7 @@ object Planner:
   private def validateCapabilities(capabilities: List[Capability]): Unit =
     // `Gate.AffectedOnly` is an unimplemented design seam (see [[Gate]]): affected-gating is derived from
     // Phase.Verify + PlanConfig.affected, not from Gate. Fail loudly at generate time rather than emit a
-    // workflow that quietly runs the capability always — a silently-green pipeline is the worst outcome.
+    // workflow that quietly runs the capability always; a silently-green pipeline is the worst outcome.
     capabilities.filter(_.gate == Gate.AffectedOnly) match
       case Nil => ()
       case bad =>
@@ -153,8 +153,8 @@ object Planner:
     * PR's pushes cancel each other while other branches are untouched).
     *
     * `cancel-in-progress` is an expression rather than `true`: a release-tag run must never be cancelled. Publishing is
-    * not idempotent, and a half-cancelled run can leave a staged-but-unreleased Central bundle behind — far worse than
-    * a wasted runner.
+    * not idempotent, and a half-cancelled run can leave a staged-but-unreleased Central bundle behind, far worse than a
+    * wasted runner.
     */
   private def concurrencyFor(config: PlanConfig): Concurrency =
     Concurrency(
@@ -184,7 +184,7 @@ object Planner:
                |prs=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
                |  --jq "[.[] | select(.merged_at != null and .base.ref == \"${{ github.ref_name }}\")] | length")
                |if [ "$prs" -gt 0 ]; then
-               |  echo "Merged PR push — skipping redundant Verify (already ran on the PR)"
+               |  echo "Merged PR push, skipping redundant Verify (already ran on the PR)"
                |  echo "run=false" >> "$GITHUB_OUTPUT"
                |else
                |  echo "run=true" >> "$GITHUB_OUTPUT"
@@ -491,7 +491,7 @@ object Planner:
     end if
   end layerJobs
 
-  /** Graph: one job per (module × optional target) — today's fan-out. */
+  /** Graph: one job per (module × optional target), today's fan-out. */
   private def graphJobsFor(
       capability: Capability,
       node: ModuleNode,

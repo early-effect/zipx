@@ -10,7 +10,7 @@ import scala.collection.immutable.ListMap
   * Prefer [[release]] (Aggregate: one job, `publishSigned; sonaRelease`) for typical library builds. Use
   * [[publishSigned]] + [[releaseOnce]] when you need Graph fan-out with staging artifacts across jobs.
   *
-  * Org secrets are referenced **by name only** — values come from the `early-effect` GitHub org.
+  * Org secrets are referenced **by name only**; values come from the `early-effect` GitHub org.
   *
   * {{{
   * // Aggregate (default / dogfood)

@@ -3,13 +3,13 @@ package zipx.core
 /** A representative cross-published monorepo graph used across the core tests.
   *
   * The shape deliberately exercises the interesting cases a real monorepo hits:
-  *   - `schema` (∅, publishes, cross 2.13+3) — a root library
-  *   - `api` (→ schema, publishes, cross) — depends on the root library
-  *   - `legacyClient` (→ schema, publishes, **2.13-only**) — the cross-version edge case
-  *   - `clientA`, `clientB` (→ api, publish, cross) — two downstream clients (a diamond over `api`)
-  *   - `serviceA`..`serviceD` (→ core/api, non-publishing) — apps, not libraries; docker candidates
-  *   - `workerA`, `workerB` (→ core, non-publishing) — background apps
-  *   - `core` (∅, non-publishing) — a shared internal dependency
+  *   - `schema` (∅, publishes, cross 2.13+3): a root library
+  *   - `api` (→ schema, publishes, cross): depends on the root library
+  *   - `legacyClient` (→ schema, publishes, **2.13-only**): the cross-version edge case
+  *   - `clientA`, `clientB` (→ api, publish, cross): two downstream clients (a diamond over `api`)
+  *   - `serviceA`..`serviceD` (→ core/api, non-publishing): apps, not libraries; docker candidates
+  *   - `workerA`, `workerB` (→ core, non-publishing): background apps
+  *   - `core` (∅, non-publishing): a shared internal dependency
   *
   * Publish partial order (what dependency-ordered publishing must produce): L0 `schema`; L1 `api`, `legacyClient`; L2
   * `clientA`, `clientB`.

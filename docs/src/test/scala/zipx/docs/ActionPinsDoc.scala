@@ -19,7 +19,7 @@ read which release a SHA corresponds to:
 ```
 
 zipx ships current defaults in the plugin jar. Consumers who want to track upstream action releases **ahead of a zipx
-upgrade** use a small pin file plus optional Dependabot automation — the same path this repository dogfoods.
+upgrade** use a small pin file plus optional Dependabot automation, the same path this repository dogfoods.
 """,
     section("Resolve order")(
       md"""
@@ -37,9 +37,9 @@ flowchart TD
   class UseFile,UseJar happy
 ```
 
-1. **`zipxActions`** — only when set *away from* `ActionPins.Defaults` (one-off / escape hatch in `build.sbt`)
-2. **Pin file** — if `zipxActionsPath` points at an existing file (default `.github/zipx/action-pins.yml`)
-3. **`ActionPins.Defaults`** — embedded classpath resource from the zipx release you depend on
+1. **`zipxActions`**: only when set *away from* `ActionPins.Defaults` (one-off / escape hatch in `build.sbt`)
+2. **Pin file**: if `zipxActionsPath` points at an existing file (default `.github/zipx/action-pins.yml`)
+3. **`ActionPins.Defaults`**: embedded classpath resource from the zipx release you depend on
 
 Empty `zipxActionsPath := ""` disables file loading so you always use jar defaults (or an explicit `zipxActions`).
 """
@@ -95,7 +95,7 @@ If `zipxDependabotSync := true`, also commit `.github/workflows/zipx-action-pins
     ),
     section("Dependabot")(
       md"""
-Dependabot's `github-actions` ecosystem only sees `uses:` in workflow / composite-action YAML — not Scala and not the
+Dependabot's `github-actions` ecosystem only sees `uses:` in workflow / composite-action YAML, not Scala and not the
 pin file directly. That is fine: it bumps SHAs (and `# vX.Y.Z` comments) in the generated workflow. You then **pull**
 those bumps back into the pin file so `zipxWorkflowCheck` stays green.
 
