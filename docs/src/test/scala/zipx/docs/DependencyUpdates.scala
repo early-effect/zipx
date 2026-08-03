@@ -13,9 +13,10 @@ object DependencyUpdates extends DocSpecSuite:
     md"""
 zipx splits dependency automation in two:
 
-- **Dependabot** (`github-actions`) — bumps SHA-pinned GitHub Actions in generated workflows; sync back via the pin
+- **Dependabot** (`github-actions`) bumps SHA-pinned GitHub Actions in generated workflows; sync back via the pin
   file (`zipxDependabotSync` / `zipxActionsPull`). See **Action pins**.
-- **Scala Steward** — bumps sbt / Scala / library dependencies. Opt in with `zipxScalaSteward := true`.
+- **Scala Steward** bumps sbt / Scala / library dependencies. Opt in with `zipxScalaSteward := true`. Updates arrive
+  grouped into a handful of PRs, not one per artifact (`zipxStewardGrouping`).
 """,
     section("Scala Steward (opt-in)")(
       md"""
@@ -41,6 +42,63 @@ on the org/repo. zipx’s opt-in is the self-hosted Action path so pins and sche
           yaml.contains("cron: 0 0 * * 0") || yaml.contains("""cron: "0 0 * * 0""""),
           yaml.contains("scala-steward-org/scala-steward-action@"),
           yaml.contains("workflow_dispatch"),
+        )
+      ),
+    ),
+    section("Grouped update PRs")(
+      md"""
+By default Scala Steward opens one PR per dependency. zipx instead generates a `pullRequests.grouping` config so
+updates land in a few PRs: one per dependency family, then everything else split by minor-and-patch versus major.
+
+```scala
+zipxStewardGrouping := ScalaStewardConfig.Defaults        // the default
+zipxStewardGrouping := ScalaStewardConfig.Defaults.prepended(
+  StewardGroup("http4s", Some("Update http4s"), List(StewardFilter(group = Some("org.http4s"))))
+)
+zipxStewardGrouping := Nil                                // back to one PR per dependency
+```
+
+Groups are **first-match-wins in list order**, so put narrow groups before broad ones. `StewardGroup` /
+`StewardFilter` / `ScalaStewardConfig` are re-exported from the plugin `autoImport`.
+
+Two things worth knowing, because neither is guessable:
+
+1. **Set grouping here, not in `.scala-steward.conf`.** The generated config reaches Steward through the action's
+   `repo-config` input, which is its *global* config channel and is merged **ahead** of the repo's own
+   `.scala-steward.conf`. Since the default list ends in a `{ group = "*" }` catch-all, a `pullRequests.grouping`
+   block in the repo file would never be reached. Everything else (`updates.ignore`, `updates.retracted`, ...) still
+   belongs in the repo file and merges normally.
+2. **The generated workflow gains a checkout step.** The action reads `repo-config` off the runner filesystem, not
+   out of Steward's own clone, and it does not check anything out itself. Worse, it *silently* ignores a missing file
+   at the default path. So `.github/.scala-steward.conf` is checked out by the workflow, and `zipxWorkflowCheck`
+   drift-checks it: the check failing is what tells you the config is missing, because Steward never would.
+
+One more non-obvious detail: patch bumps deliberately ride along in the `minor` group, since a separate patch group
+would re-fragment the PRs this is meant to consolidate. And the trailing catch-all is load-bearing rather than
+decorative: Steward's version filters need both sides of a bump to parse as strict semver, and anything that fails
+to parse escapes every version-filtered group.
+""",
+      exampleValue {
+        ScalaStewardConfig.render(ScalaStewardConfig.Defaults)
+      }.assert(conf =>
+        assertTrue(
+          conf.contains("pullRequests.grouping = ["),
+          conf.contains("""filter = [{ group = "rocks.earlyeffect" }]"""),
+          conf.indexOf("""group = "rocks.earlyeffect"""") < conf.indexOf("""version = "minor""""),
+          conf.indexOf("""version = "minor"""") < conf.indexOf("""version = "major""""),
+          conf.indexOf("""version = "major"""") < conf.indexOf("""group = "*""""),
+        )
+      ),
+      exampleValue {
+        ScalaStewardWorkflow.render(
+          ActionPins.Defaults,
+          "ubuntu-latest",
+          configPath = Some(ScalaStewardWorkflow.DefaultConfigPath),
+        )
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("repo-config: .github/.scala-steward.conf"),
+          yaml.indexOf(ActionPins.Defaults.checkout) < yaml.indexOf(ActionPins.Defaults.scalaSteward),
         )
       ),
     ),

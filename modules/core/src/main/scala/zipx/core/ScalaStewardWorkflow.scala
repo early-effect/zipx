@@ -12,14 +12,30 @@ object ScalaStewardWorkflow:
 
   val DefaultPath: String = ".github/workflows/zipx-scala-steward.yml"
 
-  /** Sunday 00:00 UTC — matches Steward action docs. */
+  /** Where the generated Steward defaults config goes. Must match the action's own `repo-config` default: when the file
+    * is missing the action silently ignores it *only* at that exact path, and fails loudly at any other.
+    */
+  val DefaultConfigPath: String = ".github/.scala-steward.conf"
+
+  /** Sunday 00:00 UTC, matching Steward action docs. */
   val DefaultSchedule: Cron = Cron.weekly(DayOfWeek.Sunday)
 
+  /** @param configPath
+    *   when set, check the repo out and pass this path as the action's `repo-config`. The action reads that file from
+    *   the runner filesystem, not from Steward's own clone, and it does not check out anything itself, so the checkout
+    *   step is required for the config to be seen at all.
+    */
   def plan(
       pins: ActionPins,
       runnerOs: String,
       schedule: Cron = DefaultSchedule,
+      configPath: Option[String] = None,
   ): Workflow =
+    val stewardStep = Step(
+      name = Some("Scala Steward"),
+      uses = Some(pins.scalaSteward),
+      `with` = configPath.fold(ListMap.empty[String, String])(path => ListMap("repo-config" -> path)),
+    )
     Workflow(
       name = "Scala Steward",
       on = Triggers(schedule = List(schedule), workflowDispatch = true),
@@ -28,21 +44,20 @@ object ScalaStewardWorkflow:
         "scala-steward" -> Job(
           name = Some("Scala Steward"),
           runsOn = List(runnerOs),
-          steps = List(
-            Step(
-              name = Some("Scala Steward"),
-              uses = Some(pins.scalaSteward),
-            )
-          ),
+          steps = configPath.fold(List(stewardStep)) { _ =>
+            List(Step(name = Some("Checkout"), uses = Some(pins.checkout)), stewardStep)
+          },
         )
       ),
     )
+  end plan
 
   def render(
       pins: ActionPins,
       runnerOs: String,
       schedule: Cron = DefaultSchedule,
+      configPath: Option[String] = None,
   ): String =
-    ActionPinFile.annotateUses(Render.render(plan(pins, runnerOs, schedule)), pins)
+    ActionPinFile.annotateUses(Render.render(plan(pins, runnerOs, schedule, configPath)), pins)
 
 end ScalaStewardWorkflow
