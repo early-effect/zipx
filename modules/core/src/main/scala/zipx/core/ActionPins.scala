@@ -57,9 +57,9 @@ object ActionPins:
   private[core] val BootstrapCheckout: String =
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
   private[core] val BootstrapSetupJava: String =
-    "actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95"
+    "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961"
   private[core] val BootstrapSetupSbt: String =
-    "sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e"
+    "sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf"
   private[core] val BootstrapCache: String =
     "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
   private[core] val BootstrapUploadArtifact: String =
@@ -67,16 +67,16 @@ object ActionPins:
   private[core] val BootstrapDownloadArtifact: String =
     "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
   private[core] val BootstrapScalaSteward: String =
-    "scala-steward-org/scala-steward-action@ff09222640622d474d0d9f93c04aefedd125b187"
+    "scala-steward-org/scala-steward-action@41bd88543dcf5e5455689f04d041b095eb901660"
 
   private[core] val BootstrapVersions: Map[String, String] = Map(
     "checkout"         -> "v7.0.1",
-    "setupJava"        -> "v5.6.0",
-    "setupSbt"         -> "v1.5.5",
+    "setupJava"        -> "v5.7.0",
+    "setupSbt"         -> "v1.5.6",
     "cache"            -> "v6.1.0",
     "uploadArtifact"   -> "v7.0.1",
     "downloadArtifact" -> "v8.0.1",
-    "scalaSteward"     -> "v2.92.0",
+    "scalaSteward"     -> "v2.93.0",
   )
 
   /** Current zipx defaults — loaded from classpath `zipx/action-pins.yml` when present. */
