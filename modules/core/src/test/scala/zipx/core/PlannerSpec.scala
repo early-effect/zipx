@@ -69,7 +69,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("Gate.AffectedOnly is rejected, not silently treated as Always") {
       // It is an unimplemented design seam (ROADMAP M3/M6: "affected-gated publishing" was never built).
-      // Affected-gating comes from Phase.Verify + PlanConfig.affected, so the planner cannot honor it —
+      // Affected-gating comes from Phase.Verify + PlanConfig.affected, so the planner cannot honor it,
       // and a capability that runs on every event while its Gate claims otherwise is exactly the
       // silently-green pipeline zipx exists to prevent.
       val cap = Capability.publish.copy(gate = Gate.AffectedOnly)
@@ -141,7 +141,7 @@ object PlannerSpec extends ZIOSpecDefault:
         !runOf("publish-legacyClient").contains("+legacyClient"), // 2.13-only → no +
       )
     },
-    test("publish jobs are never matrixed — the `+publish` leg crosses internally") {
+    test("publish jobs are never matrixed: the `+publish` leg crosses internally") {
       val wf = Planner.plan(sampleGraph, List(Capability.publishGraph), config)
       // api is cross-built, but its publish job must NOT expand into a scala matrix
       // (else the run would be a contradictory `++${{ matrix.scala }} +api/publish`).
@@ -456,7 +456,7 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs("docker-serviceA").strategy.isEmpty, // never matrixed
       )
     },
-    // ---- M6a/M6b — environments, target fan-out, env injection ----
+    // ---- M6a/M6b: environments, target fan-out, env injection ----
     test("a capability with no targets still emits a single job (unchanged path)") {
       val wf = Planner.plan(sampleGraph, List(deployCap(Nil)), config)
       assertTrue(
@@ -504,7 +504,7 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs("deploy-serviceA-staging").steps.last.run.exists(_.contains("serviceA/deploy")),
       )
     },
-    // ---- M6c — cross-capability needs, Phase.Deploy, permissions, cycle guard ----
+    // ---- M6c: cross-capability needs, Phase.Deploy, permissions, cycle guard ----
     test("deploy jobs need the module's docker job (cross-capability needs)") {
       // serviceA is a docker target and the deploy target.
       val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
@@ -569,7 +569,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
       assertTrue(scala.util.Try(Planner.plan(sampleGraph, List(a, b), config)).isFailure)
     },
-    // ---- M6d — extension seam, custom capabilities, list runners ----
+    // ---- M6d: extension seam, custom capabilities, list runners ----
     test("extraSteps are injected before the command and can reference the target") {
       val cap = Capability
         .deployGraph(
@@ -633,7 +633,7 @@ object PlannerSpec extends ZIOSpecDefault:
         Target("us", env = Map("REGISTRY" -> EnvValue.plain("111.dkr.ecr.us-east-1"), "ROLE" -> secret"US_ROLE")),
         Target("eu", env = Map("REGISTRY" -> EnvValue.plain("222.dkr.ecr.eu-west-1"), "ROLE" -> secret"EU_ROLE")),
       )
-      // A docker capability that pushes to multiple registries — same shape as deploy.
+      // A docker capability that pushes to multiple registries, same shape as deploy.
       val multiDocker = Capability
         .custom(
           name = "docker",
@@ -681,7 +681,7 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs("test-api").needs.contains("fmt"),
       )
     },
-    // ---- M7 — typed secrets & capability env ----
+    // ---- M7: typed secrets & capability env ----
     test("capability.env injects into every job of the capability (no targets)") {
       val pub = Capability.publishGraph.copy(env =
         Map(

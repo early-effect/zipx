@@ -22,7 +22,7 @@ enum Phase:
 /** How a capability's per-module (Graph) jobs are wired to each other.
   *
   *   - `ParallelWithUpstream`: a module's job needs the same-capability jobs of its direct upstream modules. Test/build
-  *     use this — everything runs as parallel as the dependency graph allows.
+  *     use this; everything runs as parallel as the dependency graph allows.
   *   - `DependencyOrdered`: a module's job needs the nearest *participating* ancestors of the same capability (empty
   *     intermediates contracted away). Publishing uses this so artifacts publish in true dependency order.
   */
@@ -34,10 +34,10 @@ enum Ordering:
   * Gate is ANDed with the capability's [[Capability.condition]] and with affected-gating.
   *
   * [[AffectedOnly]] is a **design seam, not a shipped feature**. Today affected-gating is derived from [[Phase.Verify]]
-  * plus [[PlanConfig.affected]] — never from Gate — so the planner cannot honor it; see the "Affected-only PRs (Graph
+  * plus [[PlanConfig.affected]], never from Gate, so the planner cannot honor it; see the "Affected-only PRs (Graph
   * only)" docs page and ROADMAP M3/M6. Rather than degrade silently to [[Always]] (a green, untested pipeline is
   * exactly the failure mode zipx exists to prevent), the planner rejects it with an explaining error. Making it real
-  * means threading affected-gating off Gate so Publish-phase capabilities can opt in — the "affected-gated publishing"
+  * means threading affected-gating off Gate so Publish-phase capabilities can opt in, the "affected-gated publishing"
   * the sentence above anticipates. ROADMAP M6 resolved only the Deploy case (never affected-gated); Publish is still
   * open.
   */
@@ -67,7 +67,7 @@ enum CapabilityScope:
   *   the job-id suffix and display, e.g. "staging" / "prod" / "us-east". Must be unique within a capability.
   * @param environment
   *   the GitHub Environment to bind on the job. GitHub enforces its protection rules (e.g. required reviewers for
-  *   production) — zipx only emits the binding; it generates no manual-approval steps.
+  *   production). zipx only emits the binding; it generates no manual-approval steps.
   * @param env
   *   environment variables injected into the job's `env:` block, referenced by steps as `${{ env.KEY }}`. Use
   *   [[EnvValue.secret]] / `secret"NAME"` for secret refs; [[EnvValue.plain]] for literals. Merged after
@@ -85,7 +85,7 @@ final case class Target(
 /** A pipeline stage that runs one or more sbt invocations, shaped by [[CapabilityScope]].
   *
   * This is the abstraction that keeps zipx registry- and tool-agnostic: test, library publish, and docker publish are
-  * all `Capability` values, and a user can define custom ones — any sbt task becomes a stage. The planner turns each
+  * all `Capability` values, and a user can define custom ones: any sbt task becomes a stage. The planner turns each
   * capability into GitHub Actions jobs, deriving `needs`, matrix, and gating from the graph and scope.
   *
   * @param name
@@ -201,7 +201,7 @@ object Capability:
   val test: Capability =
     Capability.once(name = "test", command = "test", phase = Phase.Verify, gate = Gate.Always)
 
-  /** Aggregate Verify that joins per-module `<id>/<testTask>` commands — escape hatch when a root aggregate task is
+  /** Aggregate Verify that joins per-module `<id>/<testTask>` commands. Escape hatch when a root aggregate task is
     * wrong (e.g. mixed `zipxTestTask` overrides). Prefer [[test]] for typical builds.
     */
   val testJoined: Capability = testBody(CapabilityScope.Aggregate, matrixed = false)
@@ -257,7 +257,7 @@ object Capability:
       condition,
     )
 
-  /** Graph deploy: one job per (module × target) — full fan-out. */
+  /** Graph deploy: one job per (module × target), full fan-out. */
   def deployGraph(
       participates: ModuleNode => Boolean,
       command: ModuleNode => String,
@@ -351,9 +351,9 @@ object Capability:
       condition = condition,
     )
 
-  /** A run-once, build-wide gate — a single job (not per module) running one fixed command, e.g. a formatting/lint
-    * check (`scalafmtCheckAll`) or a post-publish Central release (`sonaRelease`). Other capabilities can depend on it
-    * by name via `needsCapabilities`; conversely, set `needsCapabilities` here so this once-job waits on every job of
+  /** A run-once, build-wide gate: a single job (not per module) running one fixed command, e.g. a formatting/lint check
+    * (`scalafmtCheckAll`) or a post-publish Central release (`sonaRelease`). Other capabilities can depend on it by
+    * name via `needsCapabilities`; conversely, set `needsCapabilities` here so this once-job waits on every job of
     * those capabilities.
     *
     * For a reusable-workflow call (no local steps), set [[Capability.workflowCall]] via `.copy` (see

@@ -72,7 +72,7 @@ object AffectedSpec extends ZIOSpecDefault:
         emitted.contains(moduleId) || emitted.contains("all")
       assertTrue(graph.ids.forall(gatePasses))
     },
-    test("a successful diff finding nothing (Some(Nil)) stays empty — it is not a failure") {
+    test("a successful diff finding nothing (Some(Nil)) stays empty: it is not a failure") {
       assertTrue(
         Affected.outputModules(graph, Some(Nil)).isEmpty,
         // ...and so gates nothing, which is the correct, deliberate skip.
@@ -161,7 +161,7 @@ object AffectedSpec extends ZIOSpecDefault:
       assertTrue(
         Affected
           .owningModule(g, "build.sbt")
-          .isEmpty, // owningModule itself — build.sbt is handled by isBuildFile upstream
+          .isEmpty, // owningModule itself; build.sbt is handled by isBuildFile upstream
         Affected.owningModule(g, "something.txt").isEmpty,
         Affected.owningModule(g, "lib/X.scala").contains("lib"),
       )
@@ -180,7 +180,7 @@ object AffectedSpec extends ZIOSpecDefault:
       // endsWith(".sbt") must not match `foo.sbt.bak`.
       assertTrue(
         Affected.affectedModules(graph, List("docs/foo.sbt.bak")) == Set.empty, // unowned + not a build file
-        // Under a leaf module: affects only that leaf — proves isBuildFile did not fire (else full set).
+        // Under a leaf module: affects only that leaf, proving isBuildFile did not fire (else full set).
         Affected.affectedModules(graph, List("client/foo.sbt.bak")) == Set("client"),
       )
     },

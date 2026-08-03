@@ -44,7 +44,7 @@ flowchart TD
 Path gating is **Graph Verify only** (`zipxAffectedOnPR` / `zipxAffectedOnPush`; fail open). Publish is **OnReleaseTag** today
 (Publish∩Affected is an open seam). Deploy is destination-driven and **never** path-affected.
 
-`Gate` today is `Always` | `OnReleaseTag` | `AffectedOnly`. **`AffectedOnly` is rejected at generate time** — it is a
+`Gate` today is `Always` | `OnReleaseTag` | `AffectedOnly`. **`AffectedOnly` is rejected at generate time**: it is a
 design seam for future Publish affected-gating, not a silent Always. See **Affected**.
 
 `zipxCapabilities += ...` merges with built-ins; the **same `name` replaces** a built-in (e.g. turn Aggregate docker

@@ -22,8 +22,8 @@ enum AffectedMode:
   *   whether Verify jobs run for every module or only affected ones on PRs.
   * @param affectedOnPush
   *   when affected mode is on, also restrict pushes (not just PRs) to affected modules by diffing against the push
-  *   `before` sha. Off by default: pushes to main build everything (safer — a bad `before`, e.g. a force-push or the
-  *   first push to a branch, would otherwise silently under-build). Tags always build everything.
+  *   `before` sha. Off by default: pushes to main build everything (safer, since a bad `before`, e.g. a force-push or
+  *   the first push to a branch, would otherwise silently under-build). Tags always build everything.
   * @param cache
   *   the cache backend strategy.
   * @param cacheEpoch
@@ -69,8 +69,8 @@ enum AffectedMode:
   *   `None` disables the label check. Ignored when [[verifyClean]] is already `Clean` / `CleanFull`.
   * @param cancelSupersededRuns
   *   when true (default), emit workflow-level `concurrency` keyed on ref so pushing again to a PR cancels the still-
-  *   running earlier build. Never cancels release-tag runs — the group folds in the ref, and a half-cancelled publish
-  *   is worse than a wasted runner.
+  *   running earlier build. Never cancels release-tag runs: the group folds in the ref, and a half-cancelled publish is
+  *   worse than a wasted runner.
   */
 final case class PlanConfig(
     workflowName: String = "CI",

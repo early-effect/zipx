@@ -1,7 +1,7 @@
 package zipx.core
 
 /** Optional sbt clean step prepended to every Verify-phase command (Aggregate root, Layer waves, and Graph per-module
-  * jobs). Default is [[None]] — CI usually relies on a fresh runner + the action cache rather than cleaning.
+  * jobs). Default is [[None]]: CI usually relies on a fresh runner + the action cache rather than cleaning.
   */
 enum VerifyClean:
   case None, Clean, CleanFull

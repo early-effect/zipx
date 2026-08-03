@@ -14,7 +14,7 @@ object CustomCapabilities extends DocSpecSuite:
 
   def doc = page("Custom capabilities")(
     md"""
-`zipxCapabilities` is append-able — any sbt task becomes a CI stage. Beyond the built-ins you mainly use
+`zipxCapabilities` is append-able: any sbt task becomes a CI stage. Beyond the built-ins you mainly use
 `Capability.once` / `Capability.custom`, or the typed `zipxTasks` / `cmd` helpers from the plugin.
 """,
     section("Once gates")(
@@ -104,7 +104,7 @@ zipxCapabilities += Capability
         )
       ),
       md"""
-Also override `runsOn = Some(List("self-hosted", "linux"))` and `permissions` — the same knobs built-ins use.
+Also override `runsOn = Some(List("self-hosted", "linux"))` and `permissions`, the same knobs built-ins use.
 """,
     ),
     section("Typed task keys (`zipxTasks`)")(

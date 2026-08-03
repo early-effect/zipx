@@ -79,7 +79,7 @@ lazy val root = (project in file("."))
     ),
     section("Bare settings (sbt 2.0)")(
       md"""
-zipx reads build-level settings from the root project's scope, so write plain bare settings — no `ThisBuild /` prefix.
+zipx reads build-level settings from the root project's scope, so write plain bare settings, no `ThisBuild /` prefix.
 A bare `zipxTestTask := "testFull"` applies to every module; any module can override it in its own `.settings(...)`.
 
 ```scala
@@ -103,7 +103,7 @@ Workflows pin GitHub Actions to commit SHAs. To track upstream action releases w
 2. Add Dependabot for `package-ecosystem: github-actions`
 3. On Dependabot PRs run `sbt zipxActionsPull`, or set `zipxDependabotSync := true` for hands-off sync
 
-Staying on jar defaults needs no pin file — just upgrade `sbt-zipx` when pins move.
+Staying on jar defaults needs no pin file, just upgrade `sbt-zipx` when pins move.
 """
     ),
   )

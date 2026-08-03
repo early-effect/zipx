@@ -8,13 +8,13 @@ import scala.quoted.*
 /** Typed, IDE-friendly ways to specify a capability's sbt command from a real `TaskKey`/`InputKey` instead of a string.
   *
   * A capability command is ultimately a string typed at the sbt shell in CI (`sbt '<command>'`), and the pure
-  * `zipx-core` model keeps it as `ModuleNode => String` — that's what lets the planner stay sbt-free and expresses
+  * `zipx-core` model keeps it as `ModuleNode => String`, which is what lets the planner stay sbt-free and expresses
   * things a single key can't (cross `+`, aliases, compound `a; b`). These helpers live in the plugin (which has sbt on
   * the classpath) and render a key to that string form, giving code-completion and compile-time checking for the common
   * "one task" case. They compose with every `Capability` constructor via the `command`/`buildCommand` arguments.
   *
   * A key renders to `<moduleId>/<label>` (the same shape the built-ins produce), or just `<label>` for a build-wide
-  * (`Once`) command. Scoping beyond the project axis (config/task axes, args, `+`) still needs a string — by design.
+  * (`Once`) command. Scoping beyond the project axis (config/task axes, args, `+`) still needs a string, by design.
   */
 object CapabilityTasks:
 
@@ -27,7 +27,7 @@ object CapabilityTasks:
   private def configPrefix(key: Scoped): String =
     key.scope.config match
       case sbt.Select(configKey) => configKey.name.capitalize + "/"
-      case _                     => "" // This / Zero — no explicit config axis
+      case _                     => "" // This / Zero, no explicit config axis
 
   /** The CLI suffix for a key on a module: `<label>` or `<Config>/<label>`. */
   private def scopedLabel(key: Scoped): String = s"${configPrefix(key)}${label(key)}"
@@ -46,14 +46,14 @@ object CapabilityTasks:
   def renderSplice(x: Any, n: ModuleNode): String = x match
     case k: Scoped => s"${n.id}/${scopedLabel(k)}"
     case s: String => s
-    case other     => other.toString // unreachable — the macro rejects other types at compile time
+    case other     => other.toString // unreachable: the macro rejects other types at compile time
 
   /** The `cmd"…"` interpolator: write command *syntax* as literal text and splice typed keys (or strings) with `$`.
     *
     * Literal parts are emitted verbatim (so you carry `+`, `++<ver>`, compound `;`, and args). Each `${…}` splice is
     * dispatched by its **static type**:
     *   - a `TaskKey`/`InputKey` (`Scoped`) is compile-checked, config-aware, and rendered **module-scoped** as
-    *     `<moduleId>/[<Config>/]<label>` — exactly like the built-ins;
+    *     `<moduleId>/[<Config>/]<label>`, exactly like the built-ins;
     *   - a `String` is spliced verbatim (a computed version, path, secret ref, …).
     *
     * A macro enforces that every splice is one of those two types (any other is a compile error) and dispatches

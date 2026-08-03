@@ -111,7 +111,7 @@ lazy val central = (project in file("modules/central"))
     description := "zipx capability pack for CI-only Maven Central publishing (early-effect org secrets)",
   )
 
-// The sbt 2.x AutoPlugin — the only module that touches sbt.*. Publish + scripted live here;
+// The sbt 2.x AutoPlugin, the only module that touches sbt.*. Publish + scripted live here;
 // the root build dogfoods via the meta-build source mirror in project/dogfood.sbt (no publishLocal).
 lazy val plugin = (project in file("modules/sbt-plugin"))
   .enablePlugins(SbtPlugin)
@@ -122,7 +122,7 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     scalacOptions ++= commonScalacOptions,
     publishMavenStyle    := true,
     pomIncludeRepository := { _ => false },
-    // Bundle the remote-cache transport so consumers need one addSbtPlugin line — RemoteCachePlugin triggers on
+    // Bundle the remote-cache transport so consumers need one addSbtPlugin line. RemoteCachePlugin triggers on
     // AllRequirements but is a no-op until Global/remoteCache is set (which zipx does only from the CI env).
     addSbtPlugin(remoteCachePlugin),
     scriptedLaunchOpts ++= Seq("-Xmx1024m", s"-Dplugin.version=${version.value}"),

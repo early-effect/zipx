@@ -4,10 +4,10 @@ package zipx.core
   *
   * Algorithm (mirrors the well-worn sbt approach):
   *   1. If any changed file touches the build itself (a `.sbt` file or anything under the `project` dir), treat the
-  *      whole build as affected — the graph or plugins may have changed, so nothing can be safely skipped.
+  *      whole build as affected: the graph or plugins may have changed, so nothing can be safely skipped.
   *   2. Otherwise map each changed file to its owning module by **longest matching base-dir prefix**.
   *   3. Take the reverse-dependency closure of those seed modules (a module plus everything that transitively depends
-  *      on it) — that is the affected set.
+  *      on it). That is the affected set.
   *
   * Pure and unit-testable; the sbt plugin supplies the changed-file list from `git diff`.
   */
@@ -38,14 +38,14 @@ object Affected:
 
   /** The module ids the `affected` job should publish, given a diff that may have failed.
     *
-    * `changedFiles` is `None` when the diff could not be computed at all — bad base ref, missing object, force-pushed
+    * `changedFiles` is `None` when the diff could not be computed at all: bad base ref, missing object, force-pushed
     * base, no git binary. Then this returns [[AllSentinel]]: fail **open** and verify everything.
     *
     * Returning an empty list there would fail **closed**, and silently: the generated condition
     * `contains(fromJson(needs.affected.outputs.modules), '<id>')` is false for every module, so every Verify job skips
     * and the PR reports green without having been tested. A broken base ref must cost CI minutes, not coverage.
     *
-    * `Some(Nil)` is different and stays empty — that is a successful diff finding no changed files.
+    * `Some(Nil)` is different and stays empty: that is a successful diff finding no changed files.
     */
   def outputModules(graph: ModuleGraph, changedFiles: Option[List[String]]): List[String] =
     changedFiles match
@@ -53,7 +53,7 @@ object Affected:
       case Some(files) => affectedModules(graph, files).toList.sorted
 
   /** The module owning a file, by longest base-dir prefix. Root (baseDir "") only matches files not owned by any deeper
-    * module, and even then only if root is a real module — but since root is typically an excluded aggregator, such
+    * module, and even then only if root is a real module, but since root is typically an excluded aggregator, such
     * files effectively map to nothing. Returns None when no module's base dir prefixes the path.
     */
   def owningModule(graph: ModuleGraph, path: String): Option[String] =

@@ -53,7 +53,7 @@ end ActionPins
 object ActionPins:
 
   // Bootstrap fallbacks (keep in sync with `.github/zipx/action-pins.yml`). Used only when the classpath resource is
-  // missing — e.g. incomplete dogfood classpath. Prefer [[Defaults]] from the embedded pin file.
+  // missing, e.g. incomplete dogfood classpath. Prefer [[Defaults]] from the embedded pin file.
   private[core] val BootstrapCheckout: String =
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
   private[core] val BootstrapSetupJava: String =
@@ -79,7 +79,7 @@ object ActionPins:
     "scalaSteward"     -> "v2.93.0",
   )
 
-  /** Current zipx defaults — loaded from classpath `zipx/action-pins.yml` when present. */
+  /** Current zipx defaults, loaded from classpath `zipx/action-pins.yml` when present. */
   lazy val Defaults: ActionPins =
     try ActionPinFile.loadResource()
     catch

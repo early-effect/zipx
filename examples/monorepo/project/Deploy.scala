@@ -4,7 +4,7 @@
 // This is the typed replacement for an external YAML config + resolver script: deploy targets are a
 // plain Scala list, validated by the compiler.
 
-/** One deploy destination. zipx knows nothing about clouds/tiers — this is entirely user-defined. */
+/** One deploy destination. zipx knows nothing about clouds/tiers; this is entirely user-defined. */
 final case class DeployEnv(
     name: String,
     ghEnvironment: Option[String],
@@ -20,7 +20,7 @@ object DeployEnv:
     DeployEnv("prod", Some("production"), "us-east-1", "PROD_DEPLOY_ROLE", "prod"),
   )
 
-/** One image registry to publish to. Multi-account image push is just a typed list — no external config. */
+/** One image registry to publish to. Multi-account image push is just a typed list, no external config. */
 final case class Registry(name: String, host: String, roleSecret: String)
 
 object Registry:
