@@ -148,6 +148,10 @@ final case class Strategy(
 /** A single step. A GitHub Actions step is a flat mapping with optional keys; modeling it as one case class with
   * all-optional fields (rather than a `uses`-vs-`run` sum type) avoids variant discriminator wrappers and matches the
   * on-disk shape exactly. `None`/empty fields are omitted at render time.
+  *
+  * The cost of that shape is that `Step()` and `Step(uses = …, run = …)` both compile and both render YAML GitHub
+  * rejects. Prefer the builders [[Step.run]] / [[Step.uses]], which cannot express either; [[Step.validate]] catches
+  * what is hand-built, and [[Render]] calls it on every step it encodes.
   */
 final case class Step(
     name: Option[String] = None,
@@ -159,6 +163,51 @@ final case class Step(
     env: Map[String, String] = ListMap.empty,
     workingDirectory: Option[String] = None,
 ) derives Schema
+
+object Step:
+
+  /** Start a `run:` step from a typed script: `Step.run(script).named("Test").build`. */
+  def run(script: zipx.shell.Script): StepBuilder = StepBuilder.run(script)
+
+  /** **Escape hatch.** Start a `run:` step from verbatim text. See [[StepBuilder.runRaw]].
+    */
+  def runRaw(text: String): StepBuilder = StepBuilder.runRaw(text)
+
+  /** Start a `uses:` step from an action ref, normally an `ActionPins` field. */
+  def uses(action: String): StepBuilder = StepBuilder.uses(action)
+
+  /** Throw unless this step is one GitHub Actions accepts.
+    *
+    * The two structural rules a flat case class cannot encode:
+    *
+    *   - exactly one of `uses` and `run`; neither is a step that does nothing, both is ambiguous and GitHub errors
+    *   - `with:` belongs to `uses`; on a `run:` step GitHub ignores it, which reads as a silently dropped input
+    *
+    * Called from [[Render]] rather than from the constructor, because a `Step` is also a decode target: validating on
+    * construction would reject a partially-built value that a codec is still filling in. Render time is the last moment
+    * the information exists and the first moment the step is claimed to be complete.
+    */
+  def validate(step: Step): Unit =
+    val where = step.name.orElse(step.id).map(n => s" '$n'").getOrElse("")
+    (step.uses, step.run) match
+      case (Some(_), Some(_)) =>
+        throw IllegalArgumentException(
+          s"step$where sets both uses and run; a GitHub Actions step is one or the other"
+        )
+      case (None, None) =>
+        throw IllegalArgumentException(
+          s"step$where sets neither uses nor run; every step must do one or the other"
+        )
+      case (None, Some(_)) if step.`with`.nonEmpty =>
+        throw IllegalArgumentException(
+          s"step$where sets with: on a run step; with: passes inputs to an action, so GitHub ignores it here " +
+            s"(keys: ${step.`with`.keys.toList.sorted.mkString(", ")})"
+        )
+      case _ => ()
+    end match
+  end validate
+
+end Step
 
 /** Workflow- or job-level `concurrency`.
   *

@@ -48,7 +48,17 @@ object Render:
 
   /** Step list as a YAML sequence (`- uses: …`). */
   def renderSteps(steps: List[Step]): String =
-    print(Yaml.Sequence(Chunk.from(steps.map(s => prune(stepCodec.encodeValue(s))))))
+    print(Yaml.Sequence(Chunk.from(steps.map(encodeStep))))
+
+  /** Encode one step, validating it first.
+    *
+    * This is the single funnel every step passes through on its way to YAML, whether via a full workflow, a job
+    * fragment, or [[renderSteps]], which is why the check lives here rather than in `Step`'s constructor: a step that
+    * GitHub would reject fails the build at generate time instead of being written to disk.
+    */
+  private def encodeStep(step: Step): Yaml =
+    Step.validate(step)
+    prune(stepCodec.encodeValue(step))
 
   /** Standalone string→string mapping (permissions, env, `with`). */
   def renderMapping(entries: Map[String, String]): String =
@@ -107,6 +117,8 @@ object Render:
     )
 
   private def encodeJob(job: Job): Yaml =
+    // The derived job codec encodes nested steps itself, so it never reaches `encodeStep`; validate them here instead.
+    job.steps.foreach(Step.validate)
     collapseSingletonRunsOn(prune(jobCodec.encodeValue(job)))
 
   /** The derived codec renders `runsOn: List[String]` as a sequence. GitHub Actions convention (and every existing
