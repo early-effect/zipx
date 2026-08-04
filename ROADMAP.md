@@ -308,7 +308,7 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 
 **Layers:**
 1. ✅ **`zipx-shell`**: the shell AST. `Script` / `Command` / `Word` / `ShTest` over neotype newtypes.
-2. ⬜ **`Expr`** in `zipx-workflow`: the GHA expression AST, with `EnvValue` and `JobCondition` delegating to it.
+2. ✅ **`Expr`** in `zipx-workflow`: the GHA expression AST, with `EnvValue` and `JobCondition` delegating to it.
 3. ⬜ **`StepBuilder`** + render-time `Step.validate`, closing step validity from both ends.
 4. ⬜ **`Steps`** in `zipx-core`: a named, composable, `StepContext`-aware bundle that *is* a `StepContext => List[Step]`, so every existing field keeps its declared type.
 
@@ -319,6 +319,10 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 **`sh"…"` splices are typed.** The interpolator takes `Word*`, so a bare `String` splice does not compile: string interpolation is how the hole would otherwise come back, and there is deliberately no implicit `String => Word`. Wrap explicitly with `Word.lit` (checked) or `Word.litMake` (`Either`).
 
 **Raw escape hatch: allowed, typed, and loud.** `Raw` holds `List[ScriptLine]`, so the *type* guarantees raw content cannot emit YAML GitHub fails to parse; there is no separate lint pass to forget. `Script.raw(text)` returns `Either` and names the offending line. What raw can still produce is broken *shell*, so its content is reported by `Command.rawFragments` and `zipxWorkflowGenerate` warns, naming the step.
+
+**Actions syntax is typed too, every rule and not just the convenient ones.** `Expr` is closed rather than open (GitHub fixes the context list, and `Expr.Raw` covers what is not yet modelled), and each of its fields is a newtype carrying one of GitHub's documented rules: ids start with a letter or `_`, secret names reject the reserved `GITHUB_` prefix *case-insensitively* (GitHub stores them uppercase and matches case-insensitively, so checking one spelling would be bypassable) while still admitting `GITHUB_TOKEN` itself, output names reject the disabled `set-output` / `save-state` commands, matrix axes reject the `include` / `exclude` directives, context paths allow `[n]` and `*` segments but not an empty one, and `uses:` refuses an unpinned `owner/repo`. `EnvName` delegates to `zipx-shell`'s `VarName` pattern, which is the mechanical check that the two layers agree on what a name is: an `env:` key becomes a shell variable in every `run:` step.
+
+**One definition per rule.** `EnvValue.requireName` and `JobCondition`'s `requireIdent` / `requireLiteral` / `requireRaw` now delegate to those newtypes instead of restating the regexes, so their public throwing signatures are unchanged and there is a single definition of "valid GHA identifier". The cross-layer coupling is two one-liners: `JobCondition.expr` lifts a validated condition into a step field, and `Expr.asWord` embeds an expression in a script as `Word.Opaque`, the one word kind the shell renderer never escapes.
 
 **Acceptance:** the generated YAML does not move a single byte. Every existing script and expression site migrates, and the dogfood `git diff` after regeneration stays empty.
 
@@ -344,7 +348,7 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 **Docs:** a first-class guide that makes Scala the default extension story:
 - `project/*.scala` typed config (the join that replaced YAML + resolver scripts)
 - `zipxTasks` / `cmd"…"` over string commands
-- `EnvValue` / `secret"…"` over raw `${{ }}` strings
+- `Expr` / `EnvValue` / `secret"…"` over raw `${{ }}` strings, with every Actions name a validated newtype
 - composing `Capability.custom` / `.deploy` / `.once` and same-name replace
 - published packs (`zipx-central`, later `zipx-aws`)
 

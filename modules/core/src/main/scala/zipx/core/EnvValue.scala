@@ -1,5 +1,10 @@
 package zipx.core
 
+import neotype.unwrap
+
+// Expr is aliased: `EnvValue` has its own `Expr` case, and inside the enum that name wins.
+import zipx.workflow.{EnvName, Expr as GhaExpr, RawExpr, SecretName}
+
 import scala.collection.immutable.ListMap
 
 /** A value injected into a GitHub Actions job's `env:` block.
@@ -22,28 +27,37 @@ enum EnvValue:
   case Expr(expr: String)
 
   /** Render to the string that lands in the workflow YAML `env:` block. */
-  def render: String = this match
-    case EnvValue.Plain(value)     => value
-    case EnvValue.FromSecret(name) => s"$${{ secrets.$name }}"
-    case EnvValue.FromEnv(name)    => s"$${{ env.$name }}"
-    case EnvValue.Expr(expr)       => expr
+  def render: String = asExpr.render
+
+  /** This value as a [[zipx.workflow.Expr]].
+    *
+    * [[render]] goes through here, so `${{ secrets.X }}` has one definition in the codebase rather than one per layer.
+    *
+    * Names are re-validated on the way through rather than trusted: the constructors below check, but `EnvValue` is a
+    * public `enum`, so `EnvValue.FromSecret("bad name")` is constructible by a caller who skips them.
+    *
+    * Named `asExpr` rather than `expr` because the [[EnvValue.Expr]] case already has a field of that name.
+    */
+  def asExpr: GhaExpr = this match
+    case EnvValue.Plain(value)     => GhaExpr.Lit(value)
+    case EnvValue.FromSecret(name) => GhaExpr.Secret(SecretName.makeOrThrow(name))
+    case EnvValue.FromEnv(name)    => GhaExpr.Env(EnvName.makeOrThrow(name))
+    case EnvValue.Expr(expr)       => GhaExpr.Raw(RawExpr.makeOrThrow(expr))
 end EnvValue
 
 object EnvValue:
 
-  /** GitHub Actions secret / env names: start with a letter or underscore, then alphanumerics and underscores. Rejects
-    * empty, spaces, `${{`, hyphens-at-start, and other characters that would produce broken or surprising YAML.
+  /** Validate a GitHub Actions identifier used as a secret or env name.
+    *
+    * Delegates to [[zipx.workflow.SecretName]] / [[zipx.workflow.EnvName]], which hold the rule; this keeps the
+    * throwing signature callers depend on. `kind` selects the rule as well as labelling the error, since the two
+    * differ: a secret may be `GITHUB_TOKEN`, an env name may not be `GITHUB_`-prefixed at all.
     */
-  private val NamePattern = raw"[A-Za-z_][A-Za-z0-9_]*".r
-
-  /** Validate a GitHub Actions identifier used as a secret or env name. */
   def requireName(kind: String, name: String): String =
-    if name.isEmpty then throw IllegalArgumentException(s"$kind name must be non-empty")
-    if NamePattern.matches(name) then name
-    else
-      throw IllegalArgumentException(
-        s"invalid $kind name '$name': must match ${NamePattern.regex} (letters, digits, underscore; no spaces or expressions)"
-      )
+    val checked = if kind == "secret" then SecretName.make(name).map(_.unwrap) else EnvName.make(name).map(_.unwrap)
+    checked match
+      case Right(value) => value
+      case Left(error)  => throw IllegalArgumentException(error)
 
   /** A GitHub Actions secret reference: renders as `${{ secrets.<name> }}`. */
   def secret(name: String): EnvValue = FromSecret(requireName("secret", name))

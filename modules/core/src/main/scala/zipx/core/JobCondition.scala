@@ -1,5 +1,8 @@
 package zipx.core
 
+import neotype.unwrap
+import zipx.workflow.{EnvName, EventName, Expr, ExprLiteral, RawExpr}
+
 /** Typed GitHub Actions job `if:` predicate. Prefer smart constructors over assembling cases by hand.
   *
   * [[Gate]] is the timeline axis (`Always` / `OnReleaseTag`). [[JobCondition]] is an optional extra filter ANDed into
@@ -49,7 +52,7 @@ enum JobCondition:
     case JobCondition.RefStartsWith(prefix) =>
       s"startsWith(github.ref, '${JobCondition.requireLiteral("ref prefix", prefix)}')"
     case JobCondition.EventIs(name) =>
-      s"github.event_name == '${JobCondition.requireIdent("event", name)}'"
+      s"github.event_name == '${JobCondition.requireEvent(name)}'"
     case JobCondition.HasPrLabel(label) =>
       s"contains(github.event.pull_request.labels.*.name, '${JobCondition.requireLiteral("label", label)}')"
     case JobCondition.All(clauses) =>
@@ -60,6 +63,15 @@ enum JobCondition:
       s"!(${inner.render})"
     case JobCondition.Raw(expression) =>
       JobCondition.requireRaw(expression)
+
+  /** This condition as a [[zipx.workflow.Expr]], so a validated `if:` can be dropped into a step field.
+    *
+    * [[zipx.workflow.Expr.Raw]] because [[render]] already produces a jointly-validated expression: every literal in it
+    * went through [[ExprLiteral]] and every name through [[EnvName]] or [[EventName]]. Re-deriving the structure as
+    * typed `Expr` cases would duplicate the operator jointing that [[render]] owns. Together with `Expr.asWord`, this
+    * is the whole cross-layer coupling.
+    */
+  def expr: Expr = Expr.Raw(RawExpr.makeOrThrow(render))
 end JobCondition
 
 object JobCondition:
@@ -77,7 +89,7 @@ object JobCondition:
   def refStartsWith(prefix: String): JobCondition = RefStartsWith(requireLiteral("ref prefix", prefix))
 
   /** `github.event_name == 'name'` (e.g. `pull_request`, `workflow_dispatch`). */
-  def eventIs(name: String): JobCondition = EventIs(requireIdent("event", name))
+  def eventIs(name: String): JobCondition = EventIs(requireEvent(name))
 
   /** Manual **Actions → Run workflow** (requires `zipxWorkflowDispatch := true`). */
   def onWorkflowDispatch: JobCondition = eventIs("workflow_dispatch")
@@ -102,42 +114,29 @@ object JobCondition:
   /** Render an optional condition for planner `if:` assembly. */
   def renderOpt(c: Option[JobCondition]): Option[String] = c.map(_.render)
 
-  private val IdentPattern = raw"[A-Za-z_][A-Za-z0-9_]*".r
+  // The rules these helpers used to spell out inline now live in zipx-workflow as newtypes, so there is one definition
+  // of "valid GHA identifier" and "valid quoted literal" across the layers. The helpers stay private and keep throwing
+  // `IllegalArgumentException`, which is this file's public contract, and prefix the newtype's message with `kind` so
+  // the error still says which field was wrong.
 
-  /** owner/repo, refs, labels: printable ASCII without quotes, `$`, or whitespace. */
-  private val LiteralPattern = raw"""[A-Za-z0-9_./@+:-][A-Za-z0-9_./@+:-]*""".r
+  private def orThrow(kind: String, result: Either[String, String]): String =
+    result match
+      case Right(value) => value
+      case Left(error)  => throw IllegalArgumentException(s"$kind: $error")
 
-  private val MaxLiteralLen = 256
-
+  /** A `vars.` name. Delegates to [[EnvName]]: a repository variable and an `env:` key share GitHub's name rule. */
   private def requireIdent(kind: String, name: String): String =
-    if name.isEmpty then throw IllegalArgumentException(s"$kind name must be non-empty")
-    if IdentPattern.matches(name) then name
-    else
-      throw IllegalArgumentException(
-        s"invalid $kind name '$name': must match ${IdentPattern.regex}"
-      )
+    orThrow(kind, EnvName.make(name).map(_.unwrap))
 
+  private def requireEvent(name: String): String =
+    orThrow("event", EventName.make(name).map(_.unwrap))
+
+  /** owner/repo, refs, labels: trimmed, then [[ExprLiteral]]'s rule (no quotes, `$` or whitespace). */
   private def requireLiteral(kind: String, value: String): String =
-    val trimmed = value.trim
-    if trimmed.isEmpty then throw IllegalArgumentException(s"$kind must be non-empty")
-    if trimmed.length > MaxLiteralLen then throw IllegalArgumentException(s"$kind exceeds $MaxLiteralLen characters")
-    if trimmed.contains('\'') || trimmed.contains('"') || trimmed.contains('$') || trimmed.exists(_.isWhitespace) then
-      throw IllegalArgumentException(
-        s"invalid $kind '$trimmed': must not contain quotes, $$ , or whitespace"
-      )
-    if LiteralPattern.matches(trimmed) then trimmed
-    else
-      throw IllegalArgumentException(
-        s"invalid $kind '$trimmed': allowed characters are letters, digits, _ . / @ + : -"
-      )
-  end requireLiteral
+    orThrow(kind, ExprLiteral.make(value.trim).map(_.unwrap))
 
   private def requireRaw(expression: String): String =
-    val trimmed = expression.trim
-    if trimmed.isEmpty then throw IllegalArgumentException("raw JobCondition expression must be non-empty")
-    if trimmed.length > MaxLiteralLen * 4 then
-      throw IllegalArgumentException(s"raw JobCondition expression exceeds ${MaxLiteralLen * 4} characters")
-    trimmed
+    orThrow("raw JobCondition expression", RawExpr.make(expression.trim).map(_.unwrap))
 
   private def requireNonEmpty(op: String, clauses: List[JobCondition]): List[JobCondition] =
     if clauses.isEmpty then throw IllegalArgumentException(s"JobCondition.$op requires at least one clause")
