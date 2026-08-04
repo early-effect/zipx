@@ -3,8 +3,8 @@ package zipx.core
 /** How LocalDir `actions/cache` keys choose their commit-stable "epoch" namespace.
   *
   * The epoch keeps mid-PR pushes sharing hits and rolls when a release lands. Strategies differ in *when* the epoch
-  * string is known: bake at `zipxWorkflowGenerate` time ([[Fixed]]), or resolve on the runner ([[GitTags]],
-  * [[Script]]).
+  * string is known: bake at `zipxWorkflowGenerate` time ([[CacheEpoch.Fixed]]), or resolve on the runner
+  * ([[CacheEpoch.GitTags]], [[CacheEpoch.Script]]).
   */
 enum CacheEpoch:
   /** Bake `value` into the workflow YAML at generate time (previous default via root `version`). */

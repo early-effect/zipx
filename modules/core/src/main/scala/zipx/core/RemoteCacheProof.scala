@@ -2,8 +2,8 @@ package zipx.core
 
 /** Shared pins for remote-cache docs, planner tests, and live IT.
   *
-  * One source of truth so Specular examples, [[PlannerSpec]], and `RemoteCacheItSpec` cannot drift on image, port, or
-  * env names. Prefer this over `:latest` in any proof surface.
+  * One source of truth so Specular examples, `PlannerSpec`, and `RemoteCacheItSpec` cannot drift on image, port, or env
+  * names. Prefer this over `:latest` in any proof surface.
   */
 object RemoteCacheProof:
 

@@ -2,7 +2,7 @@ package zipx.core
 
 /** A build module as zipx sees it: the sbt-agnostic projection of an sbt project.
   *
-  * The sbt plugin ([[zipx.sbt]]) builds these from `Project.extract(state).structure`; the pure core plans over them so
+  * The sbt plugin (`zipx.sbt`) builds these from `Project.extract(state).structure`; the pure core plans over them so
   * the whole planner is unit-testable without sbt on the classpath.
   *
   * @param id

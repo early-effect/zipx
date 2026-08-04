@@ -3,8 +3,8 @@ package zipx.core
 /** Hash-pinned GitHub Actions used in generated workflows.
   *
   * Editable source of truth in a repo is [[ActionPinFile.DefaultPath]] (`.github/zipx/action-pins.yml`). Published
-  * [[Defaults]] are that file embedded on the classpath at build time. Override via the pin file (Dependabot-friendly)
-  * or, for one-offs, `zipxActions` in `build.sbt`:
+  * [[ActionPins.Defaults]] are that file embedded on the classpath at build time. Override via the pin file
+  * (Dependabot-friendly) or, for one-offs, `zipxActions` in `build.sbt`:
   *
   * {{{
   * zipxActions := ActionPins.Defaults.copy(
@@ -53,7 +53,7 @@ end ActionPins
 object ActionPins:
 
   // Bootstrap fallbacks (keep in sync with `.github/zipx/action-pins.yml`). Used only when the classpath resource is
-  // missing, e.g. incomplete dogfood classpath. Prefer [[Defaults]] from the embedded pin file.
+  // missing, e.g. incomplete dogfood classpath. Prefer [[ActionPins.Defaults]] from the embedded pin file.
   private[core] val BootstrapCheckout: String =
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
   private[core] val BootstrapSetupJava: String =

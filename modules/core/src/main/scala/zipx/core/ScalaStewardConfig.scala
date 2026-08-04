@@ -30,7 +30,7 @@ final case class StewardGroup(
   * input. That is the *global* config channel: it is merged ahead of the repo's own `.scala-steward.conf`
   * (`maybeGlobalRepoConfig |+| maybeRepoConfig`), and grouping lists concatenate. Since groups are first-match-wins and
   * the default list ends in a catch-all, a `pullRequests.grouping` block in the repo's own file would never be reached.
-  * Extend [[Defaults]] via `zipxStewardGrouping` instead.
+  * Extend [[ScalaStewardConfig.Defaults]] via `zipxStewardGrouping` instead.
   *
   * Keeping this separate from the repo file also means hand-written `updates.ignore` / `updates.retracted` entries stay
   * hand-owned; the two configs merge rather than replace.

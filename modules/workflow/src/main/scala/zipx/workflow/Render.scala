@@ -55,7 +55,7 @@ object Render:
     if entries.isEmpty then ""
     else print(Yaml.Mapping(Chunk.from(entries.map((k, v) => (Yaml.Scalar(k), Yaml.Scalar(v))))))
 
-  /** Prune empty collections then print any [[Yaml]] tree. */
+  /** Prune empty collections then print any `Yaml` tree. */
   def print(yaml: Yaml): String =
     YamlPrinter.print(prune(yaml))
 

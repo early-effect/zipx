@@ -3,7 +3,7 @@ package zipx.core
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** Maps a [[ModuleGraph]] + capabilities + [[PlanConfig]] to a GitHub Actions [[Workflow]].
+/** Maps a [[ModuleGraph]] + capabilities + [[PlanConfig]] to a GitHub Actions [[zipx.workflow.Workflow]].
   *
   * This is the sbt-free heart of zipx: given the real dependency graph, it emits jobs shaped by each capability's
   * [[CapabilityScope]] (Aggregate / Layer / Graph / Once), wires `needs` from the graph, expands a per-module Scala
@@ -228,8 +228,8 @@ object Planner:
   end cacheRehydrateJob
 
   /** Wire Verify jobs: never run on tag pushes (release tags only need Publish/Deploy) or on `workflow_dispatch`
-    * (manual runs are for docs-only deploys when [[zipx.specular.ZipxDocs.pages]] is enabled). When [[usesVerifyGate]],
-    * also need the gate and run when it was skipped/failed or outputs run=true (fail-open for PRs / API errors).
+    * (manual runs are for docs-only deploys when `ZipxDocs.pages` is enabled). When [[usesVerifyGate]], also need the
+    * gate and run when it was skipped/failed or outputs run=true (fail-open for PRs / API errors).
     */
   private def applyVerifyGate(
       needs: List[String],
