@@ -48,12 +48,17 @@ A common way to drive CI for a Scala monorepo is a hand-maintained external conf
 
 ## Module layout
 
+- **`modules/shell`**: `zipx.shell`. A general shell AST (`Script`, `Command`, `Word`, `ShTest`) over neotype-validated primitives (`ShText`, `ScriptLine`, `VarName`, `ExitCode`, …). No zipx concepts, no GitHub concepts, no zio-blocks: usable standalone, and the seam higher layers inject through is `Word.Opaque`.
 - **`modules/workflow`**: `zipx.workflow`. GHA AST (`Workflow`, `Job`, `Step`, `Triggers`, `Strategy`, `Concurrency`) + deterministic YAML printer. Uses zio-blocks' schema-derived codecs to build the `Yaml` AST; **our own `YamlPrinter`** serializes it (adds literal block scalars zio-blocks' writer can't emit).
 - **`modules/core`**: `zipx.core`. Graph model (`ModuleId`, `ModuleNode`, `ModuleGraph`), own deterministic toposort + layers + affected-closure, the `Capability` model, `CacheBackend`, `PlanConfig`, and the `Planner` (`ModuleGraph => Workflow`). Pure, sbt-free, unit-tested against a fixture mirroring the real graph. (M7 adds typed `EnvValue` / secret refs here.)
 - **`modules/sbt-plugin`**: `zipx.sbt.ZipxPlugin`. The only module touching `sbt.*`: adapts build `State`/`structure`/`buildDependencies` into a `ModuleGraph`, defines `autoImport`, wires tasks.
-- **Planned convenience packs** (meta-build Scala libraries, not more plugin magic):
-  - **`zipx-central`** (M8): early-effect / Maven Central org secrets, GPG import steps, `publishSigned` capability.
-  - **`zipx-aws`** (M10, deferred): OIDC + ECR helpers extracted from `examples/monorepo` once a second consumer needs them.
+- **`modules/central`**: the shipped convenience packs (see below).
+- **`modules/it`**: Testcontainers integration tests proving the remote cache against a real `buchgr/bazel-remote`. Deliberately **not** aggregated, so plain `sbt test` needs no Docker; CI runs `it/test` as a separate job. Does not publish.
+- **`docs`**: the Specular docs-as-tests site (`docs/src/test/scala/zipx/docs/`). Every example compiles and every rendered YAML snippet is asserted, so docs cannot drift from the generator. Test-scope only; does not publish.
+- **Convenience packs** (meta-build Scala libraries, not more plugin magic):
+  - **`zipx-central`** (M8, shipped): early-effect / Maven Central org secrets, GPG import steps, `publishSigned` capability.
+  - **`ZipxGitHubPackages`** (shipped, in `modules/central`): GitHub Packages publishing with the built-in `GITHUB_TOKEN`.
+  - **`zipx-aws`** (M10, planned): OIDC + ECR helpers extracted from `examples/monorepo` once a second consumer needs them.
 
 ## Milestones
 
@@ -195,7 +200,7 @@ flowchart TB
 
 | CI capability | zipx mechanism | milestone |
 |---|---|---|
-| test each module (custom task, e.g. `testFull`) | `zipxTestTask` (+ Aggregate Once / Graph/Layer); optional `zipxVerifyClean` | ✅ M1 / Verify knobs |
+| test each module (custom task, e.g. `testFull`) | `zipxTestTask` (+ Aggregate Once / Graph/Layer); `zipxVerifyClean` for a static `clean`/`cleanFull` prefix, or `zipxVerifyCleanLabel` (default `clean`) for a per-PR clean rebuild by label | ✅ M1 / Verify knobs / post-M9a |
 | ordered library publish | `Capability.publish`, dependency-ordered | ✅ M2 |
 | publish gated on release | release-tag gate | ✅ M2 |
 | docker image build | `Capability.docker` (native-packager) | ✅ M4 |
@@ -282,14 +287,49 @@ Generated CI owns GPG import + `publishSigned; sonaRelease` (Aggregate) or Graph
 
 **Acceptance:** unit coverage for Aggregate/Layer/Graph across test, publish, docker, deploy; dogfood workflow regenerates to Aggregate shape.
 
+### Post-M9a hardening ✅
+
+Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and tests on `main`.
+
+- **Runtime cache epochs from git tags** (#32, `b7a7030`). `CacheEpoch` gained `GitTags` (now the default) and `Script` alongside `Fixed`, so the LocalDir `actions/cache` key resolves its epoch **on the runner** from `git describe` / `git tag -l` instead of a generate-time `version`. On `refs/tags/v*` the epoch is the tag; otherwise `<last-tag>-ci`. Actions annotations warn when local tags lag `origin` (a shallow checkout) or when no tag matches (falls back to `0.0.0`). This is the pressure valve for M9's cache-epoch half: `sbt-dynver-ci` is still worth recommending, but zipx no longer depends on it for a PR-stable key.
+- **Cache-rehydrate job** (#39, `296fba5`; #43, `fb71d28`). When a merged-PR Verify is skipped, LocalDir would otherwise leave the next run cold, so a small job warms the cache. Controlled by `zipxCacheRehydrateOnMerge` (default true), `zipxCacheRehydrateTask` (default `compile`), and the opt-in `zipxCacheRehydrateExtraSteps` / `zipxCacheRehydrateEnv` (`ZipxPlugin.scala:192-208`).
+- **Build-wide `zipxEnv`** (#43, `9e1a643`; #45, `b52b78a`). A `Map[String, EnvValue]` merged into every generated job's `env:`, so a shared runner variable is declared once. Deliberately omitted from reusable-workflow caller jobs: GitHub rejects `env` on a `jobs.<id>.uses` job.
+- **`VerifyClean` + PR-label trigger** (#41, `d29557f`). `zipxVerifyClean` (`None` | `Clean` | `CleanFull`) prefixes the Verify command statically; when it is `None`, `zipxVerifyCleanLabel` (default `Some("clean")`) prepends `cleanFull` at workflow runtime only for PRs carrying that label. A clean rebuild becomes a label, not a workflow edit.
+- **`publish / skip` honored** (#40, `7a225ea`). The publish graph is derived from each module's `publish / skip` task, so a module that does not publish cannot appear as a publish job. Same "the build describes itself" family as docker auto-detect.
+- **`JobCondition` + a second pack** (#19, #23, #24). `JobCondition` is a typed `if:` expression with `&&` / `||` / `unary_!`, correct precedence parenthesization, and validated identifiers and literals, replacing hand-written `${{ }}` condition strings. `ZipxGitHubPackages` ([modules/central/src/main/scala/zipx/github/ZipxGitHubPackages.scala](modules/central/src/main/scala/zipx/github/ZipxGitHubPackages.scala)) is the second convenience pack, publishing to GitHub Packages with the built-in `GITHUB_TOKEN`.
+- **Remote-cache live proof (`modules/it`)** (#25; #52, `deae398`). A Testcontainers integration module runs a real `buchgr/bazel-remote` and proves a Put/Get round-trip through sbt's remote cache. It is deliberately **not** aggregated, so plain `sbt test` needs no Docker; the dogfood `remote-cache-it` job runs `it/test` in parallel with the main test job.
+- **Docs site as tests** (#6, #20-#22, #26, #28, #30). 18 Specular pages under [docs/src/test/scala/zipx/docs/](docs/src/test/scala/zipx/docs/) where every example is compiled and every rendered YAML snippet asserted, so a doc cannot drift from the generator. The `docs` project is a test-scope module and does not publish.
+- **Dogfood via `unmanagedSources`** (#31, `ac9725a`). The meta-build mirrors each `modules/<m>/src/main/scala` into a `meta<M>` project (`project/dogfood.sbt`) instead of the previous meta-meta symlinks, so zipx builds its own CI from working-tree sources. A new module needs a matching mirror project or `reload` breaks.
+- **Repo hygiene** (#37, `52fb8af`; #51; #53; #55). A scalafmt pre-commit hook in `.githooks`, property-based and edge-case coverage for the core graph and planner, an action-pin refresh, and a scaladoc-link cleanup.
+
+### Typed step & shell DSL 🚧
+
+**Why.** The third instance of the M7 pattern, so a subsection rather than a new milestone. Four layers were still stringly typed: shell `run:` bodies (s-interpolated bash with doubled `$$`, and a warning comment in `ZipxCentral` where a type should be), expressions outside `env:` and `if:` (`with:` / `outputs:` / step `env:` still take raw `${{ … }}`), `Step` validity (all-optional, so `Step()` and `Step(uses =, run =)` both compile and both render YAML GitHub rejects), and reusable step bundles (bare `StepContext => List[Step]` lambdas with no name and no composition operator). This closes issue #46, which asked to move long `run:` strings into YAML resource files: that route would have relocated the splicing rather than removed it, and zio-blocks cannot round-trip a block scalar inside a step sequence anyway.
+
+**Layers:**
+1. ✅ **`zipx-shell`**: the shell AST. `Script` / `Command` / `Word` / `ShTest` over neotype newtypes.
+2. ⬜ **`Expr`** in `zipx-workflow`: the GHA expression AST, with `EnvValue` and `JobCondition` delegating to it.
+3. ⬜ **`StepBuilder`** + render-time `Step.validate`, closing step validity from both ends.
+4. ⬜ **`Steps`** in `zipx-core`: a named, composable, `StepContext`-aware bundle that *is* a `StepContext => List[Step]`, so every existing field keeps its declared type.
+
+**Validation is structural.** Every important DSL type is a [neotype](https://github.com/kitlangton/neotype) newtype, so an invalid value is unconstructible and a literal fails at *compile* time: `VarName("has-dash")` does not compile, and the error carries the validator's own message. Smart constructors are `inline def` so they forward a literal into the check rather than laundering it, with `make`-style siblings returning `Either[String, A]` for genuinely runtime input. `CompileTimeSpec` asserts the compile-time half with zio-test's `typeCheck`. Rules cover what the shell actually does, not just the convenient cases: no `'` inside `'…'` (it cannot be escaped), no `}` inside `${…}` (it closes the expansion early), no leading tab on a script line (YAML block-scalar indentation must be spaces), `ExitCode` 0 to 255 (the shell truncates modulo 256), single-digit file descriptors only.
+
+**Extensibility is load-bearing.** `Command` is an open `trait` with rendering as a method, deliberately **not** an `enum`: a consumer needing a construct zipx does not model (a `case` statement, a function definition) implements `Command` in their own build instead of waiting on a zipx release. The cost, accepted knowingly, is that a match over `Command` cannot be exhaustive. `Word` and `ShTest` stay closed, since the shell's grammar fixes them.
+
+**`sh"…"` splices are typed.** The interpolator takes `Word*`, so a bare `String` splice does not compile: string interpolation is how the hole would otherwise come back, and there is deliberately no implicit `String => Word`. Wrap explicitly with `Word.lit` (checked) or `Word.litMake` (`Either`).
+
+**Raw escape hatch: allowed, typed, and loud.** `Raw` holds `List[ScriptLine]`, so the *type* guarantees raw content cannot emit YAML GitHub fails to parse; there is no separate lint pass to forget. `Script.raw(text)` returns `Either` and names the offending line. What raw can still produce is broken *shell*, so its content is reported by `Command.rawFragments` and `zipxWorkflowGenerate` warns, naming the step.
+
+**Acceptance:** the generated YAML does not move a single byte. Every existing script and expression site migrates, and the dogfood `git diff` after regeneration stays empty.
+
 ### M9: Dynver-ci + publishSigned auto-detect ⬜
 
-**Why.** Cache epoch already defaults to `version`; [`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci) makes that PR-stable (`<last-tag>-ci`). Docker auto-detect from `DockerPlugin` is the right pattern for "the build describes itself"; pgp presence should similarly nudge the default publish command.
+**Why.** Docker auto-detect from `DockerPlugin` is the right pattern for "the build describes itself"; pgp presence should similarly nudge the default publish command.
 
-**Goal:**
-- Document / recommend `sbt-dynver-ci` alongside zipx (epoch = dynver-ci version across a PR).
+**Scope shrunk by post-M9a work.** The cache-epoch half is already solved: `CacheEpoch.GitTags` (#32) resolves a PR-stable `<last-tag>-ci` epoch on the runner, so zipx no longer needs `sbt-dynver-ci` for a stable key. What remains here:
+- Recommend `sbt-dynver-ci` alongside zipx in the README / docs (it still gives the *build* a PR-stable version, which `GitTags` only gives the cache key).
 - When `sbt-pgp` is on the classpath, default `zipxPublishTask` (or the built-in publish capability command) toward `publishSigned`, with an explicit override. Consumers using `zipx-central` already get this via capability replace; auto-detect helps bare setups.
-- Hygiene: refresh stale milestone comments in `Planner` / `CacheBackend`; keep ROADMAP status table in sync.
+- Hygiene: refresh stale milestone comments in `Planner` / `CacheBackend`; keep the ROADMAP status table in sync. That last promise is the one that rotted: 20+ PRs landed undocumented before the `Post-M9a hardening` refresh above discharged it. The rule going forward is that a feature commit carries its own ROADMAP edit.
 
 **Acceptance:** docs + scripted/unit proving pgp auto-detect and override; dynver-ci called out in README cache-epoch section.
 
@@ -322,9 +362,13 @@ Generated CI owns GPG import + `publishSigned; sonaRelease` (Aggregate) or Graph
 
 ## Verification
 
-- **Pure units (fast, no sbt):** `zipx-core` planner + `zipx-workflow` printer tested with golden output against a fixture graph. `sbt "workflow/testFull; core/testFull"`.
+**Always `testFull`, never `test`.** On sbt 2.0 a plain `test` runs `testQuick`: it skips tests it deems unaffected and prints "No tests to run", which reads like success while proving nothing. Every command below uses `testFull` so a green result means the suite actually ran.
+
+- **Pure units (fast, no sbt):** `zipx-core` planner + `zipx-workflow` printer tested with golden output against a fixture graph, plus the shell AST and the packs. `sbt "shell/testFull; workflow/testFull; core/testFull; central/testFull"`. `zipx-shell` carries both validation paths: `PrimitivesSpec` covers every newtype's accepting cases, rejecting cases, and boundaries (each control-character range end, tab mid-line versus leading, `ExitCode` at -1/0/255/256) with generators where the rule is a character class, and `CompileTimeSpec` asserts that an invalid *literal* does not compile.
+- **Docs as tests:** `sbt docs/testFull` compiles every documented example and asserts every rendered YAML snippet, so a stale doc fails the build.
+- **Integration (Docker, not aggregated):** `sbt it/test` runs the remote-cache Testcontainers proof against a real `buchgr/bazel-remote`. `modules/it` is excluded from the root aggregate so the fast suites need no Docker; CI runs it as a parallel job.
 - **Plugin integration:** sbt `scripted` test (`modules/sbt-plugin/src/sbt-test/zipx/generate-check`) where `zipxWorkflowGenerate` then `zipxWorkflowCheck` is a clean no-op round-trip (idempotence = determinism proof).
-- **Dogfood:** zipx generates its own `.github/workflows/ci.yml` (`workflow → core → plugin` test + publish chains).
+- **Dogfood:** zipx generates its own `.github/workflows/ci.yml` (`workflow → core → plugin` test + publish chains) from working-tree sources via the meta-build mirror projects in `project/dogfood.sbt`. `sbt reload` proves the mirror is wired; regenerating and getting an empty `git diff` proves determinism end to end.
 
 ## Post-milestone follow-ups (all done)
 
@@ -339,3 +383,4 @@ Generated CI owns GPG import + `publishSigned; sonaRelease` (Aggregate) or Graph
 
 - **Own `YamlPrinter` instead of zio-blocks' `YamlWriter`.** zio-blocks' writer escapes newlines to `\n` and can't emit block scalars, which breaks multi-line values like `actions/cache` `path:`. `YamlPrinter` replicates its quoting exactly (single-line output byte-identical) and adds literal block scalars.
 - **Docker opt-in is auto-detected**, not a `zipxDocker := true` flag: enabling sbt-native-packager's `DockerPlugin` on a module is the signal (`zipxDocker` defaults from `thisProject.autoPlugins`). Users can still override the setting.
+- **Dogfooding needs meta-build mirror projects.** The original plan had no such concept: zipx would just use its own published plugin. To generate this repo's CI from working-tree sources, `project/dogfood.sbt` defines a `meta<M>` project per module whose `Compile / unmanagedSourceDirectories` points at `modules/<m>/src/main/scala` (#31 replaced an earlier meta-meta symlink scheme). The cost is real: adding a module means adding its mirror, or `reload` breaks.

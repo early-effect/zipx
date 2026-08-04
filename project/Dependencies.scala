@@ -16,6 +16,7 @@ object Dependencies:
   val specularVersion    = "0.11.0"
   val zioBlocksVersion   = "0.0.51"
   val remoteCacheVersion = "2.0.4"
+  val neotypeVersion     = "0.7.0"
 
   val commonScalacOptions: Seq[String] = Seq(
     "-deprecation",
@@ -32,6 +33,12 @@ object Dependencies:
   val workflowLibraryDeps: Seq[ModuleID] = Seq(
     "dev.zio" %% "zio-blocks-schema"      % zioBlocksVersion,
     "dev.zio" %% "zio-blocks-schema-yaml" % zioBlocksVersion,
+  )
+
+  // Compile-time-validated newtypes for the shell AST. Compile scope is neotype-internal + comptime +
+  // scala3-library only (zio-test is test-only), so it stays light on consumer meta-build classpaths.
+  val shellLibraryDeps: Seq[ModuleID] = Seq(
+    "io.github.kitlangton" %% "neotype" % neotypeVersion
   )
 
   /** Bundled so consumers need one `addSbtPlugin` line for zipx.

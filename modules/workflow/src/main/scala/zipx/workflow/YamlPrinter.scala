@@ -91,14 +91,33 @@ object YamlPrinter:
 
   /** A YAML literal block scalar (`|`): each source line is emitted at `contentIndent`. Trailing-newline handling uses
     * clip (the default `|`), which keeps a single final newline, fine for `actions/cache` path lists.
+    *
+    * The guard catches the two ways a multi-line value silently produces YAML GitHub cannot read: a `\r` or C0 control
+    * character (which `needsQuoting` would force into a quoted scalar, collapsing the whole program onto one escaped
+    * line), and a line starting with a tab (block-scalar indentation must be spaces, so a leading tab is a parse
+    * error). `zipx-shell`'s `ScriptLine` already makes these unconstructible for a DSL-built script; this is the same
+    * check for hand-written strings, which still reach here.
     */
   private def writeBlockScalar(sb: java.lang.StringBuilder, value: String, contentIndent: Int): Unit =
+    val lines = value.split("\n", -1)
+    lines.zipWithIndex.foreach { (line, i) =>
+      require(
+        !line.exists(c => c == '\r' || (c.isControl && c != '\t')),
+        s"multi-line YAML value line ${i + 1} contains a carriage return or control character, " +
+          s"which would be quote-escaped into a single line: ${line.take(60)}",
+      )
+      require(
+        !line.startsWith("\t"),
+        s"multi-line YAML value line ${i + 1} starts with a tab; block scalar indentation must be spaces",
+      )
+    }
     sb.append(" |")
-    value.split("\n", -1).foreach { line =>
+    lines.foreach { line =>
       sb.append('\n')
       if line.nonEmpty then appendIndent(sb, contentIndent)
       sb.append(line)
     }
+  end writeBlockScalar
 
   private def writeScalarKey(sb: java.lang.StringBuilder, key: Yaml): Unit = key match
     case Yaml.Scalar(value, tag) => writeScalar(sb, value, tag)

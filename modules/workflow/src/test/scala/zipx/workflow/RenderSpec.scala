@@ -118,6 +118,36 @@ object RenderSpec extends ZIOSpecDefault:
         !out.contains("""\n"""), // never an escaped newline
       )
     },
+    test("rejects a multi-line value that would render as unreadable YAML") {
+      // Belt and braces behind zipx-shell's ScriptLine: a hand-written string still reaches the printer, and both of
+      // these produce YAML GitHub cannot read rather than YAML that looks wrong.
+      def render(run: String): String =
+        Render.render(
+          Workflow(
+            name = "CI",
+            on = Triggers(push = Some(BranchFilter(branches = List("main")))),
+            jobs = ListMap("build" -> Job(steps = List(Step(run = Some(run))))),
+          )
+        )
+      def failure(run: String): Option[String] =
+        try
+          render(run); None
+        catch
+          case e: IllegalArgumentException => Some(e.getMessage)
+      // Built from a code point so no control byte sits in this source file.
+      val withControlChar = s"echo a\necho ${0x01.toChar}b"
+      assertTrue(
+        // A carriage return would push the value through needsQuoting, collapsing the script to one escaped line.
+        failure("echo a\r\necho b").exists(_.contains("line 1")),
+        failure(withControlChar).exists(_.contains("control character")),
+        // A leading tab is a block-scalar parse error, not just bad style.
+        failure("echo a\n\techo b").exists(_.contains("line 2")),
+        failure("echo a\n\techo b").exists(_.contains("tab")),
+        // A tab elsewhere on the line is fine, and an ordinary script still renders.
+        failure("echo\ta\necho b").isEmpty,
+        render("echo a\necho b").contains("run: |"),
+      )
+    },
     test("renders a job's environment binding and env block") {
       val wf = Workflow(
         name = "CD",
