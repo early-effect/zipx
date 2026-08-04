@@ -3,7 +3,7 @@ package zipx.workflow
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.yaml.{Yaml, YamlTag}
 
-/** Deterministic block-style YAML printer for the [[Yaml]] AST.
+/** Deterministic block-style YAML printer for the `Yaml` AST.
   *
   * Why our own printer instead of zio-blocks' `YamlWriter`: GitHub Actions needs multi-line values (notably
   * `actions/cache`'s `path:`) rendered as literal block scalars (`|`), but `YamlWriter` escapes newlines into `\n`

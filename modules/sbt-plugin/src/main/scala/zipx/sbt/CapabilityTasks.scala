@@ -100,7 +100,7 @@ object CapabilityTasks:
 
   // ---- Typed constructors mirroring Capability.{deploy,custom,once} but taking a key for the command ----
 
-  /** [[Capability.deploy]] (Aggregate-by-target) with the deploy command given as a task key. */
+  /** [[zipx.core.Capability.deploy]] (Aggregate-by-target) with the deploy command given as a task key. */
   def deploy(
       participates: ModuleNode => Boolean,
       command: Scoped,
@@ -124,7 +124,7 @@ object CapabilityTasks:
       condition,
     )
 
-  /** [[Capability.deployGraph]] with the deploy command given as a task key. */
+  /** [[zipx.core.Capability.deployGraph]] with the deploy command given as a task key. */
   def deployGraph(
       participates: ModuleNode => Boolean,
       command: Scoped,
@@ -148,7 +148,7 @@ object CapabilityTasks:
       condition,
     )
 
-  /** [[Capability.custom]] with the command given as a task key (rendered `<module>/<label>`). */
+  /** [[zipx.core.Capability.custom]] with the command given as a task key (rendered `<module>/<label>`). */
   def custom(
       name: String,
       command: Scoped,
@@ -182,7 +182,9 @@ object CapabilityTasks:
       condition = condition,
     )
 
-  /** [[Capability.once]] with the single build-wide command given as a task key (rendered as its bare `<label>`). */
+  /** [[zipx.core.Capability.once]] with the single build-wide command given as a task key (rendered as its bare
+    * `<label>`).
+    */
   def once(
       name: String,
       command: Scoped,

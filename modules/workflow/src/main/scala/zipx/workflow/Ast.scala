@@ -44,8 +44,8 @@ enum DayOfWeek:
 
 /** Five-field UTC cron for GitHub Actions `on.schedule` (`minute hour day-of-month month day-of-week`).
   *
-  * Prefer [[Cron.weekly]], [[Cron.daily]], [[Cron.hourly]] over [[Cron.Raw]]. Constructors validate ranges; [[Raw]] is
-  * the escape hatch for expressions the variants cannot express.
+  * Prefer [[Cron.weekly]], [[Cron.daily]], [[Cron.hourly]] over [[Cron.Raw]]. Constructors validate ranges;
+  * [[Cron.Raw]] is the escape hatch for expressions the variants cannot express.
   */
 enum Cron:
   case Weekly(day: DayOfWeek, hour: Int = 0, minute: Int = 0)

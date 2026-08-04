@@ -33,13 +33,13 @@ enum Ordering:
   *
   * Gate is ANDed with the capability's [[Capability.condition]] and with affected-gating.
   *
-  * [[AffectedOnly]] is a **design seam, not a shipped feature**. Today affected-gating is derived from [[Phase.Verify]]
-  * plus [[PlanConfig.affected]], never from Gate, so the planner cannot honor it; see the "Affected-only PRs (Graph
-  * only)" docs page and ROADMAP M3/M6. Rather than degrade silently to [[Always]] (a green, untested pipeline is
-  * exactly the failure mode zipx exists to prevent), the planner rejects it with an explaining error. Making it real
-  * means threading affected-gating off Gate so Publish-phase capabilities can opt in, the "affected-gated publishing"
-  * the sentence above anticipates. ROADMAP M6 resolved only the Deploy case (never affected-gated); Publish is still
-  * open.
+  * [[Gate.AffectedOnly]] is a **design seam, not a shipped feature**. Today affected-gating is derived from
+  * [[Phase.Verify]] plus [[PlanConfig.affected]], never from Gate, so the planner cannot honor it; see the
+  * "Affected-only PRs (Graph only)" docs page and ROADMAP M3/M6. Rather than degrade silently to [[Gate.Always]] (a
+  * green, untested pipeline is exactly the failure mode zipx exists to prevent), the planner rejects it with an
+  * explaining error. Making it real means threading affected-gating off Gate so Publish-phase capabilities can opt in,
+  * the "affected-gated publishing" the sentence above anticipates. ROADMAP M6 resolved only the Deploy case (never
+  * affected-gated); Publish is still open.
   */
 enum Gate:
   case Always, OnReleaseTag, AffectedOnly
@@ -152,7 +152,7 @@ final case class Capability(
     copy(condition = condition)
 
   /** AND `extra` onto any existing [[condition]] (or set it when none). Prefer this when layering filters on a pack
-    * that already ships a condition (e.g. [[zipx.specular.ZipxDocs.pages]]).
+    * that already ships a condition (e.g. `ZipxDocs.pages`).
     */
   def andCondition(extra: JobCondition): Capability =
     copy(condition = Some(condition.fold(extra)(_ && extra)))
@@ -356,8 +356,7 @@ object Capability:
     * name via `needsCapabilities`; conversely, set `needsCapabilities` here so this once-job waits on every job of
     * those capabilities.
     *
-    * For a reusable-workflow call (no local steps), set [[Capability.workflowCall]] via `.copy` (see
-    * [[zipx.specular.ZipxDocs]]).
+    * For a reusable-workflow call (no local steps), set [[Capability.workflowCall]] via `.copy` (see `ZipxDocs`).
     */
   def once(
       name: String,

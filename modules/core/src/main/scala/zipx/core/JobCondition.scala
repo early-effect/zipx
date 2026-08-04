@@ -7,8 +7,8 @@ package zipx.core
   * this AST; the planner renders and ANDs them with gate / affected clauses.
   *
   * Compose with [[&&]] / [[||]] (or [[JobCondition.and]] / [[JobCondition.or]]). Infix `&&` / `||` follow Boolean
-  * precedence (`&&` tighter than `||`, both left-associative). [[Raw]] is the escape hatch for expressions the variants
-  * cannot express.
+  * precedence (`&&` tighter than `||`, both left-associative). [[JobCondition.Raw]] is the escape hatch for expressions
+  * the variants cannot express.
   */
 enum JobCondition:
   case RepositoryIs(repo: String)

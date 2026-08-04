@@ -94,8 +94,8 @@ object ZipxCentral:
   /** Aggregate Central release: one job with GPG import + `publishSigned; sonaRelease`. Replaces the built-in `publish`
     * capability (same name). Prefer this over [[publishSigned]] + [[releaseOnce]] unless you need Graph fan-out.
     *
-    * Uses [[CapabilityScope.Once]] (not Aggregate join) so the root command runs once rather than being repeated per
-    * publishing module.
+    * Uses [[zipx.core.CapabilityScope.Once]] (not Aggregate join) so the root command runs once rather than being
+    * repeated per publishing module.
     */
   val release: Capability =
     Capability.once(
@@ -107,8 +107,8 @@ object ZipxCentral:
       extraSteps = gpgImportSteps,
     )
 
-  /** Graph escape hatch: replaces [[Capability.publishGraph]] with dependency-ordered `publishSigned`, staging artifact
-    * upload, and org signing env. Pair with [[releaseOnce]].
+  /** Graph escape hatch: replaces [[zipx.core.Capability.publishGraph]] with dependency-ordered `publishSigned`,
+    * staging artifact upload, and org signing env. Pair with [[releaseOnce]].
     */
   val publishSigned: Capability =
     Capability.publishGraph.copy(
