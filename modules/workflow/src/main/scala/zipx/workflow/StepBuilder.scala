@@ -3,8 +3,6 @@ package zipx.workflow
 import neotype.unwrap
 import zipx.shell.Script
 
-import scala.collection.immutable.ListMap
-
 /** A [[Step]] under construction, with typed fields.
   *
   * [[Step]] itself stays a flat all-optional case class: its shape is fixed by `derives Schema` and the on-disk
@@ -45,8 +43,8 @@ final case class StepBuilder(
   /** [[withId]] for an already-validated id. */
   def withStepId(id: StepId): StepBuilder = copy(step = step.copy(id = Some(id.unwrap)))
 
-  /** The step's `if:`. */
-  def when(condition: Expr): StepBuilder = copy(step = step.copy(`if` = Some(condition.render)))
+  /** The step's `if:`, rendered bare (see [[Expr.unwrapped]]): an `if:` is already an expression context. */
+  def when(condition: Expr): StepBuilder = copy(step = step.copy(`if` = Some(condition.unwrapped)))
 
   /** One `with:` input. Values accumulate in call order, which is what keeps the rendered YAML deterministic. */
   def withInput(name: String, value: Expr): StepBuilder = withInput(name, value.render)

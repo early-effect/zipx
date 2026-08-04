@@ -79,6 +79,40 @@ object ExprSpec extends ZIOSpecDefault:
         )
       },
     ),
+    suite("unwrapped")(
+      test("drops the ${{ }} wrapper, which is what an if: wants") {
+        // An `if:` is evaluated as an expression whether or not it is wrapped, and bare is the form that composes:
+        // `${{ a }} && ${{ b }}` is a template string that evaluates to neither operand.
+        assertTrue(
+          Expr.github("event_name").unwrapped == "github.event_name",
+          Expr.secret("PGP_SECRET").unwrapped == "secrets.PGP_SECRET",
+          Expr.stepOutput("check", "run").unwrapped == "steps.check.outputs.run",
+          Expr.jobResult("verify-gate").unwrapped == "needs.verify-gate.result",
+          Expr.matrix("scala").unwrapped == "matrix.scala",
+        )
+      },
+      test("a literal and a raw expression are already bare, so they are unchanged") {
+        assertTrue(
+          Expr.lit("refs/tags/v1.0.0").unwrapped == "refs/tags/v1.0.0",
+          Expr.raw("!cancelled()").unwrapped == "!cancelled()",
+          // A raw expression that *does* carry a wrapper keeps it: unwrapped strips Expr's own wrapper, not the
+          // caller's text, which nothing here is entitled to rewrite.
+          Expr.raw("${{ github.sha }}").unwrapped == "${{ github.sha }}",
+        )
+      },
+      test("a concat unwraps part by part, so a composed condition is a single expression") {
+        val cond = Expr.raw("!cancelled() && ") ++ Expr.jobResult("verify-gate")
+        assertTrue(
+          cond.unwrapped == "!cancelled() && needs.verify-gate.result",
+          // render would produce the broken template form; that contrast is the reason unwrapped exists.
+          cond.render == "!cancelled() && ${{ needs.verify-gate.result }}",
+        )
+      },
+      test("render and unwrapped differ by exactly the wrapper") {
+        val e = Expr.env("DEPLOY_ROLE")
+        assertTrue(e.render == s"$${{ ${e.unwrapped} }}")
+      },
+    ),
     suite("asWord")(
       test("an expression survives into a shell script unescaped") {
         // Word.Opaque specifically: the `$` and `{` of an expression must reach the YAML intact, so this is the one

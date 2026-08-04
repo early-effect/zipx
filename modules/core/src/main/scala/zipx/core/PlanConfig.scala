@@ -52,8 +52,10 @@ enum AffectedMode:
   *   sbt command for the rehydrate job (default `compile`). Not a full Verify: no `zipxTestTask`, no [[verifyClean]].
   * @param cacheRehydrateExtraSteps
   *   optional steps on the rehydrate job only, after LocalDir cache restore and before [[cacheRehydrateTask]] (default
-  *   empty). Same shape as capability `extraSteps`. Not copied from Verify capabilities; assign the same function
-  *   explicitly when you want parity (e.g. Playwright browser install under `target/`).
+  *   empty). Same shape as capability `extraSteps`, so a [[Steps]] bundle fits here too. Not copied from Verify
+  *   capabilities; assign the same bundle explicitly when you want parity (e.g. Playwright browser install under
+  *   `target/`). That is what `Steps` is for: `zipxCacheRehydrateExtraSteps := OrgSteps.playwright` and the matching
+  *   capability field name the same value instead of duplicating a lambda.
   * @param cacheRehydrateEnv
   *   optional job `env` for the rehydrate job only (default empty). Overlay on [[env]]; wins on key clash.
   * @param env

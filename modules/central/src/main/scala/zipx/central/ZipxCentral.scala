@@ -46,50 +46,48 @@ object ZipxCentral:
   /** Import the CI signing key from the base64-encoded `PGP_SECRET` org secret (same recipe as peer release.yml).
     *
     * Use a plain `$PGP_SECRET` (not `$$`). This string is not Scala-interpolated; a doubled `$` survives into the
-    * workflow YAML and bash expands `$$` to the PID, which poisons `base64 --decode`.
+    * workflow YAML and bash expands `$$` to the PID, which poisons `base64 --decode`. The warning goes away when this
+    * body becomes a `zipx.shell.Script`, where `Word.v("PGP_SECRET")` cannot be spelled the wrong way.
     */
-  val gpgImportSteps: StepContext => List[Step] = _ =>
-    List(
-      Step(
-        name = Some("Import signing key"),
-        env = ListMap("PGP_SECRET" -> secret"PGP_SECRET".render),
-        run = Some(
-          """mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
-            |echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
-            |echo "pinentry-mode loopback"   >> ~/.gnupg/gpg.conf
-            |gpgconf --kill gpg-agent || true
-            |echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin
-        ),
-      )
+  val gpgImportSteps: Steps = Steps.of("gpg-import")(
+    Step(
+      name = Some("Import signing key"),
+      env = ListMap("PGP_SECRET" -> secret"PGP_SECRET".render),
+      run = Some(
+        """mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
+          |echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          |echo "pinentry-mode loopback"   >> ~/.gnupg/gpg.conf
+          |gpgconf --kill gpg-agent || true
+          |echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin
+      ),
     )
+  )
 
   /** After Graph `publishSigned`, upload this job's `target/sona-staging` for the release job to merge. */
-  val uploadStagingSteps: StepContext => List[Step] = ctx =>
-    List(
-      Step(
-        name = Some("Upload sona staging"),
-        uses = Some(ctx.actions.uploadArtifact),
-        `with` = ListMap(
-          "name"              -> stagingArtifactName(ctx.node.id),
-          "path"              -> StagingDir,
-          "if-no-files-found" -> "error",
-        ),
-      )
+  val uploadStagingSteps: Steps = Steps.one("upload-staging") { ctx =>
+    Step(
+      name = Some("Upload sona staging"),
+      uses = Some(ctx.actions.uploadArtifact),
+      `with` = ListMap(
+        "name"              -> stagingArtifactName(ctx.node.id),
+        "path"              -> StagingDir,
+        "if-no-files-found" -> "error",
+      ),
     )
+  }
 
   /** Before Graph `sonaRelease`, download every publish job's staging tree into [[StagingDir]]. */
-  val downloadStagingSteps: StepContext => List[Step] = ctx =>
-    List(
-      Step(
-        name = Some("Download sona staging"),
-        uses = Some(ctx.actions.downloadArtifact),
-        `with` = ListMap(
-          "pattern"        -> s"$StagingArtifactPrefix*",
-          "path"           -> StagingDir,
-          "merge-multiple" -> "true",
-        ),
-      )
+  val downloadStagingSteps: Steps = Steps.one("download-staging") { ctx =>
+    Step(
+      name = Some("Download sona staging"),
+      uses = Some(ctx.actions.downloadArtifact),
+      `with` = ListMap(
+        "pattern"        -> s"$StagingArtifactPrefix*",
+        "path"           -> StagingDir,
+        "merge-multiple" -> "true",
+      ),
     )
+  }
 
   /** Aggregate Central release: one job with GPG import + `publishSigned; sonaRelease`. Replaces the built-in `publish`
     * capability (same name). Prefer this over [[publishSigned]] + [[releaseOnce]] unless you need Graph fan-out.
@@ -130,7 +128,8 @@ object ZipxCentral:
       gate = Gate.OnReleaseTag,
       needsCapabilities = List("publish"),
       env = signingEnv,
-      extraSteps = ctx => downloadStagingSteps(ctx) ++ gpgImportSteps(ctx),
+      // Composition, not a hand-threaded lambda: this is what `Steps.++` exists for.
+      extraSteps = downloadStagingSteps ++ gpgImportSteps,
     )
 
 end ZipxCentral

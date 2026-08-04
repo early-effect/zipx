@@ -461,8 +461,25 @@ object ZipxPlugin extends AutoPlugin:
     val content = renderWorkflow.value
     IO.write(out, content)
     log.info(s"zipx wrote ${out.getPath}")
+    warnRawFragments.value
     writeSyncWorkflowIfEnabled.value
     writeStewardWorkflowIfEnabled.value
+  }
+
+  /** Warn once per escape-hatch fragment in a [[Steps]] bundle, naming the bundle.
+    *
+    * Raw content is allowed and typed, so it cannot emit YAML GitHub fails to parse. What it can still emit is broken
+    * shell, and nothing checks that, so the use should be visible in the build log rather than silent.
+    */
+  private def warnRawFragments: Def.Initialize[Task[Unit]] = Def.task {
+    val log          = streams.value.log
+    val graph        = buildGraph.value
+    val cfg          = planConfig.value
+    val extracted    = Project.extract(state.value)
+    val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
+    val verifyTask   = readBuildSetting(extracted, zipxTestTask, "test")
+    val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
+    Steps.rawWarnings(capabilities, cfg).foreach(w => log.warn(s"zipx: $w"))
   }
 
   private def writeSyncWorkflowIfEnabled: Def.Initialize[Task[Unit]] = Def.task {

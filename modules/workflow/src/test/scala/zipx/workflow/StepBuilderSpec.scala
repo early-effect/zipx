@@ -52,7 +52,8 @@ object StepBuilderSpec extends ZIOSpecDefault:
         assertTrue(
           step.name.contains("Test"),
           step.id.contains("test"),
-          step.`if`.contains("${{ github.event_name }}"),
+          // Bare, not wrapped: an `if:` is already an expression context, and bare is what composes.
+          step.`if`.contains("github.event_name"),
           step.env == ListMap("TIER" -> "${{ env.TIER }}"),
           step.workingDirectory.contains("modules/core"),
         )

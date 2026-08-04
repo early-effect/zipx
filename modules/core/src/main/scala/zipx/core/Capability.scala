@@ -111,9 +111,10 @@ final case class Target(
   * @param runsOn
   *   per-capability runner override.
   * @param extraSteps
-  *   steps injected before the command step.
+  *   steps injected before the command step. Prefer a [[Steps]] bundle over a bare lambda: it composes with `++`, gates
+  *   with `when`, carries a name into diagnostics, and can be published for reuse across repos.
   * @param postSteps
-  *   steps injected after the command step.
+  *   steps injected after the command step. Same shape as [[extraSteps]].
   * @param scope
   *   Aggregate (default for built-ins), Layer, Graph, or Once.
   * @param env

@@ -74,6 +74,19 @@ enum Expr:
     case Concat(parts)        => parts.map(_.render).mkString
     case Raw(expression)      => expression.unwrap
 
+  /** The text *inside* the `${{ }}`, for a position that is already an expression context.
+    *
+    * A step or job `if:` is evaluated as an expression whether or not it is wrapped, and GitHub documents the bare form
+    * as the one to prefer there. Bare also composes: two conditions can be ANDed into one expression, where two wrapped
+    * ones would concatenate into a template string that evaluates to neither. This is what `if:` renders through, and
+    * what makes the output match the bare conditions the planner has always emitted.
+    */
+  def unwrapped: String = this match
+    case Lit(text)       => text
+    case Raw(expression) => expression.unwrap
+    case Concat(parts)   => parts.map(_.unwrapped).mkString
+    case other           => other.render.stripPrefix("${{ ").stripSuffix(" }}")
+
   /** Concatenate with `other`, flattening so nested [[Concat]]s do not nest. */
   infix def ++(other: Expr): Expr = (this, other) match
     case (Concat(a), Concat(b)) => Concat(a ++ b)
