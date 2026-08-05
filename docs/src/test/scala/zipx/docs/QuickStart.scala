@@ -66,7 +66,7 @@ lazy val root = (project in file("."))
 ```
 """,
       exampleValue {
-        val g = ModuleGraph(List(ModuleNode("lib", publishes = true, crossScalaVersions = List("3.8.4"))))
+        val g = ModuleGraph(List(ModuleNode(ModuleId("lib"), publishes = true, crossScalaVersions = List("3.8.4"))))
         DocsRender.jobs("test", "publish")(Capability.test, Capability.publish)(using g)
       }.assert(yaml =>
         assertTrue(

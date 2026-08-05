@@ -14,7 +14,7 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
 
   private val graph = ModuleGraph(
     List(
-      ModuleNode("lib", publishes = true, crossScalaVersions = List("3.3.3"))
+      ModuleNode(ModuleId("lib"), publishes = true, crossScalaVersions = List("3.3.3"))
     )
   )
 

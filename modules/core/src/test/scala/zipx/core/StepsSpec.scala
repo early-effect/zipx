@@ -8,10 +8,10 @@ import scala.collection.immutable.ListMap
 
 object StepsSpec extends ZIOSpecDefault:
 
-  private val node = ModuleNode(id = "core", publishes = true)
+  private val node = ModuleNode(id = ModuleId("core"), publishes = true)
   private val ctx  = StepContext(node, None, matrixed = false)
 
-  private def ctxFor(id: String, target: Option[Target] = None): StepContext =
+  private def ctxFor(id: ModuleId, target: Option[Target] = None): StepContext =
     StepContext(ModuleNode(id = id), target, matrixed = false)
 
   private def named(name: String): Step = Step(name = Some(name), run = Some(s"echo $name"))
@@ -127,14 +127,14 @@ object StepsSpec extends ZIOSpecDefault:
       test("the context reaches the bundle, so a step can name the module") {
         val perModule = Steps.one("upload")(c => Step(name = Some(s"upload-${c.node.id}"), run = Some("true")))
         assertTrue(
-          perModule(ctxFor("core")).head.name.contains("upload-core"),
-          perModule(ctxFor("docs")).head.name.contains("upload-docs"),
+          perModule(ctxFor(ModuleId("core"))).head.name.contains("upload-core"),
+          perModule(ctxFor(ModuleId("docs"))).head.name.contains("upload-docs"),
         )
       },
       test("both halves of a composition see the same context") {
         val a     = Steps.one("a")(c => Step(name = Some(s"a-${c.node.id}"), run = Some("true")))
         val b     = Steps.one("b")(c => Step(name = Some(s"b-${c.node.id}"), run = Some("true")))
-        val names = (a ++ b)(ctxFor("shell")).flatMap(_.name)
+        val names = (a ++ b)(ctxFor(ModuleId("shell"))).flatMap(_.name)
         assertTrue(names == List("a-shell", "b-shell"))
       },
       test("the target and action pins are visible too") {
@@ -142,15 +142,15 @@ object StepsSpec extends ZIOSpecDefault:
           Step(name = Some(c.target.fold("no-target")(_.name)), uses = Some(c.actions.checkout))
         }
         assertTrue(
-          bundle(ctxFor("core")).head.name.contains("no-target"),
-          bundle(ctxFor("core", Some(Target("staging")))).head.name.contains("staging"),
-          bundle(ctxFor("core")).head.uses.contains(ActionPins.Defaults.checkout),
+          bundle(ctxFor(ModuleId("core"))).head.name.contains("no-target"),
+          bundle(ctxFor(ModuleId("core"), Some(Target("staging")))).head.name.contains("staging"),
+          bundle(ctxFor(ModuleId("core"))).head.uses.contains(ActionPins.Defaults.checkout),
         )
       },
       test("a bundle is re-evaluated per context, not memoized on first call") {
         val bundle = Steps.one("id")(c => Step(name = Some(c.node.id), run = Some("true")))
-        val first  = bundle(ctxFor("one")).head.name
-        val second = bundle(ctxFor("two")).head.name
+        val first  = bundle(ctxFor(ModuleId("one"))).head.name
+        val second = bundle(ctxFor(ModuleId("two"))).head.name
         assertTrue(first.contains("one"), second.contains("two"))
       },
     ),
@@ -187,8 +187,8 @@ object StepsSpec extends ZIOSpecDefault:
           List(Step.run(Script.strict(Exec("sbt", task))).named(s"Test ${c.node.id}"))
         }
         assertTrue(
-          bundle(ctxFor("shell")).head.name.contains("Test shell"),
-          bundle(ctxFor("shell")).head.run.contains("set -euo pipefail\nsbt 'shell/test'"),
+          bundle(ctxFor(ModuleId("shell"))).head.name.contains("Test shell"),
+          bundle(ctxFor(ModuleId("shell"))).head.run.contains("set -euo pipefail\nsbt 'shell/test'"),
         )
       },
       test("the curried apply and the case-class apply agree") {

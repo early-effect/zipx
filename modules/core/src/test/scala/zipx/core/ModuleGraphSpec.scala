@@ -50,7 +50,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       assertTrue(sampleGraph.affectedClosure(Set("clientA")) == Set("clientA"))
     },
     test("make rejects a cycle, naming the modules involved") {
-      val cyclic = ModuleGraph.make(List(ModuleNode("a", List("b")), ModuleNode("b", List("a"))))
+      val cyclic = ModuleGraph.make(List(ModuleNode(ModuleId("a"), List("b")), ModuleNode(ModuleId("b"), List("a"))))
       assertTrue(
         cyclic.isLeft,
         cyclic.swap.exists(_.contains("cycle")),
@@ -59,7 +59,9 @@ object ModuleGraphSpec extends ZIOSpecDefault:
     },
     test("apply throws where make reports, for a fixture whose cycle would be a test bug") {
       assertTrue(
-        scala.util.Try(ModuleGraph(List(ModuleNode("a", List("b")), ModuleNode("b", List("a"))))).isFailure
+        scala.util
+          .Try(ModuleGraph(List(ModuleNode(ModuleId("a"), List("b")), ModuleNode(ModuleId("b"), List("a")))))
+          .isFailure
       )
     },
     test("subsetLayers gives the contracted publish order (L0/L1/L2)") {
@@ -75,31 +77,35 @@ object ModuleGraphSpec extends ZIOSpecDefault:
     test("subsetLayers contracts edges through excluded intermediates") {
       val g = ModuleGraph(
         List(
-          ModuleNode("a"),
-          ModuleNode("b", dependsOn = List("a")),
-          ModuleNode("c", dependsOn = List("b")),
+          ModuleNode(ModuleId("a")),
+          ModuleNode(ModuleId("b"), dependsOn = List("a")),
+          ModuleNode(ModuleId("c"), dependsOn = List("b")),
         )
       )
       assertTrue(g.subsetLayers(n => n.id == "a" || n.id == "c") == List(List("a"), List("c")))
     },
     test("self-cycle is detected") {
-      assertTrue(ModuleGraph.make(List(ModuleNode("a", dependsOn = List("a")))).isLeft)
+      assertTrue(ModuleGraph.make(List(ModuleNode(ModuleId("a"), dependsOn = List("a")))).isLeft)
     },
     test("three-node cycle is detected, and every id in it is reported") {
       val cyclic = ModuleGraph.make(
         List(
-          ModuleNode("a", dependsOn = List("c")),
-          ModuleNode("b", dependsOn = List("a")),
-          ModuleNode("c", dependsOn = List("b")),
+          ModuleNode(ModuleId("a"), dependsOn = List("c")),
+          ModuleNode(ModuleId("b"), dependsOn = List("a")),
+          ModuleNode(ModuleId("c"), dependsOn = List("b")),
         )
       )
       assertTrue(cyclic.isLeft, cyclic.swap.exists(_.contains("a, b, c")))
     },
-    test("cycle reports the ids without building a graph, for a caller wording its own error") {
+    test("cycle reports the names without building a graph, for a caller wording its own error") {
+      // Edges rather than nodes: the caller that needs this is ordering capabilities, whose names are not module ids.
       assertTrue(
-        ModuleGraph.cycle(List(ModuleNode("a", List("b")), ModuleNode("b", List("a")))) == Some(List("a", "b")),
-        ModuleGraph.cycle(List(ModuleNode("a"), ModuleNode("b", List("a")))).isEmpty,
+        ModuleGraph.cycle(Map("a" -> List("b"), "b" -> List("a"))) == Some(List("a", "b")),
+        ModuleGraph.cycle(Map("a" -> Nil, "b" -> List("a"))).isEmpty,
       )
+    },
+    test("cycle ignores a dependency on a name it has no edges for, as an external dep is ignored") {
+      assertTrue(ModuleGraph.cycle(Map("a" -> List("absent"))).isEmpty)
     },
     test("mapNodes rewrites attributes and keeps the layers") {
       val flagged = sampleGraph.mapNodes {
@@ -115,7 +121,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
     },
     test("mapNodes ignores edits to id and dependsOn, which is what makes it total") {
       // A structure-preserving map cannot invalidate the layers, so there is no cycle to report and no Either to unwrap.
-      val rewired = sampleGraph.mapNodes(n => n.copy(id = "renamed", dependsOn = List("clientA")))
+      val rewired = sampleGraph.mapNodes(n => n.copy(id = ModuleId("renamed"), dependsOn = List("clientA")))
       assertTrue(
         rewired.ids == sampleGraph.ids,
         rewired.directDeps("clientA") == sampleGraph.directDeps("clientA"),
@@ -123,7 +129,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       )
     },
     test("external dependsOn ids are dropped from directDeps") {
-      val g = ModuleGraph(List(ModuleNode("a", dependsOn = List("outside", "b")), ModuleNode("b")))
+      val g = ModuleGraph(List(ModuleNode(ModuleId("a"), dependsOn = List("outside", "b")), ModuleNode(ModuleId("b"))))
       assertTrue(g.directDeps("a") == List("b"), g.transitiveDeps("a") == Set("b"))
     },
     test("affectedClosure ignores seed ids absent from the graph") {
@@ -133,8 +139,8 @@ object ModuleGraphSpec extends ZIOSpecDefault:
     test("duplicate node ids: last definition wins in get; ids lists every occurrence") {
       val g = ModuleGraph(
         List(
-          ModuleNode("a", publishes = false),
-          ModuleNode("a", publishes = true),
+          ModuleNode(ModuleId("a"), publishes = false),
+          ModuleNode(ModuleId("a"), publishes = true),
         )
       )
       assertTrue(g.get("a").exists(_.publishes), g.ids == List("a", "a"))
@@ -146,10 +152,10 @@ object ModuleGraphSpec extends ZIOSpecDefault:
     test("diamond publish contraction: two paths to the same publisher") {
       val g = ModuleGraph(
         List(
-          ModuleNode("root", publishes = true),
-          ModuleNode("midA", dependsOn = List("root")),
-          ModuleNode("midB", dependsOn = List("root")),
-          ModuleNode("leaf", dependsOn = List("midA", "midB"), publishes = true),
+          ModuleNode(ModuleId("root"), publishes = true),
+          ModuleNode(ModuleId("midA"), dependsOn = List("root")),
+          ModuleNode(ModuleId("midB"), dependsOn = List("root")),
+          ModuleNode(ModuleId("leaf"), dependsOn = List("midA", "midB"), publishes = true),
         )
       )
       assertTrue(g.subsetLayers(_.publishes) == List(List("root"), List("leaf")))

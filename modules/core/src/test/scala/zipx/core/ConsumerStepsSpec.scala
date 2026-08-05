@@ -129,7 +129,7 @@ object ConsumerStepsSpec extends ZIOSpecDefault:
     )
 
   private val pins = ActionPins.Defaults
-  private val ctx  = StepContext(ModuleNode("core"), None, matrixed = false, pins)
+  private val ctx  = StepContext(ModuleNode(ModuleId("core")), None, matrixed = false, pins)
 
   private def stepNamed(steps: List[Step], name: String): Step =
     steps.find(_.name.contains(name)).getOrElse(throw AssertionError(s"step '$name' missing"))

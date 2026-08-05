@@ -1,6 +1,7 @@
 package zipx.core
 
 import zipx.shell.*
+import zipx.workflow.StepId
 
 /** The commit-stable namespace in a LocalDir `actions/cache` key: mid-PR pushes keep sharing hits, and a release rolls
   * it. The cases differ in *when* the string is known, at generate time or on the runner.
@@ -19,13 +20,19 @@ enum CacheEpoch:
     */
   case GitTags(tagMatch: SquoteText = CacheEpoch.DefaultTagMatch)
 
-  /** User-supplied shell that must write `epoch=` and `release=` lines to `$GITHUB_OUTPUT`. */
-  case Script(run: String, stepId: String = "cache-epoch")
+  /** User-supplied shell that must write `epoch=` and `release=` lines to `$GITHUB_OUTPUT`.
+    *
+    * @param stepId
+    *   a [[zipx.workflow.StepId]] rather than a `String` because the planner reads the epoch back out as
+    *   `steps.<id>.outputs.epoch`; an id that is not a legal Actions identifier would make that reference unparseable,
+    *   and the failure would surface as a broken cache key rather than as a rejected setting.
+    */
+  case Script(run: String, stepId: StepId = CacheEpoch.GitTagsStepId)
 end CacheEpoch
 
 object CacheEpoch:
 
-  val GitTagsStepId: String = "cache-epoch"
+  val GitTagsStepId: StepId = StepId("cache-epoch")
 
   val DefaultTagMatch: SquoteText = SquoteText("v*")
 

@@ -6,10 +6,10 @@ object AffectedSpec extends ZIOSpecDefault:
 
   private val graph = ModuleGraph(
     List(
-      ModuleNode("models", baseDir = "models"),
-      ModuleNode("coreLib", dependsOn = List("models"), baseDir = "core-lib"),
-      ModuleNode("client", dependsOn = List("coreLib"), baseDir = "client"),
-      ModuleNode("service", dependsOn = List("coreLib"), baseDir = "service"),
+      ModuleNode(ModuleId("models"), baseDir = "models"),
+      ModuleNode(ModuleId("coreLib"), dependsOn = List("models"), baseDir = "core-lib"),
+      ModuleNode(ModuleId("client"), dependsOn = List("coreLib"), baseDir = "client"),
+      ModuleNode(ModuleId("service"), dependsOn = List("coreLib"), baseDir = "service"),
     )
   )
 
@@ -80,8 +80,8 @@ object AffectedSpec extends ZIOSpecDefault:
     test("longest-prefix wins when base dirs would otherwise overlap") {
       val nested = ModuleGraph(
         List(
-          ModuleNode("outer", baseDir = "mods"),
-          ModuleNode("inner", baseDir = "mods/inner"),
+          ModuleNode(ModuleId("outer"), baseDir = "mods"),
+          ModuleNode(ModuleId("inner"), baseDir = "mods/inner"),
         )
       )
       assertTrue(
@@ -90,7 +90,10 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     test("sibling base dirs that share a name prefix must not cross-match") {
-      val g = ModuleGraph(List(ModuleNode("core", baseDir = "core"), ModuleNode("coreLib", baseDir = "core-lib")))
+      val g =
+        ModuleGraph(
+          List(ModuleNode(ModuleId("core"), baseDir = "core"), ModuleNode(ModuleId("coreLib"), baseDir = "core-lib"))
+        )
       assertTrue(
         Affected.owningModule(g, "core-lib/src/X.scala").contains("coreLib"),
         Affected.owningModule(g, "core/src/X.scala").contains("core"),
@@ -98,7 +101,7 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     test("a directory name that is a strict superstring of a base dir does not match") {
-      val g = ModuleGraph(List(ModuleNode("app", baseDir = "app")))
+      val g = ModuleGraph(List(ModuleNode(ModuleId("app"), baseDir = "app")))
       assertTrue(
         Affected.owningModule(g, "application/Main.scala").isEmpty,
         Affected.owningModule(g, "app/Main.scala").contains("app"),
@@ -107,10 +110,10 @@ object AffectedSpec extends ZIOSpecDefault:
     test("diamond dependency: closure dedupes the shared apex") {
       val diamond = ModuleGraph(
         List(
-          ModuleNode("d", baseDir = "d"),
-          ModuleNode("b", dependsOn = List("d"), baseDir = "b"),
-          ModuleNode("c", dependsOn = List("d"), baseDir = "c"),
-          ModuleNode("a", dependsOn = List("b", "c"), baseDir = "a"),
+          ModuleNode(ModuleId("d"), baseDir = "d"),
+          ModuleNode(ModuleId("b"), dependsOn = List("d"), baseDir = "b"),
+          ModuleNode(ModuleId("c"), dependsOn = List("d"), baseDir = "c"),
+          ModuleNode(ModuleId("a"), dependsOn = List("b", "c"), baseDir = "a"),
         )
       )
       assertTrue(Affected.affectedModules(diamond, List("d/X.scala")) == Set("a", "b", "c", "d"))
@@ -137,8 +140,8 @@ object AffectedSpec extends ZIOSpecDefault:
     test("empty baseDir never owns a file (root aggregators are invisible)") {
       val g = ModuleGraph(
         List(
-          ModuleNode("root", baseDir = ""),
-          ModuleNode("lib", baseDir = "lib"),
+          ModuleNode(ModuleId("root"), baseDir = ""),
+          ModuleNode(ModuleId("lib"), baseDir = "lib"),
         )
       )
       assertTrue(
@@ -148,7 +151,7 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     test("baseDir with a trailing slash still matches") {
-      val g = ModuleGraph(List(ModuleNode("app", baseDir = "app/")))
+      val g = ModuleGraph(List(ModuleNode(ModuleId("app"), baseDir = "app/")))
       assertTrue(
         Affected.owningModule(g, "app/Main.scala").contains("app"),
         Affected.owningModule(g, "app").contains("app"),
@@ -166,8 +169,8 @@ object AffectedSpec extends ZIOSpecDefault:
     test("path that equals a baseDir with nested sibling does not steal the sibling") {
       val g = ModuleGraph(
         List(
-          ModuleNode("a", baseDir = "pkgs/a"),
-          ModuleNode("ab", baseDir = "pkgs/ab"),
+          ModuleNode(ModuleId("a"), baseDir = "pkgs/a"),
+          ModuleNode(ModuleId("ab"), baseDir = "pkgs/ab"),
         )
       )
       assertTrue(

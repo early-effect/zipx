@@ -1,12 +1,62 @@
 package zipx.core
 
+import neotype.Subtype
+import neotype.unwrap
+import zipx.workflow.ExprLiteral
+import zipx.workflow.Names
+
+/** An sbt project id that zipx can put in a workflow: GitHub's identifier rule, which is stricter than sbt's own.
+  *
+  * sbt accepts any id starting with a `Character.isLetter`, so `café` and `プロジェクト` are legal projects. GitHub job ids
+  * are ASCII, so such a module would produce a workflow GitHub rejects. This is the newtype that catches it, and it
+  * catches it where the graph is built rather than midway through planning.
+  *
+  * A module id is spliced into two positions with different rules, and satisfies both. It becomes part of a
+  * `jobs.<job_id>` key, and it appears single-quoted inside an expression as the `'api'` of
+  * `contains(fromJson(…), 'api')`. GitHub's id rule is the tighter of the two: its character set is a strict subset of
+  * the expression-literal set, so checking the id rule establishes both at once and [[asExprLiteral]] needs no second
+  * validation. That subset claim is not taken on faith; `ModuleIdSpec` checks it over both character positions.
+  *
+  * A `Subtype` rather than a `Newtype`, so `ModuleId <: String`. Reading an id needs no ceremony: `_.id == "service"`
+  * in a `build.sbt`, `s"${node.id}/test"` in a command, and `Map[String, ModuleNode]` all keep working. Only
+  * *construction* is checked, which is the only place a bad id can enter.
+  */
+type ModuleId = ModuleId.Type
+object ModuleId extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a module id must be non-empty"
+    else if input.matches(Names.ActionsId) then true
+    else
+      s"invalid module id '$input': a GitHub job id must start with an ASCII letter or _ and contain only ASCII " +
+        "letters, digits, - or _, which is stricter than sbt's own project-id rule"
+
+  /** A module id from a job id, for the planner's synthetic nodes: a job zipx invents (`cache-rehydrate`) needs a node
+    * to carry it through [[StepContext]], and its identity is already the job id.
+    *
+    * `unsafeMake` because the two validators are the same rule, `Names.ActionsId` and non-empty, which is not a
+    * coincidence: a module id is constrained *because* it becomes a job id. If they ever diverge, this is the one place
+    * that has to change.
+    */
+  def fromJobId(id: zipx.workflow.JobId): ModuleId = unsafeMake(id.unwrap)
+
+  extension (id: ModuleId)
+    /** The id as an expression literal, for the `'api'` of `contains(fromJson(…), 'api')`.
+      *
+      * `unsafeMake` because [[Names.ActionsId]]'s character set is a strict subset of [[Names.ExprLiteral]]'s in both
+      * the first and subsequent positions, so this conversion is total. That is the property that lets the planner's
+      * affected gate be built rather than validated, and it is checked exhaustively in `ModuleIdSpec`.
+      */
+    def asExprLiteral: ExprLiteral = ExprLiteral.unsafeMake(id)
+end ModuleId
+
 /** A build module as zipx sees it: the sbt-agnostic projection of an sbt project.
   *
   * The sbt plugin (`zipx.sbt`) builds these from `Project.extract(state).structure`; the pure core plans over them so
   * the whole planner is unit-testable without sbt on the classpath.
   *
   * @param id
-  *   the sbt project id (e.g. "schema"); the single source of truth for a module's identity, never re-declared.
+  *   the sbt project id (e.g. "schema"); the single source of truth for a module's identity, never re-declared. A
+  *   [[ModuleId]], so a project sbt allows but GitHub cannot name is rejected when the graph is built.
   * @param dependsOn
   *   direct classpath dependencies (from sbt `dependsOn` / `buildDependencies.classpathRefs`). Drives `needs` edges.
   * @param publishes
@@ -27,7 +77,7 @@ package zipx.core
   *   the docker capability's per-module jobs.
   */
 final case class ModuleNode(
-    id: String,
+    id: ModuleId,
     dependsOn: List[String] = Nil,
     publishes: Boolean = false,
     ciRelevant: Boolean = true,
@@ -147,17 +197,24 @@ object ModuleGraph:
       case Right(layers)  => Right(new ModuleGraph(nodes, layers))
       case Left(involved) => Left(s"dependency cycle among modules: ${involved.mkString(", ")}")
 
-  /** The ids involved in a cycle, if there is one. For a caller that is not building a module graph and needs to word
-    * the error in its own terms, as [[Planner]] does for a `needsCapabilities` cycle.
+  /** The names involved in a cycle in an arbitrary `name -> dependencies` graph, if there is one. Dependencies naming
+    * something absent from the keys are ignored, as an external dependency is here too.
+    *
+    * Takes the edges rather than a `List[ModuleNode]` because the caller that needs it is not ordering modules:
+    * [[Planner]] uses it for `needsCapabilities`, and has to word the error in terms of capabilities. Passing
+    * capability names as module ids would be a lie the [[ModuleId]] rule is entitled to reject.
     */
-  def cycle(nodes: List[ModuleNode]): Option[List[String]] = layers(nodes).left.toOption
+  def cycle(edges: Map[String, List[String]]): Option[List[String]] =
+    val present = edges.keySet
+    layersOrCycle(edges.keys.toList, id => edges.getOrElse(id, Nil).toSet.intersect(present)).left.toOption
 
   private def layers(nodes: List[ModuleNode]): Either[List[String], List[List[String]]] =
     // The sort runs over distinct ids: a duplicated id is one node to order, and `byId` resolves it
     // last-definition-wins. `ModuleGraph.ids` keeps every occurrence, which is a separate, tested behaviour.
-    val present                        = nodes.map(_.id).toSet
+    // `id: String` widens the ModuleId subtype, so `intersect` compares two `Set[String]`s.
+    val present: Set[String]           = nodes.map(n => n.id: String).toSet
     val deps: Map[String, Set[String]] =
-      nodes.groupMapReduce(_.id)(_.dependsOn.toSet.intersect(present))(_ ++ _)
+      nodes.groupMapReduce(n => n.id: String)(_.dependsOn.toSet.intersect(present))(_ ++ _)
     layersOrCycle(nodes.map(_.id).distinct, id => deps.getOrElse(id, Set.empty))
 
   /** A graph whose node list is known acyclic: a test fixture, or a graph derived from one that is already validated. A

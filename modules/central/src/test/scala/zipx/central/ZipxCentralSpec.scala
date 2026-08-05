@@ -6,7 +6,7 @@ import zipx.core.*
 object ZipxCentralSpec extends ZIOSpecDefault:
   import Fixtures.*
 
-  private val stepContext = StepContext(ModuleNode(id = "schema"), None, matrixed = false)
+  private val stepContext = StepContext(ModuleNode(id = ModuleId("schema")), None, matrixed = false)
 
   private val config = PlanConfig(
     workflowName = "CI",

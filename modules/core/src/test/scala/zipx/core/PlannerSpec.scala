@@ -267,7 +267,7 @@ object PlannerSpec extends ZIOSpecDefault:
         run = """echo "epoch=9.9.9-ci" >> "$GITHUB_OUTPUT"
                 |echo "release=9.9.9" >> "$GITHUB_OUTPUT"
                 |""".stripMargin,
-        stepId = "my-epoch",
+        stepId = StepId("my-epoch"),
       )
       val wf      = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = custom))
       val steps   = wf.jobs("test").steps
@@ -732,9 +732,19 @@ object PlannerSpec extends ZIOSpecDefault:
     test("publish contracts edges through a non-publishing intermediate") {
       val g = ModuleGraph(
         List(
-          ModuleNode("pubRoot", publishes = true, crossScalaVersions = List(scala3)),
-          ModuleNode("middle", dependsOn = List("pubRoot"), publishes = false, crossScalaVersions = List(scala3)),
-          ModuleNode("pubLeaf", dependsOn = List("middle"), publishes = true, crossScalaVersions = List(scala3)),
+          ModuleNode(ModuleId("pubRoot"), publishes = true, crossScalaVersions = List(scala3)),
+          ModuleNode(
+            ModuleId("middle"),
+            dependsOn = List("pubRoot"),
+            publishes = false,
+            crossScalaVersions = List(scala3),
+          ),
+          ModuleNode(
+            ModuleId("pubLeaf"),
+            dependsOn = List("middle"),
+            publishes = true,
+            crossScalaVersions = List(scala3),
+          ),
         )
       )
       val wf = Planner.plan(g, List(Capability.publishGraph), config)
@@ -820,7 +830,8 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("root modules with empty baseDir never own changed files via the planner path") {
-      val g = ModuleGraph(List(ModuleNode("root", baseDir = ""), ModuleNode("lib", baseDir = "lib")))
+      val g =
+        ModuleGraph(List(ModuleNode(ModuleId("root"), baseDir = ""), ModuleNode(ModuleId("lib"), baseDir = "lib")))
       assertTrue(Affected.owningModule(g, "README.md").isEmpty, Affected.owningModule(g, "lib/X.scala").contains("lib"))
     },
     test("Aggregate test emits one root Once job (sbt test)") {

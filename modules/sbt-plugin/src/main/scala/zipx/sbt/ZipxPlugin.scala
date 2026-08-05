@@ -373,7 +373,11 @@ object ZipxPlugin extends AutoPlugin:
           .map(p => buildRoot.relativize(p.base.toPath).toString.replace('\\', '/'))
           .getOrElse("")
       ModuleNode(
-        id = ref.project,
+        // The one place a project id enters zipx, so the one place it is checked. sbt admits any id starting with a
+        // `Character.isLetter`, so `café` is a legal project; GitHub job ids are ASCII, and a workflow naming that
+        // module would be rejected on push. Reported here, before anything is written, rather than thrown from the
+        // middle of planning. The newtype's message already quotes the offending id, so no prefix is added.
+        id = orFail(ModuleId.make(ref.project)),
         dependsOn = deps.classpathRefs(ref).map(_.project).toList.distinct,
         publishes = publishes,
         ciRelevant = read(zipxCiRelevant, true),

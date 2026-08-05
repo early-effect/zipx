@@ -7,7 +7,7 @@ object RemoteCacheSmoke:
 
   /** Tiny one-module graph (enough for Aggregate test). */
   val graph: ModuleGraph = ModuleGraph(
-    List(ModuleNode("lib", publishes = false, crossScalaVersions = List("3.8.4"), baseDir = "lib"))
+    List(ModuleNode(ModuleId("lib"), publishes = false, crossScalaVersions = List("3.8.4"), baseDir = "lib"))
   )
 
   def config(javaVersion: String = "21", runnerOs: String = "ubuntu-latest"): PlanConfig =

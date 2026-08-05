@@ -75,10 +75,9 @@ object Planner:
             "zipxAffectedOnPush on Graph Verify capabilities, not by Gate. Use Gate.Always (Verify capabilities are " +
             "affected-gated automatically) or Gate.OnReleaseTag."
         )
-    // `ModuleGraph.cycle` rather than `make`: the nodes here are capabilities, so the error has to name them as such.
-    val names = capabilities.map(_.name).toSet
+    // `ModuleGraph.cycle` rather than `make`: these are capabilities, so the error has to name them as such.
     ModuleGraph
-      .cycle(capabilities.map(c => ModuleNode(c.name, dependsOn = c.needsCapabilities.filter(names.contains))))
+      .cycle(capabilities.map(c => c.name -> c.needsCapabilities).toMap)
       .foreach(involved => sys.error(s"zipx: needsCapabilities cycle among ${involved.mkString(", ")}"))
   end validateCapabilities
 
@@ -251,7 +250,7 @@ object Planner:
     */
   private def cacheRehydrateJob(config: PlanConfig): Job =
     val ctx = StepContext(
-      node = ModuleNode(id = cacheRehydrateJobId, publishes = false, ciRelevant = false),
+      node = ModuleNode(id = ModuleId.fromJobId(cacheRehydrateId), publishes = false, ciRelevant = false),
       target = None,
       matrixed = false,
       actions = config.actions,
@@ -434,7 +433,7 @@ object Planner:
     end match
   end onceJob
 
-  private val syntheticNode = ModuleNode(id = "_build")
+  private val syntheticNode = ModuleNode(id = ModuleId("_build"))
 
   private def aggregateJobs(
       capability: Capability,
@@ -679,14 +678,9 @@ object Planner:
   ): Option[String] =
     val releaseGate =
       Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
-    // `'all'` is the affected job's "could not narrow it down" answer.
     val affectedGate =
       Option.when(gatedOnAffected)(
-        Expr
-          .group(
-            affectedContains(node.id) || affectedContains("all")
-          )
-          .unwrapped
+        Expr.group(affectedContains(node.id.asExprLiteral) || affectedContainsAll).unwrapped
       )
     // `!= 'failure'` rather than `== 'success'`, because a *skipped* upstream is fine here: its module was not affected,
     // and that is exactly the case GitHub's implicit `success()` would wrongly block.
@@ -701,14 +695,21 @@ object Planner:
   end jobCondition
 
   /** The affected job's output is a JSON array, so `fromJson` is what makes `contains` mean membership rather than
-    * substring. `id` comes off the graph, hence the `Make` sibling: a module id that cannot be a quoted literal is a
-    * generate-time error rather than a broken `if:`.
+    * substring.
+    *
+    * Total, with no `Either` to report: the two members it is called with are a module id, validated when the graph was
+    * built and converted by [[ModuleId.asExprLiteral]], and the literal `'all'` below.
     */
-  private def affectedContains(id: String): Expr =
+  private def affectedContains(member: ExprLiteral): Expr =
     Expr.contains(
       Expr.fromJson(Expr.JobOutput(affectedId, OutputName("modules"))),
-      orThrow(s"module id '$id'", Expr.quotedMake(id)),
+      Expr.Quoted(member),
     )
+
+  /** `'all'` is the affected job's "could not narrow it down" answer, and the one member of that array that is not a
+    * module id.
+    */
+  private val affectedContainsAll: Expr = affectedContains(ExprLiteral("all"))
 
   private def jobResultOf(jobId: String): Expr =
     orThrow(s"job id '$jobId'", Expr.jobResultMake(jobId))
@@ -890,18 +891,20 @@ object Planner:
       prefix: String,
       paths: String,
       jobSuffix: String,
-      stepId: String,
+      stepId: StepId,
       resolveRun: String,
       cacheAction: String,
   ): List[Step] =
-    def output(name: String): Expr =
-      lit(prefix) ++ orThrow(s"cache-epoch step id '$stepId'", Expr.stepOutputMake(stepId, name)) ++ Expr.lit("-")
-    val epoch   = output("epoch")
+    // `Expr.StepOutput` directly rather than `stepOutputMake`: both arguments are already validated, so there is no
+    // failure left for a caller to report. `CacheEpoch` holding a `StepId` is what bought that.
+    def output(name: OutputName): Expr =
+      lit(prefix) ++ Expr.StepOutput(stepId, name) ++ Expr.lit("-")
+    val epoch   = output(OutputName("epoch"))
     val run     = perRunKey(epoch)
-    val release = output("release")
+    val release = output(OutputName("release"))
     List(
       Step(
-        id = Some(stepId),
+        id = Some(stepId.unwrap),
         name = Some("Resolve cache epoch"),
         run = Some(resolveRun),
       ),

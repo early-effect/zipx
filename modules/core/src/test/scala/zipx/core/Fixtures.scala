@@ -11,18 +11,38 @@ object Fixtures:
 
   val sampleGraph: ModuleGraph = ModuleGraph(
     List(
-      ModuleNode("core", crossScalaVersions = List(scala3), testTask = "testFull"),
-      ModuleNode("schema", publishes = true, crossScalaVersions = cross),
-      ModuleNode("api", dependsOn = List("schema"), publishes = true, crossScalaVersions = cross),
-      ModuleNode("legacyClient", dependsOn = List("schema"), publishes = true, crossScalaVersions = List(scala2)),
-      ModuleNode("clientA", dependsOn = List("api"), publishes = true, crossScalaVersions = cross),
-      ModuleNode("clientB", dependsOn = List("api"), publishes = true, crossScalaVersions = cross),
-      ModuleNode("serviceA", dependsOn = List("core", "api"), crossScalaVersions = List(scala3), testTask = "testFull"),
-      ModuleNode("serviceB", dependsOn = List("core", "api"), crossScalaVersions = List(scala3), testTask = "testFull"),
-      ModuleNode("serviceC", dependsOn = List("api"), crossScalaVersions = List(scala3), testTask = "testFull"),
-      ModuleNode("serviceD", dependsOn = List("core", "api"), crossScalaVersions = List(scala3)),
-      ModuleNode("workerA", dependsOn = List("core"), crossScalaVersions = List(scala3)),
-      ModuleNode("workerB", dependsOn = List("core"), crossScalaVersions = List(scala3)),
+      ModuleNode(ModuleId("core"), crossScalaVersions = List(scala3), testTask = "testFull"),
+      ModuleNode(ModuleId("schema"), publishes = true, crossScalaVersions = cross),
+      ModuleNode(ModuleId("api"), dependsOn = List("schema"), publishes = true, crossScalaVersions = cross),
+      ModuleNode(
+        ModuleId("legacyClient"),
+        dependsOn = List("schema"),
+        publishes = true,
+        crossScalaVersions = List(scala2),
+      ),
+      ModuleNode(ModuleId("clientA"), dependsOn = List("api"), publishes = true, crossScalaVersions = cross),
+      ModuleNode(ModuleId("clientB"), dependsOn = List("api"), publishes = true, crossScalaVersions = cross),
+      ModuleNode(
+        ModuleId("serviceA"),
+        dependsOn = List("core", "api"),
+        crossScalaVersions = List(scala3),
+        testTask = "testFull",
+      ),
+      ModuleNode(
+        ModuleId("serviceB"),
+        dependsOn = List("core", "api"),
+        crossScalaVersions = List(scala3),
+        testTask = "testFull",
+      ),
+      ModuleNode(
+        ModuleId("serviceC"),
+        dependsOn = List("api"),
+        crossScalaVersions = List(scala3),
+        testTask = "testFull",
+      ),
+      ModuleNode(ModuleId("serviceD"), dependsOn = List("core", "api"), crossScalaVersions = List(scala3)),
+      ModuleNode(ModuleId("workerA"), dependsOn = List("core"), crossScalaVersions = List(scala3)),
+      ModuleNode(ModuleId("workerB"), dependsOn = List("core"), crossScalaVersions = List(scala3)),
     )
   )
 end Fixtures
