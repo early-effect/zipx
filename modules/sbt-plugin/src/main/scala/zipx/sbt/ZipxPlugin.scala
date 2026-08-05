@@ -114,22 +114,51 @@ object ZipxPlugin extends AutoPlugin:
     //   Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install browsers").build
     //   val warm = Steps.built("warm")(Step.run(Script(Exec("npm", sh"--prefix=$dir"))))
     //
-    // `Step` is both a type and a value, since `extraSteps` is annotated with it. The rest are values only.
+    // Each has a `type` alias as well as a `val` wherever a build might annotate one (`val warm: Steps = …`, a
+    // `Capability.extraSteps` of declared type `Step`). See the "Shell and steps" docs page for the whole DSL.
     type Step = zipx.workflow.Step
     val Step = zipx.workflow.Step
 
     /** The GitHub Actions expression AST: `Expr.env("NAME")`, `Expr.secret(…)`, `Expr.github("sha")`. */
+    type Expr = zipx.workflow.Expr
     val Expr = zipx.workflow.Expr
 
     /** Composable step bundles, the typed replacement for a `StepContext => List[Step]` lambda. */
+    type Steps = zipx.core.Steps
     val Steps = zipx.core.Steps
 
     // The shell AST, for a `run:` script that is structure rather than an interpolated string. `sh` is the
     // interpolator for the one-liner case, and lives at package level in zipx-shell rather than on `Script`.
+    type Script = zipx.shell.Script
     val Script = zipx.shell.Script
-    val Word   = zipx.shell.Word
-    val Exec   = zipx.shell.Exec
+    type Word = zipx.shell.Word
+    val Word = zipx.shell.Word
+    val Exec = zipx.shell.Exec
     export zipx.shell.sh
+
+    // Shell structure: conditionals, loops, assignments, heredocs. A `Block` is a head plus a tail, so an empty
+    // branch is unconstructible; `ShTest` picks the bracket form, and `GlobMatch` takes a `GlobPattern` rather than
+    // a `Word` because a bash pattern must not arrive quoted.
+    type ShTest = zipx.shell.ShTest
+    val ShTest = zipx.shell.ShTest
+    type Block = zipx.shell.Block
+    val Block  = zipx.shell.Block
+    val If     = zipx.shell.If
+    val ForIn  = zipx.shell.ForIn
+    val While  = zipx.shell.While
+    val Assign = zipx.shell.Assign
+    // Names the above constructors take directly. The rest of zipx-shell's newtypes are reached through the smart
+    // constructors on `Word` / `Script`, so they are deliberately not re-exported.
+    val VarName     = zipx.shell.VarName
+    val GlobPattern = zipx.shell.GlobPattern
+    // Escape hatches. Typed, so they cannot break the YAML, and reported by `zipxWorkflowGenerate` as a warning
+    // naming the bundle. `Script.raw` returns an `Either`; prefer implementing `zipx.shell.Command` for anything
+    // you reach for twice.
+    val Raw     = zipx.shell.Raw
+    val RawLine = zipx.shell.RawLine
+    // `zipx.shell.Command` and `InlineCommand` are deliberately absent: `Command` is sbt's own name in a `build.sbt`
+    // (`commands += Command.command(…)`), and shadowing it here would break that. A build implementing its own shell
+    // construct imports `zipx.shell.Command` explicitly, which is usually in `project/*.scala` anyway.
     // Typed, IDE-friendly capability constructors that take a real TaskKey/InputKey instead of a command string:
     //   zipxTasks.once("fmt", scalafmtCheckAll)   zipxTasks.deploy(_.id == "svc", promote, targets = ...)
     val zipxTasks = zipx.sbt.CapabilityTasks

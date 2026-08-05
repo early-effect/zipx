@@ -106,6 +106,10 @@ To also warm **non-sbt** blobs that live under `target/` (e.g. Playwright browse
 `env`; assign the same setup function when you want step parity:
 
 ```scala
+val browserSetup = Steps.built("browsers")(
+  Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install browsers")
+)
+
 zipxSkipMergedPrPush := true  // default
 zipxCacheRehydrateOnMerge := true  // default; LocalDir only
 zipxCacheRehydrateTask := "compile"  // default
@@ -117,6 +121,10 @@ zipxCacheRehydrateExtraSteps := browserSetup  // after cache restore, before com
 
 `EnvValue.typed` takes any `Expr`, so `++` concatenates a context reference with literal text instead of spelling the
 `$${{ … }}` out. `EnvValue.expr` still accepts a raw string, and `zipxWorkflowGenerate` warns when one is used.
+
+`browserSetup` is a **`Steps` bundle**, not a lambda: it carries a name, composes with `++`, gates with `.when(...)`,
+and reports escape-hatch use so `zipxWorkflowGenerate` can warn and name it. The step body is a typed `Script`, so
+nothing here is a hand-written shell string. See **Shell and steps** for the whole DSL.
 """,
       exampleValue {
         given PlanConfig = config.copy(skipMergedPrPush = true)
@@ -136,8 +144,9 @@ zipxCacheRehydrateExtraSteps := browserSetup  // after cache restore, before com
             "PLAYWRIGHT_BROWSERS_PATH" ->
               EnvValue.typed(Expr.github("workspace") ++ Expr.lit("/target/ms-playwright"))
           ),
-          cacheRehydrateExtraSteps =
-            _ => List(Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install browsers").build),
+          cacheRehydrateExtraSteps = Steps.built("browsers")(
+            Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install browsers")
+          ),
         )
         DocsRender.jobs("cache-rehydrate", "test")(Capability.test)
       }.assert(yaml =>
