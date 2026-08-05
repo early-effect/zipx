@@ -117,7 +117,8 @@ object PipelineSpec extends ZIOSpecDefault:
       )
     },
     test("the whole workflow renders deterministically (byte-identical twice)") {
-      assertTrue(Render.render(wf) == Render.render(wf))
+      // isRight as well as equal: two Lefts would compare equal too, and a planned workflow must render.
+      assertTrue(Render.render(wf).isRight, Render.render(wf) == Render.render(wf))
     },
   )
 end PipelineSpec

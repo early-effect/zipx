@@ -64,7 +64,7 @@ Prefer GitTags so post-tag PRs warm from the release cache without a regenerate 
 ```scala
 zipxCache := CacheBackend.LocalDir
 zipxCache := CacheBackend.BazelRemoteSidecar(RemoteCacheProof.image, RemoteCacheProof.port)
-zipxCache := CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
+zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
 ```
 
 - **LocalDir**: persist local cache dirs and `target/` with `actions/cache`. Primary key is OS + JDK + epoch + run id +
@@ -94,7 +94,7 @@ store is the persistence); LocalDir uses epoch-keyed `actions/cache` instead.
         )
         val remote = DocsRender.job("test")(Capability.test)(using
           libGraph,
-          config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")),
+          config.copy(cache = CacheBackend.managedRemote("grpcs://cache.example", "CACHE_KEY")),
         )
         local + "\n---\n" + sidecar + "\n---\n" + remote
       }.assert(yaml =>

@@ -6,6 +6,9 @@ import zipx.core.*
 object ZipxCentralSpec extends ZIOSpecDefault:
   import Fixtures.*
 
+  /** For calling a [[Steps]] bundle directly, where the planner is not the thing under test. */
+  private val stepContext = StepContext(ModuleNode(id = "schema"), None, matrixed = false)
+
   private val config = PlanConfig(
     workflowName = "CI",
     cacheEpoch = CacheEpoch.Fixed("1.0.0"),
@@ -41,6 +44,23 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       assertTrue(
         importRun.contains("""echo "$PGP_SECRET" | base64 --decode | gpg --batch --import"""),
         !importRun.contains("$$PGP_SECRET"),
+      )
+    },
+    test("the typed gpg import script renders the exact bytes the hand-written one did") {
+      // The byte-stability proof for this site. The string on the right is what shipped in ci.yml before the DSL, so a
+      // change to the shell AST that moves a single character fails here rather than in a release.
+      val importRun = ZipxCentral.gpgImportSteps(stepContext).head.run.getOrElse("")
+      assertTrue(
+        importRun ==
+          """mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
+            |echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+            |echo "pinentry-mode loopback"   >> ~/.gnupg/gpg.conf
+            |gpgconf --kill gpg-agent || true
+            |echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin,
+        // No `set -euo pipefail`: the original did not have one, and adding it would change behaviour as well as bytes.
+        !importRun.startsWith("set -"),
+        // Typed all the way down, so nothing here is reported as escape-hatch content.
+        ZipxCentral.gpgImportSteps.rawFragments.isEmpty,
       )
     },
     test("cross-built modules get +publishSigned; single-version do not") {

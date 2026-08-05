@@ -5,27 +5,16 @@ import zipx.shell.*
 
 import scala.collection.immutable.ListMap
 
-/** Step validity, closed from both ends: [[StepBuilder]] makes the good path the easy one, [[Step.validate]] closes the
-  * bad one at render time.
+/** Step validity, closed from both ends: [[StepBuilder]] makes an invalid step unrepresentable, [[Step.problem]] closes
+  * the bad one at render time.
   *
   * The two ends need separate coverage because they guard different callers. A build that uses the builder cannot
-  * express an invalid step at all; a build that constructs `Step(...)` directly, which stays legal because the case
-  * class shape is fixed by the on-disk contract, is caught when [[Render]] encodes it.
+  * express an invalid step at all, and the three rules are enforced three different ways: `run:`-vs-`uses:` by the
+  * builder's type, a literal ref by the `inline` constructor during compilation, a runtime ref by an `Either`. A build
+  * that constructs `Step(...)` directly, which stays legal because the case class shape is fixed by the on-disk
+  * contract, is caught when [[Render]] encodes it, as a `Left` rather than a thrown error.
   */
 object StepBuilderSpec extends ZIOSpecDefault:
-
-  private def rejects(f: => Any): Boolean =
-    try
-      val _ = f
-      false
-    catch case _: IllegalArgumentException => true
-
-  /** Message from a rejection, so a test can assert the error explains itself. */
-  private def failure(f: => Any): Option[String] =
-    try
-      val _ = f
-      None
-    catch case e: IllegalArgumentException => Some(e.getMessage)
 
   private val script: Script = Script.strict(Exec("sbt", Word.squote("test")))
 
@@ -85,7 +74,10 @@ object StepBuilderSpec extends ZIOSpecDefault:
         )
       },
       test("a run step cannot take with:, because GitHub would ignore it") {
-        assertTrue(rejects(Step.run(script).withInput("path", "~/.sbt").build))
+        // A type, not a check: `withInput` exists only on `StepBuilder.Uses`, so this is a compile error at the
+        // construction site rather than a failure at generate time. Nothing to catch and nothing to handle.
+        for run <- typeCheck("""zipx.workflow.Step.run(zipx.shell.Script.empty).withInput("path", "~/.sbt")""")
+        yield assertTrue(run.isLeft)
       },
     ),
     suite("uses")(
@@ -110,77 +102,90 @@ object StepBuilderSpec extends ZIOSpecDefault:
           )
         )
       },
-      test("an unpinned or malformed ref is rejected at the construction site") {
-        assertTrue(
-          rejects(Step.uses("actions/checkout")),
-          rejects(Step.uses("checkout")),
-          rejects(Step.uses("")),
-          failure(Step.uses("actions/checkout")).exists(_.contains("@ref")),
+      test("an unpinned or malformed literal ref does not compile") {
+        for
+          pinned   <- typeCheck("""zipx.workflow.Step.uses("actions/checkout@v4")""")
+          unpinned <- typeCheck("""zipx.workflow.Step.uses("actions/checkout")""")
+          bare     <- typeCheck("""zipx.workflow.Step.uses("checkout")""")
+          empty    <- typeCheck("""zipx.workflow.Step.uses("")""")
+        yield assertTrue(
+          pinned.isRight,
+          unpinned.isLeft,
+          bare.isLeft,
+          empty.isLeft,
+          unpinned.left.exists(_.contains("@ref")),
         )
       },
-      test("a pin-file value works, which is the normal case") {
-        // ActionPins fields are read from a file at build time, so `uses` takes a String and validates it, rather than
-        // requiring an ActionRef literal the caller cannot produce.
+      test("a runtime ref goes through usesMake, which reports the reason as a value") {
+        // ActionPins fields are read from a file at build time, so a pin cannot reach the inline check. `usesMake` is
+        // the runtime half of the pair: the same validator, an Either instead of a compile error.
         val pin = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
-        assertTrue(Step.uses(pin).build.uses.contains(pin))
+        assertTrue(
+          Step.usesMake(pin).map(_.build.uses).contains(Some(pin)),
+          Step.usesMake("actions/checkout").isLeft,
+          Step.usesMake("").isLeft,
+          Step.usesMake("actions/checkout").left.exists(_.contains("@ref")),
+          // Still a builder afterwards, so a pin-driven step composes like a literal one.
+          Step.usesMake(pin).map(_.named("Checkout").build.name).contains(Some("Checkout")),
+        )
       },
     ),
-    suite("Step.validate")(
-      test("accepts the two valid shapes") {
+    suite("Step.problem")(
+      test("no problem with the two valid shapes") {
         assertTrue(
-          scala.util.Try(Step.validate(Step(run = Some("echo hi")))).isSuccess,
-          scala.util.Try(Step.validate(Step(uses = Some("actions/checkout@v4")))).isSuccess,
-          scala.util.Try(Step.validate(Step(uses = Some("a/b@v1"), `with` = ListMap("k" -> "v")))).isSuccess,
+          Step.problem(Step(run = Some("echo hi"))).isEmpty,
+          Step.problem(Step(uses = Some("actions/checkout@v4"))).isEmpty,
+          Step.problem(Step(uses = Some("a/b@v1"), `with` = ListMap("k" -> "v"))).isEmpty,
+          // validate is problem's Either face, for a caller that wants the step back.
+          Step.validate(Step(run = Some("echo hi"))).isRight,
         )
       },
-      test("rejects a step with both uses and run") {
+      test("reports a step with both uses and run") {
         val both = Step(name = Some("Confused"), uses = Some("actions/checkout@v4"), run = Some("echo hi"))
         assertTrue(
-          rejects(Step.validate(both)),
-          failure(Step.validate(both)).exists(_.contains("both uses and run")),
+          Step.problem(both).exists(_.contains("both uses and run")),
+          Step.validate(both).isLeft,
         )
       },
-      test("rejects a step with neither, including a bare Step()") {
+      test("reports a step with neither, including a bare Step()") {
         assertTrue(
-          rejects(Step.validate(Step())),
-          rejects(Step.validate(Step(name = Some("Does nothing")))),
-          failure(Step.validate(Step())).exists(_.contains("neither uses nor run")),
+          Step.problem(Step()).exists(_.contains("neither uses nor run")),
+          Step.problem(Step(name = Some("Does nothing"))).isDefined,
         )
       },
-      test("rejects with: on a run step and names the ignored keys") {
+      test("reports with: on a run step and names the ignored keys") {
         val step = Step(run = Some("echo hi"), `with` = ListMap("path" -> "~/.sbt", "key" -> "k"))
         assertTrue(
-          rejects(Step.validate(step)),
-          failure(Step.validate(step)).exists(_.contains("key, path")), // sorted, so the message is deterministic
+          Step.problem(step).exists(_.contains("key, path")) // sorted, so the message is deterministic
         )
       },
-      test("the error names the step, by name or by id, so a long workflow is diagnosable") {
+      test("the message names the step, by name or by id, so a long workflow is diagnosable") {
         assertTrue(
-          failure(Step.validate(Step(name = Some("Import signing key")))).exists(_.contains("'Import signing key'")),
-          failure(Step.validate(Step(id = Some("check")))).exists(_.contains("'check'")),
-          // Nameless: still an error, just without a label to quote.
-          failure(Step.validate(Step())).exists(!_.contains("''")),
+          Step.problem(Step(name = Some("Import signing key"))).exists(_.contains("'Import signing key'")),
+          Step.problem(Step(id = Some("check"))).exists(_.contains("'check'")),
+          // Nameless: still a problem, just without a label to quote.
+          Step.problem(Step()).exists(!_.contains("''")),
         )
       },
     ),
     suite("render-time enforcement")(
-      test("an invalid step throws when rendered as a step sequence") {
-        assertTrue(rejects(Render.renderSteps(List(Step(run = Some("ok")), Step()))))
+      test("an invalid step is a Left when rendered as a step sequence") {
+        assertTrue(Render.renderSteps(List(Step(run = Some("ok")), Step())).isLeft)
       },
-      test("an invalid step throws when rendered inside a job") {
+      test("an invalid step is a Left when rendered inside a job") {
         val job = Job(steps = List(Step(uses = Some("a/b@v1"), run = Some("echo hi"))))
         assertTrue(
-          rejects(Render.renderJob("build", job)),
-          rejects(Render.renderJobs(ListMap("build" -> job))),
+          Render.renderJob("build", job).isLeft,
+          Render.renderJobs(ListMap("build" -> job)).isLeft,
         )
       },
-      test("an invalid step throws when rendered as part of a whole workflow") {
+      test("an invalid step is a Left when rendered as part of a whole workflow") {
         val wf = Workflow(
           name = "CI",
           on = Triggers(push = Some(BranchFilter(branches = List("main")))),
           jobs = ListMap("build" -> Job(steps = List(Step()))),
         )
-        assertTrue(rejects(Render.render(wf)), rejects(Render.renderBody(wf)))
+        assertTrue(Render.render(wf).isLeft, Render.renderBody(wf).isLeft)
       },
       test("a job with no steps at all still renders: that is a reusable-workflow call") {
         val wf = Workflow(
@@ -188,11 +193,13 @@ object StepBuilderSpec extends ZIOSpecDefault:
           on = Triggers(push = Some(BranchFilter(branches = List("main")))),
           jobs = ListMap("call" -> Job(runsOn = Nil, uses = Some("org/repo/.github/workflows/w.yml@main"))),
         )
-        assertTrue(Render.render(wf).contains("uses: org/repo/.github/workflows/w.yml@main"))
+        assertTrue(Render.render(wf).exists(_.contains("uses: org/repo/.github/workflows/w.yml@main")))
       },
       test("a builder-made step round-trips through render unchanged") {
+        // The payoff of closing both ends: a builder-made step cannot be the reason render returns a Left, so this is a
+        // Right by construction.
         val step = Step.run(script).named("Test").withId("test").build
-        val yaml = Render.renderSteps(List(step))
+        val yaml = Render.renderSteps(List(step)).toOption.get
         assertTrue(
           yaml.contains("name: Test"),
           yaml.contains("id: test"),

@@ -4,7 +4,8 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zipx.docs.DocsFixtures.*
-import zipx.workflow.Step
+import zipx.shell.{Exec, Script, Word}
+import zipx.workflow.{Expr, Step}
 import zio.test.*
 
 /** Verify-phase knobs shared by Aggregate, Layer, and Graph. */
@@ -42,7 +43,7 @@ zipxVerifyCleanLabel := Some("clean")  // default
         )
       ),
       exampleValue {
-        given PlanConfig = config.copy(verifyCleanLabel = Some("clean"))
+        given PlanConfig = config.copy(verifyCleanLabel = PlanConfig.verifyCleanLabel("clean"))
         DocsRender.jobs("test")(Capability.test)
       }.assert(yaml =>
         assertTrue(
@@ -109,10 +110,13 @@ zipxSkipMergedPrPush := true  // default
 zipxCacheRehydrateOnMerge := true  // default; LocalDir only
 zipxCacheRehydrateTask := "compile"  // default
 zipxEnv := Map(
-  "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.expr("$${{ github.workspace }}/target/ms-playwright"),
+  "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.typed(Expr.github("workspace") ++ Expr.lit("/target/ms-playwright")),
 )
 zipxCacheRehydrateExtraSteps := browserSetup  // after cache restore, before compile
 ```
+
+`EnvValue.typed` takes any `Expr`, so `++` concatenates a context reference with literal text instead of spelling the
+`$${{ … }}` out. `EnvValue.expr` still accepts a raw string, and `zipxWorkflowGenerate` warns when one is used.
 """,
       exampleValue {
         given PlanConfig = config.copy(skipMergedPrPush = true)
@@ -129,9 +133,11 @@ zipxCacheRehydrateExtraSteps := browserSetup  // after cache restore, before com
         given PlanConfig = config.copy(
           skipMergedPrPush = true,
           env = Map(
-            "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.expr("${{ github.workspace }}/target/ms-playwright")
+            "PLAYWRIGHT_BROWSERS_PATH" ->
+              EnvValue.typed(Expr.github("workspace") ++ Expr.lit("/target/ms-playwright"))
           ),
-          cacheRehydrateExtraSteps = _ => List(Step(name = Some("Install browsers"), run = Some("npm ci"))),
+          cacheRehydrateExtraSteps =
+            _ => List(Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install browsers").build),
         )
         DocsRender.jobs("cache-rehydrate", "test")(Capability.test)
       }.assert(yaml =>

@@ -142,6 +142,22 @@ object EventName extends Newtype[String]:
     else if input.matches(Names.SecretName) then true
     else s"invalid event name '$input': must start with a letter or _ and contain only letters, digits and _"
 
+/** A function name in an expression, as in `startsWith(github.ref, 'refs/tags/v')`.
+  *
+  * Validated against GitHub's documented list rather than by shape. The expression language has no user-defined
+  * functions, so an unknown name is always a mistake, and GitHub reports it as a workflow parse error rather than a
+  * false value. Matching is case-insensitive, as the expression language is: `fromJson` and `fromJSON` are one
+  * function.
+  *
+  * If GitHub ships a function this list predates, [[Expr.raw]] is the escape hatch; that is what it is for.
+  */
+type FunctionName = FunctionName.Type
+object FunctionName extends Newtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a function name must be non-empty"
+    else if input.matches(Names.Functions) then true
+    else s"unknown expression function '$input': GitHub Actions has no user-defined functions"
+
 /** A single-quoted literal inside an expression: the `refs/tags/v` of `startsWith(github.ref, 'refs/tags/v')`.
   *
   * Quotes, `$` and whitespace are rejected because the literal is emitted between `'…'` with no escaping, so any of
@@ -174,6 +190,38 @@ object RawExpr extends Newtype[String]:
       s"unbalanced \\$${{ }} in raw expression '$input'"
     else true
 
+/** An hour of the day for [[Cron]]. UTC, since GitHub runs schedules in UTC and offers no timezone field. */
+type CronHour = CronHour.Type
+object CronHour extends Newtype[Int]:
+  override inline def validate(input: Int): Boolean | String =
+    if input < 0 || input > 23 then s"a cron hour must be 0 to 23, got $input"
+    else true
+
+  val Midnight: CronHour = CronHour(0)
+
+/** A minute past the hour for [[Cron]]. */
+type CronMinute = CronMinute.Type
+object CronMinute extends Newtype[Int]:
+  override inline def validate(input: Int): Boolean | String =
+    if input < 0 || input > 59 then s"a cron minute must be 0 to 59, got $input"
+    else true
+
+  val Zero: CronMinute = CronMinute(0)
+
+/** **Escape hatch.** A raw five-field cron expression for [[Cron.Raw]].
+  *
+  * Shape only: five whitespace-separated fields, which is what GitHub parses. The fields themselves are not validated,
+  * because that is the point of the escape hatch: a step value, a `1-5` range and `MON` are all things the typed
+  * variants cannot say. Untrimmed input is rejected rather than silently trimmed, so what renders is what was written.
+  */
+type CronExpr = CronExpr.Type
+object CronExpr extends Newtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a cron expression must be non-empty"
+    else if input != input.trim then s"cron expression '$input' has leading or trailing whitespace"
+    else if input.matches(Names.CronFields) then true
+    else s"invalid cron '$input': expected five whitespace-separated fields (minute hour dom month dow)"
+
 /** Patterns as `inline val` Strings so `validate` can evaluate them during compilation; a compiled `Regex` cannot be.
   */
 object Names:
@@ -197,6 +245,14 @@ object Names:
 
   /** Single-quoted literal contents: no quote, `$` or whitespace, since none of those can be escaped there. */
   inline val ExprLiteral = "[A-Za-z0-9_./@+:-]+"
+
+  /** Exactly five whitespace-separated non-space fields, GitHub's cron shape. Field contents are not constrained. */
+  inline val CronFields = "\\S+(\\s+\\S+){4}"
+
+  /** Every function GitHub's expression syntax defines, case-insensitively. There are no others. */
+  inline val Functions =
+    "(?i)(contains|startsWith|endsWith|format|join|toJSON|fromJSON|hashFiles|" +
+      "success|always|cancelled|failure)"
 
   inline val RemoteAction   = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(/[A-Za-z0-9_./-]+)?@[A-Za-z0-9_./-]+"
   inline val UnpinnedAction = "[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+"

@@ -4,13 +4,6 @@ import zio.test.*
 
 object JobConditionSpec extends ZIOSpecDefault:
 
-  /** True when `f` rejects its input with `IllegalArgumentException`. */
-  private def rejects(f: => Any): Boolean =
-    try
-      val _ = f
-      false
-    catch case _: IllegalArgumentException => true
-
   def spec = suite("JobCondition")(
     suite("leaf render")(
       test("RepositoryIs") {
@@ -120,39 +113,59 @@ object JobConditionSpec extends ZIOSpecDefault:
         assertTrue(JobCondition.raw("  always()  ").render == "always()")
       },
       test("operator-heavy expression preserved") {
+        // Through `rawMake`, since the expression is a `val` rather than a literal the inline validator can see.
         val expr = "(github.event_name == 'pull_request') && (github.base_ref == 'main')"
-        assertTrue(JobCondition.raw(expr).render == expr)
+        assertTrue(JobCondition.rawMake(expr).map(_.render).contains(expr))
       },
     ),
     suite("validation")(
-      test("rejects empty / blank literals") {
-        assertTrue(
-          rejects(JobCondition.repositoryIs("")),
-          rejects(JobCondition.hasPrLabel("  ")),
-          rejects(JobCondition.raw("   ")),
+      test("a bad literal written as a literal does not compile") {
+        for
+          empty <- typeCheck("""zipx.core.JobCondition.repositoryIs("")""")
+          blank <- typeCheck("""zipx.core.JobCondition.hasPrLabel("  ")""")
+          raw   <- typeCheck("""zipx.core.JobCondition.raw("   ")""")
+          quote <- typeCheck("""zipx.core.JobCondition.repositoryIs("org/repo'")""")
+          space <- typeCheck("""zipx.core.JobCondition.repositoryIs("org/repo with space")""")
+          money <- typeCheck("""zipx.core.JobCondition.hasPrLabel("a$b")""")
+          emoji <- typeCheck("""zipx.core.JobCondition.hasPrLabel("🚢")""")
+          varn  <- typeCheck("""zipx.core.JobCondition.varNonEmpty("bad-name")""")
+        yield assertTrue(
+          empty.isLeft,
+          blank.isLeft,
+          raw.isLeft,
+          quote.isLeft,
+          space.isLeft,
+          money.isLeft,
+          emoji.isLeft,
+          varn.isLeft,
         )
       },
-      test("rejects quotes, dollars, whitespace in literals") {
+      test("a bad literal read at runtime comes back as a Left, naming the reason") {
         assertTrue(
-          rejects(JobCondition.repositoryIs("org/repo'")),
-          rejects(JobCondition.repositoryIs("org/repo with space")),
-          rejects(JobCondition.hasPrLabel("a$b")),
+          JobCondition.repositoryIsMake("").isLeft,
+          JobCondition.hasPrLabelMake("  ").isLeft,
+          JobCondition.rawMake("   ").isLeft,
+          JobCondition.repositoryIsMake("org/repo'").isLeft,
+          JobCondition.varNonEmptyMake("bad-name").isLeft,
+          JobCondition.varNonEmptyMake("").isLeft,
+          JobCondition.hasPrLabelMake("a$b").left.exists(_.nonEmpty),
         )
       },
-      test("rejects unicode / emoji labels") {
-        assertTrue(rejects(JobCondition.hasPrLabel("🚢")))
-      },
-      test("rejects invalid var names") {
-        assertTrue(
-          rejects(JobCondition.varNonEmpty("bad-name")),
-          rejects(JobCondition.varNonEmpty("")),
-        )
-      },
-      test("rejects empty All / Any") {
-        assertTrue(
-          rejects(JobCondition.and()),
-          rejects(JobCondition.or()),
-          rejects(JobCondition.All(Nil).render),
+      test("an empty conjunction is not a value that exists") {
+        // `All`/`Any` take a first clause and a tail rather than a list, so there is no empty one to reject: the three
+        // ways of writing one are all compile errors instead of a render-time check.
+        for
+          and <- typeCheck("""zipx.core.JobCondition.and()""")
+          or  <- typeCheck("""zipx.core.JobCondition.or()""")
+          all <- typeCheck("""zipx.core.JobCondition.All(Nil)""")
+        yield assertTrue(
+          and.isLeft,
+          or.isLeft,
+          all.isLeft,
+          // The runtime-length case is `allOf`/`anyOf`, which report emptiness as `None` rather than as a failure.
+          JobCondition.allOf(Nil).isEmpty,
+          JobCondition.anyOf(Nil).isEmpty,
+          JobCondition.allOf(List(JobCondition.onReleaseTag)).isDefined,
         )
       },
       test("accepts owner/repo and dotted labels") {
@@ -163,10 +176,11 @@ object JobConditionSpec extends ZIOSpecDefault:
       },
       test("rejects overlong literals") {
         val long = "a" * 300
-        assertTrue(rejects(JobCondition.refIs(long)))
+        assertTrue(JobCondition.refIsMake(long).isLeft)
       },
 
-      // --- Property-based: exhaustive character set checks ---
+      // --- Property-based: exhaustive character set checks. These iterate over runtime lists, so they go through the
+      // `*Make` siblings; the compile-time half of the same rule is the `typeCheck` test above.
       test("repositoryIs succeeds for strings of only allowed characters") {
         val validInputs = List(
           "org/repo",
@@ -174,31 +188,27 @@ object JobConditionSpec extends ZIOSpecDefault:
           "a/b+c-d:e.f_g@h:i",
           "A-Z_0-9.test/ok",
         )
-        assertTrue(validInputs.map(s => scala.util.Try(JobCondition.repositoryIs(s)).isSuccess).forall(identity))
+        assertTrue(validInputs.forall(s => JobCondition.repositoryIsMake(s).isRight))
       },
 
       test("repositoryIs rejects any string containing a disallowed character") {
-        // requireLiteral trims leading/trailing whitespace first, so embed chars in the middle.
+        // The constructor trims leading/trailing whitespace first, so embed chars in the middle.
         val disallowedChars =
           List("'", "\"", "$", " ", "\t", "\n", "(", ")", "{", "}", "|", "&", ";", "`", "!", "?", "#")
-        assertTrue(
-          disallowedChars.map(c => rejects(JobCondition.repositoryIs(s"org/repo${c}name"))).forall(identity)
-        )
+        assertTrue(disallowedChars.forall(c => JobCondition.repositoryIsMake(s"org/repo${c}name").isLeft))
       },
 
       test("hasPrLabel succeeds for strings of only allowed characters") {
         val validLabels =
           List("deploy-stg", "release/v2", "ship:now", "a_b.c+d@e:f-g:h:i:j:k:l:m:n:o:p:q:r:s:t:u:v:w:x:y:z")
-        assertTrue(validLabels.map(s => scala.util.Try(JobCondition.hasPrLabel(s)).isSuccess).forall(identity))
+        assertTrue(validLabels.forall(s => JobCondition.hasPrLabelMake(s).isRight))
       },
 
       test("hasPrLabel rejects any string containing a disallowed character") {
-        // requireLiteral trims leading/trailing whitespace first, so embed chars in the middle.
+        // The constructor trims leading/trailing whitespace first, so embed chars in the middle.
         val disallowedChars =
           List("'", "\"", "$", " ", "\t", "\n", "(", ")", "{", "}", "|", "&", ";", "`", "!", "?", "#")
-        assertTrue(
-          disallowedChars.map(c => rejects(JobCondition.hasPrLabel(s"label${c}name"))).forall(identity)
-        )
+        assertTrue(disallowedChars.forall(c => JobCondition.hasPrLabelMake(s"label${c}name").isLeft))
       },
 
       test("refIs and refStartsWith accept valid GitHub ref patterns") {
@@ -209,8 +219,8 @@ object JobConditionSpec extends ZIOSpecDefault:
           "feature/my-branch_v2",
         )
         assertTrue(
-          validRefs.map(s => scala.util.Try(JobCondition.refIs(s)).isSuccess).forall(identity),
-          validRefs.map(s => scala.util.Try(JobCondition.refStartsWith(s)).isSuccess).forall(identity),
+          validRefs.forall(s => JobCondition.refIsMake(s).isRight),
+          validRefs.forall(s => JobCondition.refStartsWithMake(s).isRight),
         )
       },
 

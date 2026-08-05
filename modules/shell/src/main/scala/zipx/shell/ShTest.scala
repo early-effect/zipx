@@ -70,8 +70,11 @@ enum ShTest:
 
   /** Test by exit status: `if command; then`. No brackets, so this is how you test `git describe`, `grep -q`, or any
     * other program's success.
+    *
+    * An [[InlineCommand]]: `if for x in …; do … done; then` is not a conditional the shell accepts, so the type rules
+    * it out rather than the renderer discovering it.
     */
-  case Cmd(command: Command)
+  case Cmd(command: InlineCommand)
 
   case And(left: ShTest, right: ShTest)
   case Or(left: ShTest, right: ShTest)
@@ -133,7 +136,7 @@ object ShTest:
   inline def varNonEmpty(inline name: String): ShTest = NonEmpty(Word.vq(name))
 
   /** `if command; then`: test a program's exit status. */
-  def succeeds(command: Command): ShTest = Cmd(command)
+  def succeeds(command: InlineCommand): ShTest = Cmd(command)
 
   /** `[[ "$name" == pattern ]]`: bash glob match against an unquoted pattern. */
   inline def varMatches(inline name: String, inline pattern: String): ShTest =

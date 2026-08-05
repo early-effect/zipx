@@ -5,6 +5,16 @@ import scala.collection.immutable.ListMap
 
 object RenderSpec extends ZIOSpecDefault:
 
+  /** The rendered YAML, failing the test with the render error if there was one.
+    *
+    * Every `Render` entry point returns `Either[String, String]`, since a hand-built `Workflow` can hold a step GitHub
+    * rejects. Most tests here render a valid workflow and care only about the bytes, so they unwrap; the tests that are
+    * *about* rejection assert on the `Left` directly.
+    */
+  extension (result: Either[String, String])
+    private def yaml: String =
+      result.fold(error => throw AssertionError(s"unexpected render failure: $error"), identity)
+
   // A workflow exercising every render concern: underscore trigger keys, kebab job/step
   // keys, unquoted ints, matrix, needs, env (verbatim keys), if:, and empty-collection pruning.
   private val sample = Workflow(
@@ -69,16 +79,16 @@ object RenderSpec extends ZIOSpecDefault:
 
   def spec = suite("Render")(
     test("renders the golden GitHub Actions workflow exactly") {
-      assertTrue(Render.render(sample) == expected)
+      assertTrue(Render.render(sample).yaml == expected)
     },
     test("is deterministic: rendering twice yields identical bytes") {
-      assertTrue(Render.render(sample) == Render.render(sample))
+      assertTrue(Render.render(sample).yaml == Render.render(sample).yaml)
     },
     test("renders the concurrency block, keeping an expression in cancel-in-progress unquoted-safe") {
       val wf = sample.copy(concurrency =
         Some(Concurrency("CI-${{ github.ref }}", "${{ !startsWith(github.ref, 'refs/tags/') }}"))
       )
-      val out = Render.render(wf)
+      val out = Render.render(wf).yaml
       assertTrue(
         out.contains("concurrency:"),
         out.contains("group: CI-${{ github.ref }}"),
@@ -86,11 +96,11 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("cancel-in-progress:"),
         out.contains("!startsWith(github.ref, 'refs/tags/')"),
         // Omitted entirely when absent, no stray `concurrency: null`.
-        !Render.render(sample).contains("concurrency"),
+        !Render.render(sample).yaml.contains("concurrency"),
       )
     },
     test("prunes empty collections (no `{}` or `[]` in output)") {
-      val out = Render.render(sample)
+      val out = Render.render(sample).yaml
       assertTrue(!out.contains("{}"), !out.contains("[]"))
     },
     test("renders multi-line values as YAML literal block scalars (not escaped \\n)") {
@@ -110,7 +120,7 @@ object RenderSpec extends ZIOSpecDefault:
           )
         ),
       )
-      val out = Render.render(wf)
+      val out = Render.render(wf).yaml
       assertTrue(
         out.contains("path: |"), // literal block scalar marker
         out.contains("~/.sbt"),
@@ -118,10 +128,11 @@ object RenderSpec extends ZIOSpecDefault:
         !out.contains("""\n"""), // never an escaped newline
       )
     },
-    test("rejects a multi-line value that would render as unreadable YAML") {
+    test("reports a multi-line value that would render as unreadable YAML") {
       // Belt and braces behind zipx-shell's ScriptLine: a hand-written string still reaches the printer, and both of
-      // these produce YAML GitHub cannot read rather than YAML that looks wrong.
-      def render(run: String): String =
+      // these produce YAML GitHub cannot read rather than YAML that looks wrong. Reported as a Left rather than thrown,
+      // and reported *before* anything is printed, so a bad value cannot reach a file half-written.
+      def render(run: String): Either[String, String] =
         Render.render(
           Workflow(
             name = "CI",
@@ -129,11 +140,7 @@ object RenderSpec extends ZIOSpecDefault:
             jobs = ListMap("build" -> Job(steps = List(Step(run = Some(run))))),
           )
         )
-      def failure(run: String): Option[String] =
-        try
-          render(run); None
-        catch
-          case e: IllegalArgumentException => Some(e.getMessage)
+      def failure(run: String): Option[String] = render(run).left.toOption
       // Built from a code point so no control byte sits in this source file.
       val withControlChar = s"echo a\necho ${0x01.toChar}b"
       assertTrue(
@@ -145,7 +152,7 @@ object RenderSpec extends ZIOSpecDefault:
         failure("echo a\n\techo b").exists(_.contains("tab")),
         // A tab elsewhere on the line is fine, and an ordinary script still renders.
         failure("echo\ta\necho b").isEmpty,
-        render("echo a\necho b").contains("run: |"),
+        render("echo a\necho b").yaml.contains("run: |"),
       )
     },
     test("renders a job's environment binding and env block") {
@@ -162,7 +169,7 @@ object RenderSpec extends ZIOSpecDefault:
           )
         ),
       )
-      val out = Render.render(wf)
+      val out = Render.render(wf).yaml
       assertTrue(
         out.contains("environment: production"),
         out.contains("DEPLOY_ROLE: ${{ secrets.PROD_ROLE }}"),
@@ -173,13 +180,15 @@ object RenderSpec extends ZIOSpecDefault:
     },
     test("runs-on renders as a scalar for one label and a sequence for many") {
       def render(labels: List[String]) =
-        Render.render(
-          Workflow(
-            name = "CI",
-            on = Triggers(push = Some(BranchFilter(branches = List("main")))),
-            jobs = ListMap("j" -> Job(runsOn = labels, steps = List(Step(uses = Some("actions/checkout@v4"))))),
+        Render
+          .render(
+            Workflow(
+              name = "CI",
+              on = Triggers(push = Some(BranchFilter(branches = List("main")))),
+              jobs = ListMap("j" -> Job(runsOn = labels, steps = List(Step(uses = Some("actions/checkout@v4"))))),
+            )
           )
-        )
+          .yaml
       val single = render(List("ubuntu-latest"))
       val multi  = render(List("self-hosted", "linux"))
       assertTrue(
@@ -203,7 +212,7 @@ object RenderSpec extends ZIOSpecDefault:
           )
         ),
       )
-      val out = Render.render(wf)
+      val out = Render.render(wf).yaml
       assertTrue(
         out.contains("uses: early-effect/.github/.github/workflows/specular-docs.yml@main"),
         out.contains("sbt-project: docs"),
@@ -221,7 +230,7 @@ object RenderSpec extends ZIOSpecDefault:
           "scala-steward" -> Job(steps = List(Step(uses = Some("scala-steward-org/scala-steward-action@v2"))))
         ),
       )
-      val out = Render.render(wf)
+      val out = Render.render(wf).yaml
       assertTrue(
         out.contains("schedule:"),
         out.contains("cron:") && (out.contains("cron: \"0 0 * * 0\"") || out.contains("cron: 0 0 * * 0")),
@@ -229,16 +238,16 @@ object RenderSpec extends ZIOSpecDefault:
       )
     },
     test("renderBody is render without the generated-by header") {
-      val body = Render.renderBody(sample)
-      val full = Render.render(sample)
+      val body = Render.renderBody(sample).yaml
+      val full = Render.render(sample).yaml
       assertTrue(
         !body.startsWith("#"),
         full == s"${Render.header}\n$body\n",
       )
     },
     test("renderJob matches the jobs: slice of renderBody") {
-      val body = Render.renderBody(sample)
-      val job  = Render.renderJob("test-core", sample.jobs("test-core"))
+      val body = Render.renderBody(sample).yaml
+      val job  = Render.renderJob("test-core", sample.jobs("test-core")).yaml
       // Indent job fragment as it appears under jobs: (2 spaces).
       val indented = job.linesIterator.map(l => if l.isEmpty then l else s"  $l").mkString("\n")
       assertTrue(
@@ -251,22 +260,24 @@ object RenderSpec extends ZIOSpecDefault:
       )
     },
     test("renderJobs preserves ListMap order and matches each renderJob") {
-      val both = Render.renderJobs(sample.jobs)
+      val both = Render.renderJobs(sample.jobs).yaml
       assertTrue(
         both.indexOf("test-workflow:") < both.indexOf("test-core:"),
-        both.contains(Render.renderJob("test-workflow", sample.jobs("test-workflow")).trim) ||
+        both.contains(Render.renderJob("test-workflow", sample.jobs("test-workflow")).yaml.trim) ||
           both.startsWith("test-workflow:"),
-        Render.renderJobs(ListMap("test-core" -> sample.jobs("test-core"))) ==
-          Render.renderJob("test-core", sample.jobs("test-core")),
+        Render.renderJobs(ListMap("test-core" -> sample.jobs("test-core"))).yaml ==
+          Render.renderJob("test-core", sample.jobs("test-core")).yaml,
       )
     },
     test("renderSteps encodes a step sequence") {
-      val steps = Render.renderSteps(
-        List(
-          Step(uses = Some("actions/checkout@v4")),
-          Step(name = Some("Test"), run = Some("sbt test")),
+      val steps = Render
+        .renderSteps(
+          List(
+            Step(uses = Some("actions/checkout@v4")),
+            Step(name = Some("Test"), run = Some("sbt test")),
+          )
         )
-      )
+        .yaml
       assertTrue(
         steps.contains("- uses: actions/checkout@v4"),
         steps.contains("- name: Test"),
@@ -274,11 +285,11 @@ object RenderSpec extends ZIOSpecDefault:
       )
     },
     test("renderMapping prints a flat string map") {
-      val out = Render.renderMapping(ListMap("packages" -> "write", "contents" -> "read"))
+      val out = Render.renderMapping(ListMap("packages" -> "write", "contents" -> "read")).yaml
       assertTrue(
         out.contains("packages: write"),
         out.contains("contents: read"),
-        Render.renderMapping(Map.empty) == "",
+        Render.renderMapping(Map.empty).yaml == "",
       )
     },
 
@@ -290,7 +301,7 @@ object RenderSpec extends ZIOSpecDefault:
         on = Triggers(workflowCall = true),
         jobs = ListMap("run" -> Job(steps = List(Step(run = Some("echo hi"))))),
       )
-      val out = Render.render(wf)
+      val out = Render.render(wf).yaml
       assertTrue(
         out.contains("workflow_call: null"),
         !out.contains("push:"),
@@ -305,7 +316,7 @@ object RenderSpec extends ZIOSpecDefault:
         permissions = ListMap("contents" -> "read", "issues" -> "write"),
         jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
       )
-      val out = Render.render(wf)
+      val out = Render.render(wf).yaml
       assertTrue(
         out.contains("permissions:"),
         out.contains("contents: read"),
@@ -326,7 +337,7 @@ object RenderSpec extends ZIOSpecDefault:
         env = ListMap("GLOBAL_VAR" -> "value"),
         jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
       )
-      val out = Render.render(wf)
+      val out = Render.render(wf).yaml
       assertTrue(
         out.contains("env:"),
         out.contains("GLOBAL_VAR: value"),
@@ -348,7 +359,7 @@ object RenderSpec extends ZIOSpecDefault:
         ),
         jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
       )
-      val out = Render.render(wf)
+      val out = Render.render(wf).yaml
       assertTrue(
         out.contains("paths:"),
         out.contains(".github/**"),
@@ -357,8 +368,22 @@ object RenderSpec extends ZIOSpecDefault:
     },
 
     test("is deterministic: rendering 100 times yields identical bytes") {
-      val results = List.fill(100)(Render.render(sample))
+      val results = List.fill(100)(Render.render(sample).yaml)
       assertTrue(results.distinct.size == 1)
+    },
+    test("a step GitHub would reject is a Left, not an exception, and names the step") {
+      // The other half of the failure surface: `Step.problem`'s rules rather than the printer's. A `Workflow` is
+      // hand-constructible and a decode target, so this is reachable input, not a defect.
+      val both = Step(name = Some("Confused"), uses = Some("actions/checkout@v4"), run = Some("echo hi"))
+      val wf   = sample.copy(jobs = ListMap("build" -> Job(steps = List(both))))
+      assertTrue(
+        Render.render(wf).left.exists(_.contains("both uses and run")),
+        Render.render(wf).left.exists(_.contains("'Confused'")),
+        Render.renderSteps(List(Step())).left.exists(_.contains("neither uses nor run")),
+        Render.renderJob("build", Job(steps = List(both))).isLeft,
+        Render.renderJobs(ListMap("build" -> Job(steps = List(both)))).isLeft,
+        Render.renderBody(wf).isLeft,
+      )
     },
   )
 end RenderSpec

@@ -118,9 +118,14 @@ object Word:
       case None if braced => s"$${${name.unwrap}}"
       case None           => s"$$${name.unwrap}"
 
-  /** A command substitution, `$(command)`. The command must render on a single line. */
+  /** A command substitution, `$(command)`.
+    *
+    * Uses the command's own multi-line rendering rather than forcing one line: `$(…)` is one of the few positions where
+    * the shell accepts a wrapped command, and a long `gh api … \` continuation inside a substitution is exactly the
+    * shape that wants it. The closing paren lands on the last line, where the shell expects it.
+    */
   final case class Subst(command: Command) extends Quotable:
-    def render(quoting: Quoting): String = s"$$(${command.inlineRender})"
+    def render(quoting: Quoting): String = s"$$(${command.render})"
 
   /** Escape hatch: text emitted verbatim in every quoting context, never escaped and never quoted.
     *

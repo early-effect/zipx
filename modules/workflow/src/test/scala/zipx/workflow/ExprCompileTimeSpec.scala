@@ -13,17 +13,18 @@ object ExprCompileTimeSpec extends ZIOSpecDefault:
   def spec = suite("compile-time validation")(
     test("a valid literal compiles") {
       for
-        jobId   <- typeCheck("""JobId("build-and-test")""")
-        stepId  <- typeCheck("""StepId("check")""")
-        secret  <- typeCheck("""SecretName("PGP_PASSPHRASE")""")
-        env     <- typeCheck("""EnvName("DEPLOY_ROLE")""")
-        output  <- typeCheck("""OutputName("epoch")""")
-        axis    <- typeCheck("""MatrixAxis("scala")""")
-        path    <- typeCheck("""ContextPath("event.pull_request.base.sha")""")
-        action  <- typeCheck("""ActionRef("actions/checkout@v4")""")
-        event   <- typeCheck("""EventName("pull_request")""")
-        literal <- typeCheck("""ExprLiteral("refs/tags/v")""")
-        raw     <- typeCheck("""RawExpr("always()")""")
+        jobId    <- typeCheck("""JobId("build-and-test")""")
+        stepId   <- typeCheck("""StepId("check")""")
+        secret   <- typeCheck("""SecretName("PGP_PASSPHRASE")""")
+        env      <- typeCheck("""EnvName("DEPLOY_ROLE")""")
+        output   <- typeCheck("""OutputName("epoch")""")
+        axis     <- typeCheck("""MatrixAxis("scala")""")
+        path     <- typeCheck("""ContextPath("event.pull_request.base.sha")""")
+        action   <- typeCheck("""ActionRef("actions/checkout@v4")""")
+        event    <- typeCheck("""EventName("pull_request")""")
+        literal  <- typeCheck("""ExprLiteral("refs/tags/v")""")
+        function <- typeCheck("""FunctionName("startsWith")""")
+        raw      <- typeCheck("""RawExpr("always()")""")
       yield assertTrue(
         jobId.isRight,
         stepId.isRight,
@@ -35,7 +36,29 @@ object ExprCompileTimeSpec extends ZIOSpecDefault:
         action.isRight,
         event.isRight,
         literal.isRight,
+        function.isRight,
         raw.isRight,
+      )
+    },
+    test("an unknown expression function does not compile") {
+      // GitHub's expression language has no user-defined functions, so an unknown name is always a mistake and always a
+      // workflow parse error. Case-insensitively, since the language is: `fromJSON` and `fromJson` are one function.
+      for
+        unknown  <- typeCheck("""FunctionName("myHelper")""")
+        typo     <- typeCheck("""FunctionName("startWith")""")
+        empty    <- typeCheck("""FunctionName("")""")
+        upper    <- typeCheck("""FunctionName("FROMJSON")""")
+        mixed    <- typeCheck("""FunctionName("fromJson")""")
+        viaCall  <- typeCheck("""Expr.call("nosuchFn")""")
+        goodCall <- typeCheck("""Expr.call("contains", Expr.lit("a"), Expr.quoted("b"))""")
+      yield assertTrue(
+        unknown.isLeft,
+        typo.isLeft,
+        empty.isLeft,
+        upper.isRight,
+        mixed.isRight,
+        viaCall.isLeft,
+        goodCall.isRight,
       )
     },
     test("a digit-leading or hyphenated id does not compile") {
@@ -108,6 +131,7 @@ object ExprCompileTimeSpec extends ZIOSpecDefault:
         badOutput <- typeCheck("""Expr.stepOutput("check", "set-output")""")
         badMatrix <- typeCheck("""Expr.matrix("include")""")
         badRaw    <- typeCheck("""Expr.raw("${{ unbalanced")""")
+        badQuoted <- typeCheck("""Expr.quoted("two words")""")
         goodStep  <- typeCheck("""Expr.stepOutput("check", "run")""")
       yield assertTrue(
         badSecret.isLeft,
@@ -117,6 +141,7 @@ object ExprCompileTimeSpec extends ZIOSpecDefault:
         badOutput.isLeft,
         badMatrix.isLeft,
         badRaw.isLeft,
+        badQuoted.isLeft,
         goodStep.isRight,
       )
     },

@@ -5,6 +5,7 @@ import specular.ziotest.DocSpecSuite
 import zipx.central.ZipxCentral
 import zipx.core.*
 import zipx.docs.DocsFixtures.*
+import zipx.docs.DocsRender.yaml
 import zipx.github.ZipxGitHubPackages
 import zipx.workflow.Render
 import zio.test.*
@@ -54,7 +55,7 @@ when you mean `(a || b) && c`. Typed leaves also include `eventIs`, `onWorkflowD
       exampleValue {
         val c = (JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch) &&
           JobCondition.repositoryIs("early-effect/zipx")
-        Render.renderMapping(ListMap("if" -> c.render))
+        Render.renderMapping(ListMap("if" -> c.render)).yaml
       }.assert(yaml =>
         assertTrue(
           yaml.contains("workflow_dispatch"),
@@ -146,14 +147,14 @@ Distinct capability names coexist. zipx wires permissions + token env; **sbt** o
 ```scala
 zipxCapabilities ++= Seq(
   ZipxCentral.release,
-  ZipxGitHubPackages.sameRepo(repository = Some("acme/my-fork")),
+  ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/my-fork"))),
 )
 ```
 """,
       exampleValue {
         DocsRender.jobs("publish", "github-packages")(
           ZipxCentral.release,
-          ZipxGitHubPackages.sameRepo(repository = Some("acme/fork")),
+          ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/fork"))),
         )
       }.assert(yaml =>
         assertTrue(
@@ -206,11 +207,11 @@ zipxCapabilities += Capability
   )
   .copy(
     extraSteps = _ => List(
-      Step(
-        name = Some("Login to registry"),
-        uses = Some("aws-actions/configure-aws-credentials@v6"),
-        `with` = Map("role-to-assume" -> "$${{ env.DEPLOY_ROLE }}"),
-      )
+      Step
+        .uses("aws-actions/configure-aws-credentials@v6")
+        .named("Login to registry")
+        .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+        .build
     )
   )
 ```
@@ -308,7 +309,7 @@ JobCondition.raw("always()")
 Prefer typed leaves and `&&` / `||` when possible; `Raw` is for expressions the AST does not cover yet.
 """,
       exampleValue {
-        Render.renderMapping(ListMap("if" -> JobCondition.raw("always()").render))
+        Render.renderMapping(ListMap("if" -> JobCondition.raw("always()").render)).yaml
       }.assert(yaml => assertTrue(yaml.contains("if: always()"))),
     ),
   )

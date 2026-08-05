@@ -171,8 +171,11 @@ object StepsSpec extends ZIOSpecDefault:
         )
       },
       test("built takes builders, so a definition site never calls .build") {
-        val bundle = Steps.built("verify")(
-          Step.uses(ActionPins.Defaults.checkout),
+        // The pin is read from a file, so it goes through `usesMake` rather than the inline constructor; that fork is
+        // the same one `buildingWith` below hits for a module id.
+        val checkout = Step.usesMake(ActionPins.Defaults.checkout).toOption.get
+        val bundle   = Steps.built("verify")(
+          checkout,
           Step.run(Script.strict(Exec("sbt", Word.squote("test")))).named("Test"),
         )
         assertTrue(
@@ -181,12 +184,13 @@ object StepsSpec extends ZIOSpecDefault:
           bundle(ctx)(1).name.contains("Test"),
         )
       },
-      test("built validates: an invalid builder fails at the definition site") {
-        assertTrue(
-          try
-            val _ = Steps.built("bad")(Step.uses("actions/checkout")) // unpinned
-            false
-          catch case _: IllegalArgumentException => true
+      test("an invalid builder never reaches built: it is rejected where it is written") {
+        // `built` has nothing to validate, because a `StepBuilder` cannot hold an invalid step. An unpinned literal ref
+        // is a compile error, and an unpinned runtime ref is a `Left` that never produces a builder to pass in.
+        for unpinned <- typeCheck("""Steps.built("bad")(zipx.workflow.Step.uses("actions/checkout"))""")
+        yield assertTrue(
+          unpinned.isLeft,
+          Step.usesMake("actions/checkout").isLeft,
         )
       },
       test("buildingWith is built's context-dependent sibling") {
@@ -277,7 +281,7 @@ object StepsSpec extends ZIOSpecDefault:
         )
       },
       test("a bundle renders through Render like any other step list") {
-        val yaml = zipx.workflow.Render.renderSteps(first(ctx))
+        val yaml = zipx.core.Rendered.yaml(zipx.workflow.Render.renderSteps(first(ctx)))
         assertTrue(yaml.contains("name: one"), yaml.contains("run: echo one"))
       },
     ),

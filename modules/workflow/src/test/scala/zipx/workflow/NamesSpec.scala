@@ -283,6 +283,51 @@ object NamesSpec extends ZIOSpecDefault:
         )
       },
     ),
+    suite("FunctionName")(
+      test("accepts every function GitHub documents, in any casing") {
+        assertTrue(
+          List(
+            "contains",
+            "startsWith",
+            "endsWith",
+            "format",
+            "join",
+            "toJSON",
+            "fromJSON",
+            "hashFiles",
+            "success",
+            "always",
+            "cancelled",
+            "failure",
+          ).forall(f => FunctionName.make(f).isRight)
+        )
+      },
+      test("matching is case-insensitive, because the expression language is") {
+        // `fromJson` and `fromJSON` are one function, so accepting one spelling and rejecting the other would reject
+        // valid workflows over a detail GitHub does not care about.
+        assertTrue(
+          List("fromJson", "fromJSON", "FROMJSON", "fromjson", "StartsWith", "TOJSON")
+            .forall(f => FunctionName.make(f).isRight)
+        )
+      },
+      test("rejects an unknown name: there are no user-defined functions") {
+        assertTrue(
+          FunctionName.make("").isLeft,
+          FunctionName.make("myHelper").isLeft,
+          FunctionName.make("startWith").isLeft,  // a real typo, one character off
+          FunctionName.make("contains(").isLeft,  // the call syntax, not the name
+          FunctionName.make("fromJson ").isLeft,  // trailing space
+          FunctionName.make("not").isLeft,        // an operator, not a function
+          FunctionName.make("containsAll").isLeft, // a prefix match must not pass
+        )
+      },
+      test("the error says why, since the rule is a list rather than a shape") {
+        assertTrue(
+          FunctionName.make("myHelper").swap.exists(_.contains("no user-defined functions")),
+          FunctionName.make("").swap.exists(_.contains("non-empty")),
+        )
+      },
+    ),
     suite("ExprLiteral")(
       test("accepts refs, repo slugs, and labels") {
         assertTrue(

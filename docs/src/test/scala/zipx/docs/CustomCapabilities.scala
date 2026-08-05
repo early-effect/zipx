@@ -4,10 +4,8 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zipx.core.EnvValue.secret
-import zipx.workflow.Step
+import zipx.workflow.{Expr, Step}
 import zio.test.*
-
-import scala.collection.immutable.ListMap
 
 /** How to invent pipeline stages beyond the built-ins. */
 object CustomCapabilities extends DocSpecSuite:
@@ -61,11 +59,11 @@ zipxCapabilities += Capability
   )
   .copy(
     extraSteps = _ => List(
-      Step(
-        name = Some("Login"),
-        uses = Some("aws-actions/configure-aws-credentials@v6"),
-        `with` = Map("role-to-assume" -> "$${{ env.DEPLOY_ROLE }}"),
-      )
+      Step
+        .uses("aws-actions/configure-aws-credentials@v6")
+        .named("Login")
+        .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+        .build
     )
   )
 ```
@@ -87,11 +85,11 @@ zipxCapabilities += Capability
           .copy(extraSteps =
             _ =>
               List(
-                Step(
-                  name = Some("Login"),
-                  uses = Some("aws-actions/configure-aws-credentials@v6"),
-                  `with` = ListMap("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"),
-                )
+                Step
+                  .uses("aws-actions/configure-aws-credentials@v6")
+                  .named("Login")
+                  .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+                  .build
               )
           )
         DocsRender.jobs("docker-service-us", "docker-service-eu")(docker)

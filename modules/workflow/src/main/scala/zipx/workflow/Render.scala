@@ -19,6 +19,10 @@ import scala.collection.immutable.ListMap
   *
   * Fragment helpers ([[renderJob]], [[renderJobs]], [[renderSteps]], [[renderMapping]]) share the same encode + prune +
   * print pipeline as full-file [[render]], so doc snippets and unit tests match committed `ci.yml` bytes.
+  *
+  * The step-shape rules GitHub imposes but the case class cannot ([[Step.problem]]) are checked here, so every entry
+  * point that produces steps returns `Either[String, String]`. [[renderMapping]] and [[print]] do not: neither can
+  * reach a `Step`.
   */
 object Render:
 
@@ -28,46 +32,60 @@ object Render:
 
   /** Renders a workflow to a YAML string, ready to write into the `.github/workflows` directory.
     *
+    * `Left` if any step is one GitHub Actions would reject (see [[Step.problem]]); a `Workflow` is hand-constructible
+    * and a decode target, so that is a real possibility rather than a defect. The failure is a value because the caller
+    * decides what it means: `zipxWorkflowGenerate` turns it into an sbt build failure, a test asserts on it.
+    *
     * Output is deterministic: field order is fixed by construction, maps must be built with `ListMap`, and no
     * `Map`-iteration order is relied upon. A generated-by header is prepended so the file announces its provenance.
     */
-  def render(wf: Workflow): String =
-    s"$header\n${renderBody(wf)}\n"
+  def render(wf: Workflow): Either[String, String] =
+    renderBody(wf).map(body => s"$header\n$body\n")
 
   /** Full workflow YAML without the generated-by header (no trailing newline). */
-  def renderBody(wf: Workflow): String =
-    print(workflowYaml(wf))
+  def renderBody(wf: Workflow): Either[String, String] =
+    checked(wf.jobs.values.toList.flatMap(_.steps), workflowYaml(wf))
 
   /** Single job as a top-level mapping fragment (`publish:` + job body), matching the encoding under `jobs:`. */
-  def renderJob(id: String, job: Job): String =
-    print(jobsYaml(ListMap(id -> job)))
+  def renderJob(id: String, job: Job): Either[String, String] =
+    renderJobs(ListMap(id -> job))
 
   /** Multiple jobs as a mapping fragment (no `jobs:` wrapper). */
-  def renderJobs(jobs: ListMap[String, Job]): String =
-    print(jobsYaml(jobs))
+  def renderJobs(jobs: ListMap[String, Job]): Either[String, String] =
+    checked(jobs.values.toList.flatMap(_.steps), jobsYaml(jobs))
 
   /** Step list as a YAML sequence (`- uses: …`). */
-  def renderSteps(steps: List[Step]): String =
-    print(Yaml.Sequence(Chunk.from(steps.map(encodeStep))))
+  def renderSteps(steps: List[Step]): Either[String, String] =
+    checked(steps, Yaml.Sequence(Chunk.from(steps.map(encodeStep))))
 
-  /** Encode one step, validating it first.
+  /** The single funnel: every entry point that can produce steps checks both layers' rules before printing anything.
     *
-    * This is the single funnel every step passes through on its way to YAML, whether via a full workflow, a job
-    * fragment, or [[renderSteps]], which is why the check lives here rather than in `Step`'s constructor: a step that
-    * GitHub would reject fails the build at generate time instead of being written to disk.
+    * `Step.problem` is GitHub's step shape, which the case class cannot encode. `YamlPrinter.problem` is content that
+    * would print as YAML GitHub cannot parse. Both are checked here rather than in a constructor: a `Step` is a decode
+    * target, so a codec must be free to fill one in field by field, and render time is the first moment the value is
+    * claimed to be complete. Nothing is written to disk when either fails.
     */
+  private def checked(steps: List[Step], yaml: => Yaml): Either[String, String] =
+    steps.flatMap(Step.problem).headOption match
+      case Some(error) => Left(error)
+      case None        =>
+        val pruned = prune(yaml)
+        YamlPrinter.problem(pruned).toLeft(YamlPrinter.print(pruned))
+
   private def encodeStep(step: Step): Yaml =
-    Step.validate(step)
     prune(stepCodec.encodeValue(step))
 
-  /** Standalone string→string mapping (permissions, env, `with`). */
-  def renderMapping(entries: Map[String, String]): String =
-    if entries.isEmpty then ""
+  /** Standalone string→string mapping (permissions, env, `with`). Empty renders as the empty string. */
+  def renderMapping(entries: Map[String, String]): Either[String, String] =
+    if entries.isEmpty then Right("")
     else print(Yaml.Mapping(Chunk.from(entries.map((k, v) => (Yaml.Scalar(k), Yaml.Scalar(v))))))
 
-  /** Prune empty collections then print any `Yaml` tree. */
-  def print(yaml: Yaml): String =
-    YamlPrinter.print(prune(yaml))
+  /** Prune empty collections then print any `Yaml` tree, `Left` if it holds content YAML cannot represent readably. No
+    * `Step` is reachable from a bare tree, so this checks [[YamlPrinter.problem]] only.
+    */
+  def print(yaml: Yaml): Either[String, String] =
+    val pruned = prune(yaml)
+    YamlPrinter.problem(pruned).toLeft(YamlPrinter.print(pruned))
 
   val header: String =
     "# Generated by zipx. Do not edit. Run 'sbt zipxWorkflowGenerate' to regenerate."
@@ -117,8 +135,6 @@ object Render:
     )
 
   private def encodeJob(job: Job): Yaml =
-    // The derived job codec encodes nested steps itself, so it never reaches `encodeStep`; validate them here instead.
-    job.steps.foreach(Step.validate)
     collapseSingletonRunsOn(prune(jobCodec.encodeValue(job)))
 
   /** The derived codec renders `runsOn: List[String]` as a sequence. GitHub Actions convention (and every existing

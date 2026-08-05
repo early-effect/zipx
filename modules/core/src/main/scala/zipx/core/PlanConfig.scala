@@ -1,6 +1,6 @@
 package zipx.core
 
-import zipx.workflow.Step
+import zipx.workflow.{ExprLiteral, Step}
 
 /** Whether Verify-phase jobs (test/build) run for every module or only for affected modules on pull requests. */
 enum AffectedMode:
@@ -67,8 +67,12 @@ enum AffectedMode:
   *   optional `clean` / `cleanFull` prepended to every Verify-phase sbt command (Aggregate, Layer, and Graph).
   * @param verifyCleanLabel
   *   when [[verifyClean]] is [[VerifyClean.None]], optionally prepend `cleanFull` at workflow runtime if the PR has
-  *   this GitHub label (default `Some("clean")`). One-off LocalDir/action-cache bust without a permanent clean setting.
-  *   `None` disables the label check. Ignored when [[verifyClean]] is already `Clean` / `CleanFull`.
+  *   this GitHub label (default [[PlanConfig.DefaultVerifyCleanLabel]], `clean`). One-off LocalDir/action-cache bust
+  *   without a permanent clean setting. `None` disables the label check. Ignored when [[verifyClean]] is already
+  *   `Clean` / `CleanFull`. An [[zipx.workflow.ExprLiteral]] rather than a `String`: the label is emitted between `'…'`
+  *   inside a `contains(…)` expression, where GitHub offers no escaping, so a label containing a quote has to be
+  *   unrepresentable rather than reported at generate time. Use [[PlanConfig.verifyCleanLabel]] to write one as a
+  *   literal.
   * @param cancelSupersededRuns
   *   when true (default), emit workflow-level `concurrency` keyed on ref so pushing again to a PR cancels the still-
   *   running earlier build. Never cancels release-tag runs: the group folds in the ref, and a half-cancelled publish is
@@ -94,6 +98,21 @@ final case class PlanConfig(
     cacheRehydrateEnv: Map[String, EnvValue] = Map.empty,
     env: Map[String, EnvValue] = Map.empty,
     verifyClean: VerifyClean = VerifyClean.None,
-    verifyCleanLabel: Option[String] = Some("clean"),
+    verifyCleanLabel: Option[ExprLiteral] = Some(PlanConfig.DefaultVerifyCleanLabel),
     cancelSupersededRuns: Boolean = true,
 )
+
+object PlanConfig:
+
+  /** The default runtime `cleanFull` label: a PR labelled `clean` gets a clean build. */
+  val DefaultVerifyCleanLabel: ExprLiteral = ExprLiteral("clean")
+
+  /** A [[verifyCleanLabel]] value from a literal, checked at compile time. */
+  inline def verifyCleanLabel(inline label: String): Option[ExprLiteral] = Some(ExprLiteral(label))
+
+  /** A [[verifyCleanLabel]] value from a label only known at runtime; `Left` names why it cannot be a quoted literal.
+    */
+  def verifyCleanLabelMake(label: String): Either[String, Option[ExprLiteral]] =
+    ExprLiteral.make(label).map(Some(_))
+
+end PlanConfig

@@ -2,6 +2,12 @@ package zipx.workflow
 
 import zio.test.*
 
+/** [[Cron]] renders and, more importantly, cannot be built wrong.
+  *
+  * The field ranges live in the types ([[CronHour]], [[CronMinute]], [[CronExpr]]), so a bad literal is a compile error
+  * and a bad runtime value is a `Left` from the `*Make` sibling. Nothing here throws, and `render` is total, which is
+  * why the rejection tests below assert on `typeCheck` and `Either` rather than on a caught exception.
+  */
 object CronSpec extends ZIOSpecDefault:
 
   def spec = suite("Cron")(
@@ -35,15 +41,32 @@ object CronSpec extends ZIOSpecDefault:
     },
 
     // --- Rejection: out-of-range hour/minute ---
-    test("rejects out-of-range hour") {
-      val under = scala.util.Try(Cron.daily(hour = -1).render)
-      val over  = scala.util.Try(Cron.daily(hour = 24).render)
-      assertTrue(under.isFailure, over.isFailure)
+    test("an out-of-range literal hour does not compile") {
+      for
+        ok    <- typeCheck("""Cron.daily(hour = 23)""")
+        under <- typeCheck("""Cron.daily(hour = -1)""")
+        over  <- typeCheck("""Cron.daily(hour = 24)""")
+      yield assertTrue(ok.isRight, under.isLeft, over.isLeft, over.left.exists(_.contains("0 to 23")))
     },
-    test("rejects out-of-range minute") {
-      val under = scala.util.Try(Cron.hourly(minute = -1).render)
-      val over  = scala.util.Try(Cron.hourly(minute = 60).render)
-      assertTrue(under.isFailure, over.isFailure)
+    test("an out-of-range literal minute does not compile") {
+      for
+        ok    <- typeCheck("""Cron.hourly(minute = 59)""")
+        under <- typeCheck("""Cron.hourly(minute = -1)""")
+        over  <- typeCheck("""Cron.hourly(minute = 60)""")
+      yield assertTrue(ok.isRight, under.isLeft, over.isLeft, over.left.exists(_.contains("0 to 59")))
+    },
+    test("an out-of-range runtime hour or minute is a Left, not an exception") {
+      // A variable cannot reach the inline check, so the *Make pair is what runtime input uses. Same validator, same
+      // message, reported as a value.
+      assertTrue(
+        Cron.dailyMake(24, 0).isLeft,
+        Cron.dailyMake(-1, 0).isLeft,
+        Cron.dailyMake(0, 60).isLeft,
+        Cron.hourlyMake(60).isLeft,
+        Cron.weeklyMake(DayOfWeek.Monday, 24, 0).isLeft,
+        Cron.dailyMake(24, 0).left.exists(_.contains("0 to 23")),
+        Cron.hourlyMake(60).left.exists(_.contains("0 to 59")),
+      )
     },
 
     // --- Raw: happy path ---
@@ -57,19 +80,27 @@ object CronSpec extends ZIOSpecDefault:
         "0 0 1 * *",
         "30 4 * * 1-5",
       )
-      assertTrue(exprs.map(Cron.raw(_).render) == exprs)
+      assertTrue(exprs.flatMap(Cron.rawMake(_).toOption).map(_.render) == exprs)
     },
 
     // --- Raw: rejection ---
-    test("rejects empty raw expression") {
-      val empty = scala.util.Try(Cron.raw("").render)
-      val ws    = scala.util.Try(Cron.raw("   ").render)
-      assertTrue(empty.isFailure, ws.isFailure)
+    test("an invalid literal raw expression does not compile") {
+      for
+        ok    <- typeCheck("""Cron.raw("0 0 * * 0")""")
+        empty <- typeCheck("""Cron.raw("")""")
+        ws    <- typeCheck("""Cron.raw("   ")""")
+        four  <- typeCheck("""Cron.raw("0 0 * *")""")
+        six   <- typeCheck("""Cron.raw("0 0 * * * *")""")
+      yield assertTrue(ok.isRight, empty.isLeft, ws.isLeft, four.isLeft, six.isLeft)
     },
-    test("rejects raw expressions with wrong number of fields") {
-      val four = scala.util.Try(Cron.raw("0 0 * *").render)
-      val six  = scala.util.Try(Cron.raw("0 0 * * * *").render)
-      assertTrue(four.isFailure, six.isFailure)
+    test("an invalid runtime raw expression is a Left") {
+      assertTrue(
+        Cron.rawMake("").isLeft,
+        Cron.rawMake("   ").isLeft,
+        Cron.rawMake("0 0 * *").isLeft,
+        Cron.rawMake("0 0 * * * *").isLeft,
+        Cron.rawMake("0 0 * *").left.exists(_.contains("five")),
+      )
     },
 
     // --- Property-based: exhaustive range checks ---
@@ -77,11 +108,10 @@ object CronSpec extends ZIOSpecDefault:
       val results = for
         h <- 0 to 23
         m <- 0 to 59
-      yield
-        val c        = Cron.daily(hour = h, minute = m)
-        val rendered = c.render
-        val parts    = rendered.split(" ")
-        (parts(0).toInt == m && parts(1).toInt == h && parts.length == 5)
+      yield Cron.dailyMake(h, m).exists { c =>
+        val parts = c.render.split(" ")
+        parts(0).toInt == m && parts(1).toInt == h && parts.length == 5
+      }
       assertTrue(results.forall(identity))
     },
 
@@ -96,22 +126,22 @@ object CronSpec extends ZIOSpecDefault:
 
     test("hourly succeeds and round-trips for all valid minute values") {
       val results = (0 to 59).map { m =>
-        val c        = Cron.hourly(minute = m)
-        val rendered = c.render
-        val parts    = rendered.split(" ")
-        (parts(0).toInt == m && parts.length == 5)
+        Cron.hourlyMake(m).exists { c =>
+          val parts = c.render.split(" ")
+          parts(0).toInt == m && parts.length == 5
+        }
       }
       assertTrue(results.forall(identity))
     },
 
     test("rejects all hours outside [0,23]") {
       val badHours = (-10 to -1) ++ (24 to 30)
-      assertTrue(badHours.map(h => scala.util.Try(Cron.daily(hour = h).render).isFailure).forall(identity))
+      assertTrue(badHours.forall(h => Cron.dailyMake(h, 0).isLeft))
     },
 
     test("rejects all minutes outside [0,59]") {
       val badMinutes = (-10 to -1) ++ (60 to 70)
-      assertTrue(badMinutes.map(m => scala.util.Try(Cron.hourly(minute = m).render).isFailure).forall(identity))
+      assertTrue(badMinutes.forall(m => Cron.hourlyMake(m).isLeft))
     },
   )
 end CronSpec

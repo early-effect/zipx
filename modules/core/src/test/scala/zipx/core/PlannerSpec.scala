@@ -430,7 +430,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val wf = Planner.plan(
         sampleGraph,
         List(Capability.testGraph),
-        config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")),
+        config.copy(cache = CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")),
       )
       val job = wf.jobs("test-core")
       assertTrue(
@@ -714,7 +714,7 @@ object PlannerSpec extends ZIOSpecDefault:
               ),
           )
         ),
-        config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")),
+        config.copy(cache = CacheBackend.managedRemote("grpcs://cache.example", "CACHE_KEY")),
       )
       val job = wf.jobs("ship-serviceA-prod")
       assertTrue(
@@ -765,17 +765,14 @@ object PlannerSpec extends ZIOSpecDefault:
           .contains("${{ github.sha }}-${{ github.run_id }}")
       )
     },
-    test("ManagedRemote rejects an invalid headerSecret name at plan time") {
-      assertTrue(
-        scala.util
-          .Try(
-            Planner.plan(
-              sampleGraph,
-              List(Capability.testGraph),
-              config.copy(cache = CacheBackend.ManagedRemote("grpcs://x", "bad name")),
-            )
-          )
-          .isFailure
+    test("an invalid headerSecret name never reaches plan time") {
+      // The name is a `SecretName` in the case class, so this is not a plan-time check any more: a literal is rejected
+      // while the build compiles, and a runtime one comes back as a `Left` that never produces a `CacheBackend`.
+      for bad <- typeCheck("""zipx.core.CacheBackend.managedRemote("grpcs://x", "bad name")""")
+      yield assertTrue(
+        bad.isLeft,
+        CacheBackend.managedRemoteMake("grpcs://x", "bad name").isLeft,
+        CacheBackend.managedRemoteMake("grpcs://x", "CACHE_KEY").isRight,
       )
     },
     // ---- Adversarial / gap coverage for existing planner behavior ----
@@ -916,7 +913,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val wf = Planner.plan(
         sampleGraph,
         List(Capability.test),
-        config.copy(verifyCleanLabel = Some("clean")),
+        config.copy(verifyCleanLabel = PlanConfig.verifyCleanLabel("clean")),
       )
       val step = wf.jobs("test").steps.find(_.name.contains("test")).get
       assertTrue(
@@ -929,7 +926,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("verifyCleanLabel does not apply to Publish or when static verifyClean is set") {
-      val labeled = config.copy(verifyCleanLabel = Some("clean"))
+      val labeled = config.copy(verifyCleanLabel = PlanConfig.verifyCleanLabel("clean"))
       val pub     = Planner.plan(sampleGraph, List(Capability.publish), labeled)
       val static  =
         Planner.plan(sampleGraph, List(Capability.test), labeled.copy(verifyClean = VerifyClean.CleanFull))

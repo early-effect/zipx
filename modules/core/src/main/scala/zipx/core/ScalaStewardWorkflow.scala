@@ -52,12 +52,15 @@ object ScalaStewardWorkflow:
     )
   end plan
 
+  /** The Steward workflow as YAML, with `# vX.Y.Z` comments on its `uses:` lines. `Left` propagates a step GitHub would
+    * reject; see [[zipx.workflow.Render.render]].
+    */
   def render(
       pins: ActionPins,
       runnerOs: String,
       schedule: Cron = DefaultSchedule,
       configPath: Option[String] = None,
-  ): String =
-    ActionPinFile.annotateUses(Render.render(plan(pins, runnerOs, schedule, configPath)), pins)
+  ): Either[String, String] =
+    Render.render(plan(pins, runnerOs, schedule, configPath)).map(ActionPinFile.annotateUses(_, pins))
 
 end ScalaStewardWorkflow

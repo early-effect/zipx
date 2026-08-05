@@ -83,25 +83,22 @@ object ZipxPlugin extends AutoPlugin:
       def sameRepo(
           name: String = zipx.github.ZipxGitHubPackages.DefaultName,
           scope: CapabilityScope = CapabilityScope.Aggregate,
-          repository: Option[String] = None,
           condition: Option[JobCondition] = None,
       ): Capability =
-        zipx.github.ZipxGitHubPackages.sameRepo(name, scope, repository, condition)
+        zipx.github.ZipxGitHubPackages.sameRepo(name, scope, condition)
       def sharedRegistry(
-          tokenSecret: String = "GH_PACKAGES_TOKEN",
+          token: EnvValue = zipx.core.EnvValue.secret("GH_PACKAGES_TOKEN"),
           name: String = zipx.github.ZipxGitHubPackages.DefaultName,
           scope: CapabilityScope = CapabilityScope.Aggregate,
-          repository: Option[String] = None,
           condition: Option[JobCondition] = None,
           packagesRepo: Option[String] = None,
           publishOrg: Option[String] = None,
           publishOrgName: Option[String] = None,
       ): Capability =
         zipx.github.ZipxGitHubPackages.sharedRegistry(
-          tokenSecret,
+          token,
           name,
           scope,
-          repository,
           condition,
           packagesRepo,
           publishOrg,
@@ -111,9 +108,28 @@ object ZipxPlugin extends AutoPlugin:
       def DefaultName         = zipx.github.ZipxGitHubPackages.DefaultName
       def PublishFlagEnv      = zipx.github.ZipxGitHubPackages.PublishFlagEnv
     end ZipxGitHubPackages
-    // The workflow Step type, so extraSteps can be written in build.sbt.
+    // The typed DSL a build writes `extraSteps` / `postSteps` with, re-exported so a `build.sbt` needs no imports:
+    //
+    //   extraSteps = _ => List(Step.uses(pin).withInput("role-to-assume", Expr.env("DEPLOY_ROLE")).build)
+    //   Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install browsers").build
+    //   val warm = Steps.built("warm")(Step.run(Script(Exec("npm", sh"--prefix=$dir"))))
+    //
+    // `Step` is both a type and a value, since `extraSteps` is annotated with it. The rest are values only.
     type Step = zipx.workflow.Step
     val Step = zipx.workflow.Step
+
+    /** The GitHub Actions expression AST: `Expr.env("NAME")`, `Expr.secret(…)`, `Expr.github("sha")`. */
+    val Expr = zipx.workflow.Expr
+
+    /** Composable step bundles, the typed replacement for a `StepContext => List[Step]` lambda. */
+    val Steps = zipx.core.Steps
+
+    // The shell AST, for a `run:` script that is structure rather than an interpolated string. `sh` is the
+    // interpolator for the one-liner case, and lives at package level in zipx-shell rather than on `Script`.
+    val Script = zipx.shell.Script
+    val Word   = zipx.shell.Word
+    val Exec   = zipx.shell.Exec
+    export zipx.shell.sh
     // Typed, IDE-friendly capability constructors that take a real TaskKey/InputKey instead of a command string:
     //   zipxTasks.once("fmt", scalafmtCheckAll)   zipxTasks.deploy(_.id == "svc", promote, targets = ...)
     val zipxTasks = zipx.sbt.CapabilityTasks
@@ -421,7 +437,7 @@ object ZipxPlugin extends AutoPlugin:
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
       env = read(zipxEnv, Map.empty),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
-      verifyCleanLabel = read(zipxVerifyCleanLabel, Some("clean")),
+      verifyCleanLabel = orFail(typedVerifyCleanLabel(read(zipxVerifyCleanLabel, Some("clean")))),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
     )
   }
@@ -443,6 +459,25 @@ object ZipxPlugin extends AutoPlugin:
     val base = List(test, Capability.publish)
     if graph.nodes.exists(_.docker) then base :+ Capability.docker else base
 
+  /** The one place a zipx failure value becomes a thrown error.
+    *
+    * The libraries below (`zipx-shell`, `zipx-workflow`, `zipx-core`) report failures as `Either` and never throw, so a
+    * consumer can handle one. sbt's task contract is the opposite: a task fails by throwing, and `sys.error` is how it
+    * reports a build problem with a readable message. This is the seam between the two, and it belongs here rather than
+    * in a library, so that `Either` is what a library caller sees.
+    */
+  private def orFail[A](result: Either[String, A]): A =
+    result.fold(error => sys.error(s"zipx: $error"), identity)
+
+  /** The sbt-facing `Option[String]` label as the typed [[PlanConfig.verifyCleanLabel]]. `None` keeps the check off; a
+    * label that cannot sit inside `'…'` in a GitHub expression is a build error, named here rather than escaped over.
+    */
+  private def typedVerifyCleanLabel(label: Option[String]): Either[String, Option[zipx.workflow.ExprLiteral]] =
+    label match
+      case None        => Right(None)
+      case Some(value) =>
+        PlanConfig.verifyCleanLabelMake(value).left.map(error => s"zipxVerifyCleanLabel: $error")
+
   private def renderWorkflow: Def.Initialize[Task[String]] = Def.task {
     val graph     = buildGraph.value
     val cfg       = planConfig.value
@@ -452,7 +487,8 @@ object ZipxPlugin extends AutoPlugin:
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
     val verifyTask   = readBuildSetting(extracted, zipxTestTask, "test")
     val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
-    ActionPinFile.annotateUses(Render.render(Planner.plan(graph, capabilities, cfg)), cfg.actions)
+    val yaml         = orFail(Render.render(Planner.plan(graph, capabilities, cfg)))
+    ActionPinFile.annotateUses(yaml, cfg.actions)
   }
 
   private def writeGeneratedWorkflows: Def.Initialize[Task[Unit]] = Def.task {
@@ -491,12 +527,14 @@ object ZipxPlugin extends AutoPlugin:
       val cfg        = planConfig.value
       val actionsRel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath)
       val wfRel      = readBuildSetting(extracted, zipxWorkflowPath, ".github/workflows/ci.yml")
-      val body       = ActionPinsSyncWorkflow.render(
-        cfg.actions,
-        cfg.javaVersion,
-        cfg.runnerOs,
-        actionsRel,
-        wfRel,
+      val body       = orFail(
+        ActionPinsSyncWorkflow.render(
+          cfg.actions,
+          cfg.javaVersion,
+          cfg.runnerOs,
+          actionsRel,
+          wfRel,
+        )
       )
       IO.write(syncFile, body)
       streams.value.log.info(s"zipx wrote ${syncFile.getPath}")
@@ -528,7 +566,7 @@ object ZipxPlugin extends AutoPlugin:
         IO.write(confFile, conf)
         log.info(s"zipx wrote ${confFile.getPath}")
       }
-      val body = ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs, configPath = configPath)
+      val body = orFail(ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs, configPath = configPath))
       IO.write(stewardFile, body)
       log.info(s"zipx wrote ${stewardFile.getPath}")
     else if stewardFile.exists then ()
@@ -620,12 +658,14 @@ object ZipxPlugin extends AutoPlugin:
       val cfg          = planConfig.value
       val actionsRel   = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath)
       val wfRel        = readBuildSetting(extracted, zipxWorkflowPath, ".github/workflows/ci.yml")
-      val expectedSync = ActionPinsSyncWorkflow.render(
-        cfg.actions,
-        cfg.javaVersion,
-        cfg.runnerOs,
-        actionsRel,
-        wfRel,
+      val expectedSync = orFail(
+        ActionPinsSyncWorkflow.render(
+          cfg.actions,
+          cfg.javaVersion,
+          cfg.runnerOs,
+          actionsRel,
+          wfRel,
+        )
       )
       val actualSync = if syncFile.exists then IO.read(syncFile) else ""
       if actualSync != expectedSync then
@@ -651,7 +691,7 @@ object ZipxPlugin extends AutoPlugin:
           )
         streams.value.log.info(s"zipx: ${confFile.getPath} is up to date.")
       }
-      val expectedSteward = ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs, configPath = configPath)
+      val expectedSteward = orFail(ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs, configPath = configPath))
       val actualSteward   = if stewardFile.exists then IO.read(stewardFile) else ""
       if actualSteward != expectedSteward then
         sys.error(

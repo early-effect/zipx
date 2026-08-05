@@ -3,6 +3,7 @@ package zipx.docs
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
+import zipx.docs.DocsRender.yaml
 import zipx.workflow.{Cron, DayOfWeek}
 import zio.test.*
 
@@ -36,7 +37,7 @@ An alternative with no workflow is installing the public [Scala Steward GitHub A
 on the org/repo. zipx’s opt-in is the self-hosted Action path so pins and schedule stay in the build.
 """,
       exampleValue {
-        ScalaStewardWorkflow.render(ActionPins.Defaults, "ubuntu-latest")
+        ScalaStewardWorkflow.render(ActionPins.Defaults, "ubuntu-latest").yaml
       }.assert(yaml =>
         assertTrue(
           yaml.contains("cron: 0 0 * * 0") || yaml.contains("""cron: "0 0 * * 0""""),
@@ -90,11 +91,13 @@ to parse escapes every version-filtered group.
         )
       ),
       exampleValue {
-        ScalaStewardWorkflow.render(
-          ActionPins.Defaults,
-          "ubuntu-latest",
-          configPath = Some(ScalaStewardWorkflow.DefaultConfigPath),
-        )
+        ScalaStewardWorkflow
+          .render(
+            ActionPins.Defaults,
+            "ubuntu-latest",
+            configPath = Some(ScalaStewardWorkflow.DefaultConfigPath),
+          )
+          .yaml
       }.assert(yaml =>
         assertTrue(
           yaml.contains("repo-config: .github/.scala-steward.conf"),

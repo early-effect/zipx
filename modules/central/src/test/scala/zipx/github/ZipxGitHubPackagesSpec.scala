@@ -31,8 +31,10 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
         job.`if`.exists(_.contains("refs/tags/v")),
       )
     },
-    test("sameRepo repository becomes JobCondition.repositoryIs") {
-      val cap = ZipxGitHubPackages.sameRepo(repository = Some("acme/fork"))
+    test("a fork gate is a JobCondition like any other") {
+      // There used to be a `repository: Option[String]` shortcut that threw on a malformed slug. The condition carries
+      // its own validated name now, so a fork gate is written the same way as every other filter.
+      val cap = ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/fork")))
       assertTrue(
         cap.condition.contains(JobCondition.repositoryIs("acme/fork")),
         Planner
@@ -44,7 +46,7 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
     },
     test("sharedRegistry uses secret token and optional registry env") {
       val cap = ZipxGitHubPackages.sharedRegistry(
-        tokenSecret = "GH_PACKAGES_TOKEN",
+        token = EnvValue.secret("GH_PACKAGES_TOKEN"),
         packagesRepo = Some("https://maven.pkg.github.com/acme/pkgs"),
         publishOrg = Some("acme"),
       )
@@ -58,7 +60,7 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
     },
     test("coexists with ZipxCentral-shaped publish under a distinct name") {
       val central = Capability.publish
-      val ghp     = ZipxGitHubPackages.sameRepo(repository = Some("acme/fork"))
+      val ghp     = ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/fork")))
       val wf      = Planner.plan(graph, List(central, ghp), config)
       assertTrue(
         wf.jobs.keySet.contains("publish"),
@@ -72,10 +74,9 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
       val wf  = Planner.plan(graph, List(cap), config)
       assertTrue(wf.jobs.contains("github-packages-lib"))
     },
-    test("explicit condition ANDs with repository") {
+    test("a fork gate ANDs with a second filter through the condition itself") {
       val cap = ZipxGitHubPackages.sameRepo(
-        repository = Some("acme/fork"),
-        condition = Some(JobCondition.varNonEmpty("EXTRA")),
+        condition = Some(JobCondition.repositoryIs("acme/fork") && JobCondition.varNonEmpty("EXTRA"))
       )
       val rendered = cap.condition.map(_.render).getOrElse("")
       assertTrue(

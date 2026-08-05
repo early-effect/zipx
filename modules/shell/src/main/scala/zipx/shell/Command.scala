@@ -43,46 +43,65 @@ trait Command:
   /** The physical lines this command contributes, indented for `ctx`. */
   def lines(ctx: Script.Ctx): List[ScriptLine]
 
-  /** This command as a single line, for positions that require one: `$(…)`, a pipeline leg, an `if` condition.
+  /** This command's own lines joined, for a position that accepts more than one: a `$(…)` substitution, or a
+    * [[Script]].
     *
-    * Renders at depth zero and rejects a multi-line result, so a compound command used where the shell needs one line
-    * fails at generate time rather than emitting broken shell. Named `inlineRender` because `inline` is a keyword.
+    * Renders at depth zero, so relative indentation inside the command survives while the surrounding depth is added by
+    * whoever emits it.
     */
-  def inlineRender: String =
-    lines(Script.Ctx.root) match
-      case single :: Nil => single.unwrap
-      case many          =>
-        throw IllegalArgumentException(
-          s"command needs to render on one line here, but produced ${many.length}: ${many.map(_.unwrap).mkString("; ")}"
-        )
+  def render: String = lines(Script.Ctx.root).map(_.unwrap).mkString("\n")
 
   /** Unvalidated text carried by this command, if any. Non-empty only for [[Raw]] and commands wrapping it; drives the
     * generate-time warning about escape-hatch use.
     */
   def rawFragments: List[String] = Nil
 
+end Command
+
+/** A command the shell accepts where it wants *one* command: a pipeline leg, an `if` condition, the left side of a
+  * redirect, the command a heredoc feeds.
+  *
+  * The distinction is a type rather than a check. A compound command (`if`, `for`, `while`) needs `;` separators to sit
+  * in those positions, and the renderer does not insert them, so `Exec("wc") | If(…)` would emit broken shell. Making
+  * the position take an `InlineCommand` means it does not compile instead: there is no failure value to handle, no
+  * generate-time error to surface, and the mistake is caught at the construction site.
+  *
+  * "One command" is logical, not physical. A `\` continuation and a `$(…)` substitution that wraps both occupy several
+  * physical lines and are both legal in every one of these positions, so [[Continued]] is an `InlineCommand` and
+  * [[Script.Ctx.line]] splits the result.
+  *
+  * Implementations define [[inlineRender]] and get [[Command.lines]] for free, which is what keeps the promise
+  * structural: a single string is the only thing an implementation can produce.
+  */
+trait InlineCommand extends Command:
+
+  /** This command as one logical command. Total: there is no case that cannot be rendered here. */
+  def inlineRender: String
+
+  final def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(inlineRender)
+
   /** `this | other`. */
-  infix def |(other: Command): Command = Pipe(this, other)
+  infix def |(other: InlineCommand): InlineCommand = Pipe(this, other)
 
   /** `this && other`. */
-  infix def &&(other: Command): Command = AndThen(this, other)
+  infix def &&(other: InlineCommand): InlineCommand = AndThen(this, other)
 
   /** `this || other`. */
-  infix def ||(other: Command): Command = OrElse(this, other)
+  infix def ||(other: InlineCommand): InlineCommand = OrElse(this, other)
 
   /** `this > target`. */
-  def writeTo(target: Word): Command = Redirect(this, target, append = false)
+  def writeTo(target: Word): InlineCommand = Redirect(this, target, append = false)
 
   /** `this >> target`. */
-  def appendTo(target: Word): Command = Redirect(this, target, append = true)
+  def appendTo(target: Word): InlineCommand = Redirect(this, target, append = true)
 
   /** `this >/dev/null 2>&1`, the "run it, I only want the exit status" form. */
-  def silenced: Command = Silence(this)
+  def silenced: InlineCommand = Silence(this)
 
   /** `this 2>/dev/null`: discard stderr only. */
-  def stderrSilenced: Command = SilenceErr(this)
+  def stderrSilenced: InlineCommand = SilenceErr(this)
 
-end Command
+end InlineCommand
 
 /** A simple command: a program and its arguments, rendered space-separated.
   *
@@ -90,9 +109,8 @@ end Command
   * to suppress globbing versus `v*` to use it). Use [[Word.quoted]] / [[Word.vq]] to ask for quotes. The program is a
   * [[Word]] so `$SBT args` works; [[Command.exec]] validates a literal program name through [[ProgramName]].
   */
-final case class Exec(program: Word, args: List[Word]) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] =
-    ctx.line((program :: args).map(_.render).mkString(" "))
+final case class Exec(program: Word, args: List[Word]) extends InlineCommand:
+  def inlineRender: String = (program :: args).map(_.render).mkString(" ")
 
   override def rawFragments: List[String] = (program :: args).flatMap(_.rawFragments)
 
@@ -106,57 +124,100 @@ object Exec:
   inline def apply(inline program: String, args: Word*): Exec =
     Exec(Word.Lit(ShText.unsafeMake(ProgramName(program).unwrap)), args.toList)
 
+  /** [[apply]] for an argv assembled at runtime. A varargs splat cannot pass through the `inline` overload, and a list
+    * is what a caller mapping over paths or module ids already has.
+    */
+  inline def of(inline program: String, args: List[Word]): Exec =
+    Exec(Word.Lit(ShText.unsafeMake(ProgramName(program).unwrap)), args)
+end Exec
+
+/** One command spread over several physical lines with `\` continuations.
+  *
+  * Purely presentational: the shell joins the lines back into one command, so this changes nothing but readability, and
+  * a long `gh api --jq …` is far easier to read wrapped. Modelled rather than left to the caller because a continuation
+  * is exactly the kind of thing that goes wrong by hand: trailing whitespace after the `\` silently breaks it, and the
+  * *last* line must not carry one.
+  *
+  * Still an [[InlineCommand]]: a continuation is one *logical* command, and the shell accepts it in a pipeline leg or
+  * an `if` condition exactly as it accepts an [[Exec]]. `Script.Ctx.line` splits the rendered result back into physical
+  * lines and indents each.
+  *
+  * @param continuationIndent
+  *   spaces prefixed to each line after the first, on top of the script's own depth.
+  */
+final case class Continued(program: Word, argLines: List[List[Word]], continuationIndent: Int = 2)
+    extends InlineCommand:
+  def inlineRender: String =
+    val pad      = " " * continuationIndent
+    val rendered = argLines.map(_.map(_.render).mkString(" "))
+    val first    = (program.render :: rendered.headOption.toList).mkString(" ")
+    val rest     = rendered.drop(1).map(pad + _)
+    // Every line but the last ends with ` \`; the last must not, or the shell swallows the following line. Counted off
+    // the emitted lines rather than off `argLines`, so a program with no arguments is one unterminated line.
+    val emitted = first :: rest
+    emitted.zipWithIndex
+      .map((text, i) => if i == emitted.length - 1 then text else s"$text \\")
+      .mkString("\n")
+  end inlineRender
+
+  override def rawFragments: List[String] = (program :: argLines.flatten).flatMap(_.rawFragments)
+end Continued
+
+object Continued:
+
+  /** `program args… \` continued on further lines, with the program name validated at compile time. */
+  inline def apply(inline program: String, argLines: List[List[Word]]): Continued =
+    Continued(Word.Lit(ShText.unsafeMake(ProgramName(program).unwrap)), argLines)
+
 /** `left | right`. */
-final case class Pipe(left: Command, right: Command) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(s"${left.inlineRender} | ${right.inlineRender}")
-  override def rawFragments: List[String]      = left.rawFragments ++ right.rawFragments
+final case class Pipe(left: InlineCommand, right: InlineCommand) extends InlineCommand:
+  def inlineRender: String                = s"${left.inlineRender} | ${right.inlineRender}"
+  override def rawFragments: List[String] = left.rawFragments ++ right.rawFragments
 
 /** `left && right`. */
-final case class AndThen(left: Command, right: Command) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(s"${left.inlineRender} && ${right.inlineRender}")
-  override def rawFragments: List[String]      = left.rawFragments ++ right.rawFragments
+final case class AndThen(left: InlineCommand, right: InlineCommand) extends InlineCommand:
+  def inlineRender: String                = s"${left.inlineRender} && ${right.inlineRender}"
+  override def rawFragments: List[String] = left.rawFragments ++ right.rawFragments
 
 /** `left || right`. */
-final case class OrElse(left: Command, right: Command) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(s"${left.inlineRender} || ${right.inlineRender}")
-  override def rawFragments: List[String]      = left.rawFragments ++ right.rawFragments
+final case class OrElse(left: InlineCommand, right: InlineCommand) extends InlineCommand:
+  def inlineRender: String                = s"${left.inlineRender} || ${right.inlineRender}"
+  override def rawFragments: List[String] = left.rawFragments ++ right.rawFragments
 
 /** `command > target` or `command >> target`, optionally from a specific file descriptor (`2> log`). */
-final case class Redirect(command: Command, target: Word, append: Boolean, from: Option[FileDescriptor] = None)
-    extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] =
+final case class Redirect(command: InlineCommand, target: Word, append: Boolean, from: Option[FileDescriptor] = None)
+    extends InlineCommand:
+  def inlineRender: String =
     val fd    = from.fold("")(_.unwrap.toString)
     val arrow = if append then ">>" else ">"
-    ctx.line(s"${command.inlineRender} $fd$arrow ${target.render}")
+    s"${command.inlineRender} $fd$arrow ${target.render}"
 
   override def rawFragments: List[String] = command.rawFragments ++ target.rawFragments
 
 /** `command 2>&1`: duplicate one file descriptor onto another. */
-final case class RedirectFd(command: Command, from: FileDescriptor, to: FileDescriptor) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] =
-    ctx.line(s"${command.inlineRender} ${from.unwrap}>&${to.unwrap}")
-
+final case class RedirectFd(command: InlineCommand, from: FileDescriptor, to: FileDescriptor) extends InlineCommand:
+  def inlineRender: String                = s"${command.inlineRender} ${from.unwrap}>&${to.unwrap}"
   override def rawFragments: List[String] = command.rawFragments
 
 /** `command >/dev/null 2>&1`: discard both streams, keep the exit status. */
-final case class Silence(command: Command) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(s"${command.inlineRender} >/dev/null 2>&1")
-  override def rawFragments: List[String]      = command.rawFragments
+final case class Silence(command: InlineCommand) extends InlineCommand:
+  def inlineRender: String                = s"${command.inlineRender} >/dev/null 2>&1"
+  override def rawFragments: List[String] = command.rawFragments
 
 /** `command 2>/dev/null`: discard stderr only. */
-final case class SilenceErr(command: Command) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(s"${command.inlineRender} 2>/dev/null")
-  override def rawFragments: List[String]      = command.rawFragments
+final case class SilenceErr(command: InlineCommand) extends InlineCommand:
+  def inlineRender: String                = s"${command.inlineRender} 2>/dev/null"
+  override def rawFragments: List[String] = command.rawFragments
 
 /** `name=value`, optionally `local` / `export` / `readonly`. */
-final case class Assign(name: VarName, value: Word, scope: Assign.Scope = Assign.Scope.Plain) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] =
+final case class Assign(name: VarName, value: Word, scope: Assign.Scope = Assign.Scope.Plain) extends InlineCommand:
+  def inlineRender: String =
     val prefix = scope match
       case Assign.Scope.Plain    => ""
       case Assign.Scope.Local    => "local "
       case Assign.Scope.Export   => "export "
       case Assign.Scope.ReadOnly => "readonly "
-    ctx.line(s"$prefix${name.unwrap}=${value.render}")
+    s"$prefix${name.unwrap}=${value.render}"
 
   override def rawFragments: List[String] = value.rawFragments
 end Assign
@@ -213,7 +274,7 @@ final case class While(cond: ShTest, body: Block) extends Command:
   *   quote the opening delimiter (`<<'TAG'`) so the body is *not* expanded. Default true, because an unexpanded heredoc
   *   is the safe one: it cannot have its `$` interpreted by the shell.
   */
-final case class Heredoc(command: Command, tag: HeredocTag, body: List[ScriptLine], quoted: Boolean = true)
+final case class Heredoc(command: InlineCommand, tag: HeredocTag, body: List[ScriptLine], quoted: Boolean = true)
     extends Command:
   def lines(ctx: Script.Ctx): List[ScriptLine] =
     val open = if quoted then s"<<'${tag.unwrap}'" else s"<<${tag.unwrap}"
@@ -235,10 +296,14 @@ final case class SetOpts(errexit: Boolean = true, nounset: Boolean = true, pipef
     else ctx.line(s"set -$short")
 
 /** `exit <code>`. */
-final case class Exit(code: ExitCode = ExitCode.Success) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(s"exit ${code.unwrap}")
+final case class Exit(code: ExitCode = ExitCode.Success) extends InlineCommand:
+  def inlineRender: String = s"exit ${code.unwrap}"
 
-/** A shell comment (`# text`). In the AST because zipx's scripts explain themselves in CI logs. */
+/** A shell comment (`# text`). In the AST because zipx's scripts explain themselves in CI logs.
+  *
+  * Deliberately not an [[InlineCommand]]: `#` comments out the rest of the line, so a comment in a pipeline leg or an
+  * `if` condition swallows the command it was joined to. It is text between commands, not a command.
+  */
 final case class Comment(text: ShText) extends Command:
   def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(s"# ${text.unwrap}")
 
@@ -279,3 +344,23 @@ object Raw:
     bad match
       case Some(err) => Left(err)
       case None      => Right(Raw(split.map(ScriptLine.unsafeMake)))
+
+/** **Escape hatch.** One verbatim line, usable where the shell wants a single command.
+  *
+  * The inline-position sibling of [[Raw]], and separate from it for the reason the split exists: [[Raw]] holds a list,
+  * so it cannot promise one line, while a pipeline leg or an `if` condition needs exactly that. Same guarantees
+  * otherwise: [[ScriptLine]] keeps it from breaking the YAML, nothing checks that it is valid *shell*, and the text is
+  * reported via [[Command.rawFragments]] so `zipxWorkflowGenerate` warns.
+  */
+final case class RawLine(rawLine: ScriptLine) extends InlineCommand:
+  def inlineRender: String                = rawLine.unwrap
+  override def rawFragments: List[String] = List(rawLine.unwrap)
+
+object RawLine:
+
+  /** A raw single-line command from a literal, checked at compile time. */
+  // @targetName because ScriptLine erases to String, so this collides with the case class apply.
+  @targetName("rawLineLiteral")
+  inline def apply(inline text: String): RawLine = RawLine(ScriptLine(text))
+
+  def make(text: String): Either[String, RawLine] = ScriptLine.make(text).map(RawLine(_))

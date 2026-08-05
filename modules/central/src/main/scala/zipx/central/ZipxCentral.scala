@@ -2,7 +2,8 @@ package zipx.central
 
 import zipx.core.*
 import zipx.core.EnvValue.secret
-import zipx.workflow.Step
+import zipx.shell.{Exec, Script, Word}
+import zipx.workflow.{Expr, Step}
 import scala.collection.immutable.ListMap
 
 /** Early-effect / Maven Central paved path for zipx.
@@ -43,24 +44,31 @@ object ZipxCentral:
   def stagingArtifactName(moduleId: String): String =
     s"${StagingArtifactPrefix}publish-$moduleId"
 
+  private val gnupgHome: Word = Word.lit("~/.gnupg")
+
   /** Import the CI signing key from the base64-encoded `PGP_SECRET` org secret (same recipe as peer release.yml).
     *
-    * Use a plain `$PGP_SECRET` (not `$$`). This string is not Scala-interpolated; a doubled `$` survives into the
-    * workflow YAML and bash expands `$$` to the PID, which poisons `base64 --decode`. The warning goes away when this
-    * body becomes a `zipx.shell.Script`, where `Word.v("PGP_SECRET")` cannot be spelled the wrong way.
+    * This used to carry a warning comment where a type should be: the body was a plain string, so a doubled `$$`
+    * survived into the YAML and bash expanded it to the PID, poisoning `base64 --decode`. `Word.vq("PGP_SECRET")` is
+    * that expansion, and there is no second way to spell it.
     */
-  val gpgImportSteps: Steps = Steps.of("gpg-import")(
-    Step(
-      name = Some("Import signing key"),
-      env = ListMap("PGP_SECRET" -> secret"PGP_SECRET".render),
-      run = Some(
-        """mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
-          |echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
-          |echo "pinentry-mode loopback"   >> ~/.gnupg/gpg.conf
-          |gpgconf --kill gpg-agent || true
-          |echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin
-      ),
-    )
+  val gpgImportSteps: Steps = Steps.built("gpg-import")(
+    Step
+      .run(
+        Script(
+          Exec("mkdir", Word.lit("-p"), gnupgHome) && Exec("chmod", Word.lit("700"), gnupgHome),
+          Exec("echo", Word.quoted("allow-loopback-pinentry")).appendTo(Word.lit("~/.gnupg/gpg-agent.conf")),
+          // The trailing pad keeps this redirect aligned with the one above it, as the peer release.yml has it.
+          Exec("echo", Word.cat(Word.quoted("pinentry-mode loopback"), Word.lit("  ")))
+            .appendTo(Word.lit("~/.gnupg/gpg.conf")),
+          Exec("gpgconf", Word.lit("--kill"), Word.lit("gpg-agent")) || Exec("true"),
+          Exec("echo", Word.vq("PGP_SECRET")) |
+            Exec("base64", Word.lit("--decode")) |
+            Exec("gpg", Word.lit("--batch"), Word.lit("--import")),
+        )
+      )
+      .named("Import signing key")
+      .withEnv("PGP_SECRET", Expr.secret("PGP_SECRET"))
   )
 
   /** After Graph `publishSigned`, upload this job's `target/sona-staging` for the release job to merge. */

@@ -28,10 +28,12 @@ object ExprSpec extends ZIOSpecDefault:
       test("githubToken is the short documented spelling") {
         assertTrue(Expr.githubToken.render == "${{ github.token }}")
       },
-      test("Lit and Raw are the two bare cases: everything else wraps itself") {
-        // The asymmetry is deliberate. It is what lets Concat interleave fixed text with expressions.
+      test("Lit, Quoted and Raw are the bare cases: everything else wraps itself") {
+        // The asymmetry is deliberate. It is what lets Concat interleave fixed text with expressions, and what lets a
+        // Quoted sit inside a Call's argument list without a nested wrapper.
         assertTrue(
           Expr.lit("sbt-").render == "sbt-",
+          Expr.quoted("refs/tags/v").render == "'refs/tags/v'",
           Expr.raw("always()").render == "always()",
           Expr.raw("${{ github.sha }}").render == "${{ github.sha }}",
         )
@@ -111,6 +113,115 @@ object ExprSpec extends ZIOSpecDefault:
       test("render and unwrapped differ by exactly the wrapper") {
         val e = Expr.env("DEPLOY_ROLE")
         assertTrue(e.render == s"$${{ ${e.unwrapped} }}")
+      },
+    ),
+    suite("Call")(
+      test("arguments render unwrapped, since a call is already an expression context") {
+        // The whole point of the case. `contains(${{ needs.x.outputs.y }}, 'id')` is a template string GitHub evaluates
+        // to neither operand, so an argument must render bare even though the call itself wraps.
+        val call = Expr.contains(Expr.jobOutput("affected", "modules"), Expr.quoted("api"))
+        assertTrue(
+          call.unwrapped == "contains(needs.affected.outputs.modules, 'api')",
+          call.render == "${{ contains(needs.affected.outputs.modules, 'api') }}",
+        )
+      },
+      test("nested calls nest their arguments, not their wrappers") {
+        assertTrue(
+          Expr
+            .contains(Expr.fromJson(Expr.jobOutput("affected", "modules")), Expr.quoted("all"))
+            .unwrapped == "contains(fromJson(needs.affected.outputs.modules), 'all')"
+        )
+      },
+      test("a nullary call renders empty parens") {
+        assertTrue(
+          Expr.cancelled.unwrapped == "cancelled()",
+          (!Expr.cancelled).unwrapped == "!cancelled()",
+        )
+      },
+      test("startsWith takes a quoted prefix, which is the planner's tag gate") {
+        assertTrue(
+          Expr.startsWith(Expr.github("ref"), Expr.quoted("refs/tags/v")).unwrapped ==
+            "startsWith(github.ref, 'refs/tags/v')"
+        )
+      },
+      test("call rejects an unknown function name at runtime, and accepts either JSON spelling") {
+        // GitHub's expression language is case-insensitive and has no user-defined functions, so `fromJSON` and
+        // `fromJson` are one function and anything off the list is a workflow parse error rather than a false value.
+        assertTrue(
+          Expr.callMake("nosuchFunction").isLeft,
+          Expr.callMake("nosuchFunction").swap.exists(_.contains("no user-defined functions")),
+          Expr.callMake("fromJSON", Expr.lit("x")).map(_.unwrapped) == Right("fromJSON(x)"),
+          Expr.callMake("fromJson", Expr.lit("x")).map(_.unwrapped) == Right("fromJson(x)"),
+        )
+      },
+      test("quotedMake rejects what cannot be single-quoted") {
+        // The literal is emitted between '…' with no escaping, so a quote, `$` or whitespace would either close the
+        // quote early or turn the argument into a nested expression.
+        assertTrue(
+          Expr.quotedMake("it's").isLeft,
+          Expr.quotedMake("$HOME").isLeft,
+          Expr.quotedMake("two words").isLeft,
+          Expr.quotedMake("").isLeft,
+          Expr.quotedMake("refs/tags/v1.0.0") == Right(Expr.quoted("refs/tags/v1.0.0")),
+        )
+      },
+    ),
+    suite("operators")(
+      test("&& and || join bare, and only Group emits a paren") {
+        // Unlike JobCondition, which parenthesizes every clause defensively because its operands are user-supplied.
+        // Here the operands are assembled in this codebase, so the rendered bytes are the author's to control.
+        val a = Expr.github("event_name") === Expr.quoted("push")
+        val b = Expr.jobResult("gate") !== Expr.quoted("success")
+        assertTrue(
+          (a && b).unwrapped == "github.event_name == 'push' && needs.gate.result != 'success'",
+          (a || b).unwrapped == "github.event_name == 'push' || needs.gate.result != 'success'",
+          Expr.group(a).unwrapped == "(github.event_name == 'push')",
+        )
+      },
+      test("! negates without parens, so !( … ) is written explicitly") {
+        val call = Expr.cancelled
+        assertTrue(
+          (!call).unwrapped == "!cancelled()",
+          (!Expr.group(call)).unwrapped == "!(cancelled())",
+        )
+      },
+      test("the planner's verify gate composes to the exact string it has always emitted") {
+        // The byte-for-byte target, lifted from .github/workflows/ci.yml. `Group` placement is what makes the `||` bind
+        // its two clauses only, and `!cancelled()` is what keeps the job reachable after a *skipped* gate.
+        val gate =
+          !Expr.cancelled &&
+            !Expr.startsWith(Expr.github("ref"), Expr.quoted("refs/tags/")) &&
+            (Expr.github("event_name") !== Expr.quoted("workflow_dispatch")) &&
+            Expr.group(
+              Expr.group(Expr.jobResult("verify-gate") !== Expr.quoted("success")) ||
+                Expr.group(Expr.jobOutput("verify-gate", "run") === Expr.quoted("true"))
+            )
+        assertTrue(
+          gate.unwrapped ==
+            "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && " +
+            "((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+        )
+      },
+      test("operators are left-associative, matching Scala's own precedence") {
+        val a = Expr.lit("a")
+        val b = Expr.lit("b")
+        val c = Expr.lit("c")
+        assertTrue(
+          (a && b && c) == Expr.Join(Expr.Join(a, JoinOp.And, b), JoinOp.And, c),
+          // `&&` binds tighter than `||`, so this is `a || (b && c)` with no parens rendered either way.
+          (a || b && c).unwrapped == "a || b && c",
+          (a || b && c) == Expr.Join(a, JoinOp.Or, Expr.Join(b, JoinOp.And, c)),
+        )
+      },
+      test("=== builds a comparison where == would compare the Scala values") {
+        // Why the operator is spelled `===`: `==` is `Any`'s, so it can only ever answer "are these the same AST", not
+        // "emit a GHA equality test". Both are useful and neither can be the other.
+        val e = Expr.lit("x")
+        assertTrue(
+          (e === e) == Expr.Compare(e, CompareOp.Eq, e),
+          (e === e).unwrapped == "x == x",
+          e == Expr.lit("x"),
+        )
       },
     ),
     suite("asWord")(

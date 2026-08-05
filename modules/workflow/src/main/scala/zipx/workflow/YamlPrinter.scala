@@ -20,6 +20,41 @@ object YamlPrinter:
     writeNode(sb, yaml, 0, isTopLevel = true)
     sb.toString
 
+  /** The reason this tree cannot be printed as readable YAML, if there is one.
+    *
+    * A pre-pass rather than a check inside the writer, because the writer is a recursive `StringBuilder` walk whose
+    * every method would otherwise have to return and thread an `Either`. Separating the two keeps [[print]] total for a
+    * tree that passed, and gives [[Render]] a failure *value* to return rather than an exception to throw. See
+    * [[writeBlockScalar]] for why these two cases are fatal rather than merely ugly.
+    */
+  def problem(yaml: Yaml): Option[String] = yaml match
+    case Yaml.Mapping(entries)   => entries.iterator.flatMap((k, v) => problem(k).orElse(problem(v))).nextOption()
+    case Yaml.Sequence(elements) => elements.iterator.flatMap(problem).nextOption()
+    case Yaml.Scalar(value, _)   => multiLineProblem(value)
+    case Yaml.NullValue          => None
+
+  /** The block-scalar rules, checked against a value that is about to be printed. Only multi-line values reach a block
+    * scalar, so a single-line string with a control character is left to `needsQuoting`, which handles it correctly.
+    */
+  private def multiLineProblem(value: String): Option[String] =
+    if !value.contains('\n') then None
+    else
+      value
+        .split("\n", -1)
+        .iterator
+        .zipWithIndex
+        .flatMap { (line, i) =>
+          if line.exists(c => c == '\r' || (c.isControl && c != '\t')) then
+            Some(
+              s"multi-line YAML value line ${i + 1} contains a carriage return or control character, " +
+                s"which would be quote-escaped into a single line: ${line.take(60)}"
+            )
+          else if line.startsWith("\t") then
+            Some(s"multi-line YAML value line ${i + 1} starts with a tab; block scalar indentation must be spaces")
+          else None
+        }
+        .nextOption()
+
   private def writeNode(sb: java.lang.StringBuilder, yaml: Yaml, indent: Int, isTopLevel: Boolean): Unit =
     yaml match
       case Yaml.Mapping(entries)   => writeBlockMapping(sb, entries, indent, isTopLevel)
@@ -92,25 +127,14 @@ object YamlPrinter:
   /** A YAML literal block scalar (`|`): each source line is emitted at `contentIndent`. Trailing-newline handling uses
     * clip (the default `|`), which keeps a single final newline, fine for `actions/cache` path lists.
     *
-    * The guard catches the two ways a multi-line value silently produces YAML GitHub cannot read: a `\r` or C0 control
-    * character (which `needsQuoting` would force into a quoted scalar, collapsing the whole program onto one escaped
-    * line), and a line starting with a tab (block-scalar indentation must be spaces, so a leading tab is a parse
-    * error). `zipx-shell`'s `ScriptLine` already makes these unconstructible for a DSL-built script; this is the same
-    * check for hand-written strings, which still reach here.
+    * Two kinds of content silently produce YAML GitHub cannot read here: a `\r` or C0 control character (which
+    * `needsQuoting` would force into a quoted scalar, collapsing the whole program onto one escaped line), and a line
+    * starting with a tab (block-scalar indentation must be spaces, so a leading tab is a parse error). `zipx-shell`'s
+    * `ScriptLine` makes both unconstructible for a DSL-built script; a hand-written string still reaches here, and
+    * [[problem]] is where it is caught, before any output is produced.
     */
   private def writeBlockScalar(sb: java.lang.StringBuilder, value: String, contentIndent: Int): Unit =
     val lines = value.split("\n", -1)
-    lines.zipWithIndex.foreach { (line, i) =>
-      require(
-        !line.exists(c => c == '\r' || (c.isControl && c != '\t')),
-        s"multi-line YAML value line ${i + 1} contains a carriage return or control character, " +
-          s"which would be quote-escaped into a single line: ${line.take(60)}",
-      )
-      require(
-        !line.startsWith("\t"),
-        s"multi-line YAML value line ${i + 1} starts with a tab; block scalar indentation must be spaces",
-      )
-    }
     sb.append(" |")
     lines.foreach { line =>
       sb.append('\n')

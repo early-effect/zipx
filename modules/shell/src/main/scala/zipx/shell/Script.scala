@@ -57,8 +57,14 @@ object Script:
     /** One level deeper, for a nested body. */
     def nested: Ctx = Ctx(depth + 1)
 
-    /** Indent and validate one line of text. Returns a single-element list so implementations can `:::` results. */
-    def line(text: String): List[ScriptLine] = List(indent(ScriptLine.makeOrThrow(text)))
+    /** Indent and validate `text` as one logical line.
+      *
+      * Text spanning several physical lines is split and each part indented, because a single logical command can
+      * legitimately occupy several: a `\` continuation, or a `$(…)` substitution that wraps. Every part still goes
+      * through [[ScriptLine]], so splitting adds no way to smuggle an unchecked line through.
+      */
+    def line(text: String): List[ScriptLine] =
+      text.split("\n", -1).toList.map(part => indent(ScriptLine.makeOrThrow(part)))
 
     /** Indent an already-validated line. Indentation is spaces, never tabs. */
     def indent(line: ScriptLine): ScriptLine =

@@ -90,20 +90,22 @@ zipxCapabilities += Capability
           name = r.name,
           env = Map(
             "REGISTRY"    -> EnvValue.plain(r.host),
-            "DEPLOY_ROLE" -> secret"${r.roleSecret}",
+            "DEPLOY_ROLE" -> r.roleSecret,
           ),
         )
       ),
     permissions = Map("id-token" -> "write", "contents" -> "read"),
   )
   .copy(
+    // `Expr.env` rather than the string `"${{ env.DEPLOY_ROLE }}"`: the name is validated at compile time, so a typo is
+    // a build error here instead of an empty input on the runner.
     extraSteps = _ =>
       List(
-        Step(
-          name = Some("Login to registry"),
-          uses = Some("aws-actions/configure-aws-credentials@v6"),
-          `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"),
-        )
+        Step
+          .uses("aws-actions/configure-aws-credentials@v6")
+          .named("Login to registry")
+          .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+          .build
       )
   )
 
@@ -125,7 +127,7 @@ zipxCapabilities += zipxTasks
           environment = e.ghEnvironment,
           env = Map(
             "AWS_REGION"  -> EnvValue.plain(e.region),
-            "DEPLOY_ROLE" -> secret"${e.roleSecret}",
+            "DEPLOY_ROLE" -> e.roleSecret,
             "TIER"        -> EnvValue.plain(e.tier),
           ),
           condition = Some(JobCondition.refIs("refs/heads/main")),
@@ -138,10 +140,11 @@ zipxCapabilities += zipxTasks
     // The extension seam: assume the cloud role (from the target's env) before running the deploy command.
     extraSteps = _ =>
       List(
-        Step(
-          name = Some("Configure AWS credentials"),
-          uses = Some("aws-actions/configure-aws-credentials@v6"),
-          `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}", "aws-region" -> "${{ env.AWS_REGION }}"),
-        )
+        Step
+          .uses("aws-actions/configure-aws-credentials@v6")
+          .named("Configure AWS credentials")
+          .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+          .withInput("aws-region", Expr.env("AWS_REGION"))
+          .build
       )
   )

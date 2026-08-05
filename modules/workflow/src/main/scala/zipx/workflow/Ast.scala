@@ -1,5 +1,6 @@
 package zipx.workflow
 
+import neotype.unwrap
 import zio.blocks.schema.*
 import scala.collection.immutable.ListMap
 
@@ -44,63 +45,66 @@ enum DayOfWeek:
 
 /** Five-field UTC cron for GitHub Actions `on.schedule` (`minute hour day-of-month month day-of-week`).
   *
-  * Prefer [[Cron.weekly]], [[Cron.daily]], [[Cron.hourly]] over [[Cron.Raw]]. Constructors validate ranges;
-  * [[Cron.Raw]] is the escape hatch for expressions the variants cannot express.
+  * Ranges are enforced by the field types ([[CronHour]], [[CronMinute]]) rather than checked when rendering, so
+  * `Cron.daily(hour = 24)` is a compile error at the call site and [[render]] is total. A schedule is written as a
+  * literal in a build, which is what makes the compile-time form the right one here; `Cron.dailyMake` is the sibling
+  * for an hour that arrives as runtime data.
+  *
+  * Prefer [[Cron.weekly]], [[Cron.daily]], [[Cron.hourly]] over [[Cron.Raw]], the escape hatch for the step-value and
+  * range forms the variants cannot express.
   */
 enum Cron:
-  case Weekly(day: DayOfWeek, hour: Int = 0, minute: Int = 0)
-  case Daily(hour: Int = 0, minute: Int = 0)
-  case Hourly(minute: Int = 0)
-  case Raw(expression: String)
+  case Weekly(day: DayOfWeek, hour: CronHour = CronHour.Midnight, minute: CronMinute = CronMinute.Zero)
+  case Daily(hour: CronHour = CronHour.Midnight, minute: CronMinute = CronMinute.Zero)
+  case Hourly(minute: CronMinute = CronMinute.Zero)
+  case Raw(expression: CronExpr)
 
-  /** Render to the string that lands in YAML `cron:`. */
+  /** Render to the string that lands in YAML `cron:`. Total: every field is a type that cannot hold a bad value. */
   def render: String = this match
-    case Cron.Weekly(day, hour, minute) =>
-      Cron.requireMinute(minute)
-      Cron.requireHour(hour)
-      s"$minute $hour * * ${day.cronValue}"
-    case Cron.Daily(hour, minute) =>
-      Cron.requireMinute(minute)
-      Cron.requireHour(hour)
-      s"$minute $hour * * *"
-    case Cron.Hourly(minute) =>
-      Cron.requireMinute(minute)
-      s"$minute * * * *"
-    case Cron.Raw(expression) =>
-      Cron.requireRaw(expression)
+    case Cron.Weekly(day, hour, minute) => s"${minute.unwrap} ${hour.unwrap} * * ${day.cronValue}"
+    case Cron.Daily(hour, minute)       => s"${minute.unwrap} ${hour.unwrap} * * *"
+    case Cron.Hourly(minute)            => s"${minute.unwrap} * * * *"
+    case Cron.Raw(expression)           => expression.unwrap
 end Cron
 
 object Cron:
 
-  def weekly(day: DayOfWeek = DayOfWeek.Sunday, hour: Int = 0, minute: Int = 0): Cron =
-    Weekly(day, hour, minute)
+  /** `weekly(Monday, hour = 6)`, with the hour and minute checked during compilation. */
+  inline def weekly(day: DayOfWeek = DayOfWeek.Sunday, inline hour: Int = 0, inline minute: Int = 0): Cron =
+    Weekly(day, CronHour(hour), CronMinute(minute))
 
-  def daily(hour: Int = 0, minute: Int = 0): Cron =
-    Daily(hour, minute)
+  /** [[weekly]] for an hour or minute that arrives as runtime data. */
+  def weeklyMake(day: DayOfWeek, hour: Int, minute: Int): Either[String, Cron] =
+    for
+      h <- CronHour.make(hour)
+      m <- CronMinute.make(minute)
+    yield Weekly(day, h, m)
 
-  def hourly(minute: Int = 0): Cron =
-    Hourly(minute)
+  inline def daily(inline hour: Int = 0, inline minute: Int = 0): Cron =
+    Daily(CronHour(hour), CronMinute(minute))
 
-  /** Escape hatch: a raw five-field cron string, rendered verbatim after light validation. */
-  def raw(expression: String): Cron =
-    Raw(expression)
+  /** [[daily]] for an hour or minute that arrives as runtime data. */
+  def dailyMake(hour: Int, minute: Int): Either[String, Cron] =
+    for
+      h <- CronHour.make(hour)
+      m <- CronMinute.make(minute)
+    yield Daily(h, m)
 
-  private def requireMinute(minute: Int): Unit =
-    require(minute >= 0 && minute <= 59, s"cron minute must be 0–59, got $minute")
+  inline def hourly(inline minute: Int = 0): Cron =
+    Hourly(CronMinute(minute))
 
-  private def requireHour(hour: Int): Unit =
-    require(hour >= 0 && hour <= 23, s"cron hour must be 0–23, got $hour")
+  /** [[hourly]] for a minute that arrives as runtime data. */
+  def hourlyMake(minute: Int): Either[String, Cron] =
+    CronMinute.make(minute).map(Hourly(_))
 
-  private val RawPattern = raw"\S+(?:\s+\S+){4}".r
+  /** Escape hatch: a raw five-field cron string, checked during compilation. */
+  inline def raw(inline expression: String): Cron =
+    Raw(CronExpr(expression))
 
-  private def requireRaw(expression: String): String =
-    val trimmed = expression.trim
-    if trimmed.isEmpty then throw IllegalArgumentException("cron expression must be non-empty")
-    if RawPattern.matches(trimmed) then trimmed
-    else
-      throw IllegalArgumentException(
-        s"invalid cron '$expression': expected five whitespace-separated fields (minute hour dom month dow)"
-      )
+  /** [[raw]] for an expression that arrives as runtime data. */
+  def rawMake(expression: String): Either[String, Cron] =
+    CronExpr.make(expression).map(Raw(_))
+
 end Cron
 
 /** Branch/tag/path filters for a `push` or `pull_request` trigger. Empty lists are pruned at render time. */
@@ -167,45 +171,52 @@ final case class Step(
 object Step:
 
   /** Start a `run:` step from a typed script: `Step.run(script).named("Test").build`. */
-  def run(script: zipx.shell.Script): StepBuilder = StepBuilder.run(script)
+  def run(script: zipx.shell.Script): StepBuilder.Run = StepBuilder.run(script)
 
   /** **Escape hatch.** Start a `run:` step from verbatim text. See [[StepBuilder.runRaw]].
     */
-  def runRaw(text: String): StepBuilder = StepBuilder.runRaw(text)
+  def runRaw(text: String): StepBuilder.Run = StepBuilder.runRaw(text)
 
-  /** Start a `uses:` step from an action ref, normally an `ActionPins` field. */
-  def uses(action: String): StepBuilder = StepBuilder.uses(action)
+  /** Start a `uses:` step from a literal action ref, checked during compilation. See [[StepBuilder.uses]]. */
+  inline def uses(inline action: String): StepBuilder.Uses = StepBuilder.uses(action)
 
-  /** Throw unless this step is one GitHub Actions accepts.
+  /** [[uses]] for a ref that arrives as runtime data, normally an `ActionPins` field. See [[StepBuilder.usesMake]]. */
+  def usesMake(action: String): Either[String, StepBuilder.Uses] = StepBuilder.usesMake(action)
+
+  /** The reason this step is not one GitHub Actions accepts, if there is one.
+    *
+    * A pure query, not a check that throws: the caller decides what a bad step means. [[Render]] reports it as a
+    * rendering failure, and that is the only place in zipx that needs to.
     *
     * The two structural rules a flat case class cannot encode:
     *
     *   - exactly one of `uses` and `run`; neither is a step that does nothing, both is ambiguous and GitHub errors
     *   - `with:` belongs to `uses`; on a `run:` step GitHub ignores it, which reads as a silently dropped input
     *
-    * Called from [[Render]] rather than from the constructor, because a `Step` is also a decode target: validating on
-    * construction would reject a partially-built value that a codec is still filling in. Render time is the last moment
-    * the information exists and the first moment the step is claimed to be complete.
+    * Both are unreachable through [[StepBuilder]], which fixes `run:`/`uses:` in its type and gives `withInput` only to
+    * the `uses:` case. This exists for the other two ways a `Step` comes into being: hand-construction, which stays
+    * legal because the case class shape is fixed by the on-disk contract, and codec decoding. Checking at render time
+    * rather than on construction is what lets a codec fill a value in field by field.
     */
-  def validate(step: Step): Unit =
+  def problem(step: Step): Option[String] =
     val where = step.name.orElse(step.id).map(n => s" '$n'").getOrElse("")
     (step.uses, step.run) match
       case (Some(_), Some(_)) =>
-        throw IllegalArgumentException(
-          s"step$where sets both uses and run; a GitHub Actions step is one or the other"
-        )
+        Some(s"step$where sets both uses and run; a GitHub Actions step is one or the other")
       case (None, None) =>
-        throw IllegalArgumentException(
-          s"step$where sets neither uses nor run; every step must do one or the other"
-        )
+        Some(s"step$where sets neither uses nor run; every step must do one or the other")
       case (None, Some(_)) if step.`with`.nonEmpty =>
-        throw IllegalArgumentException(
+        Some(
           s"step$where sets with: on a run step; with: passes inputs to an action, so GitHub ignores it here " +
             s"(keys: ${step.`with`.keys.toList.sorted.mkString(", ")})"
         )
-      case _ => ()
+      case _ => None
     end match
-  end validate
+  end problem
+
+  /** `Right(step)` if this is a step GitHub Actions accepts, `Left` with [[problem]]'s message otherwise. */
+  def validate(step: Step): Either[String, Step] =
+    problem(step).toLeft(step)
 
 end Step
 

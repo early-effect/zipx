@@ -1,5 +1,7 @@
 package zipx.core
 
+import zipx.workflow.SecretName
+
 /** How CI caches sbt's build state.
   *
   * sbt 2.x's action cache is machine-wide and content-addressed on disk. All three backends are fully wired by the
@@ -21,8 +23,29 @@ enum CacheBackend:
   /** Run a `buchgr/bazel-remote` gRPC server as a workflow service and point `Global / remoteCache` at it. */
   case BazelRemoteSidecar(image: String, port: Int)
 
-  /** Point `Global / remoteCache` at a managed gRPC backend (BuildBuddy/EngFlow/NativeLink). `headerSecret` is the
-    * *name* of a GitHub Actions secret whose value becomes the auth header (rendered via [[EnvValue.secret]]).
+  /** Point `Global / remoteCache` at a managed gRPC backend (BuildBuddy/EngFlow/NativeLink).
+    *
+    * `headerSecret` is the *name* of a GitHub Actions secret whose value becomes the auth header, so it is a
+    * [[zipx.workflow.SecretName]] rather than a `String`: the name is spliced into a `${{ secrets.… }}` expression, and
+    * typing it is what keeps a malformed one from reaching the YAML. Use [[CacheBackend.managedRemote]] to write it as
+    * a literal, which is checked while the build compiles.
     */
-  case ManagedRemote(uri: String, headerSecret: String)
+  case ManagedRemote(uri: String, headerSecret: SecretName)
+end CacheBackend
+
+object CacheBackend:
+
+  /** [[CacheBackend.ManagedRemote]] from a literal secret name, checked at compile time.
+    *
+    * {{{
+    * zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
+    * }}}
+    */
+  inline def managedRemote(uri: String, inline headerSecret: String): CacheBackend =
+    ManagedRemote(uri, SecretName(headerSecret))
+
+  /** [[managedRemote]] for a secret name that arrives as runtime data (a setting, an env lookup). */
+  def managedRemoteMake(uri: String, headerSecret: String): Either[String, CacheBackend] =
+    SecretName.make(headerSecret).map(ManagedRemote(uri, _))
+
 end CacheBackend

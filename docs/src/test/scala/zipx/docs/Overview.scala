@@ -3,6 +3,7 @@ package zipx.docs
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
+import zipx.docs.DocsRender.yaml
 import zipx.workflow.Render
 import zio.test.*
 
@@ -274,13 +275,15 @@ env = Map(
 ```
 """,
       exampleValue {
-        Render.renderMapping(
-          ListMap(
-            "PGP_PASSPHRASE" -> EnvValue.secret("PGP_PASSPHRASE").render,
-            "AWS_REGION"     -> EnvValue.plain("us-west-2").render,
-            "DEPLOY_ROLE"    -> EnvValue.env("DEPLOY_ROLE").render,
+        Render
+          .renderMapping(
+            ListMap(
+              "PGP_PASSPHRASE" -> EnvValue.secret("PGP_PASSPHRASE").render,
+              "AWS_REGION"     -> EnvValue.plain("us-west-2").render,
+              "DEPLOY_ROLE"    -> EnvValue.env("DEPLOY_ROLE").render,
+            )
           )
-        )
+          .yaml
       }.assert(yaml =>
         assertTrue(
           yaml.contains("PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}"),

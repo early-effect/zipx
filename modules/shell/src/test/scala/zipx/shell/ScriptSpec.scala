@@ -137,17 +137,107 @@ object ScriptSpec extends ZIOSpecDefault:
         assertTrue(
           Exit().inlineRender == "exit 0",
           Exit(ExitCode(1)).inlineRender == "exit 1",
-          Comment("why this exists").inlineRender == "# why this exists",
+          Comment("why this exists").render == "# why this exists",
           BlankLine.lines(Script.Ctx.root).map(_.unwrap) == List(""),
         )
       },
-      test("inlineRender rejects a multi-line command where the shell needs one line") {
-        val multiLine = If(ShTest.varNonEmpty("x"), Block(Exec("echo", Word.lit("hi"))))
-        val failed    =
-          try
-            multiLine.inlineRender; false
-          catch case _: IllegalArgumentException => true
-        assertTrue(failed)
+      test("Continued puts a trailing backslash on every line but the last") {
+        // The property the type exists to guarantee: a `\` on the last line makes the shell swallow whatever follows,
+        // and a missing one mid-command splits it in two. Neither is visible by eye in a long `gh api` call.
+        val cmd = Continued(
+          "gh",
+          List(
+            List(Word.lit("api"), Word.quoted("repos/owner/repo/pulls")),
+            List(Word.lit("--jq"), Word.quoted("length")),
+            List(Word.lit("--paginate")),
+          ),
+        )
+        val rendered = cmd.render
+        assertTrue(
+          rendered ==
+            """gh api "repos/owner/repo/pulls" \
+              |  --jq "length" \
+              |  --paginate""".stripMargin,
+          rendered.linesIterator.toList.dropRight(1).forall(_.endsWith(" \\")),
+          !rendered.linesIterator.toList.last.endsWith("\\"),
+        )
+      },
+      test("continuationIndent applies to every line after the first, on top of the script's depth") {
+        // Two indents compose here and neither owns the other: `continuationIndent` is the command's own hanging indent,
+        // the script's depth comes from the enclosing block.
+        val cmd = Continued("curl", List(List(Word.lit("-s")), List(Word.lit("-o"), Word.lit("out"))))
+        assertTrue(
+          cmd.render == "curl -s \\\n  -o out",
+          cmd.copy(continuationIndent = 4).render == "curl -s \\\n    -o out",
+          cmd.copy(continuationIndent = 0).render == "curl -s \\\n-o out",
+          // Inside an `if`, the block's two spaces are added to both lines and the hanging indent survives.
+          Script(If(ShTest.varNonEmpty("x"), Block(cmd))).render ==
+            """if [ -n "$x" ]; then
+              |  curl -s \
+              |    -o out
+              |fi""".stripMargin,
+        )
+      },
+      test("a Continued with one line, or none, carries no backslash") {
+        assertTrue(
+          Continued("git", List(List(Word.lit("status")))).render == "git status",
+          Continued("git", Nil).render == "git",
+        )
+      },
+      test("a Continued is inline-usable: a continuation is one logical command") {
+        // Verified against real bash: `printf … \` continued into `| wc -l` runs as one pipeline. The restriction here is
+        // the shell's, not the renderer's, so a continuation belongs in an inline position and `Script.Ctx` splits it.
+        val cmd = Continued("gh", List(List(Word.lit("api")), List(Word.lit("--paginate"))))
+        assertTrue(
+          (cmd | Exec("wc", Word.lit("-l"))).render == "gh api \\\n  --paginate | wc -l",
+          cmd.lines(Script.Ctx.root).length == 2,
+        )
+      },
+    ),
+    suite("InlineCommand")(
+      test("a compound command does not compile where the shell needs one command") {
+        // The type distinction replaces what used to be a generate-time throw. `if`, `for` and `while` need `;`
+        // separators to sit in these positions and the renderer emits none, so the mistake is a compile error at the
+        // construction site instead of broken shell discovered later.
+        for
+          piped     <- typeCheck("""Exec("wc", Word.lit("-l")) | If(ShTest.varNonEmpty("x"), Block(Exit()))""")
+          condition <- typeCheck("""ShTest.succeeds(ForIn(VarName("x"), Nil, Block(Exit())))""")
+          redirect  <- typeCheck("""While(ShTest.varNonEmpty("x"), Block(Exit())).writeTo(Word.lit("log"))""")
+          comment   <- typeCheck("""Exec("echo", Word.lit("hi")) | Comment("not a command")""")
+          rawBlock  <- typeCheck("""ShTest.succeeds(Raw(Nil))""")
+        yield assertTrue(
+          piped.isLeft,
+          condition.isLeft,
+          redirect.isLeft,
+          comment.isLeft,
+          rawBlock.isLeft,
+        )
+      },
+      test("the inline-usable commands do compile in those positions") {
+        for
+          exec      <- typeCheck("""Exec("git", Word.lit("tag")) | Exec("wc", Word.lit("-l"))""")
+          continued <- typeCheck("""ShTest.succeeds(Continued("gh", List(List(Word.lit("api")))))""")
+          assign    <- typeCheck("""Assign("k", Word.lit("v")).writeTo(Word.lit("out"))""")
+          rawLine   <- typeCheck("""ShTest.succeeds(RawLine("grep -q pattern file"))""")
+        yield assertTrue(exec.isRight, continued.isRight, assign.isRight, rawLine.isRight)
+      },
+      test("RawLine is the single-line escape hatch, and reports itself as raw") {
+        val cmd = RawLine("grep -q '^v' tags")
+        assertTrue(
+          Script(If(ShTest.succeeds(cmd), Block(Exit()))).render ==
+            """if grep -q '^v' tags; then
+              |  exit 0
+              |fi""".stripMargin,
+          cmd.rawFragments == List("grep -q '^v' tags"),
+          RawLine.make("two\nlines").isLeft,
+          RawLine.make("fine").map(_.inlineRender) == Right("fine"),
+        )
+      },
+      test("a multi-line RawLine literal does not compile") {
+        for
+          multiline <- typeCheck("""RawLine("two\nlines")""")
+          fine      <- typeCheck("""RawLine("one line")""")
+        yield assertTrue(multiline.isLeft, fine.isRight)
       },
     ),
     suite("If")(
@@ -301,7 +391,7 @@ object ScriptSpec extends ZIOSpecDefault:
         )
       },
       test("raw fragments propagate through wrapping commands so the warning can find them") {
-        val raw     = Raw.make("custom line").toOption.get
+        val raw     = RawLine.make("custom line").toOption.get
         val wrapped = Script(If(ShTest.succeeds(raw), Block(Exec("echo", Word.lit("hi")))))
         assertTrue(wrapped.rawFragments == List("custom line"))
       },

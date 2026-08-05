@@ -1,7 +1,7 @@
 package zipx.github
 
 import zipx.core.*
-import zipx.core.EnvValue.{expr, plain, secret}
+import zipx.core.EnvValue.{plain, secret}
 
 /** GitHub Packages paved path for zipx.
   *
@@ -14,7 +14,7 @@ import zipx.core.EnvValue.{expr, plain, secret}
   * {{{
   * zipxCapabilities ++= Seq(
   *   ZipxCentral.release,
-  *   ZipxGitHubPackages.sameRepo(repository = Some("acme/my-fork")),
+  *   ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/my-fork"))),
   * )
   * }}}
   */
@@ -28,27 +28,38 @@ object ZipxGitHubPackages:
   /** Env flag builds use to opt `publishTo` into GitHub Packages (work / mechanoid convention). */
   val PublishFlagEnv: String = "PUBLISH_GITHUB_PACKAGES"
 
-  /** Same-repo Packages: default `GITHUB_TOKEN` from `${{ github.token }}`. */
+  /** Same-repo Packages: default `GITHUB_TOKEN` from `${{ github.token }}`.
+    *
+    * A fork gate is a [[zipx.core.JobCondition]] like any other, so it goes in `condition`. There used to be a
+    * `repository: Option[String]` shortcut here; it took an owner/repo slug as an unvalidated string and threw on a
+    * malformed one, where `JobCondition.repositoryIs("acme/fork")` is checked while the build compiles.
+    *
+    * {{{
+    * ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/my-fork")))
+    * }}}
+    */
   def sameRepo(
       name: String = DefaultName,
       scope: CapabilityScope = CapabilityScope.Aggregate,
-      repository: Option[String] = None,
       condition: Option[JobCondition] = None,
   ): Capability =
     publishCap(
       name = name,
       scope = scope,
-      token = expr("${{ github.token }}"),
-      condition = resolveCondition(repository, condition),
+      token = EnvValue.githubToken,
+      condition = condition,
       extraEnv = Map.empty,
     )
 
-  /** Shared / cross-repo Packages: token from a repository or org secret (e.g. `GH_PACKAGES_TOKEN`). */
+  /** Shared / cross-repo Packages: token from a repository or org secret.
+    *
+    * `token` is an [[zipx.core.EnvValue]] rather than a secret *name*, so the name is validated where it is written:
+    * `secret"GH_PACKAGES_TOKEN"` is an `inline` constructor and a malformed name does not compile.
+    */
   def sharedRegistry(
-      tokenSecret: String = "GH_PACKAGES_TOKEN",
+      token: EnvValue = secret"GH_PACKAGES_TOKEN",
       name: String = DefaultName,
       scope: CapabilityScope = CapabilityScope.Aggregate,
-      repository: Option[String] = None,
       condition: Option[JobCondition] = None,
       packagesRepo: Option[String] = None,
       publishOrg: Option[String] = None,
@@ -62,20 +73,11 @@ object ZipxGitHubPackages:
     publishCap(
       name = name,
       scope = scope,
-      token = secret(tokenSecret),
-      condition = resolveCondition(repository, condition),
+      token = token,
+      condition = condition,
       extraEnv = extras,
     )
   end sharedRegistry
-
-  private def resolveCondition(
-      repository: Option[String],
-      condition: Option[JobCondition],
-  ): Option[JobCondition] =
-    (repository, condition) match
-      case (Some(repo), Some(c)) => Some(JobCondition.and(JobCondition.repositoryIs(repo), c))
-      case (Some(repo), None)    => Some(JobCondition.repositoryIs(repo))
-      case (None, c)             => c
 
   private def publishCap(
       name: String,
