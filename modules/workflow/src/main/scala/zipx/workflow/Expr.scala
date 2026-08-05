@@ -4,34 +4,20 @@ import neotype.unwrap
 
 /** A GitHub Actions expression: the typed replacement for a hand-written `${{ … }}` string.
   *
-  * Covers the contexts zipx actually renders into, each one a validated name rather than spliced text:
-  *
   * {{{
-  * Expr.secret("PGP_PASSPHRASE").render      // ${{ secrets.PGP_PASSPHRASE }}
-  * Expr.stepOutput("check", "run").render    // ${{ steps.check.outputs.run }}
-  * Expr.github("event.pull_request.base.sha")
-  * }}}
+  * Expr.secret("PGP_PASSPHRASE").render   // ${{ secrets.PGP_PASSPHRASE }}
+  * Expr.stepOutput("check", "run").render // ${{ steps.check.outputs.run }}
   *
-  * and the operators and function calls a job `if:` is built from, so a gate is composed rather than interpolated:
-  *
-  * {{{
   * (!Expr.cancelled && Expr.github("event_name") !== Expr.quoted("workflow_dispatch")).unwrapped
   * // !cancelled() && github.event_name != 'workflow_dispatch'
   * }}}
   *
-  * Closed rather than open, unlike `zipx.shell.Command`: GitHub fixes the context list and the operator set, so a new
-  * case would be a new GitHub feature, and [[Expr.Raw]] covers anything not yet modelled. The two seams to other layers
-  * are [[Expr.asWord]], which drops an expression into a shell script, and `JobCondition.expr` in `zipx-core`, which
-  * lifts a validated condition into a step field.
+  * [[Expr.Lit]], [[Expr.Quoted]] and [[Expr.Raw]] emit their text bare where every other case wraps in `${{ … }}`,
+  * which is what lets [[Expr.Concat]] build `sbt-${{ runner.os }}-key` without an interpolator.
   *
-  * Note the asymmetry in [[render]]: [[Expr.Lit]], [[Expr.Quoted]] and [[Expr.Raw]] emit their text bare, every other
-  * case wraps in `${{ … }}`. That is what makes [[Expr.Concat]] able to build `sbt-${{ runner.os }}-key` without an
-  * interpolator.
-  *
-  * **Grouping is explicit.** [[&&]] and [[||]] join their operands bare and [[Expr.Group]] is the only thing that emits
-  * a paren, unlike `JobCondition`, whose `&&` parenthesizes every clause. The difference is who wrote the operands: a
-  * `JobCondition` composes user-supplied conditions of unknown shape, where defensive parens are the safe default,
-  * while an `Expr` is assembled here and the rendered bytes are the author's to control.
+  * **Grouping is explicit:** [[&&]] and [[||]] join their operands bare and [[Expr.Group]] is the only case that emits
+  * a paren. `JobCondition` instead parenthesizes every clause, because it composes user-supplied conditions of unknown
+  * shape, where an `Expr` is assembled here and the rendered bytes are the author's to control.
   */
 enum Expr:
 
@@ -41,7 +27,7 @@ enum Expr:
   /** `${{ env.NAME }}`. */
   case Env(name: EnvName)
 
-  /** `${{ vars.NAME }}`: a repository or organization configuration variable, not a secret. */
+  /** `${{ vars.NAME }}`: a configuration variable, not a secret. */
   case Var(name: EnvName)
 
   /** `${{ github.<path> }}`, as in `github.sha` or `github.event.pull_request.base.sha`. */
@@ -66,9 +52,7 @@ enum Expr:
   case Lit(text: String)
 
   /** A single-quoted literal *inside* an expression: the `'refs/tags/v'` of `startsWith(github.ref, 'refs/tags/v')`.
-    *
-    * Emitted bare, quotes included, since it is only ever an operand of a [[Call]] or [[Compare]]. See [[ExprLiteral]]
-    * for why the character set is restricted rather than escaped.
+    * Emitted bare, quotes included, since it is only ever an operand of a [[Call]] or [[Compare]].
     */
   case Quoted(text: ExprLiteral)
 
@@ -79,7 +63,7 @@ enum Expr:
     */
   case Call(function: FunctionName, args: List[Expr])
 
-  /** `a == b` / `a != b`. Operands render [[unwrapped]], for the same reason [[Call]]'s arguments do. */
+  /** `a == b` / `a != b`. Operands render [[unwrapped]], as [[Call]]'s arguments do. */
   case Compare(lhs: Expr, op: CompareOp, rhs: Expr)
 
   /** `a && b` / `a || b`, joined bare. Wrap an operand in [[Group]] where precedence needs it. */
@@ -88,7 +72,7 @@ enum Expr:
   /** `!inner`, with no parens of its own; `!(…)` is `Not(Group(…))`. */
   case Not(inner: Expr)
 
-  /** `(inner)`: the only case that emits a paren, so grouping is something the author writes rather than infers. */
+  /** `(inner)`: the only case that emits a paren. */
   case Group(inner: Expr)
 
   /** Concatenation, so a cache key or tag is assembled from parts instead of interpolated. */
@@ -106,13 +90,11 @@ enum Expr:
     case Concat(parts)   => parts.map(_.render).mkString
     case other           => s"$${{ ${other.unwrapped} }}"
 
-  /** The text *inside* the `${{ }}`, for a position that is already an expression context.
+  /** The text *inside* the `${{ }}`, for a position that is already an expression context: an `if:`, or an operand of
+    * an operator or [[Call]].
     *
-    * A step or job `if:` is evaluated as an expression whether or not it is wrapped, and GitHub documents the bare form
-    * as the one to prefer there. Bare also composes: two conditions can be ANDed into one expression, where two wrapped
-    * ones would concatenate into a template string that evaluates to neither. This is what `if:` renders through, what
-    * every operand of an operator or [[Call]] renders through, and what makes the output match the bare conditions the
-    * planner has always emitted.
+    * Bare composes where wrapped does not: two conditions ANDed bare are one expression, where two wrapped ones
+    * concatenate into a template string that evaluates to neither.
     */
   def unwrapped: String = this match
     case Secret(name)         => s"secrets.${name.unwrap}"
@@ -158,17 +140,15 @@ enum Expr:
 
   /** This expression as a shell [[zipx.shell.Word]], for embedding in a `run:` script.
     *
-    * [[zipx.shell.Word.Opaque]] specifically: an expression's `$` must survive into the YAML unescaped, so it is the
-    * one word kind the shell renderer never touches. This is the whole coupling between the expression AST and the
-    * shell AST, in one direction only. The return type is the precise `Opaque` rather than `Word`, so an expression can
-    * be nested inside a double-quoted word, which is what `"repos/${{ github.repository }}/commits"` needs.
+    * [[zipx.shell.Word.Opaque]] specifically, since an expression's `$` must survive into the YAML unescaped. The
+    * return type is the precise `Opaque` rather than `Word` so it can nest inside a double-quoted word, which
+    * `"repos/${{ github.repository }}/commits"` needs.
     */
   def asWord: zipx.shell.Word.Opaque = zipx.shell.Word.Opaque(zipx.shell.ShText.makeOrThrow(render))
 
 end Expr
 
-/** The comparison operators [[Expr.Compare]] renders. Equality only; GitHub's `<`, `>` and friends compare numbers, and
-  * zipx has no site that needs one.
+/** The comparison operators [[Expr.Compare]] renders. Equality only; nothing here needs GitHub's numeric comparisons.
   */
 enum CompareOp(val symbol: String):
   case Eq extends CompareOp("==")
@@ -259,8 +239,8 @@ object Expr:
   /** `fromJson(value)`: parse a JSON string into an array or object, so `contains` can search it. */
   def fromJson(value: Expr): Expr = call("fromJson", value)
 
-  /** `cancelled()`: true once the run is cancelled. Negated, it is what keeps a job runnable after a *skipped*
-    * upstream, which `success()` (the implicit default) is not.
+  /** `cancelled()`. Negated, it keeps a job runnable after a *skipped* upstream, which `success()` (the implicit
+    * default) does not.
     */
   val cancelled: Expr = Call(FunctionName("cancelled"), Nil)
 
@@ -278,9 +258,7 @@ object Expr:
 
   def rawMake(expression: String): Either[String, Expr] = RawExpr.make(expression).map(Raw(_))
 
-  /** The `GITHUB_TOKEN` injected into every workflow run: `${{ github.token }}`.
-    *
-    * `github.token` rather than `secrets.GITHUB_TOKEN`; the two are equivalent and this is the shorter documented form.
+  /** The `GITHUB_TOKEN` injected into every workflow run: `${{ github.token }}`, equivalent to `secrets.GITHUB_TOKEN`.
     */
   val githubToken: Expr = Github(ContextPath("token"))
 

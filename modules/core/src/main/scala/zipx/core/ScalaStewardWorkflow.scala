@@ -3,27 +3,25 @@ package zipx.core
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** Opt-in Scala Steward companion workflow: weekly (plus manual) dependency update PRs via
-  * `scala-steward-org/scala-steward-action` with the default GitHub Actions token.
+/** Opt-in Scala Steward companion workflow: weekly and manual dependency update PRs, using the default Actions token.
   *
-  * Requires the repo/org setting **Allow GitHub Actions to create and approve pull requests**.
+  * Requires the repo or org setting **Allow GitHub Actions to create and approve pull requests**.
   */
 object ScalaStewardWorkflow:
 
   val DefaultPath: String = ".github/workflows/zipx-scala-steward.yml"
 
-  /** Where the generated Steward defaults config goes. Must match the action's own `repo-config` default: when the file
-    * is missing the action silently ignores it *only* at that exact path, and fails loudly at any other.
+  /** Must match the action's own `repo-config` default: a missing file is silently ignored at exactly this path, and
+    * fails the run at any other.
     */
   val DefaultConfigPath: String = ".github/.scala-steward.conf"
 
-  /** Sunday 00:00 UTC, matching Steward action docs. */
   val DefaultSchedule: Cron = Cron.weekly(DayOfWeek.Sunday)
 
   /** @param configPath
-    *   when set, check the repo out and pass this path as the action's `repo-config`. The action reads that file from
-    *   the runner filesystem, not from Steward's own clone, and it does not check out anything itself, so the checkout
-    *   step is required for the config to be seen at all.
+    *   passed as the action's `repo-config`, which it reads from the runner filesystem rather than from Steward's own
+    *   clone. The action checks out nothing itself, so setting this also adds the checkout step the file needs to
+    *   exist.
     */
   def plan(
       pins: ActionPins,
@@ -52,9 +50,7 @@ object ScalaStewardWorkflow:
     )
   end plan
 
-  /** The Steward workflow as YAML, with `# vX.Y.Z` comments on its `uses:` lines. `Left` propagates a step GitHub would
-    * reject; see [[zipx.workflow.Render.render]].
-    */
+  /** As YAML, with `# vX.Y.Z` comments annotated onto its `uses:` lines. */
   def render(
       pins: ActionPins,
       runnerOs: String,

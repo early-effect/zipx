@@ -64,7 +64,6 @@ object JobConditionSpec extends ZIOSpecDefault:
         val a = JobCondition.repositoryIs("a/b")
         val b = JobCondition.onWorkflowDispatch
         val c = JobCondition.onReleaseTag
-        // a || b && c ≡ a || (b && c), not (a || b) && c
         assertTrue(
           (a || b && c) == (a || (b && c)),
           (a || b && c) != ((a || b) && c),
@@ -113,7 +112,6 @@ object JobConditionSpec extends ZIOSpecDefault:
         assertTrue(JobCondition.raw("  always()  ").render == "always()")
       },
       test("operator-heavy expression preserved") {
-        // Through `rawMake`, since the expression is a `val` rather than a literal the inline validator can see.
         val expr = "(github.event_name == 'pull_request') && (github.base_ref == 'main')"
         assertTrue(JobCondition.rawMake(expr).map(_.render).contains(expr))
       },
@@ -152,8 +150,6 @@ object JobConditionSpec extends ZIOSpecDefault:
         )
       },
       test("an empty conjunction is not a value that exists") {
-        // `All`/`Any` take a first clause and a tail rather than a list, so there is no empty one to reject: the three
-        // ways of writing one are all compile errors instead of a render-time check.
         for
           and <- typeCheck("""zipx.core.JobCondition.and()""")
           or  <- typeCheck("""zipx.core.JobCondition.or()""")
@@ -162,7 +158,6 @@ object JobConditionSpec extends ZIOSpecDefault:
           and.isLeft,
           or.isLeft,
           all.isLeft,
-          // The runtime-length case is `allOf`/`anyOf`, which report emptiness as `None` rather than as a failure.
           JobCondition.allOf(Nil).isEmpty,
           JobCondition.anyOf(Nil).isEmpty,
           JobCondition.allOf(List(JobCondition.onReleaseTag)).isDefined,
@@ -178,9 +173,6 @@ object JobConditionSpec extends ZIOSpecDefault:
         val long = "a" * 300
         assertTrue(JobCondition.refIsMake(long).isLeft)
       },
-
-      // --- Property-based: exhaustive character set checks. These iterate over runtime lists, so they go through the
-      // `*Make` siblings; the compile-time half of the same rule is the `typeCheck` test above.
       test("repositoryIs succeeds for strings of only allowed characters") {
         val validInputs = List(
           "org/repo",
@@ -192,7 +184,6 @@ object JobConditionSpec extends ZIOSpecDefault:
       },
 
       test("repositoryIs rejects any string containing a disallowed character") {
-        // The constructor trims leading/trailing whitespace first, so embed chars in the middle.
         val disallowedChars =
           List("'", "\"", "$", " ", "\t", "\n", "(", ")", "{", "}", "|", "&", ";", "`", "!", "?", "#")
         assertTrue(disallowedChars.forall(c => JobCondition.repositoryIsMake(s"org/repo${c}name").isLeft))
@@ -205,7 +196,6 @@ object JobConditionSpec extends ZIOSpecDefault:
       },
 
       test("hasPrLabel rejects any string containing a disallowed character") {
-        // The constructor trims leading/trailing whitespace first, so embed chars in the middle.
         val disallowedChars =
           List("'", "\"", "$", " ", "\t", "\n", "(", ")", "{", "}", "|", "&", ";", "`", "!", "?", "#")
         assertTrue(disallowedChars.forall(c => JobCondition.hasPrLabelMake(s"label${c}name").isLeft))

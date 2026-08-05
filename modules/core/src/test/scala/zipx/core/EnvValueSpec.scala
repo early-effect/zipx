@@ -23,7 +23,7 @@ object EnvValueSpec extends ZIOSpecDefault:
         EnvValue.plain("us-west-2").render == "us-west-2",
         EnvValue
           .plain("${{ secrets.LOOKS_LIKE_ONE }}")
-          .render == "${{ secrets.LOOKS_LIKE_ONE }}", // Plain does not rewrite
+          .render == "${{ secrets.LOOKS_LIKE_ONE }}",
         EnvValue.expr("${{ github.sha }}").render == "${{ github.sha }}",
       )
     },
@@ -44,9 +44,6 @@ object EnvValueSpec extends ZIOSpecDefault:
         EnvValue.renderAll(Map.empty).isEmpty,
       )
     },
-    // ---- Pathological / adversarial name validation ----
-    // A name written as a literal is checked while the build compiles, so these assert on a compile error rather than
-    // on a caught exception. The runtime half of each rule is `secretMake` / `envMake`, below.
     test("a malformed secret name written as a literal does not compile") {
       for
         empty  <- typeCheck("""zipx.core.EnvValue.secret("")""")
@@ -54,7 +51,6 @@ object EnvValueSpec extends ZIOSpecDefault:
         expr   <- typeCheck("""zipx.core.EnvValue.secret("${{ secrets.X }}")""")
         dotted <- typeCheck("""zipx.core.EnvValue.secret("secrets.X")""")
         digit  <- typeCheck("""zipx.core.EnvValue.secret("1PASSWORD")""")
-        // Keep the alphabet tight: hyphens in secret *names* are uncommon and confuse YAML/shell; force underscore.
         hyphen <- typeCheck("""zipx.core.EnvValue.secret("PGP-PASSPHRASE")""")
       yield assertTrue(empty.isLeft, space.isLeft, expr.isLeft, dotted.isLeft, digit.isLeft, hyphen.isLeft)
     },
@@ -86,15 +82,12 @@ object EnvValueSpec extends ZIOSpecDefault:
       assertTrue(names.forall(n => EnvValue.secretMake(n).isRight))
     },
     test("the secret interpolator carries the validation, so a runtime name does not compile") {
-      // `secret"…"` is `inline` all the way down: an interpolation of compile-time-known parts is folded and checked,
-      // and one splicing runtime data is a compile error naming the input instead of a silent runtime check.
       for
         runtime <- typeCheck("""val bad = "has space"; zipx.core.EnvValue.secret(StringContext("").s(bad))""")
         literal <- typeCheck("""zipx.core.EnvValue.secret("has space")""")
       yield assertTrue(
         runtime.isLeft,
         literal.isLeft,
-        // The supported route for a name assembled at runtime.
         EnvValue.secretMake("has space").isLeft,
       )
     },

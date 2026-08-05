@@ -3,27 +3,17 @@ package zipx.workflow
 import neotype.unwrap
 import zio.test.*
 
-/** Every Actions-syntax newtype's accepting cases, rejecting cases, and boundaries.
-  *
-  * `make` runs the same `validate` the compile-time path does, so testing through `make` covers both rules; that a bad
-  * *literal* also fails the build is asserted separately in [[WorkflowCompileTimeSpec]].
-  *
-  * The rules here are GitHub's, not zipx's, so each suite says which one it is enforcing. Where a rule is a character
-  * class rather than a fixed list, a generator covers it so the suite is not limited to the cases we thought of.
-  */
 object NamesSpec extends ZIOSpecDefault:
 
   private val gIdentStart: Gen[Any, Char] = Gen.elements((('A' to 'Z') ++ ('a' to 'z') :+ '_')*)
   private val gIdentRest: Gen[Any, Char]  = Gen.elements((('A' to 'Z') ++ ('a' to 'z') ++ ('0' to '9') :+ '_')*)
 
-  /** An identifier that every one of these newtypes must accept, other than the reserved-name rules. */
   private val gIdent: Gen[Any, String] =
     for
       head <- gIdentStart
       tail <- Gen.listOf(gIdentRest)
     yield (head :: tail).mkString
 
-  /** Characters that appear in a hand-written expression and must not survive into a name. */
   private val expressionChars = List("$", "{", "}", " ", "'", "\"", ".", "/", "(", ")", "*", "[", "]", "!", "&", "|")
 
   def spec = suite("names")(
@@ -90,8 +80,6 @@ object NamesSpec extends ZIOSpecDefault:
         )
       },
       test("rejects the reserved GITHUB_ prefix, case-insensitively") {
-        // GitHub stores secret names uppercase and matches them case-insensitively, so `github_pat` is the same
-        // reserved name as `GITHUB_PAT`. A validator that only checked the uppercase spelling would be bypassable.
         assertTrue(
           SecretName.make("GITHUB_PAT").isLeft,
           SecretName.make("github_pat").isLeft,
@@ -100,18 +88,16 @@ object NamesSpec extends ZIOSpecDefault:
         )
       },
       test("accepts GITHUB_TOKEN itself, and only it") {
-        // Not a secret you create: GitHub injects it, and `secrets.GITHUB_TOKEN` is the documented way to read it.
         assertTrue(
           SecretName.make("GITHUB_TOKEN").isRight,
           SecretName.make("github_token").isRight,
           SecretName.make("GITHUB_TOKEN_2").isLeft,
-          SecretName.make("MY_GITHUB_TOKEN").isRight, // the prefix rule is about the start, not a substring
+          SecretName.make("MY_GITHUB_TOKEN").isRight,
         )
       },
     ),
     suite("EnvName")(
       test("accepts POSIX-shaped names, agreeing with zipx-shell's VarName") {
-        // The agreement is the point: an `env:` key becomes a shell variable in every `run:` step.
         check(gIdent) { s =>
           assertTrue(EnvName.make(s).isRight == zipx.shell.VarName.make(s).isRight)
         }
@@ -129,7 +115,7 @@ object NamesSpec extends ZIOSpecDefault:
       test("rejects the GITHUB_ prefix, which is GitHub's own default-variable namespace") {
         assertTrue(
           EnvName.make("GITHUB_OUTPUT").isLeft,
-          EnvName.make("GITHUB_TOKEN").isLeft, // unlike a secret: setting this as an env *key* is not the same thing
+          EnvName.make("GITHUB_TOKEN").isLeft,
           EnvName.make("github_output").isLeft,
           EnvName.make("PUBLISH_GITHUB_PACKAGES").isRight,
         )
@@ -150,7 +136,7 @@ object NamesSpec extends ZIOSpecDefault:
           OutputName.make("set-output").isLeft,
           OutputName.make("SET-OUTPUT").isLeft,
           OutputName.make("save-state").isLeft,
-          OutputName.make("set-output-2").isRight, // only the exact command names are reserved
+          OutputName.make("set-output-2").isRight,
         )
       },
       test("rejects empty and expression shapes") {
@@ -173,8 +159,8 @@ object NamesSpec extends ZIOSpecDefault:
         assertTrue(
           MatrixAxis.make("include").isLeft,
           MatrixAxis.make("exclude").isLeft,
-          MatrixAxis.make("includes").isRight, // only the exact directive names
-          MatrixAxis.make("Include").isRight,  // matrix keys are case-sensitive, unlike secrets
+          MatrixAxis.make("includes").isRight,
+          MatrixAxis.make("Include").isRight,
         )
       },
       test("rejects empty and dotted paths") {
@@ -246,7 +232,6 @@ object NamesSpec extends ZIOSpecDefault:
         )
       },
       test("rejects an unpinned owner/repo, with an error that says to add the ref") {
-        // Unpinned actions are exactly what ActionPinFile exists to prevent, so the type refuses to express one.
         assertTrue(
           ActionRef.make("actions/checkout").isLeft,
           ActionRef.make("actions/checkout").swap.exists(_.contains("@ref")),
@@ -271,7 +256,7 @@ object NamesSpec extends ZIOSpecDefault:
           EventName.make("pull_request").isRight,
           EventName.make("workflow_dispatch").isRight,
           EventName.make("schedule").isRight,
-          EventName.make("merge_group").isRight, // shape only, so a newer event is not rejected
+          EventName.make("merge_group").isRight,
         )
       },
       test("rejects empty, hyphens, and expression shapes") {
@@ -303,8 +288,6 @@ object NamesSpec extends ZIOSpecDefault:
         )
       },
       test("matching is case-insensitive, because the expression language is") {
-        // `fromJson` and `fromJSON` are one function, so accepting one spelling and rejecting the other would reject
-        // valid workflows over a detail GitHub does not care about.
         assertTrue(
           List("fromJson", "fromJSON", "FROMJSON", "fromjson", "StartsWith", "TOJSON")
             .forall(f => FunctionName.make(f).isRight)
@@ -314,11 +297,11 @@ object NamesSpec extends ZIOSpecDefault:
         assertTrue(
           FunctionName.make("").isLeft,
           FunctionName.make("myHelper").isLeft,
-          FunctionName.make("startWith").isLeft,  // a real typo, one character off
-          FunctionName.make("contains(").isLeft,  // the call syntax, not the name
-          FunctionName.make("fromJson ").isLeft,  // trailing space
-          FunctionName.make("not").isLeft,        // an operator, not a function
-          FunctionName.make("containsAll").isLeft, // a prefix match must not pass
+          FunctionName.make("startWith").isLeft,
+          FunctionName.make("contains(").isLeft,
+          FunctionName.make("fromJson ").isLeft,
+          FunctionName.make("not").isLeft,
+          FunctionName.make("containsAll").isLeft,
         )
       },
       test("the error says why, since the rule is a list rather than a shape") {
@@ -398,7 +381,6 @@ object NamesSpec extends ZIOSpecDefault:
         )
       },
       test("does not trim: an expression keeps the spacing the caller chose") {
-        // Trimming belongs to the caller (JobCondition.raw trims before delegating), so `render` stays byte-faithful.
         assertTrue(RawExpr.make(" always() ").map(_.unwrap) == Right(" always() "))
       },
     ),

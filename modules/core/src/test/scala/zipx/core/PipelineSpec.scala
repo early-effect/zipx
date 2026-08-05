@@ -3,16 +3,10 @@ package zipx.core
 import zio.test.*
 import zipx.workflow.*
 
-/** M6e: end-to-end capability proof. Plans the FULL set of capabilities (test → publish → docker → gated multi-target
-  * deploy) together on the sample graph and asserts the complete pipeline holds. Where the per-capability specs check
-  * one behavior in isolation, this catches interaction bugs: phase ordering across capabilities, cross-capability
-  * `needs`, and that a realistic multi-environment build generates entirely from the model with no external config.
-  */
 object PipelineSpec extends ZIOSpecDefault:
   import Fixtures.*
   import EnvValue.secret
 
-  // A graph where serviceA is a docker image AND a deploy target (the "app" shape), alongside the publishing libraries.
   private val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
     case n if n.id == "serviceA" => n.copy(docker = true)
     case n                       => n
@@ -67,15 +61,11 @@ object PipelineSpec extends ZIOSpecDefault:
   def spec = suite("Pipeline (M6e end-to-end)")(
     test("the full pipeline emits every stage's jobs") {
       assertTrue(
-        // Verify: one test job per module.
         wf.jobs.contains("test-schema"),
         wf.jobs.contains("test-serviceA"),
-        // Publish: only for publishing libraries, not the service.
         wf.jobs.contains("publish-schema"),
         !wf.jobs.contains("publish-serviceA"),
-        // Docker: only for the opted-in service.
         wf.jobs.contains("docker-serviceA"),
-        // Deploy: one job per target.
         wf.jobs.contains("deploy-serviceA-staging"),
         wf.jobs.contains("deploy-serviceA-prod"),
       )
@@ -117,7 +107,6 @@ object PipelineSpec extends ZIOSpecDefault:
       )
     },
     test("the whole workflow renders deterministically (byte-identical twice)") {
-      // isRight as well as equal: two Lefts would compare equal too, and a planned workflow must render.
       assertTrue(Render.render(wf).isRight, Render.render(wf) == Render.render(wf))
     },
   )

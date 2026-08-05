@@ -7,22 +7,13 @@ import scala.collection.immutable.ListMap
 
 /** Renders a [[Workflow]] to deterministic GitHub Actions YAML.
   *
-  * Strategy (see [[zipx.workflow]] package doc and the project memory `zipx-yaml-rendering`):
-  *   - Job/Step/Strategy/Concurrency are rendered by zio-blocks' derived YAML codecs, which kebab-case field names,
-  *     precisely GitHub's convention for those keys (`runs-on`, `timeout-minutes`, `fail-fast`, ...).
-  *   - The top-level `Workflow` is hand-encoded so the `on:` block can emit underscore event keys (`pull_request`,
-  *     `workflow_dispatch`) that the kebab-casing deriver cannot produce, and so the `jobs:` mapping preserves the
-  *     `ListMap` order. Derivation is purely structural and ignores custom nested codecs, so the override must live at
-  *     the level that owns the key, hence a `YamlCodec[Workflow]`, not a `given` on `Triggers`.
-  *   - A final [[prune]] pass drops empty mappings/sequences (an empty `env`/`with`/`needs`) so they don't render as
-  *     `{}` / `[]`, while preserving explicit `null`.
+  * Jobs and steps go through zio-blocks' derived codecs; only the top-level `Workflow` is hand-encoded, so that the
+  * `on:` block can emit underscore event keys the kebab-casing deriver cannot produce and `jobs:` keeps its `ListMap`
+  * order. Derivation is purely structural and ignores custom nested codecs, so that override has to live at the level
+  * owning the key: a `YamlCodec[Workflow]`, not a `given` on `Triggers`.
   *
-  * Fragment helpers ([[renderJob]], [[renderJobs]], [[renderSteps]], [[renderMapping]]) share the same encode + prune +
-  * print pipeline as full-file [[render]], so doc snippets and unit tests match committed `ci.yml` bytes.
-  *
-  * The step-shape rules GitHub imposes but the case class cannot ([[Step.problem]]) are checked here, so every entry
-  * point that produces steps returns `Either[String, String]`. [[renderMapping]] and [[print]] do not: neither can
-  * reach a `Step`.
+  * The fragment helpers share [[render]]'s encode + prune + print pipeline, which is what makes a doc snippet or unit
+  * test byte-comparable with the committed `ci.yml`.
   */
 object Render:
 
@@ -30,40 +21,28 @@ object Render:
   private val stepCodec: YamlCodec[Step]               = Schema[Step].derive(YamlFormat)
   private val concurrencyCodec: YamlCodec[Concurrency] = Schema[Concurrency].derive(YamlFormat)
 
-  /** Renders a workflow to a YAML string, ready to write into the `.github/workflows` directory.
-    *
-    * `Left` if any step is one GitHub Actions would reject (see [[Step.problem]]); a `Workflow` is hand-constructible
-    * and a decode target, so that is a real possibility rather than a defect. The failure is a value because the caller
-    * decides what it means: `zipxWorkflowGenerate` turns it into an sbt build failure, a test asserts on it.
-    *
-    * Output is deterministic: field order is fixed by construction, maps must be built with `ListMap`, and no
-    * `Map`-iteration order is relied upon. A generated-by header is prepended so the file announces its provenance.
-    */
+  /** The file as written to `.github/workflows`, header included. */
   def render(wf: Workflow): Either[String, String] =
     renderBody(wf).map(body => s"$header\n$body\n")
 
-  /** Full workflow YAML without the generated-by header (no trailing newline). */
+  /** No header, no trailing newline. */
   def renderBody(wf: Workflow): Either[String, String] =
     checked(wf.jobs.values.toList.flatMap(_.steps), workflowYaml(wf))
 
-  /** Single job as a top-level mapping fragment (`publish:` + job body), matching the encoding under `jobs:`. */
+  /** One job as the mapping fragment it would be under `jobs:`. */
   def renderJob(id: String, job: Job): Either[String, String] =
     renderJobs(ListMap(id -> job))
 
-  /** Multiple jobs as a mapping fragment (no `jobs:` wrapper). */
   def renderJobs(jobs: ListMap[String, Job]): Either[String, String] =
     checked(jobs.values.toList.flatMap(_.steps), jobsYaml(jobs))
 
-  /** Step list as a YAML sequence (`- uses: …`). */
   def renderSteps(steps: List[Step]): Either[String, String] =
     checked(steps, Yaml.Sequence(Chunk.from(steps.map(encodeStep))))
 
-  /** The single funnel: every entry point that can produce steps checks both layers' rules before printing anything.
-    *
-    * `Step.problem` is GitHub's step shape, which the case class cannot encode. `YamlPrinter.problem` is content that
-    * would print as YAML GitHub cannot parse. Both are checked here rather than in a constructor: a `Step` is a decode
-    * target, so a codec must be free to fill one in field by field, and render time is the first moment the value is
-    * claimed to be complete. Nothing is written to disk when either fails.
+  /** The single funnel for both layers' render-time rules: [[Step.problem]] is GitHub's step shape, which the case
+    * class cannot encode, and [[YamlPrinter.problem]] is content that would print as YAML GitHub cannot parse. The
+    * failure is a value, and nothing reaches disk when either fires, because the caller decides what a bad workflow
+    * means: `zipxWorkflowGenerate` makes it a build failure, a test asserts on it.
     */
   private def checked(steps: List[Step], yaml: => Yaml): Either[String, String] =
     steps.flatMap(Step.problem).headOption match
@@ -75,14 +54,12 @@ object Render:
   private def encodeStep(step: Step): Yaml =
     prune(stepCodec.encodeValue(step))
 
-  /** Standalone string→string mapping (permissions, env, `with`). Empty renders as the empty string. */
+  /** A `permissions:`, `env:` or `with:` block on its own. Empty renders as the empty string. */
   def renderMapping(entries: Map[String, String]): Either[String, String] =
     if entries.isEmpty then Right("")
     else print(Yaml.Mapping(Chunk.from(entries.map((k, v) => (Yaml.Scalar(k), Yaml.Scalar(v))))))
 
-  /** Prune empty collections then print any `Yaml` tree, `Left` if it holds content YAML cannot represent readably. No
-    * `Step` is reachable from a bare tree, so this checks [[YamlPrinter.problem]] only.
-    */
+  /** Checks [[YamlPrinter.problem]] but not [[Step.problem]]: no `Step` is reachable from a bare tree. */
   def print(yaml: Yaml): Either[String, String] =
     val pruned = prune(yaml)
     YamlPrinter.problem(pruned).toLeft(YamlPrinter.print(pruned))
@@ -90,7 +67,6 @@ object Render:
   val header: String =
     "# Generated by zipx. Do not edit. Run 'sbt zipxWorkflowGenerate' to regenerate."
 
-  /** The hand-assembled top-level mapping. Only present keys are emitted. */
   private def workflowYaml(wf: Workflow): Yaml =
     val entries = Chunk.from(
       scalar("name", wf.name) ++
@@ -103,7 +79,9 @@ object Render:
     Yaml.Mapping(entries.map((k, v) => (Yaml.Scalar(k), v)))
   end workflowYaml
 
-  /** The `on:` block, hand-built with GitHub's exact underscore event keys. */
+  /** Hand-built because GitHub's event keys are `pull_request` and `workflow_dispatch`, which kebab-casing would
+    * mangle.
+    */
   private def triggersYaml(t: Triggers): Yaml =
     val scheduleEntry =
       if t.schedule.isEmpty then Nil
@@ -137,9 +115,8 @@ object Render:
   private def encodeJob(job: Job): Yaml =
     collapseSingletonRunsOn(prune(jobCodec.encodeValue(job)))
 
-  /** The derived codec renders `runsOn: List[String]` as a sequence. GitHub Actions convention (and every existing
-    * golden) is a scalar for a single label, so collapse a one-element `runs-on` sequence to a scalar, leaving
-    * multi-label runners as a sequence (`runs-on: [self-hosted, linux]`).
+  /** The derived codec renders `runsOn: List[String]` as a sequence, but GitHub's convention for a single label is a
+    * scalar. Multi-label runners stay a sequence.
     */
   private def collapseSingletonRunsOn(job: Yaml): Yaml = job match
     case Yaml.Mapping(entries) =>
@@ -156,9 +133,9 @@ object Render:
   private def seqEntry(k: String, xs: List[String]): Seq[(String, Yaml)] =
     if xs.isEmpty then Nil else Seq(k -> Yaml.Sequence(Chunk.from(xs.map(Yaml.Scalar(_)))))
 
-  /** Recursively drop empty mappings and sequences so absent collections don't render as `{}` / `[]`. Preserves
-    * explicit `null` and non-empty structures. Applied to the fully-assembled tree so it also cleans the output of the
-    * derived job/step codecs (which emit `env: {}`, `needs: []`, etc.).
+  /** Drops empty mappings and sequences, so an absent collection does not render as `{}` or `[]`. Explicit `null`
+    * survives. Applied to the fully-assembled tree, which is what also cleans up the derived codecs' `env: {}` and
+    * `needs: []`.
     */
   def prune(y: Yaml): Yaml = y match
     case Yaml.Mapping(entries) =>

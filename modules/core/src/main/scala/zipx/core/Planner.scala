@@ -5,31 +5,23 @@ import zipx.shell.*
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** Maps a [[ModuleGraph]] + capabilities + [[PlanConfig]] to a GitHub Actions [[zipx.workflow.Workflow]].
-  *
-  * This is the sbt-free heart of zipx: given the real dependency graph, it emits jobs shaped by each capability's
-  * [[CapabilityScope]] (Aggregate / Layer / Graph / Once), wires `needs` from the graph, expands a per-module Scala
-  * matrix where Graph requests it, attaches caching, and merges typed [[EnvValue]] maps (cache → capability → target)
-  * into each job's `env:`. The result is rendered to YAML by [[zipx.workflow.Render]].
+/** Maps a [[ModuleGraph]] + capabilities + [[PlanConfig]] to a GitHub Actions [[zipx.workflow.Workflow]], with no sbt
+  * dependency. Env maps are merged plan → cache → capability → target, so a target wins every clash.
   */
 object Planner:
 
-  /** The job id for a Graph capability's job on a given module, e.g. `test-schema`. */
   def jobId(capability: Capability, moduleId: String): String = s"${capability.name}-$moduleId"
 
-  /** The job id for a Graph per-target job, e.g. `deploy-service-prod`. */
   def jobId(capability: Capability, moduleId: String, target: Target): String =
     s"${capability.name}-$moduleId-${target.name}"
 
-  /** Aggregate / Layer deploy job id for a target, e.g. `deploy-prod`. */
   def aggregateTargetJobId(capability: Capability, target: Target): String =
     s"${capability.name}-${target.name}"
 
-  /** Layer job id, e.g. `test-L0`. */
   def layerJobId(capability: Capability, layerIndex: Int): String =
     s"${capability.name}-L$layerIndex"
 
-  /** All job ids a capability produces (for cross-capability `needs`). */
+  /** Every job id a capability produces, which is how one capability's `needs` names another's jobs. */
   def allJobIds(capability: Capability, graph: ModuleGraph): List[String] =
     capability.scope match
       case CapabilityScope.Once      => List(capability.name)
@@ -52,7 +44,8 @@ object Planner:
       case Nil     => List(jobId(capability, node.id))
       case targets => targets.sortBy(_.name).map(t => jobId(capability, node.id, t))
 
-  /** Distinct targets across participating modules, sorted by name. First-seen wins for env/environment/condition. */
+  /** Deduplicated by name, first-seen winning, so two modules naming `prod` differently do not produce two `prod` jobs.
+    */
   private def distinctTargets(capability: Capability, graph: ModuleGraph): List[Target] =
     val seen = scala.collection.mutable.LinkedHashMap.empty[String, Target]
     for
@@ -69,11 +62,10 @@ object Planner:
   private def joinCommands(capability: Capability, nodes: List[ModuleNode]): String =
     nodes.map(capability.command).mkString("; ")
 
-  /** Guards against a `needsCapabilities` cycle among capabilities, and against gates the planner cannot honor. */
+  /** Rejects a `needsCapabilities` cycle, and [[Gate.AffectedOnly]], which is an unimplemented seam: honoring it
+    * silently as [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run.
+    */
   private def validateCapabilities(capabilities: List[Capability]): Unit =
-    // `Gate.AffectedOnly` is an unimplemented design seam (see [[Gate]]): affected-gating is derived from
-    // Phase.Verify + PlanConfig.affected, not from Gate. Fail loudly at generate time rather than emit a
-    // workflow that quietly runs the capability always; a silently-green pipeline is the worst outcome.
     capabilities.filter(_.gate == Gate.AffectedOnly) match
       case Nil => ()
       case bad =>
@@ -91,9 +83,8 @@ object Planner:
     ()
   end validateCapabilities
 
-  // The `JobId` is the definition and the `String` is derived from it, rather than the other way round: these ids are
-  // both public API (a caller reads `Planner.affectedJobId` to find the job) and operands of `Expr.JobOutput` /
-  // `Expr.JobResult`, whose validation is compile-time and so needs a validated value rather than a literal reference.
+  // The JobId is the definition and the String is derived from it, because these ids are both public API and operands of
+  // `Expr.JobOutput` / `Expr.JobResult`, which take a validated value rather than a literal.
   private val affectedId       = JobId("affected")
   private val verifyGateId     = JobId("verify-gate")
   private val cacheRehydrateId = JobId("cache-rehydrate")
@@ -105,14 +96,13 @@ object Planner:
   def plan(graph: ModuleGraph, capabilities: List[Capability], config: PlanConfig): Workflow =
     validateCapabilities(capabilities)
 
-    // Affected-only applies to Graph Verify jobs (per-module gating). Aggregate/Layer skip the affected setup.
+    // Affected-gating is per-module, so only a Graph Verify capability can narrow anything.
     val usesAffected =
       config.affected == AffectedMode.AffectedOnPR &&
         capabilities.exists(c => c.phase == Phase.Verify && c.scope == CapabilityScope.Graph)
 
-    val hasVerify      = capabilities.exists(_.phase == Phase.Verify)
-    val usesVerifyGate = config.skipMergedPrPush && hasVerify
-    // LocalDir only: recreate a default-branch actions/cache save when Verify is skipped after merge.
+    val hasVerify          = capabilities.exists(_.phase == Phase.Verify)
+    val usesVerifyGate     = config.skipMergedPrPush && hasVerify
     val usesCacheRehydrate =
       usesVerifyGate && config.cacheRehydrateOnMerge && config.cache == CacheBackend.LocalDir
 
@@ -156,48 +146,34 @@ object Planner:
     )
   end plan
 
-  /** Workflow-level `concurrency`: one in-flight run per ref, superseded runs cancelled.
-    *
-    * The group folds in the workflow name (so sibling workflows in the same repo never contend) and `github.ref` (so a
-    * PR's pushes cancel each other while other branches are untouched).
-    *
-    * `cancel-in-progress` is an expression rather than `true`: a release-tag run must never be cancelled. Publishing is
-    * not idempotent, and a half-cancelled run can leave a staged-but-unreleased Central bundle behind, far worse than a
-    * wasted runner.
+  /** The group folds in the workflow name so sibling workflows never contend, and `github.ref` so a PR's pushes cancel
+    * each other while other branches are untouched. `cancel-in-progress` is an expression rather than `true` because
+    * publishing is not idempotent: a half-cancelled release-tag run can leave a staged-but-unreleased Central bundle
+    * behind, which is worse than a wasted runner.
     */
   private def concurrencyFor(config: PlanConfig): Concurrency =
     Concurrency(
       group = (Expr.lit(config.workflowName + "-") ++ Expr.github("ref")).render,
-      // Wrapped, unlike an `if:`: `cancel-in-progress` is a plain field, so the expression needs its `${{ }}`.
+      // `render`, not `unwrapped`: `cancel-in-progress` is a plain field, so the expression needs its `${{ }}`.
       cancelInProgress = (!onAnyTagPush).render,
     )
 
-  /** `startsWith(github.ref, 'refs/tags/')`: any tag push, not just `v`-prefixed ones.
-    *
-    * Deliberately broader than [[JobCondition.onReleaseTag]] (`refs/tags/v`). Verify is skipped and cancellation
-    * disabled for *every* tag, since a tag push is never the thing Verify exists to check; only a `v` tag *publishes*.
+  /** Deliberately broader than [[JobCondition.onReleaseTag]] (`refs/tags/v`): Verify is skipped and cancellation
+    * disabled for *every* tag, since a tag push is never what Verify exists to check, while only a `v` tag publishes.
     */
   private val onAnyTagPush: Expr =
     Expr.startsWith(Expr.github("ref"), Expr.quoted("refs/tags/"))
 
-  /** `github.event_name == 'name'` as an [[Expr]]. Distinct from [[eventIs]], which is the *shell* test for the same
-    * question; these gates are `if:` expressions and never reach a `run:` script.
-    */
+  /** The `if:` expression form. [[eventIs]] is the shell-test form of the same question, for a `run:` script. */
   private inline def onEvent(inline name: String): Expr =
     Expr.github("event_name") === Expr.quoted(name)
 
-  /** The verify-gate job's `run` output: `'true'` when Verify should proceed. A *string*, not a boolean, since every
-    * `$GITHUB_OUTPUT` value is one, which is why it is compared against `Expr.quoted` rather than negated.
-    */
+  /** Compared against a quoted `'true'` rather than negated, because every `$GITHUB_OUTPUT` value is a string. */
   private val verifyGateRuns: Expr = Expr.JobOutput(verifyGateId, OutputName("run"))
 
-  /** `needs.verify-gate.result`. */
   private val verifyGateResult: Expr = Expr.JobResult(verifyGateId)
 
-  /** Cheap gate: on branch pushes, ask whether this SHA already belongs to a PR merged into the same branch. Merge and
-    * squash both associate the landed commit with the merged PR; a direct push typically does not. Fail-open: if the
-    * check job is skipped or fails, Verify still runs.
-    */
+  /** Fail-open: when this job is skipped or fails, Verify still runs. */
   private def verifyGateJob(config: PlanConfig): Job =
     Job(
       name = Some("verify-gate"),
@@ -216,12 +192,12 @@ object Planner:
       ),
     )
 
-  /** Ask the API whether this SHA landed via a merged PR into the same branch, and publish `run` accordingly.
+  /** Asks the API whether this SHA landed via a PR merged into the same branch. Merge and squash both associate the
+    * landed commit with the merged PR; a direct push does not.
     *
-    * The `--jq` filter is the interesting part: it is a double-quoted shell argument containing a *nested*
-    * double-quoted jq string, so the inner quotes must reach jq as `\"`. `Word.Dquote` nested inside another `Dquote`
-    * renders exactly that, which is why the escaping is a property of the type here rather than backslashes counted by
-    * hand.
+    * The `--jq` filter is a double-quoted shell argument containing a *nested* double-quoted jq string, so the inner
+    * quotes must reach jq as `\"`. A `Word.Dquote` inside another `Dquote` renders exactly that, which is why no
+    * backslashes are counted by hand here.
     */
   private def verifyGateScript: Script =
     val jqFilter = Word.dquote(
@@ -263,21 +239,16 @@ object Planner:
     )
   end verifyGateScript
 
-  /** `echo "name=value" >> "$GITHUB_OUTPUT"`: publish a step output. */
   private inline def setOutput(inline name: String, value: Word.Quotable): Command =
     Exec("echo", Word.dquote(Word.lit(name + "="), value)).appendTo(Word.vq("GITHUB_OUTPUT"))
 
-  /** `[ "${{ github.event_name }}" = "name" ]`. `inline` rather than a lambda: the quoted name is validated at compile
-    * time, and a lambda parameter is not a literal the validator can see.
-    */
+  /** `inline` rather than a lambda, so the quoted name is a literal the validator can see at compile time. */
   private inline def eventIs(inline name: String): ShTest =
     ShTest.StrEq(Word.dquote(Expr.github("event_name").asWord), Word.quoted(name))
 
-  /** When verify-gate skips Verify after a merged PR, run a minimal LocalDir cache restore/save so the default branch
-    * gets an `actions/cache` entry later PRs can restore from. Fail-closed: only runs when the gate succeeds with
-    * `run=false`. Does not touch Publish/Deploy needs or conditions; no [[verifyClean]]. Optional
-    * [[PlanConfig.cacheRehydrateExtraSteps]] / [[PlanConfig.cacheRehydrateEnv]] are opt-in only (not copied from Verify
-    * capabilities).
+  /** A minimal LocalDir restore/save, so the default branch still gets an `actions/cache` entry that later PRs can
+    * restore from when verify-gate skipped Verify. Fail-closed, unlike Verify itself: it runs only when the gate
+    * *succeeded* with `run=false`.
     */
   private def cacheRehydrateJob(config: PlanConfig): Job =
     val ctx = StepContext(
@@ -306,9 +277,8 @@ object Planner:
     )
   end cacheRehydrateJob
 
-  /** Wire Verify jobs: never run on tag pushes (release tags only need Publish/Deploy) or on `workflow_dispatch`
-    * (manual runs are for docs-only deploys when `ZipxDocs.pages` is enabled). When [[usesVerifyGate]], also need the
-    * gate and run when it was skipped/failed or outputs run=true (fail-open for PRs / API errors).
+  /** Verify never runs on a tag push (a release tag only needs Publish and Deploy) or a `workflow_dispatch` (a manual
+    * run is for a docs-only deploy). Non-Verify phases pass through untouched.
     */
   private def applyVerifyGate(
       needs: List[String],
@@ -322,8 +292,8 @@ object Planner:
       if !usesVerifyGate then (needs, andConditions(Some(notOnTagOrDispatch.unwrapped), cond))
       else
         val gatedNeeds = (verifyGateJobId :: needs).distinct.sorted
-        // Fail-open, and grouped so the `||` binds only its two clauses: run when the gate said yes *or* when the gate
-        // itself did not succeed. `!cancelled()` is what keeps this reachable when the gate was skipped entirely.
+        // Fail-open: run when the gate said yes, or when the gate itself did not succeed. `!cancelled()` is what keeps
+        // this reachable when the gate was skipped entirely.
         val gateCond = !Expr.cancelled && notOnTagOrDispatch && Expr.group(
           Expr.group(verifyGateResult !== Expr.quoted("success")) ||
             Expr.group(verifyGateRuns === Expr.quoted("true"))
@@ -352,16 +322,9 @@ object Planner:
     )
   end affectedSetupJob
 
-  /** Decide which modules this run must build, and publish the list as the `modules` output.
-    *
-    * Previously assembled by splicing an interpolated `$runAffected` fragment into two nesting depths, which is why it
-    * needed a `.replace("\n\n", "\n")` to clean up after an empty branch and why the nested copy came out
-    * under-indented by two spaces. Nesting is the AST's job here: an `if` body is a `Block` that renders one level
-    * deeper, and an omitted branch is an absent `elif` rather than an empty string to paper over.
-    */
   private def affectedScript(affectedOnPush: Boolean): Script =
-    // `sbt` writes the answer to a file rather than stdout: sbt 2 prints server banners, and `modules=$(sbt …)` once
-    // poisoned GITHUB_OUTPUT with them.
+    // sbt writes the answer to a file rather than stdout, because sbt 2 prints server banners and `modules=$(sbt …)`
+    // would put them in GITHUB_OUTPUT.
     val runAffected = Block(
       Exec(
         "sbt",
@@ -379,7 +342,7 @@ object Planner:
         List(
           eventIs("push") -> Block(
             Assign("before", Word.dquote(Expr.github("event.before").asWord)),
-            // A force-push or a branch-create reports an all-zero before-sha, which no diff can be taken against.
+            // A force-push or a branch-create reports this all-zero sha, which no diff can be taken against.
             If(
               ShTest.varEmpty("before") ||
                 ShTest.varEquals("before", "0000000000000000000000000000000000000000"),
@@ -438,7 +401,7 @@ object Planner:
     val cond          = andConditions(base, JobCondition.renderOpt(capability.condition))
     capability.workflowCall match
       case Some(call) =>
-        // GHA forbids job-level env (and runs-on) on reusable-workflow caller jobs.
+        // GitHub rejects job-level `env` and `runs-on` alongside `uses`, hence neither here.
         capability.name -> Job(
           name = Some(capability.name),
           runsOn = Nil,
@@ -474,7 +437,6 @@ object Planner:
 
   private val syntheticNode = ModuleNode(id = "_build")
 
-  /** Aggregate: one job (joined commands), or one job per distinct target (deploy). */
   private def aggregateJobs(
       capability: Capability,
       graph: ModuleGraph,
@@ -546,7 +508,6 @@ object Planner:
     end if
   end aggregateJobs
 
-  /** Layer: one job per toposort wave; each needs the previous wave. */
   private def layerJobs(
       capability: Capability,
       graph: ModuleGraph,
@@ -565,11 +526,12 @@ object Planner:
 
       layers.zipWithIndex.map { (layerIds, i) =>
         val id            = layerJobId(capability, i)
-        val prevNeed      = if i == 0 then Nil else List(layerJobId(capability, i - 1))
+        val firstWave     = i == 0
+        val prevNeed      = if firstWave then Nil else List(layerJobId(capability, i - 1))
         val layerNeeds    = (prevNeed ++ crossNeeds).distinct.sorted
         val (needs, base) =
-          // Only the first wave depends on verify-gate; later waves already wait on L0.
-          if i == 0 then applyVerifyGate(layerNeeds, releaseCond, capability.phase, usesVerifyGate)
+          // Later waves already wait on L0, so gating them again would be redundant.
+          if firstWave then applyVerifyGate(layerNeeds, releaseCond, capability.phase, usesVerifyGate)
           else (layerNeeds, releaseCond)
         val cond       = andConditions(base, JobCondition.renderOpt(capability.condition))
         val layerNodes = layerIds.flatMap(graph.get)
@@ -597,7 +559,6 @@ object Planner:
     end if
   end layerJobs
 
-  /** Graph: one job per (module × optional target), today's fan-out. */
   private def graphJobsFor(
       capability: Capability,
       node: ModuleNode,
@@ -641,12 +602,10 @@ object Planner:
 
     val cache    = cacheContribution(config)
     val baseCond = jobCondition(capability, node, upstreamNeeds, gatedOnAffected)
-    // When affected setup already needs verify-gate, Graph Verify jobs inherit the skip via affected.
-    // Otherwise (no affected, or non-Verify), apply the gate directly.
+    // The affected setup job already needs verify-gate, so a gated-on-affected job inherits the skip through it and asks
+    // only for the tag exclusion.
     val (needs, gated) =
-      if gatedOnAffected then
-        // Affected setup already needs verify-gate; still exclude tags (release pushes only Publish/Deploy).
-        applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate = false)
+      if gatedOnAffected then applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate = false)
       else applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
     val cond   = andConditions(gated, JobCondition.renderOpt(capability.condition))
     val runner = capability.runsOn.getOrElse(List(config.runnerOs))
@@ -721,8 +680,7 @@ object Planner:
   ): Option[String] =
     val releaseGate =
       Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
-    // `contains(fromJson(…), 'id')` rather than a string match: the output is a JSON array, so `fromJson` is what makes
-    // `contains` mean membership instead of substring. `'all'` is the affected job's "could not narrow it down" answer.
+    // `'all'` is the affected job's "could not narrow it down" answer.
     val affectedGate =
       Option.when(gatedOnAffected)(
         Expr
@@ -731,8 +689,8 @@ object Planner:
           )
           .unwrapped
       )
-    // `!= 'failure'` rather than `== 'success'`: a *skipped* upstream is fine here (its module was not affected), and
-    // that is exactly the case an implicit `success()` would wrongly block.
+    // `!= 'failure'` rather than `== 'success'`, because a *skipped* upstream is fine here: its module was not affected,
+    // and that is exactly the case GitHub's implicit `success()` would wrongly block.
     val upstreamGuards =
       if gatedOnAffected && upstreamNeeds.nonEmpty then
         upstreamNeeds.sorted.map(u => (jobResultOf(u) !== Expr.quoted("failure")).unwrapped)
@@ -743,10 +701,9 @@ object Planner:
     if clauses.isEmpty then None else Some(clauses.mkString(" && "))
   end jobCondition
 
-  /** `contains(fromJson(needs.affected.outputs.modules), 'id')`.
-    *
-    * `id` is a module id off the graph, so it is runtime data and goes through the `Make` sibling rather than the
-    * `inline` constructor. A module id that cannot be a quoted literal is a generate-time error, not a broken `if:`.
+  /** The affected job's output is a JSON array, so `fromJson` is what makes `contains` mean membership rather than
+    * substring. `id` comes off the graph, hence the `Make` sibling: a module id that cannot be a quoted literal is a
+    * generate-time error rather than a broken `if:`.
     */
   private def affectedContains(id: String): Expr =
     Expr.contains(
@@ -754,7 +711,6 @@ object Planner:
       orThrow(s"module id '$id'", Expr.quotedMake(id)),
     )
 
-  /** `needs.<id>.result` for a job id computed from the graph. */
   private def jobResultOf(jobId: String): Expr =
     orThrow(s"job id '$jobId'", Expr.jobResultMake(jobId))
 
@@ -820,7 +776,7 @@ object Planner:
     )
   end stepsFor
 
-  /** Verify sbt step: static [[VerifyClean]] prefix when set; otherwise optional runtime `cleanFull` when the PR has
+  /** A static [[VerifyClean]] prefix when one is set, otherwise a runtime `cleanFull` decided by
     * [[PlanConfig.verifyCleanLabel]].
     */
   private def verifyCommandStep(name: String, scalaArg: String, raw: String, config: PlanConfig): Step =
@@ -828,8 +784,8 @@ object Planner:
       case VerifyClean.None =>
         config.verifyCleanLabel match
           case Some(label) =>
-            // The env value stays *wrapped*, unlike a job `if:`: an `env:` entry is a plain field, and the runner
-            // substitutes the expression to the string `true` or `false` for the script below to compare against.
+            // Left wrapped, unlike a job `if:`: an `env:` entry is a plain field, so the runner substitutes the
+            // expression to the string the script below compares against.
             val labelled =
               onEvent("pull_request") && Expr.contains(
                 Expr.github("event.pull_request.labels.*.name"),
@@ -853,11 +809,9 @@ object Planner:
       case mode =>
         Step.run(Script(sbt(scalaArg, mode.prefixCommand(raw)))).named(name).build
 
-  /** `sbt '++3.3.6 test'`: one single-quoted argument.
-    *
-    * The quoted text is an *sbt* command, not shell structure, so the AST models it as one word rather than trying to
-    * express sbt's own syntax. What the type does guarantee is the part that matters here: the command reaches sbt as a
-    * single argument, and a quote inside it is a generate-time error rather than a script that splits mid-command.
+  /** `sbt '++3.3.6 test'`. The quoted text is an *sbt* command, not shell structure, so it is one word rather than an
+    * attempt to model sbt's own syntax. What the type guarantees is that it reaches sbt as a single argument, and that
+    * a quote inside it is a generate-time error rather than a script that splits mid-command.
     */
   private def sbt(scalaArg: String, command: String): Command =
     val argument = scalaArg + command
@@ -868,10 +822,8 @@ object Planner:
         .fold(error => throw IllegalArgumentException(s"zipx: invalid sbt command '$argument': $error"), identity),
     )
 
-  /** The env key holding the runtime `cleanFull` decision, in both types the two layers need it in: an `env:` key and
-    * the shell variable the generated script reads. `EnvName` and `VarName` agree on the shape by construction
-    * (`EnvName` delegates to `zipx.shell.Patterns.Ident`), which is what makes one name legal in both positions.
-    */
+  // One name in the two types its two positions need: an `env:` key and the shell variable the generated script reads.
+  // `EnvName` delegates to `zipx.shell.Patterns.Ident`, so the two agree on shape by construction.
   private val verifyCleanFullName = EnvName("ZIPX_VERIFY_CLEAN_FULL")
   private val verifyCleanFullVar  = VarName("ZIPX_VERIFY_CLEAN_FULL")
 
@@ -927,7 +879,9 @@ object Planner:
 
       case _ => Nil
 
-  /** Resolve step + cache action whose key/restore-keys reference `steps.<id>.outputs.{epoch,release}`. */
+  /** A resolve step plus a cache action whose keys reference `steps.<id>.outputs.{epoch,release}`, so the namespace is
+    * decided at workflow runtime rather than baked in at generate time.
+    */
   private def runtimeEpochCacheSteps(
       prefix: String,
       paths: String,
@@ -956,11 +910,11 @@ object Planner:
     )
   end runtimeEpochCacheSteps
 
-  /** `<epoch>-<run id>-`: the write key's namespace, unique per run so every job saves its own entry. */
+  /** Folds in the run id, so every job saves its own entry rather than racing for one key. */
   private def perRunKey(epoch: Expr): Expr = epoch ++ Expr.github("run_id") ++ Expr.lit("-")
 
-  /** The `actions/cache` step. `restore-keys` is newline-joined, which the block-scalar printer emits as a list; `path`
-    * is newline-joined for the same reason, but is plain data (directories) rather than an expression.
+  /** `path` and `restore-keys` are newline-joined strings because that is the multi-line form `actions/cache` reads and
+    * [[zipx.workflow.YamlPrinter]] emits as a block scalar.
     */
   private def cacheStep(cacheAction: String, paths: String, key: Expr, restoreKeys: List[String]): Step =
     Step(
@@ -973,7 +927,9 @@ object Planner:
       ),
     )
 
-  /** When a Fixed epoch is a post-tag CI suffix (`*-ci` / `*-SNAPSHOT`), restore from the bare release epoch first. */
+  /** A `-ci` / `-SNAPSHOT` epoch is the post-tag continuation of a release, so its first restore fallback is that
+    * release's own bare epoch.
+    */
   private[core] def priorReleaseEpochKey(prefix: String, cacheEpoch: String): Option[String] =
     val release =
       if cacheEpoch.endsWith("-ci") then Some(cacheEpoch.stripSuffix("-ci"))
@@ -992,7 +948,8 @@ object Planner:
             RemoteCacheProof.serviceName -> JobService(
               image = image,
               ports = List(s"$port:$port"),
-              // Official image entrypoint is already bazel-remote; max_size keeps the ephemeral service bounded.
+              // No command needed: the official image's entrypoint is already bazel-remote. `max_size` bounds the
+              // ephemeral service to 1 GiB.
               options = Some("--max_size=1"),
             )
           ),

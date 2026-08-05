@@ -4,10 +4,8 @@ import neotype.unwrap
 
 import scala.annotation.targetName
 
-/** A non-empty sequence of commands: the body of an `if` branch or a loop.
-  *
-  * Non-emptiness is structural (a head plus a tail) rather than a checked `List`, because `if cond; then fi` is a
-  * syntax error in every shell. The varargs `apply` keeps it readable: `Block(cmd1, cmd2)`.
+/** A non-empty sequence of commands: the body of an `if` branch or a loop. Non-emptiness is structural, so
+  * `if cond; then fi` has no value that spells it.
   */
 final case class Block(head: Command, rest: List[Command]):
   def commands: List[Command]                  = head :: rest
@@ -19,63 +17,40 @@ object Block:
 
 /** One shell statement: the unit [[Script]] renders line by line.
   *
-  * **This trait is deliberately open, not an `enum`.** The built-in cases cover what zipx's own generated scripts need,
-  * but a consumer with a construct zipx does not model (a `case` statement, a `select`, a function definition)
-  * implements `Command` in their own build or pack rather than waiting on a zipx release. The cost is that pattern
-  * matches over `Command` cannot be exhaustive, which is why rendering is a *method* here instead of a match in
-  * [[Script]].
-  *
-  * Implementing one:
+  * Open on purpose, so a consumer can add a construct zipx does not model. An implementation must emit lines via
+  * `ctx.line` / `ctx.nested` rather than prepending spaces itself ([[Script]] owns depth), return one entry per
+  * physical line, and override [[rawFragments]] if it carries unvalidated text.
   * {{{
   * final case class WhileRead(name: VarName, body: Block) extends Command:
   *   def lines(ctx: Script.Ctx): List[ScriptLine] =
-  *     ctx.line(s"while read -r ${name.unwrap}; do") :: body.lines(ctx.nested) ::: List(ctx.line("done"))
+  *     ctx.line(s"while read -r ${name.unwrap}; do") ::: body.lines(ctx.nested) ::: ctx.line("done")
   * }}}
-  *
-  * Contract for an implementation:
-  *   - Emit lines via `ctx.line` / `ctx.nested`, never by prepending spaces yourself: [[Script]] owns depth so nested
-  *     bodies line up, and [[ScriptLine]] is what guarantees the result is safe to embed in a YAML block scalar.
-  *   - Return one entry per physical line.
-  *   - Override [[rawFragments]] if the command carries unvalidated text, so `zipxWorkflowGenerate` can warn about it.
   */
 trait Command:
 
   /** The physical lines this command contributes, indented for `ctx`. */
   def lines(ctx: Script.Ctx): List[ScriptLine]
 
-  /** This command's own lines joined, for a position that accepts more than one: a `$(…)` substitution, or a
-    * [[Script]].
-    *
-    * Renders at depth zero, so relative indentation inside the command survives while the surrounding depth is added by
-    * whoever emits it.
+  /** This command's own lines joined, for a position that accepts more than one. Renders at depth zero; the surrounding
+    * depth is added by whoever emits it.
     */
   def render: String = lines(Script.Ctx.root).map(_.unwrap).mkString("\n")
 
-  /** Unvalidated text carried by this command, if any. Non-empty only for [[Raw]] and commands wrapping it; drives the
-    * generate-time warning about escape-hatch use.
-    */
+  /** Unvalidated text carried by this command. Drives the generate-time warning about escape-hatch use. */
   def rawFragments: List[String] = Nil
 
 end Command
 
 /** A command the shell accepts where it wants *one* command: a pipeline leg, an `if` condition, the left side of a
-  * redirect, the command a heredoc feeds.
+  * redirect, the command a heredoc feeds. A compound command (`if`, `for`, `while`) needs `;` separators there and the
+  * renderer does not insert them, so those positions take an `InlineCommand` and `Exec("wc") | If(…)` does not compile.
   *
-  * The distinction is a type rather than a check. A compound command (`if`, `for`, `while`) needs `;` separators to sit
-  * in those positions, and the renderer does not insert them, so `Exec("wc") | If(…)` would emit broken shell. Making
-  * the position take an `InlineCommand` means it does not compile instead: there is no failure value to handle, no
-  * generate-time error to surface, and the mistake is caught at the construction site.
-  *
-  * "One command" is logical, not physical. A `\` continuation and a `$(…)` substitution that wraps both occupy several
-  * physical lines and are both legal in every one of these positions, so [[Continued]] is an `InlineCommand` and
-  * [[Script.Ctx.line]] splits the result.
-  *
-  * Implementations define [[inlineRender]] and get [[Command.lines]] for free, which is what keeps the promise
-  * structural: a single string is the only thing an implementation can produce.
+  * "One command" is logical, not physical: [[Continued]] spans several lines and is still legal in every one of these
+  * positions, and [[Script.Ctx.line]] splits the result.
   */
 trait InlineCommand extends Command:
 
-  /** This command as one logical command. Total: there is no case that cannot be rendered here. */
+  /** This command as one logical command. */
   def inlineRender: String
 
   final def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(inlineRender)
@@ -106,8 +81,7 @@ end InlineCommand
 /** A simple command: a program and its arguments, rendered space-separated.
   *
   * Nothing is quoted for you, because whether an argument needs quoting is a decision only the caller can make (`'v*'`
-  * to suppress globbing versus `v*` to use it). Use [[Word.quoted]] / [[Word.vq]] to ask for quotes. The program is a
-  * [[Word]] so `$SBT args` works; [[Command.exec]] validates a literal program name through [[ProgramName]].
+  * to suppress globbing versus `v*` to use it). Use [[Word.quoted]] / [[Word.vq]] to ask for quotes.
   */
 final case class Exec(program: Word, args: List[Word]) extends InlineCommand:
   def inlineRender: String = (program :: args).map(_.render).mkString(" ")
@@ -124,23 +98,15 @@ object Exec:
   inline def apply(inline program: String, args: Word*): Exec =
     Exec(Word.Lit(ShText.unsafeMake(ProgramName(program).unwrap)), args.toList)
 
-  /** [[apply]] for an argv assembled at runtime. A varargs splat cannot pass through the `inline` overload, and a list
-    * is what a caller mapping over paths or module ids already has.
-    */
+  /** [[apply]] for an argv assembled at runtime: a varargs splat cannot pass through the `inline` overload. */
   inline def of(inline program: String, args: List[Word]): Exec =
     Exec(Word.Lit(ShText.unsafeMake(ProgramName(program).unwrap)), args)
 end Exec
 
 /** One command spread over several physical lines with `\` continuations.
   *
-  * Purely presentational: the shell joins the lines back into one command, so this changes nothing but readability, and
-  * a long `gh api --jq …` is far easier to read wrapped. Modelled rather than left to the caller because a continuation
-  * is exactly the kind of thing that goes wrong by hand: trailing whitespace after the `\` silently breaks it, and the
-  * *last* line must not carry one.
-  *
-  * Still an [[InlineCommand]]: a continuation is one *logical* command, and the shell accepts it in a pipeline leg or
-  * an `if` condition exactly as it accepts an [[Exec]]. `Script.Ctx.line` splits the rendered result back into physical
-  * lines and indents each.
+  * Purely presentational, but modelled because a hand-written continuation breaks silently: trailing whitespace after
+  * the `\` kills it, and the last line must not carry one.
   *
   * @param continuationIndent
   *   spaces prefixed to each line after the first, on top of the script's own depth.
@@ -152,8 +118,7 @@ final case class Continued(program: Word, argLines: List[List[Word]], continuati
     val rendered = argLines.map(_.map(_.render).mkString(" "))
     val first    = (program.render :: rendered.headOption.toList).mkString(" ")
     val rest     = rendered.drop(1).map(pad + _)
-    // Every line but the last ends with ` \`; the last must not, or the shell swallows the following line. Counted off
-    // the emitted lines rather than off `argLines`, so a program with no arguments is one unterminated line.
+    // Counted off the emitted lines rather than off `argLines`, so a program with no arguments is one unterminated line.
     val emitted = first :: rest
     emitted.zipWithIndex
       .map((text, i) => if i == emitted.length - 1 then text else s"$text \\")
@@ -229,11 +194,7 @@ object Assign:
   /** `name=value` with the name validated at compile time. */
   inline def apply(inline name: String, value: Word): Assign = Assign(VarName(name), value)
 
-/** `if …; then … [elif …; then …] [else …] fi`.
-  *
-  * Bodies are [[Block]]s, so an empty branch is unconstructible, and they render one nesting level deeper so [[Script]]
-  * owns the indentation.
-  */
+/** `if …; then … [elif …; then …] [else …] fi`. */
 final case class If(
     cond: ShTest,
     thenDo: Block,
@@ -278,8 +239,8 @@ final case class Heredoc(command: InlineCommand, tag: HeredocTag, body: List[Scr
     extends Command:
   def lines(ctx: Script.Ctx): List[ScriptLine] =
     val open = if quoted then s"<<'${tag.unwrap}'" else s"<<${tag.unwrap}"
-    // The body and closing delimiter are column-zero: an indented delimiter only works with <<- plus real tabs,
-    // which is precisely the leading-tab hazard ScriptLine exists to prevent.
+    // The body and closing delimiter are column-zero: an indented delimiter needs <<- plus real tabs, the leading-tab
+    // hazard ScriptLine exists to prevent.
     // unsafeMake: a HeredocTag is identifier-shaped, so it satisfies ScriptLine by construction.
     ctx.line(s"${command.inlineRender} $open") ::: body ::: List(ScriptLine.unsafeMake(tag.unwrap))
 
@@ -299,10 +260,10 @@ final case class SetOpts(errexit: Boolean = true, nounset: Boolean = true, pipef
 final case class Exit(code: ExitCode = ExitCode.Success) extends InlineCommand:
   def inlineRender: String = s"exit ${code.unwrap}"
 
-/** A shell comment (`# text`). In the AST because zipx's scripts explain themselves in CI logs.
+/** A shell comment (`# text`).
   *
-  * Deliberately not an [[InlineCommand]]: `#` comments out the rest of the line, so a comment in a pipeline leg or an
-  * `if` condition swallows the command it was joined to. It is text between commands, not a command.
+  * Not an [[InlineCommand]]: `#` comments out the rest of the line, so one in a pipeline leg would swallow the command
+  * it was joined to.
   */
 final case class Comment(text: ShText) extends Command:
   def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(s"# ${text.unwrap}")
@@ -318,15 +279,9 @@ case object BlankLine extends Command:
 
 /** **Escape hatch.** Verbatim lines, indented but otherwise untouched.
   *
-  * The lines are [[ScriptLine]]s, so raw content cannot produce YAML GitHub fails to parse (no `\r`, no C0 control
-  * characters, no leading tab): the type is the guard, there is no separate lint step to forget. What it *can* produce
-  * is broken shell, since nothing here understands the text. Two consequences worth knowing:
-  *
-  *   - The lines are reported by [[Command.rawFragments]], and `zipxWorkflowGenerate` logs a warning naming the step
-  *     that used them. The warning is the point: raw usage should be visible in the build log, not silent.
-  *   - Nothing validates `$` handling, quoting, or exit-status behaviour. A `$$` that means "PID" to bash and "escaped
-  *     dollar" to a Scala interpolator is exactly the class of bug this module exists to remove, and `Raw` opts back
-  *     in.
+  * The lines are [[ScriptLine]]s, so raw content cannot break the YAML. It can still be broken *shell*: nothing here
+  * validates `$` handling, quoting or exit status. The text is reported through [[Command.rawFragments]] so
+  * `zipxWorkflowGenerate` warns, naming the step that used it.
   *
   * Prefer implementing [[Command]] for a construct you need repeatedly: an implementation is checked, composable, and
   * reusable, where `Raw` is none of the three.
@@ -345,12 +300,8 @@ object Raw:
       case Some(err) => Left(err)
       case None      => Right(Raw(split.map(ScriptLine.unsafeMake)))
 
-/** **Escape hatch.** One verbatim line, usable where the shell wants a single command.
-  *
-  * The inline-position sibling of [[Raw]], and separate from it for the reason the split exists: [[Raw]] holds a list,
-  * so it cannot promise one line, while a pipeline leg or an `if` condition needs exactly that. Same guarantees
-  * otherwise: [[ScriptLine]] keeps it from breaking the YAML, nothing checks that it is valid *shell*, and the text is
-  * reported via [[Command.rawFragments]] so `zipxWorkflowGenerate` warns.
+/** **Escape hatch.** One verbatim line, usable where the shell wants a single command. Separate from [[Raw]] because a
+  * list cannot promise one line; the guarantees are otherwise the same.
   */
 final case class RawLine(rawLine: ScriptLine) extends InlineCommand:
   def inlineRender: String                = rawLine.unwrap

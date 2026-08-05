@@ -6,7 +6,6 @@ import zipx.core.*
 object ZipxCentralSpec extends ZIOSpecDefault:
   import Fixtures.*
 
-  /** For calling a [[Steps]] bundle directly, where the planner is not the thing under test. */
   private val stepContext = StepContext(ModuleNode(id = "schema"), None, matrixed = false)
 
   private val config = PlanConfig(
@@ -23,10 +22,10 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       val run = job.steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
       assertTrue(
         run.contains("publishSigned"),
-        !run.contains("/publish'"), // not the unsigned task as the sole command
+        !run.contains("/publish'"),
         job.env.get("PGP_PASSPHRASE").contains("${{ secrets.PGP_PASSPHRASE }}"),
         job.env.get("SONATYPE_USERNAME").contains("${{ secrets.SONATYPE_USERNAME }}"),
-        !job.env.contains("PGP_SECRET"), // secret stays on the import step, not job env
+        !job.env.contains("PGP_SECRET"),
         job.steps.exists(s =>
           s.name.contains("Import signing key") && s.env.get("PGP_SECRET").contains("${{ secrets.PGP_SECRET }}")
         ),
@@ -47,8 +46,6 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       )
     },
     test("the typed gpg import script renders the exact bytes the hand-written one did") {
-      // The byte-stability proof for this site. The string on the right is what shipped in ci.yml before the DSL, so a
-      // change to the shell AST that moves a single character fails here rather than in a release.
       val importRun = ZipxCentral.gpgImportSteps(stepContext).head.run.getOrElse("")
       assertTrue(
         importRun ==
@@ -57,9 +54,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
             |echo "pinentry-mode loopback"   >> ~/.gnupg/gpg.conf
             |gpgconf --kill gpg-agent || true
             |echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin,
-        // No `set -euo pipefail`: the original did not have one, and adding it would change behaviour as well as bytes.
         !importRun.startsWith("set -"),
-        // Typed all the way down, so nothing here is reported as escape-hatch content.
         ZipxCentral.gpgImportSteps.rawFragments.isEmpty,
       )
     },
@@ -92,9 +87,9 @@ object ZipxCentralSpec extends ZIOSpecDefault:
         download.exists(_.`with`.get("path").contains(ZipxCentral.StagingDir)),
         download.exists(_.`with`.get("merge-multiple").contains("true")),
         pubIdx >= 0,
-        upIdx > pubIdx, // upload after publishSigned
+        upIdx > pubIdx,
         dlIdx >= 0,
-        runIdx > dlIdx, // download before sonaRelease
+        runIdx > dlIdx,
         rel.needs.contains("publish-schema"),
         rel.needs.contains("publish-api"),
         rel.needs.contains("publish-clientA"),

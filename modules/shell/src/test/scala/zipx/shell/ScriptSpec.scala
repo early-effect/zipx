@@ -3,7 +3,6 @@ package zipx.shell
 import neotype.unwrap
 import zio.test.*
 
-/** Rendering: what each AST case emits, how nesting indents, and how quoting composes. */
 object ScriptSpec extends ZIOSpecDefault:
 
   def spec = suite("Script")(
@@ -13,7 +12,6 @@ object ScriptSpec extends ZIOSpecDefault:
           Word.lit("--tags").render == "--tags",
           Word.lit("refs/tags/v*").render == "refs/tags/v*",
           Word.lit("$HOME").render == "$HOME",
-          // Inside "…" the shell still acts on $ ` \ and ", so all four are escaped.
           Word.lit("$HOME").render(Quoting.InDouble) == "\\$HOME",
           Word.lit("a\"b").render(Quoting.InDouble) == "a\\\"b",
           Word.lit("a\\b").render(Quoting.InDouble) == "a\\\\b",
@@ -78,7 +76,6 @@ object ScriptSpec extends ZIOSpecDefault:
         val expr = Word.opaque("${{ github.sha }}")
         assertTrue(
           expr.render == "${{ github.sha }}",
-          // Not escaped inside double quotes: an expression's $ must survive.
           expr.render(Quoting.InDouble) == "${{ github.sha }}",
           Word.dquote(expr).render == "\"${{ github.sha }}\"",
         )
@@ -142,8 +139,6 @@ object ScriptSpec extends ZIOSpecDefault:
         )
       },
       test("Continued puts a trailing backslash on every line but the last") {
-        // The property the type exists to guarantee: a `\` on the last line makes the shell swallow whatever follows,
-        // and a missing one mid-command splits it in two. Neither is visible by eye in a long `gh api` call.
         val cmd = Continued(
           "gh",
           List(
@@ -163,14 +158,11 @@ object ScriptSpec extends ZIOSpecDefault:
         )
       },
       test("continuationIndent applies to every line after the first, on top of the script's depth") {
-        // Two indents compose here and neither owns the other: `continuationIndent` is the command's own hanging indent,
-        // the script's depth comes from the enclosing block.
         val cmd = Continued("curl", List(List(Word.lit("-s")), List(Word.lit("-o"), Word.lit("out"))))
         assertTrue(
           cmd.render == "curl -s \\\n  -o out",
           cmd.copy(continuationIndent = 4).render == "curl -s \\\n    -o out",
           cmd.copy(continuationIndent = 0).render == "curl -s \\\n-o out",
-          // Inside an `if`, the block's two spaces are added to both lines and the hanging indent survives.
           Script(If(ShTest.varNonEmpty("x"), Block(cmd))).render ==
             """if [ -n "$x" ]; then
               |  curl -s \
@@ -185,8 +177,6 @@ object ScriptSpec extends ZIOSpecDefault:
         )
       },
       test("a Continued is inline-usable: a continuation is one logical command") {
-        // Verified against real bash: `printf … \` continued into `| wc -l` runs as one pipeline. The restriction here is
-        // the shell's, not the renderer's, so a continuation belongs in an inline position and `Script.Ctx` splits it.
         val cmd = Continued("gh", List(List(Word.lit("api")), List(Word.lit("--paginate"))))
         assertTrue(
           (cmd | Exec("wc", Word.lit("-l"))).render == "gh api \\\n  --paginate | wc -l",
@@ -196,9 +186,6 @@ object ScriptSpec extends ZIOSpecDefault:
     ),
     suite("InlineCommand")(
       test("a compound command does not compile where the shell needs one command") {
-        // The type distinction replaces what used to be a generate-time throw. `if`, `for` and `while` need `;`
-        // separators to sit in these positions and the renderer emits none, so the mistake is a compile error at the
-        // construction site instead of broken shell discovered later.
         for
           piped     <- typeCheck("""Exec("wc", Word.lit("-l")) | If(ShTest.varNonEmpty("x"), Block(Exit()))""")
           condition <- typeCheck("""ShTest.succeeds(ForIn(VarName("x"), Nil, Block(Exit())))""")
@@ -314,7 +301,7 @@ object ScriptSpec extends ZIOSpecDefault:
         val l = Word.vq("a")
         val r = Word.quoted("b")
         assertTrue(
-          ShTest.StrEq(l, r).render == "[ \"$a\" = \"b\" ]", // = not ==, which is a bashism in [ ]
+          ShTest.StrEq(l, r).render == "[ \"$a\" = \"b\" ]",
           ShTest.StrNe(l, r).render == "[ \"$a\" != \"b\" ]",
           ShTest.IntEq(l, r).render == "[ \"$a\" -eq \"b\" ]",
           ShTest.IntNe(l, r).render == "[ \"$a\" -ne \"b\" ]",
@@ -337,7 +324,6 @@ object ScriptSpec extends ZIOSpecDefault:
         )
       },
       test("glob match uses double brackets with an unquoted pattern") {
-        // The pattern must stay unquoted or the shell compares literally instead of matching.
         assertTrue(
           ShTest.varMatches("ref", "refs/tags/v*").render == "[[ \"$ref\" == refs/tags/v* ]]",
           ShTest.GlobNotMatch(Word.vq("ref"), GlobPattern("v*")).render == "[[ \"$ref\" != v* ]]",
@@ -413,14 +399,10 @@ object ScriptSpec extends ZIOSpecDefault:
           sh"$tag".render == "\"$TAG\"",
           sh"no splices".render == "no splices",
           sh"".render == "",
-          // Adjacent splices with no literal between them.
           sh"$tag$tag".render == "\"$TAG\"\"$TAG\"",
         )
       },
       test("a literal part is validated, so a multi-line sh literal throws") {
-        // The splices cannot carry a newline (they are already Words), so the only route in is a literal part, and
-        // ShText rejects it. Spelled through StringContext rather than a triple-quoted literal so the test says
-        // exactly which parts it passes.
         val failed =
           try
             StringContext("first\nsecond ", "").sh(Word.vq("TAG")); false
@@ -443,8 +425,6 @@ object ScriptSpec extends ZIOSpecDefault:
     ),
     suite("extensibility")(
       test("a consumer can implement Command without modifying this module") {
-        // The extensibility requirement: `trait Command` is open, so a construct zipx does not model
-        // is a case class in the consumer's own code.
         final case class Case(subject: Word, arms: List[(GlobPattern, Block)]) extends Command:
           def lines(ctx: Script.Ctx): List[ScriptLine] =
             val inner = ctx.nested

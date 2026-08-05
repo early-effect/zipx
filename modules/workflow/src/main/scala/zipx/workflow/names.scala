@@ -2,17 +2,15 @@ package zipx.workflow
 
 import neotype.*
 
-// GitHub Actions syntax rules as types. These are GitHub's rules, which is why they live here rather than in the
-// deliberately GHA-agnostic zipx-shell.
+// GitHub Actions syntax rules as types. GitHub's rules, which is why they live here rather than in the deliberately
+// GHA-agnostic zipx-shell.
 //
 // Same compile-time contract as zipx.shell: `StepId("check")` validates the literal during compilation, a runtime
 // string goes through `make` (Either) or `makeOrThrow`. Validators use only what neotype can evaluate at compile
 // time, so character classes are `matches` against `inline val` patterns rather than lambdas or compiled Regexes.
 
-/** A `jobs.<job_id>` key. GitHub: "must start with a letter or `_` and contain only alphanumeric characters, `-`, or
-  * `_`". A digit-leading id is a hard workflow parse error, not a warning.
-  *
-  * Uniqueness is a property of the *collection*, so it is checked where the job map is assembled, not here.
+/** A `jobs.<job_id>` key: must start with a letter or `_` and contain only alphanumerics, `-`, or `_`. Uniqueness is a
+  * property of the *collection*, so it is checked where the job map is assembled.
   */
 type JobId = JobId.Type
 object JobId extends Newtype[String]:
@@ -29,14 +27,11 @@ object StepId extends Newtype[String]:
     else if input.matches(Names.ActionsId) then true
     else s"invalid step id '$input': must start with a letter or _ and contain only letters, digits, - or _"
 
-/** A secret name for `secrets.<name>`.
+/** A secret name for `secrets.<name>`: alphanumerics and `_`, not starting with a digit, and not using GitHub's
+  * reserved `GITHUB_` prefix. The prefix check is case-insensitive because GitHub matches secret names that way.
   *
-  * GitHub's rules for what you may *create*: alphanumerics and `_` only, must not start with a number, and must not
-  * start with the reserved `GITHUB_` prefix. Names are stored uppercase and matched case-insensitively, so the prefix
-  * check has to be case-insensitive too: `github_token` is the same name as `GITHUB_TOKEN`.
-  *
-  * `GITHUB_TOKEN` itself is accepted, and only it. The token is not a secret you create, it is injected into every
-  * workflow and `secrets.GITHUB_TOKEN` is the documented way to read it.
+  * `GITHUB_TOKEN` itself is accepted, and only it: the token is injected rather than created, and
+  * `secrets.GITHUB_TOKEN` is the documented way to read it.
   */
 type SecretName = SecretName.Type
 object SecretName extends Newtype[String]:
@@ -51,11 +46,8 @@ object SecretName extends Newtype[String]:
 
 /** An environment or `vars.` name for `env.<name>` / `vars.<name>`.
   *
-  * The shape is exactly `zipx.shell.VarName`'s, and deliberately so: an `env:` key becomes a shell variable in every
-  * `run:` step, so the two layers must agree on what a name is. The pattern is shared rather than restated, which is
-  * what keeps them from drifting.
-  *
-  * The `GITHUB_` prefix is reserved here as well, for the same reason it is on secrets.
+  * Shares `zipx.shell.Patterns.Ident` with `VarName` rather than restating it: an `env:` key becomes a shell variable
+  * in every `run:` step, so the two layers must agree on what a name is. The `GITHUB_` prefix is reserved here too.
   */
 type EnvName = EnvName.Type
 object EnvName extends Newtype[String]:
@@ -67,10 +59,9 @@ object EnvName extends Newtype[String]:
       s"invalid env name '$input': the GITHUB_ prefix is reserved for GitHub's default variables"
     else true
 
-/** A step or job output name for `steps.<id>.outputs.<name>` / `needs.<id>.outputs.<name>`.
-  *
-  * Also rejects the two deprecated workflow-command spellings (`set-output`, `save-state`), which GitHub disabled: a
-  * name shaped like one means a caller is porting an old script and expecting behaviour that no longer exists.
+/** A step or job output name for `steps.<id>.outputs.<name>` / `needs.<id>.outputs.<name>`. Rejects the two
+  * workflow-command spellings GitHub disabled (`set-output`, `save-state`), which signal a ported script expecting
+  * behaviour that no longer exists.
   */
 type OutputName = OutputName.Type
 object OutputName extends Newtype[String]:
@@ -81,10 +72,8 @@ object OutputName extends Newtype[String]:
     else if input.matches(Names.ActionsId) then true
     else s"invalid output name '$input': must start with a letter or _ and contain only letters, digits, - or _"
 
-/** A matrix axis name for `matrix.<axis>`.
-  *
-  * `include` and `exclude` are rejected: they are matrix *directives* that add and remove combinations, so a
-  * `matrix.include` reference does not mean what it reads like.
+/** A matrix axis name for `matrix.<axis>`. `include` and `exclude` are rejected: they are directives that add and
+  * remove combinations, so `matrix.include` does not mean what it reads like.
   */
 type MatrixAxis = MatrixAxis.Type
 object MatrixAxis extends Newtype[String]:
@@ -98,9 +87,9 @@ object MatrixAxis extends Newtype[String]:
 /** A dotted context path, the part after the context name: the `event.pull_request.base.sha` of
   * `github.event.pull_request.base.sha`.
   *
-  * Segments are identifiers, joined by `.`, with two extra forms GitHub's expression syntax allows: a `[n]` array index
-  * and a `*` wildcard, so `event.pull_request.labels.*.name` is expressible. An empty segment (`github..sha`) or an
-  * unbalanced bracket is rejected, since both render as an expression GitHub fails to parse.
+  * Identifier segments joined by `.`, plus the `[n]` index and `*` wildcard GitHub allows, so
+  * `event.pull_request.labels.*.name` is expressible. An empty segment (`github..sha`) or an unbalanced bracket is
+  * rejected.
   */
 type ContextPath = ContextPath.Type
 object ContextPath extends Newtype[String]:
@@ -116,8 +105,8 @@ object ContextPath extends Newtype[String]:
   *   - `./path`, an action in this repository
   *   - `docker://image`, a container action
   *
-  * A bare `owner/repo` with no `@ref` is rejected. GitHub requires the ref, and an unpinned action is precisely what
-  * `ActionPinFile` exists to prevent, so the type refuses to express it.
+  * A bare `owner/repo` with no `@ref` is rejected: GitHub requires the ref, and an unpinned action is what
+  * `ActionPinFile` exists to prevent.
   */
 type ActionRef = ActionRef.Type
 object ActionRef extends Newtype[String]:
@@ -131,9 +120,8 @@ object ActionRef extends Newtype[String]:
 
 /** A webhook event name for `github.event_name`, as in `push` or `pull_request`.
   *
-  * Shape only. GitHub adds event types, so validating against a fixed list would reject a valid workflow the day a new
-  * event ships; the shape check is what catches the actual mistake, a quoted expression or a typo with punctuation in
-  * it.
+  * Shape only: GitHub adds event types, so a fixed list would reject a valid workflow the day a new event ships. The
+  * shape check catches the actual mistake, a quoted expression or a typo with punctuation in it.
   */
 type EventName = EventName.Type
 object EventName extends Newtype[String]:
@@ -144,12 +132,9 @@ object EventName extends Newtype[String]:
 
 /** A function name in an expression, as in `startsWith(github.ref, 'refs/tags/v')`.
   *
-  * Validated against GitHub's documented list rather than by shape. The expression language has no user-defined
-  * functions, so an unknown name is always a mistake, and GitHub reports it as a workflow parse error rather than a
-  * false value. Matching is case-insensitive, as the expression language is: `fromJson` and `fromJSON` are one
-  * function.
-  *
-  * If GitHub ships a function this list predates, [[Expr.raw]] is the escape hatch; that is what it is for.
+  * Validated against GitHub's documented list rather than by shape, since the expression language has no user-defined
+  * functions. Matching is case-insensitive, as the language is: `fromJson` and `fromJSON` are one function. If GitHub
+  * ships a function this list predates, [[Expr.raw]] is the escape hatch.
   */
 type FunctionName = FunctionName.Type
 object FunctionName extends Newtype[String]:
@@ -160,10 +145,9 @@ object FunctionName extends Newtype[String]:
 
 /** A single-quoted literal inside an expression: the `refs/tags/v` of `startsWith(github.ref, 'refs/tags/v')`.
   *
-  * Quotes, `$` and whitespace are rejected because the literal is emitted between `'…'` with no escaping, so any of
-  * them either closes the quote early or turns the literal into a nested expression. The character set is what refs,
-  * `owner/repo` slugs and PR labels actually use, and the length is bounded so a pathological value cannot produce an
-  * unreadable `if:` line.
+  * Emitted between `'…'` with no escaping, so quotes, `$` and whitespace are rejected: each either closes the quote
+  * early or turns the literal into a nested expression. The allowed set is what refs, `owner/repo` slugs and PR labels
+  * use.
   */
 type ExprLiteral = ExprLiteral.Type
 object ExprLiteral extends Newtype[String]:
@@ -174,11 +158,9 @@ object ExprLiteral extends Newtype[String]:
       s"invalid expression literal '$input': allowed characters are letters, digits and _ . / @ + : -"
     else true
 
-/** **Escape hatch.** A raw GitHub Actions expression.
-  *
-  * Non-empty, single-line, length-bounded, and with balanced `${{ … }}` delimiters if any are present. That is enough
-  * to keep a raw expression from emitting YAML GitHub cannot parse; it is *not* enough to make the expression mean what
-  * the caller intended, which is why the typed [[Expr]] cases exist.
+/** **Escape hatch.** A raw GitHub Actions expression: non-empty, single-line, length-bounded, with balanced `${{ … }}`
+  * if any are present. Enough to keep it from emitting YAML GitHub cannot parse, not enough to make it mean what the
+  * caller intended.
   */
 type RawExpr = RawExpr.Type
 object RawExpr extends Newtype[String]:
@@ -210,9 +192,9 @@ object CronMinute extends Newtype[Int]:
 
 /** **Escape hatch.** A raw five-field cron expression for [[Cron.Raw]].
   *
-  * Shape only: five whitespace-separated fields, which is what GitHub parses. The fields themselves are not validated,
-  * because that is the point of the escape hatch: a step value, a `1-5` range and `MON` are all things the typed
-  * variants cannot say. Untrimmed input is rejected rather than silently trimmed, so what renders is what was written.
+  * Shape only: five whitespace-separated fields. The field contents are deliberately unvalidated, since a step value, a
+  * `1-5` range and `MON` are all things the typed variants cannot say. Untrimmed input is rejected rather than silently
+  * trimmed, so what renders is what was written.
   */
 type CronExpr = CronExpr.Type
 object CronExpr extends Newtype[String]:
@@ -236,17 +218,16 @@ object Names:
   inline val GithubPrefixed = "(?i)GITHUB_.*"
   inline val GithubToken    = "(?i)GITHUB_TOKEN"
 
-  /** The workflow commands GitHub disabled; a name shaped like one is a ported-script mistake. */
+  /** The workflow commands GitHub disabled. */
   inline val Deprecated = "(?i)(set-output|save-state)"
 
   /** Dotted identifiers with optional `[n]` index or `*` wildcard segments. */
   inline val ContextPath =
     "[A-Za-z_][A-Za-z0-9_-]*(\\[[0-9]+\\])*(\\.([A-Za-z_][A-Za-z0-9_-]*|\\*)(\\[[0-9]+\\])*)*"
 
-  /** Single-quoted literal contents: no quote, `$` or whitespace, since none of those can be escaped there. */
   inline val ExprLiteral = "[A-Za-z0-9_./@+:-]+"
 
-  /** Exactly five whitespace-separated non-space fields, GitHub's cron shape. Field contents are not constrained. */
+  /** Exactly five whitespace-separated fields, GitHub's cron shape. Field contents are not constrained. */
   inline val CronFields = "\\S+(\\s+\\S+){4}"
 
   /** Every function GitHub's expression syntax defines, case-insensitively. There are no others. */

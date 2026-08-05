@@ -103,7 +103,6 @@ store is the persistence); LocalDir uses epoch-keyed `actions/cache` instead.
           RemoteCacheProof.sidecarYamlMustContain.forall(yaml.contains),
           yaml.contains(s"${RemoteCacheProof.envUri}: grpcs://cache.example") ||
             yaml.contains(s"${RemoteCacheProof.envUri}: \"grpcs://cache.example\""),
-          // Sidecar / managed sections must not rely on actions/cache for the remote half: managed block has no cache step
           yaml.split("---").toList match
             case local :: sidecar :: managed :: Nil =>
               local.contains("actions/cache") &&

@@ -2,11 +2,6 @@ package zipx.workflow
 
 import zio.test.*
 
-/** What [[Expr]] renders, which is the string that lands in the YAML.
-  *
-  * [[NamesSpec]] covers the name rules; this covers the jointing: which cases wrap themselves in `${{ }}`, how `Concat`
-  * flattens, and that [[Expr.asWord]] hands the shell layer something it will not escape.
-  */
 object ExprSpec extends ZIOSpecDefault:
 
   def spec = suite("Expr")(
@@ -29,8 +24,6 @@ object ExprSpec extends ZIOSpecDefault:
         assertTrue(Expr.githubToken.render == "${{ github.token }}")
       },
       test("Lit, Quoted and Raw are the bare cases: everything else wraps itself") {
-        // The asymmetry is deliberate. It is what lets Concat interleave fixed text with expressions, and what lets a
-        // Quoted sit inside a Call's argument list without a nested wrapper.
         assertTrue(
           Expr.lit("sbt-").render == "sbt-",
           Expr.quoted("refs/tags/v").render == "'refs/tags/v'",
@@ -83,8 +76,6 @@ object ExprSpec extends ZIOSpecDefault:
     ),
     suite("unwrapped")(
       test("drops the ${{ }} wrapper, which is what an if: wants") {
-        // An `if:` is evaluated as an expression whether or not it is wrapped, and bare is the form that composes:
-        // `${{ a }} && ${{ b }}` is a template string that evaluates to neither operand.
         assertTrue(
           Expr.github("event_name").unwrapped == "github.event_name",
           Expr.secret("PGP_SECRET").unwrapped == "secrets.PGP_SECRET",
@@ -97,8 +88,6 @@ object ExprSpec extends ZIOSpecDefault:
         assertTrue(
           Expr.lit("refs/tags/v1.0.0").unwrapped == "refs/tags/v1.0.0",
           Expr.raw("!cancelled()").unwrapped == "!cancelled()",
-          // A raw expression that *does* carry a wrapper keeps it: unwrapped strips Expr's own wrapper, not the
-          // caller's text, which nothing here is entitled to rewrite.
           Expr.raw("${{ github.sha }}").unwrapped == "${{ github.sha }}",
         )
       },
@@ -106,7 +95,6 @@ object ExprSpec extends ZIOSpecDefault:
         val cond = Expr.raw("!cancelled() && ") ++ Expr.jobResult("verify-gate")
         assertTrue(
           cond.unwrapped == "!cancelled() && needs.verify-gate.result",
-          // render would produce the broken template form; that contrast is the reason unwrapped exists.
           cond.render == "!cancelled() && ${{ needs.verify-gate.result }}",
         )
       },
@@ -117,8 +105,6 @@ object ExprSpec extends ZIOSpecDefault:
     ),
     suite("Call")(
       test("arguments render unwrapped, since a call is already an expression context") {
-        // The whole point of the case. `contains(${{ needs.x.outputs.y }}, 'id')` is a template string GitHub evaluates
-        // to neither operand, so an argument must render bare even though the call itself wraps.
         val call = Expr.contains(Expr.jobOutput("affected", "modules"), Expr.quoted("api"))
         assertTrue(
           call.unwrapped == "contains(needs.affected.outputs.modules, 'api')",
@@ -145,8 +131,6 @@ object ExprSpec extends ZIOSpecDefault:
         )
       },
       test("call rejects an unknown function name at runtime, and accepts either JSON spelling") {
-        // GitHub's expression language is case-insensitive and has no user-defined functions, so `fromJSON` and
-        // `fromJson` are one function and anything off the list is a workflow parse error rather than a false value.
         assertTrue(
           Expr.callMake("nosuchFunction").isLeft,
           Expr.callMake("nosuchFunction").swap.exists(_.contains("no user-defined functions")),
@@ -155,8 +139,6 @@ object ExprSpec extends ZIOSpecDefault:
         )
       },
       test("quotedMake rejects what cannot be single-quoted") {
-        // The literal is emitted between '…' with no escaping, so a quote, `$` or whitespace would either close the
-        // quote early or turn the argument into a nested expression.
         assertTrue(
           Expr.quotedMake("it's").isLeft,
           Expr.quotedMake("$HOME").isLeft,
@@ -168,8 +150,6 @@ object ExprSpec extends ZIOSpecDefault:
     ),
     suite("operators")(
       test("&& and || join bare, and only Group emits a paren") {
-        // Unlike JobCondition, which parenthesizes every clause defensively because its operands are user-supplied.
-        // Here the operands are assembled in this codebase, so the rendered bytes are the author's to control.
         val a = Expr.github("event_name") === Expr.quoted("push")
         val b = Expr.jobResult("gate") !== Expr.quoted("success")
         assertTrue(
@@ -186,8 +166,6 @@ object ExprSpec extends ZIOSpecDefault:
         )
       },
       test("the planner's verify gate composes to the exact string it has always emitted") {
-        // The byte-for-byte target, lifted from .github/workflows/ci.yml. `Group` placement is what makes the `||` bind
-        // its two clauses only, and `!cancelled()` is what keeps the job reachable after a *skipped* gate.
         val gate =
           !Expr.cancelled &&
             !Expr.startsWith(Expr.github("ref"), Expr.quoted("refs/tags/")) &&
@@ -208,14 +186,11 @@ object ExprSpec extends ZIOSpecDefault:
         val c = Expr.lit("c")
         assertTrue(
           (a && b && c) == Expr.Join(Expr.Join(a, JoinOp.And, b), JoinOp.And, c),
-          // `&&` binds tighter than `||`, so this is `a || (b && c)` with no parens rendered either way.
           (a || b && c).unwrapped == "a || b && c",
           (a || b && c) == Expr.Join(a, JoinOp.Or, Expr.Join(b, JoinOp.And, c)),
         )
       },
       test("=== builds a comparison where == would compare the Scala values") {
-        // Why the operator is spelled `===`: `==` is `Any`'s, so it can only ever answer "are these the same AST", not
-        // "emit a GHA equality test". Both are useful and neither can be the other.
         val e = Expr.lit("x")
         assertTrue(
           (e === e) == Expr.Compare(e, CompareOp.Eq, e),
@@ -226,8 +201,6 @@ object ExprSpec extends ZIOSpecDefault:
     ),
     suite("asWord")(
       test("an expression survives into a shell script unescaped") {
-        // Word.Opaque specifically: the `$` and `{` of an expression must reach the YAML intact, so this is the one
-        // word kind the shell renderer never quotes or escapes.
         val word = Expr.github("event_name").asWord
         assertTrue(
           word == zipx.shell.Word.Opaque(zipx.shell.ShText.makeOrThrow("${{ github.event_name }}")),

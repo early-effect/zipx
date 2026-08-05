@@ -1,19 +1,12 @@
-// Build-helper types for the example's deploy capability. Living in project/ (the meta-build) keeps
-// build.sbt clean and avoids the top-level-class-in-build.sbt scoping quirks.
+// Lives in project/ (the meta-build) rather than build.sbt, which cannot hold top-level classes cleanly.
 //
-// This is the typed replacement for an external YAML config + resolver script: deploy targets are a
-// plain Scala list, validated by the compiler.
-//
-// Note `roleSecret: EnvValue` rather than `String`. The `secret"…"` interpolator is `inline`, so it
-// checks the name while this file compiles. Holding the validated `EnvValue` here (instead of a bare
-// name that build.sbt wraps later) is what keeps that check available: a name assembled from a
-// runtime `String` cannot be validated at compile time, and `EnvValue.secretMake` would be the
-// honest signature for one.
+// `roleSecret` is an `EnvValue`, not a `String`, so the `secret"…"` interpolator checks each name while this file
+// compiles. A name assembled at runtime cannot be, and would have to go through `EnvValue.secretMake`.
 
 import zipx.core.EnvValue
 import zipx.core.EnvValue.secret
 
-/** One deploy destination. zipx knows nothing about clouds/tiers; this is entirely user-defined. */
+/** One deploy destination. zipx knows nothing about clouds or tiers; this shape is entirely user-defined. */
 final case class DeployEnv(
     name: String,
     ghEnvironment: Option[String],
@@ -23,13 +16,12 @@ final case class DeployEnv(
 )
 
 object DeployEnv:
-  /** The environments this repo deploys to. Production carries a GitHub Environment for approval. */
+  /** `prod` carries a GitHub Environment, which is what gates it behind an approval. */
   val all: List[DeployEnv] = List(
     DeployEnv("staging", None, "us-west-2", secret"STAGING_DEPLOY_ROLE", "staging"),
     DeployEnv("prod", Some("production"), "us-east-1", secret"PROD_DEPLOY_ROLE", "prod"),
   )
 
-/** One image registry to publish to. Multi-account image push is just a typed list, no external config. */
 final case class Registry(name: String, host: String, roleSecret: EnvValue)
 
 object Registry:

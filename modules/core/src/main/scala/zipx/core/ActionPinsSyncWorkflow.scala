@@ -11,11 +11,8 @@ object ActionPinsSyncWorkflow:
 
   val DefaultPath: String = ".github/workflows/zipx-action-pins-sync.yml"
 
-  /** The sync workflow.
-    *
-    * `Left` when a path cannot be single-quoted into the commit script. The paths are parameters, so they are runtime
-    * data: [[zipx.shell.SquoteText]] rejects a single quote outright, because inside `'…'` there is no escape for one
-    * and a path containing one would hand the shell a different argument list than the caller wrote.
+  /** `Left` when a path cannot be single-quoted into [[commitScript]]: inside `'…'` there is no escape for a single
+    * quote, so such a path would hand the shell a different argument list than the caller wrote.
     */
   def plan(
       pins: ActionPins,
@@ -69,7 +66,6 @@ object ActionPinsSyncWorkflow:
     )
   end planWith
 
-  /** Commit the regenerated pin file and workflows, or exit cleanly when Dependabot's bump changed nothing. */
   private def commitScript(actionsPath: String, workflowPath: String): Either[String, Script] =
     quotedPaths(List(actionsPath, workflowPath, DefaultPath)).map(commitScriptWith)
 
@@ -96,13 +92,11 @@ object ActionPinsSyncWorkflow:
         Exec("git", Word.lit("commit"), Word.lit("-m"), Word.quoted("ci: sync zipx action pins from Dependabot")),
         Exec("git", Word.lit("push")),
       ),
-      // The pre-DSL string ended with a newline, so the block scalar emits a blank line after `git push`. Byte parity
-      // means keeping that, not tidying it.
+      // Emits a blank line after `git push`, as the pre-DSL string did. Kept for byte parity with the committed YAML.
       trailingNewline = true,
     )
   end commitScriptWith
 
-  /** Every path as a single-quoted word, or the first path that cannot be one, named in the message. */
   private def quotedPaths(paths: List[String]): Either[String, List[Word]] =
     paths.foldRight(Right(Nil): Either[String, List[Word]]) { (path, acc) =>
       for
@@ -111,9 +105,7 @@ object ActionPinsSyncWorkflow:
       yield word :: rest
     }
 
-  /** The sync workflow as YAML, with `# vX.Y.Z` comments on its `uses:` lines. `Left` propagates an unquotable path or
-    * a step GitHub would reject; see [[plan]] and [[zipx.workflow.Render.render]].
-    */
+  /** As YAML, with `# vX.Y.Z` comments annotated onto its `uses:` lines. */
   def render(
       pins: ActionPins,
       javaVersion: String,

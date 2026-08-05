@@ -2,25 +2,19 @@ package zipx.shell
 
 import neotype.unwrap
 
-/** The quoting context a [[Word]] renders into.
-  *
-  * Quoting is explicit in the AST rather than inferred: the shell's two quote styles are not interchangeable, since
-  * `'v*'` suppresses globbing while `"$v"` expands a variable, and the same characters need different escaping in each.
+/** The quoting context a [[Word]] renders into. Explicit rather than inferred: `'v*'` suppresses globbing where `"$v"`
+  * expands, and the same characters need different escaping in each.
   */
 enum Quoting:
   case Unquoted, InDouble
 
-/** A parameter expansion modifier: the part after the name in `${name…}`.
-  *
-  * Modelled as a closed set rather than as separate optional fields so mutually exclusive modifiers are
-  * unconstructible. `${name:-a#b}` has one meaning, and a `VarRef` carrying both a default and a prefix-strip has none.
-  */
+/** A parameter expansion modifier: the part after the name in `${name…}`. */
 enum ParamMod:
 
   /** `${name:-text}`: substitute when unset **or empty**. The form to use under `set -u`. */
   case Default(text: ParamText)
 
-  /** `${name-text}`: substitute only when unset. An empty value stays empty. */
+  /** `${name-text}`: substitute only when unset; an empty value stays empty. */
   case DefaultIfUnset(text: ParamText)
 
   /** `${name:+text}`: substitute when set and non-empty. */
@@ -52,14 +46,9 @@ end ParamMod
 /** A single word in command position: literal text, a quoted string, a variable expansion, a command substitution, or
   * an opaque pre-rendered fragment.
   *
-  * A sealed hierarchy rather than an `enum` so nesting rules are types: [[Word.Quotable]] marks the words that may
-  * appear inside `"…"`. [[Word.Squote]] is deliberately not `Quotable`, because a single-quoted string nested in double
-  * quotes emits *literal* quote characters instead of quoting anything, which is nearly always a bug. Combined with
-  * [[ParamMod]] this makes rendering total: no case of `render` can throw.
-  *
-  * The set of ways the shell can spell one word is fixed by its grammar, so the hierarchy is closed. [[Word.Opaque]] is
-  * the seam for anything a higher layer needs to inject verbatim: `zipx-workflow` fills it from its GitHub Actions
-  * expression AST, which is the only reason this module needs no GitHub concepts.
+  * Nesting rules are types: [[Word.Quotable]] marks the words that may appear inside `"…"`, and [[Word.Squote]] is not
+  * one, because a single-quoted string nested in double quotes emits *literal* quote characters instead of quoting
+  * anything. [[Word.Opaque]] is the seam for a higher layer's own expression language.
   */
 sealed trait Word:
 
@@ -82,10 +71,8 @@ object Word:
   /** A word that is safe to nest inside a double-quoted string. */
   sealed trait Quotable extends Word
 
-  /** Verbatim text: flags (`--tags`), paths (`~/.gnupg/gpg.conf`), and deliberate globs (`refs/tags/v*`).
-    *
-    * Unquoted, the shell sees the characters as written, metacharacters included. Inside `"…"` the four characters the
-    * shell still acts on are escaped so the text stays literal.
+  /** Verbatim text: flags (`--tags`), paths (`~/.gnupg/gpg.conf`), and deliberate globs (`refs/tags/v*`). Unquoted the
+    * shell sees the characters as written, metacharacters included; inside `"…"` they are escaped to stay literal.
     */
   final case class Lit(text: ShText) extends Quotable:
     def render(quoting: Quoting): String = quoting match
@@ -96,9 +83,8 @@ object Word:
   final case class Squote(text: SquoteText) extends Word:
     def render(quoting: Quoting): String = s"'${text.unwrap}'"
 
-  /** A double-quoted string, `"…"`. Parts render in [[Quoting.InDouble]], so variables still expand and literals are
-    * escaped. The parts list is itself the concatenation, so `"${release}-ci"` is a `Dquote` of two parts. Nested
-    * inside another `Dquote` this emits `\"…\"`, the form a `--jq` argument needs.
+  /** A double-quoted string, `"…"`. The parts list is the concatenation, so `"${release}-ci"` is a `Dquote` of two
+    * parts. Nested inside another `Dquote` this emits `\"…\"`, the form a `--jq` argument needs.
     */
   final case class Dquote(parts: List[Quotable]) extends Quotable:
     def render(quoting: Quoting): String =
@@ -120,17 +106,16 @@ object Word:
 
   /** A command substitution, `$(command)`.
     *
-    * Uses the command's own multi-line rendering rather than forcing one line: `$(…)` is one of the few positions where
-    * the shell accepts a wrapped command, and a long `gh api … \` continuation inside a substitution is exactly the
-    * shape that wants it. The closing paren lands on the last line, where the shell expects it.
+    * Renders the command over as many lines as it takes rather than forcing one: `$(…)` is one of the few positions
+    * where the shell accepts a wrapped command, and the closing paren lands on the last line.
     */
   final case class Subst(command: Command) extends Quotable:
     def render(quoting: Quoting): String = s"$$(${command.render})"
 
   /** Escape hatch: text emitted verbatim in every quoting context, never escaped and never quoted.
     *
-    * The deliberate seam for expression languages layered on top: a GitHub Actions `${{ … }}` must not have its `$`
-    * escaped. [[ShText]] still guarantees it cannot break the surrounding YAML.
+    * The seam for an expression language layered on top, whose `${{ … }}` must not have its `$` escaped. [[ShText]]
+    * still guarantees it cannot break the surrounding YAML.
     */
   final case class Opaque(rendered: ShText) extends Quotable:
     def render(quoting: Quoting): String = rendered.unwrap
@@ -139,8 +124,8 @@ object Word:
   final case class Cat(parts: List[Word]) extends Word:
     def render(quoting: Quoting): String = parts.map(_.render(quoting)).mkString
 
-  // Literal constructors are `inline` so the newtype validates at compile time. The `*Make` siblings take genuinely
-  // runtime input and return the error instead of throwing.
+  // Literal constructors are `inline` so the newtype validates at compile time; the `*Make` siblings take runtime input
+  // and return the error.
 
   /** `Word.Lit` from a literal, checked at compile time. */
   inline def lit(inline text: String): Lit = Lit(ShText(text))
@@ -170,7 +155,7 @@ object Word:
 
   def vqMake(name: String): Either[String, Dquote] = vMake(name).map(r => Dquote(List(r)))
 
-  /** `${name:-}`, the "unset or empty is fine" form used under `set -u`. */
+  /** `${name:-}`, the form used under `set -u`. */
   inline def vOrEmpty(inline name: String): VarRef =
     VarRef(VarName(name), Some(ParamMod.Default(ParamText(""))))
 

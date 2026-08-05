@@ -2,16 +2,9 @@ package zipx.workflow
 
 import zio.test.*
 
-/** [[Cron]] renders and, more importantly, cannot be built wrong.
-  *
-  * The field ranges live in the types ([[CronHour]], [[CronMinute]], [[CronExpr]]), so a bad literal is a compile error
-  * and a bad runtime value is a `Left` from the `*Make` sibling. Nothing here throws, and `render` is total, which is
-  * why the rejection tests below assert on `typeCheck` and `Either` rather than on a caught exception.
-  */
 object CronSpec extends ZIOSpecDefault:
 
   def spec = suite("Cron")(
-    // --- Weekly ---
     test("weekly Sunday midnight renders Steward's default cron") {
       assertTrue(Cron.weekly(DayOfWeek.Sunday).render == "0 0 * * 0")
     },
@@ -24,7 +17,6 @@ object CronSpec extends ZIOSpecDefault:
       assertTrue(actual == expected)
     },
 
-    // --- Daily / Hourly ---
     test("daily and hourly helpers") {
       assertTrue(
         Cron.daily(hour = 3, minute = 15).render == "15 3 * * *",
@@ -32,7 +24,6 @@ object CronSpec extends ZIOSpecDefault:
       )
     },
 
-    // --- Boundary values (should succeed) ---
     test("accepts max valid hour and minute") {
       assertTrue(
         Cron.daily(hour = 23, minute = 59).render == "59 23 * * *",
@@ -40,7 +31,6 @@ object CronSpec extends ZIOSpecDefault:
       )
     },
 
-    // --- Rejection: out-of-range hour/minute ---
     test("an out-of-range literal hour does not compile") {
       for
         ok    <- typeCheck("""Cron.daily(hour = 23)""")
@@ -56,8 +46,6 @@ object CronSpec extends ZIOSpecDefault:
       yield assertTrue(ok.isRight, under.isLeft, over.isLeft, over.left.exists(_.contains("0 to 59")))
     },
     test("an out-of-range runtime hour or minute is a Left, not an exception") {
-      // A variable cannot reach the inline check, so the *Make pair is what runtime input uses. Same validator, same
-      // message, reported as a value.
       assertTrue(
         Cron.dailyMake(24, 0).isLeft,
         Cron.dailyMake(-1, 0).isLeft,
@@ -69,7 +57,6 @@ object CronSpec extends ZIOSpecDefault:
       )
     },
 
-    // --- Raw: happy path ---
     test("raw accepts a valid five-field expression") {
       assertTrue(Cron.raw("0 */6 * * *").render == "0 */6 * * *")
     },
@@ -83,7 +70,6 @@ object CronSpec extends ZIOSpecDefault:
       assertTrue(exprs.flatMap(Cron.rawMake(_).toOption).map(_.render) == exprs)
     },
 
-    // --- Raw: rejection ---
     test("an invalid literal raw expression does not compile") {
       for
         ok    <- typeCheck("""Cron.raw("0 0 * * 0")""")
@@ -103,7 +89,6 @@ object CronSpec extends ZIOSpecDefault:
       )
     },
 
-    // --- Property-based: exhaustive range checks ---
     test("daily succeeds and round-trips for all valid hour/minute combinations") {
       val results = for
         h <- 0 to 23

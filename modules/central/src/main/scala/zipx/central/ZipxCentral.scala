@@ -6,28 +6,24 @@ import zipx.shell.{Exec, Script, Word}
 import zipx.workflow.{Expr, Step}
 import scala.collection.immutable.ListMap
 
-/** Early-effect / Maven Central paved path for zipx.
-  *
-  * Prefer [[release]] (Aggregate: one job, `publishSigned; sonaRelease`) for typical library builds. Use
-  * [[publishSigned]] + [[releaseOnce]] when you need Graph fan-out with staging artifacts across jobs.
-  *
-  * Org secrets are referenced **by name only**; values come from the `early-effect` GitHub org.
+/** Early-effect / Maven Central paved path for zipx. Secrets are referenced by name only; the values live in the
+  * `early-effect` GitHub org.
   *
   * {{{
-  * // Aggregate (default / dogfood)
+  * // one job: publishSigned; sonaRelease
   * zipxCapabilities += ZipxCentral.release
   *
-  * // Graph escape hatch
+  * // Graph fan-out, staging artifacts merged across jobs
   * zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
   * }}}
   */
 object ZipxCentral:
 
-  /** The five early-effect org secrets used for CI-only Central publishing. */
   val OrgSecretNames: List[String] =
     List("PGP_KEY_HEX", "PGP_SECRET", "PGP_PASSPHRASE", "SONATYPE_USERNAME", "SONATYPE_PASSWORD")
 
-  /** Job-level env for signed publish / `sonaRelease` (excludes `PGP_SECRET`, which is step-scoped on the import). */
+  /** No `PGP_SECRET`: that one is step-scoped on the key import, so the decoded key is not in every job's environment.
+    */
   val signingEnv: Map[String, EnvValue] = Map(
     "PGP_KEY_HEX"       -> secret"PGP_KEY_HEX",
     "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
@@ -35,10 +31,9 @@ object ZipxCentral:
     "SONATYPE_PASSWORD" -> secret"SONATYPE_PASSWORD",
   )
 
-  /** Local staging directory used by sbt `localStaging` / `sonaRelease`. */
+  /** Where sbt's `localStaging` / `sonaRelease` expect the bundle. */
   val StagingDir: String = "target/sona-staging"
 
-  /** Artifact name prefix; each Graph publish job uploads `sona-staging-publish-<module>`. */
   val StagingArtifactPrefix: String = "sona-staging-"
 
   def stagingArtifactName(moduleId: String): String =
@@ -46,11 +41,7 @@ object ZipxCentral:
 
   private val gnupgHome: Word = Word.lit("~/.gnupg")
 
-  /** Import the CI signing key from the base64-encoded `PGP_SECRET` org secret (same recipe as peer release.yml).
-    *
-    * This used to carry a warning comment where a type should be: the body was a plain string, so a doubled `$$`
-    * survived into the YAML and bash expanded it to the PID, poisoning `base64 --decode`. `Word.vq("PGP_SECRET")` is
-    * that expansion, and there is no second way to spell it.
+  /** Imports the CI signing key from the base64-encoded `PGP_SECRET` secret, the same recipe as the peer release.yml.
     */
   val gpgImportSteps: Steps = Steps.built("gpg-import")(
     Step
@@ -71,7 +62,7 @@ object ZipxCentral:
       .withEnv("PGP_SECRET", Expr.secret("PGP_SECRET"))
   )
 
-  /** After Graph `publishSigned`, upload this job's `target/sona-staging` for the release job to merge. */
+  /** Uploads this job's staging tree for [[downloadStagingSteps]] to merge. */
   val uploadStagingSteps: Steps = Steps.one("upload-staging") { ctx =>
     Step(
       name = Some("Upload sona staging"),
@@ -84,7 +75,7 @@ object ZipxCentral:
     )
   }
 
-  /** Before Graph `sonaRelease`, download every publish job's staging tree into [[StagingDir]]. */
+  /** Merges every publish job's staging tree into one [[StagingDir]], which is what `sonaRelease` uploads. */
   val downloadStagingSteps: Steps = Steps.one("download-staging") { ctx =>
     Step(
       name = Some("Download sona staging"),
@@ -97,11 +88,9 @@ object ZipxCentral:
     )
   }
 
-  /** Aggregate Central release: one job with GPG import + `publishSigned; sonaRelease`. Replaces the built-in `publish`
-    * capability (same name). Prefer this over [[publishSigned]] + [[releaseOnce]] unless you need Graph fan-out.
-    *
-    * Uses [[zipx.core.CapabilityScope.Once]] (not Aggregate join) so the root command runs once rather than being
-    * repeated per publishing module.
+  /** Named `publish`, so it replaces the built-in capability rather than adding a second one.
+    * [[zipx.core.CapabilityScope.Once]] rather than an Aggregate join, so the root command runs once instead of once
+    * per publishing module.
     */
   val release: Capability =
     Capability.once(
@@ -113,9 +102,7 @@ object ZipxCentral:
       extraSteps = gpgImportSteps,
     )
 
-  /** Graph escape hatch: replaces [[zipx.core.Capability.publishGraph]] with dependency-ordered `publishSigned`,
-    * staging artifact upload, and org signing env. Pair with [[releaseOnce]].
-    */
+  /** Pair with [[releaseOnce]]: this publishes per module, that merges the staging trees and releases once. */
   val publishSigned: Capability =
     Capability.publishGraph.copy(
       command = n =>
@@ -127,7 +114,6 @@ object ZipxCentral:
       postSteps = uploadStagingSteps,
     )
 
-  /** After the Graph publish wave: merge staging artifacts and run `sonaRelease`. */
   val releaseOnce: Capability =
     Capability.once(
       name = "central-release",
@@ -136,7 +122,6 @@ object ZipxCentral:
       gate = Gate.OnReleaseTag,
       needsCapabilities = List("publish"),
       env = signingEnv,
-      // Composition, not a hand-threaded lambda: this is what `Steps.++` exists for.
       extraSteps = downloadStagingSteps ++ gpgImportSteps,
     )
 

@@ -2,14 +2,10 @@ package zipx.specular
 
 import zipx.core.*
 
-/** Early-effect Specular docs paved path for zipx.
+/** Early-effect Specular docs paved path for zipx: a once-job that delegates to the org reusable workflow rather than
+  * running steps of its own, so generated CI owns what a hand-written `docs.yml` used to.
   *
-  * Emits a once-job that calls the org reusable workflow `early-effect/.github/.github/workflows/specular-docs.yml`
-  * (build Specular site → GitHub Pages). Same pattern as peers' thin `docs.yml`, expressed as a capability so generated
-  * CI owns it.
-  *
-  * Runs on `v*` tags **or** manual `workflow_dispatch` (enable with `zipxWorkflowDispatch := true`). Publish stays
-  * tag-only; Verify is skipped on dispatch so "Run workflow" is docs-cheap.
+  * Reaching the `workflow_dispatch` half of [[deployWhen]] needs `zipxWorkflowDispatch := true`.
   *
   * {{{
   * zipxCapabilities += ZipxDocs.pages()
@@ -20,27 +16,24 @@ import zipx.core.*
   */
 object ZipxDocs:
 
-  /** Org reusable workflow that builds `sbt <project>/specularSite` and deploys to GitHub Pages. */
+  /** Builds `sbt <project>/specularSite` and deploys it to GitHub Pages. */
   val ReusableWorkflow: String =
     "early-effect/.github/.github/workflows/specular-docs.yml@main"
 
-  /** Pages permissions required by the reusable workflow caller. */
+  /** What the reusable workflow requires of its caller. */
   val pagesPermissions: Map[String, String] = Map(
     "contents" -> "read",
     "pages"    -> "write",
     "id-token" -> "write",
   )
 
-  /** Built-in job filter: release tags or manual workflow dispatch. */
   val deployWhen: JobCondition =
     JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch
 
-  /** Deploy Specular docs to GitHub Pages on `v*` tags or `workflow_dispatch`.
-    *
-    * @param sbtProject
-    *   sbt project that defines `specularSite` (default `docs`).
+  /** @param sbtProject
+    *   the sbt project defining `specularSite`.
     * @param javaVersion
-    *   optional Temurin JDK major passed through to the reusable workflow (omit to use the workflow default).
+    *   Temurin JDK major; omit to take the reusable workflow's own default.
     */
   def pages(sbtProject: String = "docs", javaVersion: Option[String] = None): Capability =
     val inputs =

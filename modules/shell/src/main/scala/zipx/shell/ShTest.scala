@@ -4,14 +4,9 @@ import neotype.unwrap
 
 /** A shell conditional, the `…` in `if … ; then`.
   *
-  * The variants know which bracket form they need, which is the point of typing them. `[ … ]` is POSIX `test`, portable
-  * but with no pattern matching; `[[ … ]]` is a bash keyword where the right-hand side of `==` is a *glob pattern* and
-  * must not be quoted. Getting that backwards is a silent bug: `[ "$ref" = refs/tags/v* ]` compares against the literal
-  * string `refs/tags/v*` rather than matching, so [[GlobMatch]] renders `[[ ]]` and takes a [[GlobPattern]] (not a
-  * [[Word]], which could arrive quoted), while every other comparison renders `[ ]`.
-  *
-  * Unlike [[Command]] this is closed: a fixed grammar with no useful extension point, and [[Cmd]] already covers "test
-  * by running something", which is where custom logic belongs.
+  * Each variant knows which bracket form it needs. `[ "$ref" = refs/tags/v* ]` compares against the literal string
+  * rather than matching, so [[GlobMatch]] renders `[[ ]]` and takes a [[GlobPattern]] rather than a [[Word]], which
+  * could arrive quoted; every other comparison renders `[ ]`.
   */
 enum ShTest:
 
@@ -27,9 +22,7 @@ enum ShTest:
   /** `[ -n word ]`: set and non-empty. */
   case NonEmpty(word: Word)
 
-  /** `[ left -eq right ]`: integer equality. Distinct from [[StrEq]] because `[ 01 -eq 1 ]` is true and `[ 01 = 1 ]` is
-    * not.
-    */
+  /** `[ left -eq right ]`: integer equality. `[ 01 -eq 1 ]` is true where `[ 01 = 1 ]` is not. */
   case IntEq(left: Word, right: Word)
 
   /** `[ left -ne right ]`. */
@@ -68,11 +61,8 @@ enum ShTest:
   /** `[ -x path ]`: exists and is executable. */
   case Executable(path: Word)
 
-  /** Test by exit status: `if command; then`. No brackets, so this is how you test `git describe`, `grep -q`, or any
-    * other program's success.
-    *
-    * An [[InlineCommand]]: `if for x in …; do … done; then` is not a conditional the shell accepts, so the type rules
-    * it out rather than the renderer discovering it.
+  /** Test by exit status: `if command; then`, with no brackets. An [[InlineCommand]], since
+    * `if for x in …; do … done; then` is not a conditional the shell accepts.
     */
   case Cmd(command: InlineCommand)
 
@@ -125,7 +115,7 @@ end ShTest
 
 object ShTest:
 
-  /** `[ "$name" = value ]`, the safe shape: the variable is quoted so an empty value cannot collapse the test. */
+  /** `[ "$name" = value ]`, with the variable quoted so an empty value cannot collapse the test. */
   inline def varEquals(inline name: String, inline value: String): ShTest =
     StrEq(Word.vq(name), Word.quoted(value))
 

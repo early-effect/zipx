@@ -1,13 +1,10 @@
 import sbt.*
 
-/** Shared versions and dependency lists for the main build and the meta-build dogfood mirror.
+/** One home for every dep shared by build.sbt and the meta-build dogfood mirror, so the two cannot drift.
   *
-  * Keep library deps used by modules workflow/core/central/sbt-plugin here so project/dogfood.sbt and build.sbt cannot
-  * drift.
-  *
-  * Layering: project/ .sbt files sit one level above project/ .scala files, so dogfood cannot import this object by
-  * default. project/project/build.sbt adds this file (and Dogfood.scala) via unmanagedSources (same source, no
-  * symlink). Docs/Specular-only deps stay in build.sbt.
+  * The `.sbt` files in `project/` sit one level above the `.scala` files there, so dogfood cannot import this object by
+  * default; `project/project/build.sbt` adds this file to its `unmanagedSources` instead. Docs-only deps stay in
+  * build.sbt.
   */
 object Dependencies:
 
@@ -35,17 +32,17 @@ object Dependencies:
     "dev.zio" %% "zio-blocks-schema-yaml" % zioBlocksVersion,
   )
 
-  // Compile-time-validated newtypes for the shell AST. Compile scope is neotype-internal + comptime +
-  // scala3-library only (zio-test is test-only), so it stays light on consumer meta-build classpaths.
+  // neotype's compile scope is light enough to put on a consumer's meta-build classpath: its own jar, comptime, and
+  // scala3-library. Its zio-test integration is test-only.
   val shellLibraryDeps: Seq[ModuleID] = Seq(
     "io.github.kitlangton" %% "neotype" % neotypeVersion
   )
 
   /** Bundled so consumers need one `addSbtPlugin` line for zipx.
     *
-    * Drop `org.scala-sbt` transitives: the published POM re-lists `sbt` as a compile dependency, which pulls
-    * `compiler-interface` into every consumer meta-build and collides with zinc 1.x schemes from other plugins. Host
-    * sbt already provides that stack; remote-cache only needs its own jar plus shaded-remoteapis.
+    * The `org.scala-sbt` transitives are dropped because the published POM re-lists `sbt` itself as a compile
+    * dependency, which drags `compiler-interface` into every consumer meta-build and collides with zinc 1.x schemas
+    * from other plugins. Host sbt already provides that stack.
     */
   val remoteCachePlugin: ModuleID =
     ("org.scala-sbt" % "sbt-remote-cache" % remoteCacheVersion)

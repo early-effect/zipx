@@ -5,8 +5,8 @@ import neotype.unwrap
 /** A shell program: a list of [[Command]]s plus how the rendered text ends.
   *
   * @param trailingNewline
-  *   whether [[render]] ends with a newline. Not cosmetic: it decides whether the YAML block scalar this lands in emits
-  *   a blank line after the last command, so it is part of the type rather than something `render` guesses.
+  *   whether [[render]] ends with a newline, which decides whether the YAML block scalar this lands in emits a blank
+  *   line after the last command.
   */
 final case class Script(commands: List[Command], trailingNewline: Boolean = false):
 
@@ -40,28 +40,21 @@ object Script:
   /** `set -euo pipefail` followed by `commands`, the shape every generated script should start with. */
   def strict(commands: Command*): Script = Script(SetOpts() :: commands.toList)
 
-  /** **Escape hatch.** A script from verbatim text, split on newlines and validated line by line.
-    *
-    * Returns the offending line on failure rather than throwing, since raw text is usually runtime input. See [[Raw]]
-    * for what this does and does not guarantee.
+  /** **Escape hatch.** A script from verbatim text, split on newlines and validated line by line. `Left` names the
+    * offending line. See [[Raw]] for what this does and does not guarantee.
     */
   def raw(text: String): Either[String, Script] = Raw.make(text).map(r => Script(List(r)))
 
-  /** Indentation state threaded through [[Command.lines]].
-    *
-    * [[Script]] owns depth so a [[Command]] never prepends spaces itself: nested `if` bodies line up, and every line
-    * goes through [[ScriptLine]] on the way out, which is what makes the result safe to embed in a YAML block scalar.
+  /** Indentation state threaded through [[Command.lines]]. [[Script]] owns depth so a [[Command]] never prepends spaces
+    * itself, and every line goes out through [[ScriptLine]].
     */
   final case class Ctx(depth: Int):
 
     /** One level deeper, for a nested body. */
     def nested: Ctx = Ctx(depth + 1)
 
-    /** Indent and validate `text` as one logical line.
-      *
-      * Text spanning several physical lines is split and each part indented, because a single logical command can
-      * legitimately occupy several: a `\` continuation, or a `$(…)` substitution that wraps. Every part still goes
-      * through [[ScriptLine]], so splitting adds no way to smuggle an unchecked line through.
+    /** Indent and validate `text` as one logical line. Text spanning several physical lines is split and each part
+      * indented and validated, since a `\` continuation or a wrapped `$(…)` is one logical command over several.
       */
     def line(text: String): List[ScriptLine] =
       text.split("\n", -1).toList.map(part => indent(ScriptLine.makeOrThrow(part)))
@@ -74,7 +67,7 @@ object Script:
 
   object Ctx:
 
-    /** Two spaces, matching `YamlPrinter.indentStep` and the shell convention in the existing scripts. */
+    /** Two spaces, matching `YamlPrinter.indentStep`. */
     val IndentWidth = 2
 
     val root: Ctx = Ctx(0)

@@ -2,13 +2,6 @@ package zipx.shell
 
 import zio.test.*
 
-/** The compile-time half of validation: a bad *literal* must fail the build, not just `make`.
-  *
-  * `typeCheck` compiles the snippet at test-compile time and reports whether it succeeded, which is how a spec can
-  * assert that invalid code does not compile. This is the property that makes the DSL worth having over runtime checks:
-  * [[PrimitivesSpec]] proves `validate` rejects bad values, this proves the rejection happens before the build
-  * finishes.
-  */
 object CompileTimeSpec extends ZIOSpecDefault:
 
   def spec = suite("compile-time validation")(
@@ -82,7 +75,6 @@ object CompileTimeSpec extends ZIOSpecDefault:
       yield assertTrue(negative.isLeft, tooBig.isLeft, badFd.isLeft)
     },
     test("smart constructors forward literals into the compile-time check") {
-      // inline def lit/v/squote must not launder an invalid literal into a valid Word.
       for
         badVar    <- typeCheck("""Word.v("has-dash")""")
         badLit    <- typeCheck("""Word.lit("two\nlines")""")
@@ -106,8 +98,6 @@ object CompileTimeSpec extends ZIOSpecDefault:
       yield assertTrue(dashed.swap.exists(_.contains("invalid shell variable name")))
     },
     test("sh\"…\" rejects a String splice, which is the reason it takes Word*") {
-      // The typed varargs are the whole safety property: an untyped splice is how string interpolation reintroduces
-      // exactly the hole this module closes, so it must be a compile error rather than a lint.
       for
         stringSplice <- typeCheck("""val s = "user input"; sh"echo $s"""")
         intSplice    <- typeCheck("""val n = 3; sh"echo $n"""")

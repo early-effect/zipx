@@ -14,8 +14,6 @@ object ScalaStewardConfigSpec extends ZIOSpecDefault:
       )
     },
     test("family groups precede the version groups, which precede the catch-all") {
-      // Groups are first-match-wins, so a version group ahead of a family group would
-      // swallow it, and anything after the catch-all would be unreachable.
       val out         = ScalaStewardConfig.render(ScalaStewardConfig.Defaults)
       val earlyeffect = out.indexOf("\"rocks.earlyeffect\"")
       val zio         = out.indexOf("\"dev.zio\"")

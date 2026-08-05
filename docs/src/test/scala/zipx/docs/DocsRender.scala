@@ -9,12 +9,8 @@ import scala.collection.immutable.ListMap
 /** Plan + fragment YAML for Specular docs (result panels show real `ci.yml` bytes). */
 object DocsRender:
 
-  /** The rendered YAML, failing the docs build if the planner produced a step GitHub would reject.
-    *
-    * `Render` returns `Either` because a hand-built `Workflow` can be invalid. Every workflow here comes from
-    * [[zipx.core.Planner]], so a `Left` means a planner bug, not a doc author's mistake. Failing loudly is the right
-    * response: these pages are tests, and a broken plan should break the suite rather than print an error message into
-    * the published documentation.
+  /** The rendered YAML. Every workflow here comes from [[zipx.core.Planner]], so a `Left` is a planner bug and should
+    * break the suite rather than print an error into the published page.
     */
   extension (result: Either[String, String])
     def yaml: String =

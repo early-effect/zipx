@@ -32,8 +32,6 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
       )
     },
     test("a fork gate is a JobCondition like any other") {
-      // There used to be a `repository: Option[String]` shortcut that threw on a malformed slug. The condition carries
-      // its own validated name now, so a fork gate is written the same way as every other filter.
       val cap = ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/fork")))
       assertTrue(
         cap.condition.contains(JobCondition.repositoryIs("acme/fork")),

@@ -2,12 +2,11 @@ package zipx.shell
 
 import neotype.*
 
-// Validated primitives. Every other type in this module holds these, not String.
+// Validated primitives. Every other type in this module holds these, not String. `ShText("echo hi")` validates the
+// literal at compile time; a runtime string goes through `ShText.make` (Either) or `makeOrThrow`.
 //
-// `ShText("echo hi")` validates the literal at compile time; a runtime string goes through
-// `ShText.make` (Either) or `makeOrThrow`. Validators use only what neotype can evaluate at
-// compile time: isEmpty, contains, startsWith, matches, length, Int comparison. `exists` with a
-// lambda is not supported, so character-class checks are regexes.
+// Validators use only what neotype can evaluate at compile time: isEmpty, contains, startsWith, matches, length, Int
+// comparison. `exists` with a lambda is not, so character-class checks are regexes.
 
 /** Text safe inside a shell word: one line, no control characters. Tabs are allowed. */
 type ShText = ShText.Type
@@ -32,10 +31,8 @@ object SquoteText extends Newtype[String]:
     else if !input.matches(Patterns.NoControlChars) then "shell text must not contain control characters"
     else true
 
-/** Text appearing inside `${…}`, such as the default in `${VAR:-default}` or the pattern in `${VAR#prefix}`.
-  *
-  * `}` closes the expansion, so it cannot appear in the body: `${VAR:-a}b}` means the default is `a` followed by the
-  * literal `b}`, which is silently not what the caller wrote.
+/** Text appearing inside `${…}`, such as the default in `${VAR:-default}` or the pattern in `${VAR#prefix}`. `}` closes
+  * the expansion, so `${VAR:-a}b}` would silently mean a default of `a` followed by a literal `b}`.
   */
 type ParamText = ParamText.Type
 object ParamText extends Newtype[String]:
@@ -46,11 +43,11 @@ object ParamText extends Newtype[String]:
     else if !input.matches(Patterns.NoControlChars) then "shell text must not contain control characters"
     else true
 
-/** One physical line of a rendered script.
+/** One physical line of a rendered script: [[ShText]]'s rules plus no leading tab.
   *
-  * [[ShText]]'s rules plus no leading tab, both YAML constraints rather than shell ones. Block scalar indentation must
-  * be spaces, and `YamlPrinter.needsQuoting` force-quotes any string holding `\r` or a control character, which would
-  * emit a multi-line program as one escaped scalar.
+  * Both are YAML constraints rather than shell ones. Block scalar indentation must be spaces, and
+  * `YamlPrinter.needsQuoting` force-quotes any string holding `\r` or a control character, which would emit a
+  * multi-line program as one escaped scalar.
   */
 type ScriptLine = ScriptLine.Type
 object ScriptLine extends Newtype[String]:
@@ -83,8 +80,8 @@ object GlobPattern extends Newtype[String]:
       s"invalid glob pattern '$input': it renders unquoted, so whitespace and quote characters are not allowed"
     else true
 
-/** A program name or subcommand in command position. Keeps `Exec` from becoming a second splicing hole: the program is
-  * constrained while its arguments stay [[Word]]s that choose their own quoting.
+/** A program name or subcommand in command position, so `Exec` is not a second splicing hole. Its arguments stay
+  * [[Word]]s that choose their own quoting.
   */
 type ProgramName = ProgramName.Type
 object ProgramName extends Newtype[String]:
@@ -94,9 +91,7 @@ object ProgramName extends Newtype[String]:
       s"invalid program name '$input': allowed characters are letters, digits, and _ . / - +"
     else true
 
-/** A heredoc delimiter. Identifier-shaped so it needs no quoting, and so a value line can never accidentally match it
-  * through whitespace differences.
-  */
+/** A heredoc delimiter. Identifier-shaped so it needs no quoting. */
 type HeredocTag = HeredocTag.Type
 object HeredocTag extends Newtype[String]:
   override inline def validate(input: String): Boolean | String =

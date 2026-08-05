@@ -77,7 +77,6 @@ warning comment: a `$$` meant "escaped dollar" to Scala and "process id" to bash
         assertTrue(
           sh.startsWith("set -euo pipefail\n"),
           sh.contains("""echo "$PGP_SECRET" | base64 --decode | gpg --batch --import"""),
-          // The doubled-$$ bug this layer removes: exactly one dollar reaches the YAML.
           !sh.contains("$$"),
         )
       ),
@@ -118,12 +117,10 @@ then` does not compile.
           .render
       }.assert(sh =>
         assertTrue(
-          // The pattern is unquoted (so it globs); the value being matched is quoted (so it does not word-split).
           sh.contains("""if [[ "$GITHUB_REF" == refs/tags/v* ]]; then"""),
           sh.contains("""epoch=$(git describe --tags)"""),
           sh.contains("else"),
           sh.contains("fi"),
-          // Bodies are indented two spaces by Script, never by the command itself.
           sh.contains("\n  epoch="),
         )
       ),
@@ -283,11 +280,9 @@ step that already has an `if:` keeps it, ANDed with yours.
         s"bundle name: ${bundle.name}\n---\n${DocsRender.job("cache-rehydrate")(Capability.test)}"
       }.assert(yaml =>
         assertTrue(
-          // Composition joins names with `+`, so a warning from a composed bundle still says where it came from.
           yaml.contains("bundle name: warm-node+browsers"),
           yaml.contains("Install deps"),
           yaml.contains("Install browsers"),
-          // One `if:` per step, because GitHub has no bundle-level one.
           yaml.contains("github.event_name == 'pull_request'"),
         )
       ),
@@ -320,7 +315,6 @@ above have no YAML equivalent. `zipx-central`'s own steps are the first consumer
 import is a published `Steps`, and `releaseOnce` composes two bundles with `++`.
 """,
       exampleValue {
-        // The real thing, not a mock-up: the shipped pack composes two published bundles with `++`.
         val composed = ZipxCentral.releaseOnce.extraSteps
         val name     = composed match
           case s: Steps => s.name

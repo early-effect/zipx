@@ -3,23 +3,25 @@ package zipx.shell
 import neotype.unwrap
 import zio.test.*
 
-/** Every newtype's accepting cases, rejecting cases, and boundaries.
-  *
-  * `make` runs the same `validate` the compile-time path does, so testing through `make` covers both. The compile-time
-  * rejection itself cannot be asserted from a spec (a bad literal fails the build), so it is demonstrated in the docs
-  * page instead.
-  *
-  * Control characters are written via [[ctrl]] rather than as literals: a raw NUL or DEL in a source file is invisible
-  * in a diff, which is the same hazard these newtypes exist to prevent.
-  */
 object PrimitivesSpec extends ZIOSpecDefault:
 
-  /** A string containing the control character with the given code point, surrounded by ordinary text. */
-  private def ctrl(code: Int): String = s"a${code.toChar}b"
+  /** Named so an assertion reads as the character it is about; a literal control character is invisible in a diff. */
+  private object Ascii:
+    val Nul: Char           = 0x00.toChar
+    val Soh: Char           = 0x01.toChar
+    val Backspace: Char     = '\b'
+    val Tab: Char           = '\t'
+    val VerticalTab: Char   = 0x0b.toChar
+    val Escape: Char        = 0x1b.toChar
+    val UnitSeparator: Char = 0x1f.toChar
+    val Space: Char         = ' '
+    val Delete: Char        = 0x7f.toChar
+  end Ascii
 
-  /** All C0 control characters plus DEL, minus tab: the set every text newtype must reject. */
+  private def surroundedBy(c: Char): String = s"a${c}b"
+
   private val forbiddenControls: List[Char] =
-    ((0 to 0x1f).toList.map(_.toChar) :+ 0x7f.toChar).filter(_ != '\t')
+    ((Ascii.Nul to Ascii.UnitSeparator).toList :+ Ascii.Delete).filter(_ != Ascii.Tab)
 
   private val gAsciiPrintable: Gen[Any, Char] = Gen.char(' ', '~')
   private val gControlChar: Gen[Any, Char]    = Gen.elements(forbiddenControls*)
@@ -38,11 +40,11 @@ object PrimitivesSpec extends ZIOSpecDefault:
         assertTrue(
           ShText.make("echo hi").isRight,
           ShText.make("").isRight,
-          ShText.make("a\tb").isRight, // tab mid-line is legitimate argument content
-          ShText.make("\t").isRight,   // ShText has no leading-tab rule; ScriptLine does
+          ShText.make("a\tb").isRight,
+          ShText.make("\t").isRight,
           ShText.make("$HOME `date` \\ \" '").isRight,
           ShText.make("refs/tags/v*").isRight,
-          ShText.make("café ☕").isRight, // non-ASCII is fine
+          ShText.make("café ☕").isRight,
         )
       },
       test("rejects newlines and carriage returns") {
@@ -54,20 +56,20 @@ object PrimitivesSpec extends ZIOSpecDefault:
           ShText.make("a\rb").isLeft,
         )
       },
-      test("rejects NUL, DEL, and the C0 boundaries") {
+      test("rejects NUL, DEL, and the C0 boundaries, but not space") {
         assertTrue(
-          ShText.make(ctrl(0x00)).isLeft, // NUL
-          ShText.make(ctrl(0x01)).isLeft, // start of the C0 range
-          ShText.make(ctrl(0x08)).isLeft, // backspace, just below tab
-          ShText.make(ctrl(0x0b)).isLeft, // vertical tab, just above newline
-          ShText.make(ctrl(0x1b)).isLeft, // ESC
-          ShText.make(ctrl(0x1f)).isLeft, // top of the C0 range
-          ShText.make(ctrl(0x7f)).isLeft, // DEL
-          ShText.make(ctrl(0x20)).isRight, // space is printable, not control
+          ShText.make(surroundedBy(Ascii.Nul)).isLeft,
+          ShText.make(surroundedBy(Ascii.Soh)).isLeft,
+          ShText.make(surroundedBy(Ascii.Backspace)).isLeft,
+          ShText.make(surroundedBy(Ascii.VerticalTab)).isLeft,
+          ShText.make(surroundedBy(Ascii.Escape)).isLeft,
+          ShText.make(surroundedBy(Ascii.UnitSeparator)).isLeft,
+          ShText.make(surroundedBy(Ascii.Delete)).isLeft,
+          ShText.make(surroundedBy(Ascii.Space)).isRight,
         )
       },
       test("rejects every C0 control character and DEL, but not tab") {
-        check(gControlChar)(c => assertTrue(ShText.make(s"a${c}b").isLeft))
+        check(gControlChar)(c => assertTrue(ShText.make(surroundedBy(c)).isLeft))
       },
       test("accepts any string of printable ASCII") {
         check(Gen.listOf(gAsciiPrintable))(chars => assertTrue(ShText.make(chars.mkString).isRight))
@@ -76,7 +78,7 @@ object PrimitivesSpec extends ZIOSpecDefault:
         assertTrue(
           ShText.make("a\nb").swap.exists(_.contains("newline")),
           ShText.make("a\rb").swap.exists(_.contains("carriage return")),
-          ShText.make(ctrl(0x00)).swap.exists(_.contains("control")),
+          ShText.make(surroundedBy(Ascii.Nul)).swap.exists(_.contains("control")),
         )
       },
       test("empty is the empty string") {
@@ -108,12 +110,12 @@ object PrimitivesSpec extends ZIOSpecDefault:
         assertTrue(
           SquoteText.make("a\nb").isLeft,
           SquoteText.make("a\rb").isLeft,
-          SquoteText.make(ctrl(0x00)).isLeft,
-          SquoteText.make(ctrl(0x7f)).isLeft,
+          SquoteText.make(surroundedBy(Ascii.Nul)).isLeft,
+          SquoteText.make(surroundedBy(Ascii.Delete)).isLeft,
         )
       },
       test("rejects every control character") {
-        check(gControlChar)(c => assertTrue(SquoteText.make(s"a${c}b").isLeft))
+        check(gControlChar)(c => assertTrue(SquoteText.make(surroundedBy(c)).isLeft))
       },
     ),
     suite("ParamText")(
@@ -122,7 +124,7 @@ object PrimitivesSpec extends ZIOSpecDefault:
           ParamText.make("").isRight,
           ParamText.make("default-value").isRight,
           ParamText.make("refs/tags/").isRight,
-          ParamText.make("${nested").isRight, // an opening brace alone cannot close the expansion
+          ParamText.make("${nested").isRight,
           ParamText.make("a'b\"c").isRight,
         )
       },
@@ -131,7 +133,7 @@ object PrimitivesSpec extends ZIOSpecDefault:
           ParamText.make("}").isLeft,
           ParamText.make("a}b").isLeft,
           ParamText.make("trailing}").isLeft,
-          ParamText.make("{balanced}").isLeft, // still rejected: the first } wins
+          ParamText.make("{balanced}").isLeft,
           ParamText.make("}").swap.exists(_.contains("close the expansion")),
         )
       },
@@ -139,12 +141,12 @@ object PrimitivesSpec extends ZIOSpecDefault:
         assertTrue(
           ParamText.make("a\nb").isLeft,
           ParamText.make("a\rb").isLeft,
-          ParamText.make(ctrl(0x00)).isLeft,
+          ParamText.make(surroundedBy(Ascii.Nul)).isLeft,
           ParamText.make("a\tb").isRight,
         )
       },
       test("rejects every control character") {
-        check(gControlChar)(c => assertTrue(ParamText.make(s"a${c}b").isLeft))
+        check(gControlChar)(c => assertTrue(ParamText.make(surroundedBy(c)).isLeft))
       },
     ),
     suite("ScriptLine")(
@@ -154,8 +156,8 @@ object PrimitivesSpec extends ZIOSpecDefault:
           ScriptLine.make("").isRight,
           ScriptLine.make("  nested").isRight,
           ScriptLine.make("if [ -n \"$x\" ]; then").isRight,
-          ScriptLine.make("a\tb").isRight,            // tab mid-line is fine
-          ScriptLine.make(" \tafter a space").isRight, // only the *first* character matters
+          ScriptLine.make("a\tb").isRight,
+          ScriptLine.make(" \tafter a space").isRight,
         )
       },
       test("rejects a leading tab: YAML block scalar indentation must be spaces") {
@@ -176,16 +178,16 @@ object PrimitivesSpec extends ZIOSpecDefault:
       },
       test("rejects NUL, DEL, and the C0 boundaries") {
         assertTrue(
-          ScriptLine.make(ctrl(0x00)).isLeft,
-          ScriptLine.make(ctrl(0x01)).isLeft,
-          ScriptLine.make(ctrl(0x08)).isLeft,
-          ScriptLine.make(ctrl(0x0b)).isLeft,
-          ScriptLine.make(ctrl(0x1f)).isLeft,
-          ScriptLine.make(ctrl(0x7f)).isLeft,
+          ScriptLine.make(surroundedBy(Ascii.Nul)).isLeft,
+          ScriptLine.make(surroundedBy(Ascii.Soh)).isLeft,
+          ScriptLine.make(surroundedBy(Ascii.Backspace)).isLeft,
+          ScriptLine.make(surroundedBy(Ascii.VerticalTab)).isLeft,
+          ScriptLine.make(surroundedBy(Ascii.UnitSeparator)).isLeft,
+          ScriptLine.make(surroundedBy(Ascii.Delete)).isLeft,
         )
       },
       test("rejects every C0 control character and DEL") {
-        check(gControlChar)(c => assertTrue(ScriptLine.make(s"x${c}y").isLeft))
+        check(gControlChar)(c => assertTrue(ScriptLine.make(surroundedBy(c)).isLeft))
       },
       test("accepts any line of printable ASCII that does not start with a tab") {
         check(Gen.listOf(gAsciiPrintable))(chars => assertTrue(ScriptLine.make(chars.mkString).isRight))
@@ -224,7 +226,7 @@ object PrimitivesSpec extends ZIOSpecDefault:
           VarName.make("has{brace}").isLeft,
           VarName.make("café").isLeft,
           VarName.make("a\nb").isLeft,
-          VarName.make(ctrl(0x00)).isLeft,
+          VarName.make(surroundedBy(Ascii.Nul)).isLeft,
           VarName.make("").swap.exists(_.contains("non-empty")),
         )
       },
@@ -249,8 +251,8 @@ object PrimitivesSpec extends ZIOSpecDefault:
           GlobPattern.make("has\"dquote").isLeft,
           GlobPattern.make("has\\backslash").isLeft,
           GlobPattern.make("has\nnewline").isLeft,
-          GlobPattern.make(ctrl(0x00)).isLeft,
-          GlobPattern.make(ctrl(0x7f)).isLeft,
+          GlobPattern.make(surroundedBy(Ascii.Nul)).isLeft,
+          GlobPattern.make(surroundedBy(Ascii.Delete)).isLeft,
           GlobPattern.make("").swap.exists(_.contains("non-empty")),
           GlobPattern.make("a b").swap.exists(_.contains("unquoted")),
         )
@@ -283,7 +285,7 @@ object PrimitivesSpec extends ZIOSpecDefault:
           ProgramName.make("amp&").isLeft,
           ProgramName.make("back`tick`").isLeft,
           ProgramName.make("new\nline").isLeft,
-          ProgramName.make(ctrl(0x00)).isLeft,
+          ProgramName.make(surroundedBy(Ascii.Nul)).isLeft,
         )
       },
     ),
@@ -327,7 +329,7 @@ object PrimitivesSpec extends ZIOSpecDefault:
       },
       test("rejects values the shell would truncate modulo 256") {
         assertTrue(
-          ExitCode.make(256).isLeft, // would report success
+          ExitCode.make(256).isLeft,
           ExitCode.make(300).isLeft,
           ExitCode.make(Int.MaxValue).isLeft,
           ExitCode.make(Int.MinValue).isLeft,

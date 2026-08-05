@@ -23,10 +23,8 @@ object ModuleGraphSpec extends ZIOSpecDefault:
     },
     test("topological layers group independent modules; roots first") {
       val layers = sampleGraph.topologicalLayers
-      // Layer 0 = modules with no in-graph deps: core, schema (sorted).
       assertTrue(
         layers.head == List("core", "schema"),
-        // api and legacyClient (both need only schema) land in the same layer, after schema.
         layers.exists(l => l.contains("api") && l.contains("legacyClient")),
       )
     },
@@ -37,7 +35,6 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       )
     },
     test("affected closure includes seeds and all transitive dependents") {
-      // Changing schema affects everything downstream of it.
       val affected = sampleGraph.affectedClosure(Set("schema"))
       assertTrue(
         affected.contains("schema"),
@@ -45,7 +42,6 @@ object ModuleGraphSpec extends ZIOSpecDefault:
         affected.contains("clientA"),
         affected.contains("clientB"),
         affected.contains("legacyClient"),
-        // core is not downstream of schema.
         !affected.contains("core"),
         !affected.contains("workerA"),
       )
@@ -58,18 +54,16 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       assertTrue(scala.util.Try(cyclic.topologicalSort).isFailure)
     },
     test("subsetLayers gives the contracted publish order (L0/L1/L2)") {
-      // Publishers only, edges contracted through non-publishers.
       val layers = sampleGraph.subsetLayers(_.publishes)
       assertTrue(
         layers == List(
-          List("schema"),              // L0
-          List("api", "legacyClient"), // L1 (both need only schema)
-          List("clientA", "clientB"),  // L2 (need api)
+          List("schema"),
+          List("api", "legacyClient"),
+          List("clientA", "clientB"),
         )
       )
     },
     test("subsetLayers contracts edges through excluded intermediates") {
-      // a(inc) → b(excl) → c(inc): c's nearest included ancestor is a, so a before c despite b between them.
       val g = ModuleGraph(
         List(
           ModuleNode("a"),
@@ -108,7 +102,6 @@ object ModuleGraphSpec extends ZIOSpecDefault:
           ModuleNode("a", publishes = true),
         )
       )
-      // byId last-wins; ids is derived from the raw node list (callers must not duplicate).
       assertTrue(g.get("a").exists(_.publishes), g.ids == List("a", "a"))
     },
     test("empty graph sorts and layers to empty") {
@@ -116,7 +109,6 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       assertTrue(g.topologicalSort == Nil, g.topologicalLayers == Nil, g.subsetLayers(_ => true) == Nil)
     },
     test("diamond publish contraction: two paths to the same publisher") {
-      // leaf depends on midA and midB; both depend on root; only root+leaf publish.
       val g = ModuleGraph(
         List(
           ModuleNode("root", publishes = true),

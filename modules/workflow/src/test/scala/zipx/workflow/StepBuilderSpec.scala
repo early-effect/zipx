@@ -5,15 +5,6 @@ import zipx.shell.*
 
 import scala.collection.immutable.ListMap
 
-/** Step validity, closed from both ends: [[StepBuilder]] makes an invalid step unrepresentable, [[Step.problem]] closes
-  * the bad one at render time.
-  *
-  * The two ends need separate coverage because they guard different callers. A build that uses the builder cannot
-  * express an invalid step at all, and the three rules are enforced three different ways: `run:`-vs-`uses:` by the
-  * builder's type, a literal ref by the `inline` constructor during compilation, a runtime ref by an `Either`. A build
-  * that constructs `Step(...)` directly, which stays legal because the case class shape is fixed by the on-disk
-  * contract, is caught when [[Render]] encodes it, as a `Left` rather than a thrown error.
-  */
 object StepBuilderSpec extends ZIOSpecDefault:
 
   private val script: Script = Script.strict(Exec("sbt", Word.squote("test")))
@@ -41,14 +32,12 @@ object StepBuilderSpec extends ZIOSpecDefault:
         assertTrue(
           step.name.contains("Test"),
           step.id.contains("test"),
-          // Bare, not wrapped: an `if:` is already an expression context, and bare is what composes.
           step.`if`.contains("github.event_name"),
           step.env == ListMap("TIER" -> "${{ env.TIER }}"),
           step.workingDirectory.contains("modules/core"),
         )
       },
       test("a builder is a value: two steps can branch off one base") {
-        // The point of returning a new builder from every method rather than mutating: a shared prefix is reusable.
         val base = Step.run(script).named("Test")
         val a    = base.withId("test-a").build
         val b    = base.withId("test-b").build
@@ -64,7 +53,6 @@ object StepBuilderSpec extends ZIOSpecDefault:
         assertTrue(step.env.keys.toList == List("FIRST", "SECOND", "THIRD"))
       },
       test("a raw script is carried forward as a fragment so generate can warn") {
-        // Step gains no field for this, so the builder is where the information survives.
         val raw = Script.raw("echo hand written").toOption.get
         assertTrue(
           Step.run(script).rawFragments.isEmpty,
@@ -74,8 +62,6 @@ object StepBuilderSpec extends ZIOSpecDefault:
         )
       },
       test("a run step cannot take with:, because GitHub would ignore it") {
-        // A type, not a check: `withInput` exists only on `StepBuilder.Uses`, so this is a compile error at the
-        // construction site rather than a failure at generate time. Nothing to catch and nothing to handle.
         for run <- typeCheck("""zipx.workflow.Step.run(zipx.shell.Script.empty).withInput("path", "~/.sbt")""")
         yield assertTrue(run.isLeft)
       },
@@ -117,15 +103,12 @@ object StepBuilderSpec extends ZIOSpecDefault:
         )
       },
       test("a runtime ref goes through usesMake, which reports the reason as a value") {
-        // ActionPins fields are read from a file at build time, so a pin cannot reach the inline check. `usesMake` is
-        // the runtime half of the pair: the same validator, an Either instead of a compile error.
         val pin = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
         assertTrue(
           Step.usesMake(pin).map(_.build.uses).contains(Some(pin)),
           Step.usesMake("actions/checkout").isLeft,
           Step.usesMake("").isLeft,
           Step.usesMake("actions/checkout").left.exists(_.contains("@ref")),
-          // Still a builder afterwards, so a pin-driven step composes like a literal one.
           Step.usesMake(pin).map(_.named("Checkout").build.name).contains(Some("Checkout")),
         )
       },
@@ -136,7 +119,6 @@ object StepBuilderSpec extends ZIOSpecDefault:
           Step.problem(Step(run = Some("echo hi"))).isEmpty,
           Step.problem(Step(uses = Some("actions/checkout@v4"))).isEmpty,
           Step.problem(Step(uses = Some("a/b@v1"), `with` = ListMap("k" -> "v"))).isEmpty,
-          // validate is problem's Either face, for a caller that wants the step back.
           Step.validate(Step(run = Some("echo hi"))).isRight,
         )
       },
@@ -156,14 +138,13 @@ object StepBuilderSpec extends ZIOSpecDefault:
       test("reports with: on a run step and names the ignored keys") {
         val step = Step(run = Some("echo hi"), `with` = ListMap("path" -> "~/.sbt", "key" -> "k"))
         assertTrue(
-          Step.problem(step).exists(_.contains("key, path")) // sorted, so the message is deterministic
+          Step.problem(step).exists(_.contains("key, path"))
         )
       },
       test("the message names the step, by name or by id, so a long workflow is diagnosable") {
         assertTrue(
           Step.problem(Step(name = Some("Import signing key"))).exists(_.contains("'Import signing key'")),
           Step.problem(Step(id = Some("check"))).exists(_.contains("'check'")),
-          // Nameless: still a problem, just without a label to quote.
           Step.problem(Step()).exists(!_.contains("''")),
         )
       },
@@ -196,8 +177,6 @@ object StepBuilderSpec extends ZIOSpecDefault:
         assertTrue(Render.render(wf).exists(_.contains("uses: org/repo/.github/workflows/w.yml@main")))
       },
       test("a builder-made step round-trips through render unchanged") {
-        // The payoff of closing both ends: a builder-made step cannot be the reason render returns a Left, so this is a
-        // Right by construction.
         val step = Step.run(script).named("Test").withId("test").build
         val yaml = Render.renderSteps(List(step)).toOption.get
         assertTrue(
@@ -233,8 +212,6 @@ object StepBuilderSpec extends ZIOSpecDefault:
         yield assertTrue(good.isRight, dashed.isLeft, reserved.isLeft, reserved.left.exists(_.contains("reserved")))
       },
       test("a runtime id is pushed to withStepId, which takes a validated value") {
-        // Same fork as Expr's inline/Make pair: a variable cannot reach the inline check, so the caller must produce a
-        // StepId, and StepId.make is the only way to do that from runtime input.
         for
           variable <- typeCheck("""val i = "check"; zipx.workflow.Step.run(zipx.shell.Script.empty).withId(i)""")
           viaMake  <- typeCheck(

@@ -3,13 +3,6 @@ package zipx.core
 import zio.test.*
 import zipx.workflow.Expr
 
-/** The two seams that couple `zipx-core`'s condition and env models to `zipx-workflow`'s [[Expr]].
-  *
-  * [[zipx.core.EnvValueSpec]] and [[zipx.core.JobConditionSpec]] pin the rendered strings; this covers what the
-  * delegation adds. Both bridges are total, and that is the property under test here: every case of both enums holds a
-  * validated newtype, so `asExpr` / `expr` have no failure to report, and the rejection tests assert on a compile error
-  * or a `Left` rather than on a caught exception.
-  */
 object ExprBridgeSpec extends ZIOSpecDefault:
 
   def spec = suite("Expr bridges")(
@@ -32,9 +25,6 @@ object ExprBridgeSpec extends ZIOSpecDefault:
         assertTrue(values.forall(v => v.render == v.asExpr.render))
       },
       test("a case cannot be constructed with an invalid name, even bypassing the constructors") {
-        // `EnvValue` is a public enum, so a caller can write `FromSecret(...)` directly. The case holds a `SecretName`
-        // rather than a `String`, so there is no bad value to pass: the mistake is a compile error at the construction
-        // site instead of a check inside `render`.
         for
           secret <- typeCheck("""zipx.core.EnvValue.FromSecret("bad name")""")
           env    <- typeCheck("""zipx.core.EnvValue.FromEnv("bad-name")""")
@@ -43,7 +33,6 @@ object ExprBridgeSpec extends ZIOSpecDefault:
           secret.isLeft,
           env.isLeft,
           raw.isLeft,
-          // Plain is the one case with nothing to validate, deliberately: it is data, not an expression.
           EnvValue.Plain("anything at all ${{ }}").render == "anything at all ${{ }}",
         )
       },
@@ -57,8 +46,6 @@ object ExprBridgeSpec extends ZIOSpecDefault:
         )
       },
       test("a secret may be GITHUB_TOKEN but an env key may not be GITHUB_-prefixed") {
-        // The rules genuinely differ: `secrets.GITHUB_TOKEN` is the documented way to read the injected token, while
-        // an `env:` key in GitHub's own namespace collides with a default variable.
         for
           pat    <- typeCheck("""zipx.core.EnvValue.secret("GITHUB_PAT")""")
           output <- typeCheck("""zipx.core.EnvValue.env("GITHUB_OUTPUT")""")
@@ -88,9 +75,6 @@ object ExprBridgeSpec extends ZIOSpecDefault:
         assertTrue(leaves.forall(c => c.expr.unwrapped == c.render))
       },
       test("expr is structural, not a Raw wrapper, so the operator jointing has one definition") {
-        // Worth pinning: `expr` used to re-parse `render`'s output into `Expr.Raw`, which meant a length bound applied
-        // to the *joint* and a wide condition failed at plan time. Now every clause is a typed case, so a condition
-        // that renders is a condition that has an `Expr`, with no second rule to satisfy.
         val leaf = JobCondition.hasPrLabelMake("a" * 30).toOption.get
         val wide = JobCondition.allOf(List.fill(40)(leaf)).get
         assertTrue(

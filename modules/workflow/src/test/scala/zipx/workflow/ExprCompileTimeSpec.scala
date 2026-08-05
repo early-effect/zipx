@@ -2,12 +2,6 @@ package zipx.workflow
 
 import zio.test.*
 
-/** The compile-time half of the Actions-syntax rules: a bad *literal* must fail the build, not just `make`.
-  *
-  * Same contract and same technique as `zipx.shell.CompileTimeSpec`. [[NamesSpec]] proves `validate` rejects bad values
-  * at runtime; this proves a name written into a build file is rejected before the build finishes, which is what makes
-  * a mistyped secret name a compile error rather than a workflow that silently injects an empty string.
-  */
 object ExprCompileTimeSpec extends ZIOSpecDefault:
 
   def spec = suite("compile-time validation")(
@@ -41,8 +35,6 @@ object ExprCompileTimeSpec extends ZIOSpecDefault:
       )
     },
     test("an unknown expression function does not compile") {
-      // GitHub's expression language has no user-defined functions, so an unknown name is always a mistake and always a
-      // workflow parse error. Case-insensitively, since the language is: `fromJSON` and `fromJson` are one function.
       for
         unknown  <- typeCheck("""FunctionName("myHelper")""")
         typo     <- typeCheck("""FunctionName("startWith")""")
@@ -121,8 +113,6 @@ object ExprCompileTimeSpec extends ZIOSpecDefault:
       yield assertTrue(openOnly.isLeft, closeOnly.isLeft, multiline.isLeft, balanced.isRight)
     },
     test("Expr's smart constructors forward literals into the compile-time check") {
-      // The same laundering hazard as `Word.lit`: an inline constructor must pass the literal through to `validate`
-      // rather than accept a String and validate at runtime, or the compile-time guarantee is only on the newtypes.
       for
         badSecret <- typeCheck("""Expr.secret("GITHUB_PAT")""")
         badEnv    <- typeCheck("""Expr.env("bad-name")""")
@@ -146,8 +136,6 @@ object ExprCompileTimeSpec extends ZIOSpecDefault:
       )
     },
     test("a runtime String does not reach an inline constructor") {
-      // `inline def secret(inline name: String)` accepts only a literal, so a variable is a compile error and the
-      // caller is pushed to `secretMake`, which returns an Either. That is the fork the design depends on.
       for
         variable <- typeCheck("""val n = "PGP_SECRET"; Expr.secret(n)""")
         viaMake  <- typeCheck("""val n = "PGP_SECRET"; Expr.secretMake(n)""")

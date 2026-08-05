@@ -5,18 +5,10 @@ import scala.collection.immutable.ListMap
 
 object RenderSpec extends ZIOSpecDefault:
 
-  /** The rendered YAML, failing the test with the render error if there was one.
-    *
-    * Every `Render` entry point returns `Either[String, String]`, since a hand-built `Workflow` can hold a step GitHub
-    * rejects. Most tests here render a valid workflow and care only about the bytes, so they unwrap; the tests that are
-    * *about* rejection assert on the `Left` directly.
-    */
   extension (result: Either[String, String])
     private def yaml: String =
       result.fold(error => throw AssertionError(s"unexpected render failure: $error"), identity)
 
-  // A workflow exercising every render concern: underscore trigger keys, kebab job/step
-  // keys, unquoted ints, matrix, needs, env (verbatim keys), if:, and empty-collection pruning.
   private val sample = Workflow(
     name = "CI",
     on = Triggers(
@@ -92,10 +84,8 @@ object RenderSpec extends ZIOSpecDefault:
       assertTrue(
         out.contains("concurrency:"),
         out.contains("group: CI-${{ github.ref }}"),
-        // kebab-cased by the deriver, as GitHub Actions requires
         out.contains("cancel-in-progress:"),
         out.contains("!startsWith(github.ref, 'refs/tags/')"),
-        // Omitted entirely when absent, no stray `concurrency: null`.
         !Render.render(sample).yaml.contains("concurrency"),
       )
     },
@@ -104,7 +94,6 @@ object RenderSpec extends ZIOSpecDefault:
       assertTrue(!out.contains("{}"), !out.contains("[]"))
     },
     test("renders multi-line values as YAML literal block scalars (not escaped \\n)") {
-      // A step whose `with` carries a multi-path value (like actions/cache path:).
       val wf = Workflow(
         name = "CI",
         on = Triggers(push = Some(BranchFilter(branches = List("main")))),
@@ -122,16 +111,13 @@ object RenderSpec extends ZIOSpecDefault:
       )
       val out = Render.render(wf).yaml
       assertTrue(
-        out.contains("path: |"), // literal block scalar marker
+        out.contains("path: |"),
         out.contains("~/.sbt"),
         out.contains("~/.cache/sbt"),
-        !out.contains("""\n"""), // never an escaped newline
+        !out.contains("""\n"""),
       )
     },
     test("reports a multi-line value that would render as unreadable YAML") {
-      // Belt and braces behind zipx-shell's ScriptLine: a hand-written string still reaches the printer, and both of
-      // these produce YAML GitHub cannot read rather than YAML that looks wrong. Reported as a Left rather than thrown,
-      // and reported *before* anything is printed, so a bad value cannot reach a file half-written.
       def render(run: String): Either[String, String] =
         Render.render(
           Workflow(
@@ -141,16 +127,13 @@ object RenderSpec extends ZIOSpecDefault:
           )
         )
       def failure(run: String): Option[String] = render(run).left.toOption
-      // Built from a code point so no control byte sits in this source file.
-      val withControlChar = s"echo a\necho ${0x01.toChar}b"
+      val soh                                  = 0x01.toChar
+      val withControlChar                      = s"echo a\necho ${soh}b"
       assertTrue(
-        // A carriage return would push the value through needsQuoting, collapsing the script to one escaped line.
         failure("echo a\r\necho b").exists(_.contains("line 1")),
         failure(withControlChar).exists(_.contains("control character")),
-        // A leading tab is a block-scalar parse error, not just bad style.
         failure("echo a\n\techo b").exists(_.contains("line 2")),
         failure("echo a\n\techo b").exists(_.contains("tab")),
-        // A tab elsewhere on the line is fine, and an ordinary script still renders.
         failure("echo\ta\necho b").isEmpty,
         render("echo a\necho b").yaml.contains("run: |"),
       )
@@ -192,9 +175,9 @@ object RenderSpec extends ZIOSpecDefault:
       val single = render(List("ubuntu-latest"))
       val multi  = render(List("self-hosted", "linux"))
       assertTrue(
-        single.contains("runs-on: ubuntu-latest"), // scalar
-        !single.contains("runs-on:\n      -"),     // not a sequence
-        multi.contains("- self-hosted"),           // sequence
+        single.contains("runs-on: ubuntu-latest"),
+        !single.contains("runs-on:\n      -"),
+        multi.contains("- self-hosted"),
         multi.contains("- linux"),
       )
     },
@@ -246,9 +229,8 @@ object RenderSpec extends ZIOSpecDefault:
       )
     },
     test("renderJob matches the jobs: slice of renderBody") {
-      val body = Render.renderBody(sample).yaml
-      val job  = Render.renderJob("test-core", sample.jobs("test-core")).yaml
-      // Indent job fragment as it appears under jobs: (2 spaces).
+      val body     = Render.renderBody(sample).yaml
+      val job      = Render.renderJob("test-core", sample.jobs("test-core")).yaml
       val indented = job.linesIterator.map(l => if l.isEmpty then l else s"  $l").mkString("\n")
       assertTrue(
         body.contains(indented),
@@ -292,9 +274,6 @@ object RenderSpec extends ZIOSpecDefault:
         Render.renderMapping(Map.empty).yaml == "",
       )
     },
-
-    // --- Edge cases for Triggers.workflowCall, workflow-level fields, BranchFilter.paths ---
-
     test("Triggers.workflowCall renders workflow_call trigger") {
       val wf = Workflow(
         name = "Reusable",
@@ -322,7 +301,6 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("contents: read"),
         out.contains("issues: write"),
       )
-      // verify permissions appears before the jobs section (first job key "j:" indented under jobs:)
       val lines       = out.linesIterator.toList
       val permIdx     = lines.indexWhere(_.startsWith("permissions:"))
       val firstJobIdx = lines.indexWhere(l => l.trim == "j:" || l.trim.startsWith("j: "))
@@ -342,7 +320,6 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("env:"),
         out.contains("GLOBAL_VAR: value"),
       )
-      // verify workflow-level env appears before the jobs section (first job key "j:" indented under jobs:)
       val lines       = out.linesIterator.toList
       val envIdx      = lines.indexWhere(_.startsWith("env:"))
       val firstJobIdx = lines.indexWhere(l => l.trim == "j:" || l.trim.startsWith("j: "))
@@ -372,8 +349,6 @@ object RenderSpec extends ZIOSpecDefault:
       assertTrue(results.distinct.size == 1)
     },
     test("a step GitHub would reject is a Left, not an exception, and names the step") {
-      // The other half of the failure surface: `Step.problem`'s rules rather than the printer's. A `Workflow` is
-      // hand-constructible and a decode target, so this is reachable input, not a defect.
       val both = Step(name = Some("Confused"), uses = Some("actions/checkout@v4"), run = Some("echo hi"))
       val wf   = sample.copy(jobs = ListMap("build" -> Job(steps = List(both))))
       assertTrue(

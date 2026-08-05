@@ -3,19 +3,9 @@ package zipx.core
 import zio.test.*
 import zipx.workflow.Step
 
-/** The byte-stability proof for the typed-script migration.
-  *
-  * Every expected string here is what the site emitted *before* it was a `Script`, lifted verbatim out of the source it
-  * came from. This repo has no golden `.yml` fixtures, so this spec is where the old literals live on: a change to the
-  * shell AST that moves a single character fails here, with a diff, rather than surfacing as a mystery
-  * `zipxWorkflowCheck` failure in a consumer's repo.
-  *
-  * The dogfood zero-diff check (`zipxWorkflowGenerate` then `git diff --exit-code .github/`) is the end-to-end half of
-  * the same proof. This spec is the half that says *which* script moved.
-  */
 object ScriptRenderSpec extends ZIOSpecDefault:
 
-  def spec = suite("migrated scripts render byte-identically")(
+  def spec = suite("migrated scripts render byte-identically to their pre-DSL strings")(
     test("the action-pins sync commit script") {
       val step = ActionPinsSyncWorkflow
         .plan(ActionPins.Defaults, javaVersion = "25", runnerOs = "ubuntu-latest")
@@ -65,7 +55,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
             |echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
             |echo "release=$release" >> "$GITHUB_OUTPUT"
             |""".stripMargin,
-        // A non-default tag match still goes through single quotes, so a glob cannot leak into the shell unquoted.
         CacheEpoch.gitTagsResolveScript(CacheEpoch.gitTags("release-*").tagMatch).contains("tag_match='release-*'"),
         CacheEpoch.gitTagsResolveTypedScript().rawFragments.isEmpty,
       )
@@ -88,7 +77,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
             |  echo "run=true" >> "$GITHUB_OUTPUT"
             |fi""".stripMargin
         ),
-        // No trailing newline here, unlike the cache-epoch script. The two differ, and the type is what records that.
         !step.run.exists(_.endsWith("\n")),
       )
     },
@@ -106,10 +94,7 @@ object ScriptRenderSpec extends ZIOSpecDefault:
         )
       )
     },
-    test("the affected-modules script, with the push branch") {
-      // One deliberate byte change from the pre-DSL output: the nested `modules=$(cat …)` was emitted at two spaces
-      // where four is correct, because one interpolated fragment was spliced into two different nesting depths. The
-      // AST owns depth, so it lines up, and the `.replace("\n\n", "\n")` that papered over the empty branch is gone.
+    test("the affected-modules script, with the push branch, indenting the nested assignment to four spaces") {
       assertTrue(
         affectedScript(affectedOnPush = true).contains(
           """if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -133,9 +118,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       )
     },
     test("the verify step's runtime cleanFull branch, and the env expression that decides it") {
-      // Three layers meet in one step and each keeps its own form: an `if` with a quoted `$VAR` comparison (shell), an
-      // sbt command jointed into one single-quoted argument (not shell structure), and a *wrapped* `${{ }}` env value,
-      // because an `env:` entry is a plain field the runner substitutes rather than an expression position.
       val step = verifyStep(PlanConfig(verifyCleanLabel = PlanConfig.verifyCleanLabel("clean")))
       assertTrue(
         step.run.contains(
@@ -154,8 +136,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       )
     },
     test("the verify step without the label is one sbt line, and with a static mode carries the prefix") {
-      // The matrixed case is the interesting one: `++${{ matrix.scala }} ` is jointed into the *same* single quoted
-      // argument as the task, so the expression has to survive the shell layer without being escaped.
       val matrixed = Planner
         .plan(Fixtures.sampleGraph, List(Capability.testGraph), PlanConfig(verifyCleanLabel = None))
         .jobs("test-schema")
@@ -168,9 +148,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       )
     },
     test("a verify-clean label containing a quote is not a value that can reach a plan") {
-      // The label lands inside `'…'` in an expression, where GitHub offers no escape, so the field is an `ExprLiteral`
-      // rather than a `String`. There is no plan-time check left to test: a literal is rejected while this spec
-      // compiles, and a label that arrives as runtime data comes back as a `Left` that never becomes a `PlanConfig`.
       for bad <- typeCheck("""zipx.core.PlanConfig(verifyCleanLabel = zipx.core.PlanConfig.verifyCleanLabel("it's"))""")
       yield assertTrue(
         bad.isLeft,
@@ -179,8 +156,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       )
     },
     test("the cache key and restore-keys, assembled from Expr rather than interpolated") {
-      // `key` is one line, `restore-keys` is newline-joined for the block-scalar printer, and `path` is plain data. All
-      // three used to be `s"…$${{ … }}"` strings; the bytes are unchanged.
       val prefix = "ubuntu-latest-jdk21-sbt-"
       val cache  = cacheStep(PlanConfig(cacheEpoch = CacheEpoch.GitTags()))
       val fixed  = cacheStep(PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci")))
@@ -202,9 +177,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       )
     },
     test("a path containing a single quote is reported as a value rather than escaped around") {
-      // Not a hypothetical: the paths are `plan` parameters fed from sbt settings, so they are genuinely runtime data.
-      // A quote would break out of the surrounding '…' and the shell would see a different argument list than the
-      // caller wrote, so `plan` reports it and names the offending path instead of producing a workflow.
       val bad = ActionPinsSyncWorkflow.plan(
         ActionPins.Defaults,
         javaVersion = "25",
@@ -219,11 +191,9 @@ object ScriptRenderSpec extends ZIOSpecDefault:
     },
   )
 
-  /** The verify capability's sbt step, the last step of its job. */
   private def verifyStep(config: PlanConfig, capability: Capability = Capability.test): Step =
     Planner.plan(Fixtures.sampleGraph, List(capability), config).jobs(capability.name).steps.last
 
-  /** The `actions/cache` step of the `test` job. */
   private def cacheStep(config: PlanConfig): Step =
     Planner
       .plan(Fixtures.sampleGraph, List(Capability.test), config)
@@ -232,7 +202,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       .find(_.uses.exists(_.startsWith("actions/cache@")))
       .getOrElse(throw AssertionError("cache step missing"))
 
-  /** The `compute` step's script, which is `private` in the planner and so is read back off the plan. */
   private def affectedScript(affectedOnPush: Boolean): Option[String] =
     Planner
       .plan(

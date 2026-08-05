@@ -17,26 +17,22 @@ object ZipxPlugin extends AutoPlugin:
   override def requires = plugins.JvmPlugin
 
   object autoImport:
-    // Re-export the core cache-backend ADT so users can write `zipxCache := CacheBackend.LocalDir` etc.
     type CacheBackend = zipx.core.CacheBackend
     val CacheBackend = zipx.core.CacheBackend
     type CacheEpoch = zipx.core.CacheEpoch
     val CacheEpoch = zipx.core.CacheEpoch
     type ActionPins = zipx.core.ActionPins
     val ActionPins = zipx.core.ActionPins
-    // Re-export schedule helpers so companion workflows can use typed cron.
     type Cron = zipx.workflow.Cron
     val Cron = zipx.workflow.Cron
     type DayOfWeek = zipx.workflow.DayOfWeek
     val DayOfWeek = zipx.workflow.DayOfWeek
-    // Re-export the Scala Steward grouping model so builds can extend zipxStewardGrouping.
     type StewardGroup = zipx.core.StewardGroup
     val StewardGroup = zipx.core.StewardGroup
     type StewardFilter = zipx.core.StewardFilter
     val StewardFilter      = zipx.core.StewardFilter
     val ScalaStewardConfig = zipx.core.ScalaStewardConfig
 
-    // Re-export the capability/target model so users can define and append custom capabilities in build.sbt.
     type Capability = zipx.core.Capability
     val Capability = zipx.core.Capability
     type Target = zipx.core.Target
@@ -55,13 +51,14 @@ object ZipxPlugin extends AutoPlugin:
     val CapabilityScope = zipx.core.CapabilityScope
     type VerifyClean = zipx.core.VerifyClean
     val VerifyClean = zipx.core.VerifyClean
-    // Typed env / secret references. Prefer these over hand-written "${{ secrets.X }}" strings.
     type EnvValue = zipx.core.EnvValue
     val EnvValue = zipx.core.EnvValue
     val Secret   = zipx.core.Secret
     export zipx.core.EnvValue.secret
-    // Early-effect Central paved path (publishSigned + sonaRelease).
-    // Nested object: build.sbt only needs Capability from the plugin jar (not zipx-central on the meta classpath).
+
+    /** Nested object rather than a re-exported type: this way a `build.sbt` needs only `Capability` from the plugin
+      * jar, not `zipx-central` on the meta classpath.
+      */
     object ZipxCentral:
       def release: Capability       = zipx.central.ZipxCentral.release
       def publishSigned: Capability = zipx.central.ZipxCentral.publishSigned
@@ -70,7 +67,7 @@ object ZipxPlugin extends AutoPlugin:
       def OrgSecretNames            = zipx.central.ZipxCentral.OrgSecretNames
       def gpgImportSteps            = zipx.central.ZipxCentral.gpgImportSteps
     end ZipxCentral
-    // Early-effect Specular Pages paved path (org reusable workflow).
+
     object ZipxDocs:
       def pages(sbtProject: String = "docs", javaVersion: Option[String] = None): Capability =
         zipx.specular.ZipxDocs.pages(sbtProject, javaVersion)
@@ -78,7 +75,7 @@ object ZipxPlugin extends AutoPlugin:
       def pagesPermissions = zipx.specular.ZipxDocs.pagesPermissions
       def deployWhen       = zipx.specular.ZipxDocs.deployWhen
     end ZipxDocs
-    // GitHub Packages paved path (token env + packages: write; sbt owns publishTo).
+
     object ZipxGitHubPackages:
       def sameRepo(
           name: String = zipx.github.ZipxGitHubPackages.DefaultName,
@@ -108,27 +105,13 @@ object ZipxPlugin extends AutoPlugin:
       def DefaultName         = zipx.github.ZipxGitHubPackages.DefaultName
       def PublishFlagEnv      = zipx.github.ZipxGitHubPackages.PublishFlagEnv
     end ZipxGitHubPackages
-    // The typed DSL a build writes `extraSteps` / `postSteps` with, re-exported so a `build.sbt` needs no imports:
-    //
-    //   extraSteps = _ => List(Step.uses(pin).withInput("role-to-assume", Expr.env("DEPLOY_ROLE")).build)
-    //   Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install browsers").build
-    //   val warm = Steps.built("warm")(Step.run(Script(Exec("npm", sh"--prefix=$dir"))))
-    //
-    // Each has a `type` alias as well as a `val` wherever a build might annotate one (`val warm: Steps = …`, a
-    // `Capability.extraSteps` of declared type `Step`). See the "Shell and steps" docs page for the whole DSL.
     type Step = zipx.workflow.Step
     val Step = zipx.workflow.Step
-
-    /** The GitHub Actions expression AST: `Expr.env("NAME")`, `Expr.secret(…)`, `Expr.github("sha")`. */
     type Expr = zipx.workflow.Expr
     val Expr = zipx.workflow.Expr
-
-    /** Composable step bundles, the typed replacement for a `StepContext => List[Step]` lambda. */
     type Steps = zipx.core.Steps
     val Steps = zipx.core.Steps
 
-    // The shell AST, for a `run:` script that is structure rather than an interpolated string. `sh` is the
-    // interpolator for the one-liner case, and lives at package level in zipx-shell rather than on `Script`.
     type Script = zipx.shell.Script
     val Script = zipx.shell.Script
     type Word = zipx.shell.Word
@@ -136,36 +119,24 @@ object ZipxPlugin extends AutoPlugin:
     val Exec = zipx.shell.Exec
     export zipx.shell.sh
 
-    // Shell structure: conditionals, loops, assignments, heredocs. A `Block` is a head plus a tail, so an empty
-    // branch is unconstructible; `ShTest` picks the bracket form, and `GlobMatch` takes a `GlobPattern` rather than
-    // a `Word` because a bash pattern must not arrive quoted.
     type ShTest = zipx.shell.ShTest
     val ShTest = zipx.shell.ShTest
     type Block = zipx.shell.Block
-    val Block  = zipx.shell.Block
-    val If     = zipx.shell.If
-    val ForIn  = zipx.shell.ForIn
-    val While  = zipx.shell.While
-    val Assign = zipx.shell.Assign
-    // Names the above constructors take directly. The rest of zipx-shell's newtypes are reached through the smart
-    // constructors on `Word` / `Script`, so they are deliberately not re-exported.
+    val Block       = zipx.shell.Block
+    val If          = zipx.shell.If
+    val ForIn       = zipx.shell.ForIn
+    val While       = zipx.shell.While
+    val Assign      = zipx.shell.Assign
     val VarName     = zipx.shell.VarName
     val GlobPattern = zipx.shell.GlobPattern
-    // Escape hatches. Typed, so they cannot break the YAML, and reported by `zipxWorkflowGenerate` as a warning
-    // naming the bundle. `Script.raw` returns an `Either`; prefer implementing `zipx.shell.Command` for anything
-    // you reach for twice.
-    val Raw     = zipx.shell.Raw
-    val RawLine = zipx.shell.RawLine
-    // `zipx.shell.Command` and `InlineCommand` are deliberately absent: `Command` is sbt's own name in a `build.sbt`
-    // (`commands += Command.command(…)`), and shadowing it here would break that. A build implementing its own shell
-    // construct imports `zipx.shell.Command` explicitly, which is usually in `project/*.scala` anyway.
-    // Typed, IDE-friendly capability constructors that take a real TaskKey/InputKey instead of a command string:
-    //   zipxTasks.once("fmt", scalafmtCheckAll)   zipxTasks.deploy(_.id == "svc", promote, targets = ...)
+    val Raw         = zipx.shell.Raw
+    val RawLine     = zipx.shell.RawLine
+    // `zipx.shell.Command` and `InlineCommand` stay unexported: `Command` is sbt's own name in a `build.sbt`
+    // (`commands += Command.command(…)`), and shadowing it would break that.
+
     val zipxTasks = zipx.sbt.CapabilityTasks
-    // The cmd"…" interpolator: literal command syntax + typed key splices, e.g. cmd"+ ${testFull}".
     export zipx.sbt.CapabilityTasks.cmd
 
-    // Build-level configuration.
     val zipxCapabilities =
       settingKey[Seq[Capability]]("CI capabilities (default: test, publish, docker?). Append custom ones here.")
     val zipxCache =
@@ -306,52 +277,44 @@ object ZipxPlugin extends AutoPlugin:
     zipxWorkflowDispatch         := false,
   )
 
-  /** Wires sbt's remote cache from the environment the generated workflow sets up (`ZIPX_REMOTE_CACHE`,
-    * `ZIPX_REMOTE_CACHE_HEADER`). Inert when the env is unset (local dev / LocalDir backend).
-    *
-    * The gRPC transport (`sbt.plugins.RemoteCachePlugin`) is bundled transitively via sbt-zipx's dependency on
-    * `sbt-remote-cache`, and triggers on AllRequirements, but its store is a no-op until `Global / remoteCache` is
-    * `Some`, which only happens here when the CI job sets `ZIPX_REMOTE_CACHE`. So local builds are unaffected.
+  /** Wires sbt's remote cache from the environment the generated workflow sets up, and is inert when that env is unset:
+    * the bundled gRPC transport (`sbt.plugins.RemoteCachePlugin`) triggers on AllRequirements but no-ops until
+    * `Global / remoteCache` is `Some`, so local builds are unaffected.
     */
   private def remoteCacheWiring: Seq[Setting[?]] =
     sys.env.get(RemoteCacheProof.envUri).filter(_.nonEmpty) match
       case None         => Nil
       case Some(uriStr) =>
         Seq(
-          Global / remoteCache := Some(uri(uriStr)),
-          // sbt's content-addressed cache key hashes sources/classpath/scalacOptions but NOT the JDK or OS. For a shared
-          // remote cache this is unsafe: a JDK-21 runner and a JDK-17 runner would read each other's blobs. Fold those
-          // two axes into `cacheVersion` (mixed into every key) so heterogeneous runners get disjoint partitions.
-          // The commit epoch is deliberately excluded: cross-epoch reuse is the whole point of a persistent remote cache.
+          Global / remoteCache  := Some(uri(uriStr)),
           Global / cacheVersion := cacheVersionFor(runtimeJdkMajor, runtimeOs),
         ) ++ sys.env.get(RemoteCacheProof.envHeader).filter(_.nonEmpty).toSeq.map { header =>
           Global / remoteCacheHeaders := Seq(header)
         }
 
-  /** The JDK feature version at runtime (e.g. "21", "17", "1.8"). */
   private def runtimeJdkMajor: String = sys.props.getOrElse("java.specification.version", "unknown")
 
-  /** A coarse OS family, matching what the `actions/cache` key uses for the local backend. */
   private def runtimeOs: String = sys.props.getOrElse("os.name", "unknown").toLowerCase.split(' ').head
 
-  /** A stable 64-bit hash of the cache-correctness axes → `cacheVersion`. Deterministic across machines (FNV-1a over
-    * the UTF-8 bytes), so the same (jdk, os) always yields the same partition and different ones never collide by
-    * design.
+  /** Partitions the remote cache by the two axes sbt's own content-addressed key omits. sbt hashes sources, classpath
+    * and scalacOptions but not the JDK or the OS, so without this a JDK-21 runner and a JDK-17 runner would read each
+    * other's blobs. The commit epoch is deliberately not an axis: cross-epoch reuse is the point of a persistent cache.
+    *
+    * FNV-1a over the UTF-8 bytes, so the same (jdk, os) hashes the same on every machine.
     */
   private def cacheVersionFor(jdk: String, os: String): Long =
-    val input = s"jdk=$jdk;os=$os"
-    var hash  = 0xcbf29ce484222325L // FNV-1a 64-bit offset basis
-    val prime = 0x100000001b3L
-    input.getBytes(java.nio.charset.StandardCharsets.UTF_8).foreach { b =>
-      hash = (hash ^ (b & 0xff)) * prime
+    val FnvOffsetBasis = 0xcbf29ce484222325L
+    val FnvPrime       = 0x100000001b3L
+    var hash           = FnvOffsetBasis
+    s"jdk=$jdk;os=$os".getBytes(java.nio.charset.StandardCharsets.UTF_8).foreach { b =>
+      hash = (hash ^ (b & 0xff)) * FnvPrime
     }
-    hash & Long.MaxValue // keep it non-negative for readability in logs
+    hash & Long.MaxValue
 
   override def buildSettings: Seq[Setting[?]] = Seq(
     zipxGraph        := graphTask.value,
     zipxPublishOrder := publishOrderTask.value,
-    // Side-effecting file write → Unit task key + Def.uncached, matching the established sbt-2.x plugin pattern
-    // (side effects are not valid cached-task outputs).
+    // `Def.uncached` because a file write is not a valid cached-task output.
     zipxWorkflowGenerate := Def.uncached {
       writeGeneratedWorkflows.value
     },
@@ -362,21 +325,24 @@ object ZipxPlugin extends AutoPlugin:
     zipxAffectedModules := affectedModulesTask.evaluated,
   )
 
+  /** An aggregator is a container rather than a testable module, so it is CI-irrelevant by default. Plain settings, so
+    * a project can override any of them.
+    */
   override def projectSettings: Seq[Setting[?]] = Seq(
-    // An aggregator (aggregates ≥1 project) is a container, not a testable/publishable module, off by default.
-    // These are plain settings, so users can override per project (e.g. `zipxCiRelevant := true`).
     zipxCiRelevant  := thisProject.value.aggregate.isEmpty,
     zipxPublish     := None,
     zipxTestTask    := "test",
     zipxPublishTask := "publish",
-    // Auto-detect: a module opts into the docker capability by enabling sbt-native-packager's DockerPlugin.
-    zipxDocker := thisProject.value.autoPlugins.exists(_.label == "com.typesafe.sbt.packager.docker.DockerPlugin"),
+    zipxDocker      := thisProject.value.autoPlugins.exists(_.label == DockerPluginLabel),
   )
 
-  // ---- Build-state → ModuleGraph adapter ---------------------------------------------------------
+  /** A module opts into the docker capability by enabling sbt-native-packager's `DockerPlugin`, detected by label so
+    * zipx needs no dependency on it.
+    */
+  private inline val DockerPluginLabel = "com.typesafe.sbt.packager.docker.DockerPlugin"
 
-  /** Project ids that opt out of publishing/CI cannot be read here (they are project-scoped settings); instead we read
-    * them per-ref against the loaded structure. This runs inside a task so the settings are resolved.
+  /** The loaded build as a [[ModuleGraph]]. A task rather than a setting: the per-project settings it reads are
+    * resolved per-ref against the loaded structure.
     */
   private def buildGraph: Def.Initialize[Task[ModuleGraph]] = Def.task {
     val st        = state.value
@@ -384,31 +350,23 @@ object ZipxPlugin extends AutoPlugin:
     val structure = extracted.structure
     val deps      = buildDependencies.value
 
-    // Only projects in the root build unit, sorted by id for determinism.
-    val refs = structure.allProjectRefs.sortBy(_.project)
-
-    // Aggregators (aggregate ≥1 project) are containers, not publishable modules, never publish by default.
+    val refsSortedForDeterminism                   = structure.allProjectRefs.sortBy(_.project)
     val aggregatorIds: Set[String]                 = structure.allProjects.filter(_.aggregate.nonEmpty).map(_.id).toSet
     val resolvedById: Map[String, ResolvedProject] = structure.allProjects.map(p => p.id -> p).toMap
     val buildRoot                                  = (LocalRootProject / baseDirectory).value.toPath
 
-    val nodes = refs.map { ref =>
+    val nodes = refsSortedForDeterminism.map { ref =>
       def read[A](key: SettingKey[A], default: A): A = extracted.getOpt(ref / key).getOrElse(default)
-      // `publish / skip` is a TaskKey, so evaluate it (unlike publishArtifact, a Setting). zipxPublish := Some(_)
-      // wins as an explicit override; aggregators never publish by default. Also honor publishArtifact := false
-      // (common for apps) so existing builds keep working. (CI-relevance is defaulted in projectSettings via
-      // thisProject.aggregate.)
-      val publishes =
-        read[Option[Boolean]](zipxPublish, None).getOrElse {
-          !aggregatorIds.contains(ref.project) &&
-          !extracted.runTask(ref / publish / skip, st)._2 &&
-          read(publishArtifact, true)
-        }
-      val crossVersions =
+      val explicitOverride                           = read[Option[Boolean]](zipxPublish, None)
+      val isAggregator                               = aggregatorIds.contains(ref.project)
+      // `publish / skip` is a TaskKey, hence `runTask`; `publishArtifact` is a Setting.
+      val skipsPublish      = extracted.runTask(ref / publish / skip, st)._2
+      val publishesArtifact = read(publishArtifact, true)
+      val publishes         = explicitOverride.getOrElse(!isAggregator && !skipsPublish && publishesArtifact)
+      val crossVersions     =
         read(crossScalaVersions, Nil) match
           case Nil      => List(read(scalaVersion, "")).filter(_.nonEmpty)
           case versions => versions.toList
-      // Module base dir relative to the build root, forward-slashed; "" for the root project itself.
       val baseDir =
         resolvedById
           .get(ref.project)
@@ -430,15 +388,14 @@ object ZipxPlugin extends AutoPlugin:
     ModuleGraph(nodes)
   }
 
-  /** The root project's `ProjectRef`. Build-level zipx settings are read from *this* scope, not the task's own
-    * (ThisBuild) scope, so they honor every sbt-2.0 assignment form: a bare `zipxX := ...` (a per-project *common*
-    * setting), a `ThisBuild / zipxX := ...`, and the plugin's Global default all resolve via project→ThisBuild→Global
-    * delegation. A ThisBuild-scoped read would miss the bare/common form (delegation only goes specific→general).
-    */
   private def rootRef(structure: sbt.internal.BuildStructure): ProjectRef =
     ProjectRef(structure.root, structure.rootProject(structure.root))
 
-  /** Read a build-level setting from the root project's scope, falling back to `default`. */
+  /** Reads a build-level setting from the *root project's* scope rather than ThisBuild's, so that every sbt-2.0
+    * assignment form resolves: a bare `zipxX := …` (a per-project common setting), a `ThisBuild / zipxX := …`, and the
+    * plugin's Global default all reach here via project → ThisBuild → Global delegation. A ThisBuild-scoped read would
+    * miss the bare form, since delegation only goes specific → general.
+    */
   private def readBuildSetting[A](extracted: Extracted, key: SettingKey[A], default: A): A =
     extracted.getOpt(rootRef(extracted.structure) / key).getOrElse(default)
 
@@ -471,36 +428,30 @@ object ZipxPlugin extends AutoPlugin:
     )
   }
 
-  /** Resolve pins: explicit `zipxActions` (≠ Defaults) wins; else the pin file when present; else Defaults. */
   private def resolveActionPins(extracted: Extracted, root: File): ActionPins =
-    val setting = readBuildSetting(extracted, zipxActions, ActionPins.Defaults)
-    if setting != ActionPins.Defaults then setting
+    val setting        = readBuildSetting(extracted, zipxActions, ActionPins.Defaults)
+    val userOverrodeIt = setting != ActionPins.Defaults
+    if userOverrodeIt then setting
     else
       val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
       if rel.isEmpty then ActionPins.Defaults
       else ActionPinFile.loadOption((root / rel).toPath).getOrElse(ActionPins.Defaults)
 
-  /** The built-in capabilities zipx derives from the graph: Aggregate Verify (root `zipxTestTask`), library publish,
-    * plus docker when any module opts in. Clean prefixes come from [[PlanConfig.verifyClean]], not the command string.
+  /** Clean prefixes come from [[PlanConfig.verifyClean]] rather than from `verifyTask`, so the command string here is
+    * only the task.
     */
   private def builtinCapabilities(graph: ModuleGraph, verifyTask: String): List[Capability] =
     val test = Capability.once(name = "test", command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
     val base = List(test, Capability.publish)
     if graph.nodes.exists(_.docker) then base :+ Capability.docker else base
 
-  /** The one place a zipx failure value becomes a thrown error.
-    *
-    * The libraries below (`zipx-shell`, `zipx-workflow`, `zipx-core`) report failures as `Either` and never throw, so a
-    * consumer can handle one. sbt's task contract is the opposite: a task fails by throwing, and `sys.error` is how it
-    * reports a build problem with a readable message. This is the seam between the two, and it belongs here rather than
-    * in a library, so that `Either` is what a library caller sees.
+  /** The one place a zipx failure value becomes a thrown error. The libraries below report failures as `Either` and
+    * never throw; sbt's task contract is the opposite, a task fails by throwing. This is the seam, and it lives here so
+    * that a library caller still sees the `Either`.
     */
   private def orFail[A](result: Either[String, A]): A =
     result.fold(error => sys.error(s"zipx: $error"), identity)
 
-  /** The sbt-facing `Option[String]` label as the typed [[PlanConfig.verifyCleanLabel]]. `None` keeps the check off; a
-    * label that cannot sit inside `'…'` in a GitHub expression is a build error, named here rather than escaped over.
-    */
   private def typedVerifyCleanLabel(label: Option[String]): Either[String, Option[zipx.workflow.ExprLiteral]] =
     label match
       case None        => Right(None)
@@ -508,11 +459,9 @@ object ZipxPlugin extends AutoPlugin:
         PlanConfig.verifyCleanLabelMake(value).left.map(error => s"zipxVerifyCleanLabel: $error")
 
   private def renderWorkflow: Def.Initialize[Task[String]] = Def.task {
-    val graph     = buildGraph.value
-    val cfg       = planConfig.value
-    val extracted = Project.extract(state.value)
-    // Built-in capabilities plus any the user appended via zipxCapabilities (custom stages / deploys), read from the
-    // root project's scope so a bare `zipxCapabilities += ...` (a per-project common setting) is honored.
+    val graph        = buildGraph.value
+    val cfg          = planConfig.value
+    val extracted    = Project.extract(state.value)
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
     val verifyTask   = readBuildSetting(extracted, zipxTestTask, "test")
     val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
@@ -531,10 +480,8 @@ object ZipxPlugin extends AutoPlugin:
     writeStewardWorkflowIfEnabled.value
   }
 
-  /** Warn once per escape-hatch fragment in a [[Steps]] bundle, naming the bundle.
-    *
-    * Raw content is allowed and typed, so it cannot emit YAML GitHub fails to parse. What it can still emit is broken
-    * shell, and nothing checks that, so the use should be visible in the build log rather than silent.
+  /** Warns once per escape-hatch fragment, naming the bundle. Raw content is typed, so it cannot emit YAML GitHub fails
+    * to parse; it can still emit broken shell, and nothing checks that.
     */
   private def warnRawFragments: Def.Initialize[Task[Unit]] = Def.task {
     val log          = streams.value.log
@@ -567,15 +514,10 @@ object ZipxPlugin extends AutoPlugin:
       )
       IO.write(syncFile, body)
       streams.value.log.info(s"zipx wrote ${syncFile.getPath}")
-    else if syncFile.exists then
-      // Leave an existing file alone when disabled (user may have checked one in manually).
-      ()
     end if
   }
 
-  /** The Steward grouping config to generate, or None when grouping is disabled. Shared by generate and check so the
-    * two cannot disagree about whether the config file should exist.
-    */
+  /** Shared by generate and check, so the two cannot disagree about whether the config file should exist. */
   private def stewardGrouping(extracted: Extracted): Option[String] =
     val groups = readBuildSetting(extracted, zipxStewardGrouping, ScalaStewardConfig.Defaults).toList
     Option.when(groups.nonEmpty)(ScalaStewardConfig.render(groups))
@@ -598,7 +540,6 @@ object ZipxPlugin extends AutoPlugin:
       val body = orFail(ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs, configPath = configPath))
       IO.write(stewardFile, body)
       log.info(s"zipx wrote ${stewardFile.getPath}")
-    else if stewardFile.exists then ()
     end if
   }
 
@@ -618,17 +559,14 @@ object ZipxPlugin extends AutoPlugin:
     writeGeneratedWorkflows.value
   }
 
-  /** Merge built-in and user capabilities: a user capability whose `name` matches a built-in *replaces* it (same-name
-    * override), so e.g. a user can supply a multi-registry `docker` capability in place of the single-target default
-    * without producing duplicate `docker-<module>` jobs. Order follows the built-ins, then any new user capabilities.
+  /** A user capability whose `name` matches a built-in *replaces* it, so supplying a multi-registry `docker` capability
+    * yields one set of `docker-<module>` jobs rather than duplicates.
     */
   private def combineCapabilities(builtins: List[Capability], user: List[Capability]): List[Capability] =
     val userByName = user.map(c => c.name -> c).toMap
-    val merged     = builtins.map(b => userByName.getOrElse(b.name, b))
-    val extras     = user.filterNot(u => builtins.exists(_.name == u.name))
-    merged ++ extras
-
-  // ---- Tasks -------------------------------------------------------------------------------------
+    val overridden = builtins.map(b => userByName.getOrElse(b.name, b))
+    val newlyAdded = user.filterNot(u => builtins.exists(_.name == u.name))
+    overridden ++ newlyAdded
 
   private def graphTask: Def.Initialize[Task[Unit]] = Def.task {
     val graph = buildGraph.value
@@ -649,9 +587,6 @@ object ZipxPlugin extends AutoPlugin:
     }
   }
 
-  /** Print the dependency-ordered publish layers: the publishing modules with edges contracted through non-publishers,
-    * grouped into waves that may publish in parallel. This is the order zipx wires into the release `needs` graph.
-    */
   private def publishOrderTask: Def.Initialize[Task[Unit]] = Def.task {
     val graph  = buildGraph.value
     val log    = streams.value.log
@@ -664,9 +599,7 @@ object ZipxPlugin extends AutoPlugin:
       }
   }
 
-  /** The absolute workflow file, resolved against the build root. `baseDirectory` is a task in sbt 2.x, so this must be
-    * a task too (a setting cannot depend on it).
-    */
+  /** A task rather than a setting because `baseDirectory` is a task in sbt 2.x. */
   private def workflowFile: Def.Initialize[Task[File]] = Def.task {
     (LocalRootProject / baseDirectory).value / zipxWorkflowPath.value
   }
@@ -709,8 +642,8 @@ object ZipxPlugin extends AutoPlugin:
       val cfg         = planConfig.value
       val maybeConf   = stewardGrouping(extracted)
       val configPath  = maybeConf.map(_ => ScalaStewardWorkflow.DefaultConfigPath)
-      // Checked before the workflow itself: the action silently ignores a missing config at the
-      // default path, so this drift check is the only thing that catches it.
+      // Checked before the workflow itself: the Steward action ignores a missing config at the default path silently,
+      // so this drift check is the only thing that catches it.
       maybeConf.foreach { expectedConf =>
         val confFile   = root / ScalaStewardWorkflow.DefaultConfigPath
         val actualConf = if confFile.exists then IO.read(confFile) else ""
@@ -730,37 +663,33 @@ object ZipxPlugin extends AutoPlugin:
     end if
   }
 
-  /** `zipxAffectedModules <base-ref>`: diff against the base ref, map changed files to owning modules, expand the
-    * reverse-dependency closure, and write the affected module ids as a JSON array to
-    * `<base>/target/zipx-affected.json` (also printed for local use). The generated workflow's `affected` job reads
-    * that stable path so sbt's log lines never pollute `GITHUB_OUTPUT`. (Do not use `(target).value`; under sbt 2 it is
-    * a versioned `target/out/...` tree.)
+  /** `zipxAffectedModules <base-ref>`. Writes the ids to a fixed `target/zipx-affected.json` rather than stdout because
+    * the generated `affected` job reads the file, which keeps sbt's log lines out of `GITHUB_OUTPUT`. The path is built
+    * from `baseDirectory`, not `(target).value`, which under sbt 2 is a versioned `target/out/…` tree.
     */
   private def affectedModulesTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
-      val base    = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
-      val graph   = buildGraph.value
-      val root    = (LocalRootProject / baseDirectory).value
-      val baseRef = if base.isEmpty then "HEAD^" else base
-      val changed = gitDiffNames(root, baseRef)
-      if changed.isEmpty then
+      val base         = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+      val graph        = buildGraph.value
+      val root         = (LocalRootProject / baseDirectory).value
+      val baseRef      = if base.isEmpty then "HEAD^" else base
+      val changedFiles = gitDiffNames(root, baseRef)
+      val diffFailed   = changedFiles.isEmpty
+      if diffFailed then
         streams.value.log.warn(
           s"zipx: could not diff against '$baseRef', emitting ${jsonArray(Affected.AllSentinel)} so every job runs. " +
             "Affected-only gating is disabled for this run."
         )
-      val modules = Affected.outputModules(graph, changed)
-      val json    = jsonArray(modules)
-      val out     = root / "target" / "zipx-affected.json"
-      IO.write(out, json + "\n")
+      val json = jsonArray(Affected.outputModules(graph, changedFiles))
+      IO.write(root / "target" / "zipx-affected.json", json + "\n")
       println(json)
     }
 
-  /** Files changed on HEAD since its merge-base with `baseRef` (three-dot diff), repo-root-relative with forward
-    * slashes.
+  /** Files changed on HEAD since its merge-base with `baseRef`, repo-root-relative with forward slashes.
     *
-    * `None` means the diff **failed** (nonzero exit or no git at all); `Some(Nil)` means it succeeded and found no
-    * changes. [[Affected.outputModules]] relies on that distinction to fail open; collapsing both to `Nil` is what made
-    * a bad base ref skip every Verify job and report the PR green.
+    * `None` means the diff *failed*, `Some(Nil)` means it succeeded and found nothing. [[Affected.outputModules]] needs
+    * that distinction to fail open; collapsing both to `Nil` is what once made a bad base ref skip every Verify job and
+    * report the PR green.
     */
   private def gitDiffNames(root: File, baseRef: String): Option[List[String]] =
     try

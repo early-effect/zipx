@@ -10,7 +10,6 @@ object ScalaStewardWorkflowSpec extends ZIOSpecDefault:
       val pins = ActionPins.Defaults
       val out  = ScalaStewardWorkflow.render(pins, "ubuntu-latest").yaml
 
-      // Version comment is dynamic: annotateUses appends "# <version>" from pins.versions
       val expectedVersionComment =
         pins.versions.get("scalaSteward").map(v => s"# $v").getOrElse("")
 
@@ -48,8 +47,6 @@ object ScalaStewardWorkflowSpec extends ZIOSpecDefault:
       val pins = ActionPins.Defaults
       val out  =
         ScalaStewardWorkflow.render(pins, "ubuntu-latest", configPath = Some(".github/.scala-steward.conf")).yaml
-      // The action reads repo-config off the runner filesystem and never checks out itself,
-      // so checkout must come first or the config is silently ignored.
       assertTrue(
         out.contains(s"uses: ${pins.checkout}"),
         out.indexOf(pins.checkout) < out.indexOf(pins.scalaSteward),

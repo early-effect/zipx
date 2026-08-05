@@ -6,12 +6,6 @@ import zipx.workflow.{Expr, Step}
 
 import scala.collection.immutable.ListMap
 
-/** [[Steps]]: the composable step bundle, and the property that makes it adoptable without breaking a consumer.
-  *
-  * The design claim under test is that `Steps` *is* a `StepContext => List[Step]`, so every field that took a lambda
-  * accepts one with no signature change. That claim is only worth as much as the compile-time evidence for it, which is
-  * why the assignment tests here name the declared lambda types explicitly rather than relying on inference.
-  */
 object StepsSpec extends ZIOSpecDefault:
 
   private val node = ModuleNode(id = "core", publishes = true)
@@ -28,7 +22,6 @@ object StepsSpec extends ZIOSpecDefault:
   def spec = suite("Steps")(
     suite("is a function, which is what keeps it non-breaking")(
       test("a Steps satisfies every field that declares a lambda") {
-        // No `.build`, no adapter, no signature change: the whole migration story in four assignments.
         val capability: Capability                      = Capability.test.copy(extraSteps = first, postSteps = second)
         val config: PlanConfig                          = PlanConfig(cacheRehydrateExtraSteps = first)
         val asLambda: StepContext => List[Step]         = first
@@ -102,7 +95,6 @@ object StepsSpec extends ZIOSpecDefault:
         )
       },
       test("renders the condition bare, because an if: is already an expression context") {
-        // Wrapped would be `${{ a }} && ${{ b }}`, a template string that evaluates to neither operand.
         val gated = first.when(JobCondition.eventIs("push"))
         assertTrue(
           gated(ctx).head.`if`.contains("github.event_name == 'push'"),
@@ -171,8 +163,6 @@ object StepsSpec extends ZIOSpecDefault:
         )
       },
       test("built takes builders, so a definition site never calls .build") {
-        // The pin is read from a file, so it goes through `usesMake` rather than the inline constructor; that fork is
-        // the same one `buildingWith` below hits for a module id.
         val checkout = Step.usesMake(ActionPins.Defaults.checkout).toOption.get
         val bundle   = Steps.built("verify")(
           checkout,
@@ -185,8 +175,6 @@ object StepsSpec extends ZIOSpecDefault:
         )
       },
       test("an invalid builder never reaches built: it is rejected where it is written") {
-        // `built` has nothing to validate, because a `StepBuilder` cannot hold an invalid step. An unpinned literal ref
-        // is a compile error, and an unpinned runtime ref is a `Left` that never produces a builder to pass in.
         for unpinned <- typeCheck("""Steps.built("bad")(zipx.workflow.Step.uses("actions/checkout"))""")
         yield assertTrue(
           unpinned.isLeft,
@@ -194,8 +182,6 @@ object StepsSpec extends ZIOSpecDefault:
         )
       },
       test("buildingWith is built's context-dependent sibling") {
-        // The module id is runtime data, so the command word goes through `squoteMake` rather than the inline
-        // constructor. That fork is the point of the design, and it shows up the moment a bundle reads its context.
         val bundle = Steps.buildingWith("per-module") { c =>
           val task = Word.squoteMake(s"${c.node.id}/test").fold(e => throw IllegalArgumentException(e), identity)
           List(Step.run(Script.strict(Exec("sbt", task))).named(s"Test ${c.node.id}"))
@@ -256,8 +242,6 @@ object StepsSpec extends ZIOSpecDefault:
         assertTrue(Steps.rawWarnings(List(Capability.test, Capability.publish), PlanConfig()).isEmpty)
       },
       test("a bare lambda reports nothing, which is the incentive to use Steps") {
-        // Not a gap being papered over: a lambda has nowhere to carry the information, so the type is the only place it
-        // can live. Worth pinning, because a reader could otherwise expect this to be caught.
         val legacy: StepContext => List[Step] = _ => List(Step(run = Some("echo raw")))
         assertTrue(Steps.rawWarnings(List(Capability.test.copy(extraSteps = legacy)), PlanConfig()).isEmpty)
       },
