@@ -28,17 +28,6 @@ object ActionPinFile:
   private val UsesLine: Regex =
     raw"""^\s*-?\s*uses:\s*(\S+?)(?:\s+#\s*(\S+))?\s*$$""".r
 
-  /** Field name → GitHub action id prefix (owner/name). */
-  val FieldPrefixes: List[(String, String)] = List(
-    "checkout"         -> "actions/checkout",
-    "setupJava"        -> "actions/setup-java",
-    "setupSbt"         -> "sbt/setup-sbt",
-    "cache"            -> "actions/cache",
-    "uploadArtifact"   -> "actions/upload-artifact",
-    "downloadArtifact" -> "actions/download-artifact",
-    "scalaSteward"     -> "scala-steward-org/scala-steward-action",
-  )
-
   def parse(text: String): ActionPins =
     val values   = scala.collection.mutable.Map.empty[String, String]
     val versions = scala.collection.mutable.Map.empty[String, String]
@@ -57,19 +46,22 @@ object ActionPinFile:
   def loadOption(path: Path): Option[ActionPins] =
     if Files.isRegularFile(path) then Some(load(path)) else None
 
-  def loadResource(name: String = ResourceName, classLoader: ClassLoader = getClass.getClassLoader): ActionPins =
-    val stream = Option(classLoader.getResourceAsStream(name)).getOrElse {
-      throw new IllegalStateException(s"Missing classpath resource /$name (zipx action pins)")
+  /** `None` when the resource is absent, which is how [[ActionPins.Defaults]] falls back to its bootstrap pins. */
+  def loadResource(
+      name: String = ResourceName,
+      classLoader: ClassLoader = getClass.getClassLoader,
+  ): Option[ActionPins] =
+    Option(classLoader.getResourceAsStream(name)).map { stream =>
+      try parse(new String(stream.readAllBytes(), StandardCharsets.UTF_8))
+      finally stream.close()
     }
-    try parse(new String(stream.readAllBytes(), StandardCharsets.UTF_8))
-    finally stream.close()
 
   def render(pins: ActionPins): String =
-    val lines = FieldPrefixes.map { (field, _) =>
+    val lines = ActionPins.Field.values.toList.map { field =>
       val ref = pins.field(field)
-      pins.versions.get(field) match
-        case Some(v) => s"$field: $ref # $v"
-        case None    => s"$field: $ref"
+      pins.version(field) match
+        case Some(v) => s"${field.key}: $ref # $v"
+        case None    => s"${field.key}: $ref"
     }
     Header + lines.mkString("\n") + "\n"
 
@@ -79,28 +71,20 @@ object ActionPinFile:
 
   /** Pull known action pins from a generated (or Dependabot-edited) workflow YAML. */
   def pullFromWorkflow(workflowYaml: String, base: ActionPins = ActionPins.Defaults): ActionPins =
-    val foundRef = scala.collection.mutable.Map.empty[String, String]
+    val foundRef = scala.collection.mutable.Map.empty[ActionPins.Field, String]
     val foundVer = scala.collection.mutable.Map.empty[String, String]
     workflowYaml.linesIterator.foreach {
       case UsesLine(refRaw, ver) =>
         val ref = stripComment(refRaw)
-        FieldPrefixes.foreach { (field, prefix) =>
-          if ref.startsWith(prefix + "@") && !foundRef.contains(field) then
+        ActionPins.Field.values.foreach { field =>
+          if ref.startsWith(field.prefix + "@") && !foundRef.contains(field) then
             foundRef(field) = ref
-            if ver != null && ver.nonEmpty then foundVer(field) = ver
+            if ver != null && ver.nonEmpty then foundVer(field.key) = ver
         }
       case _ => ()
     }
-    base.copy(
-      checkout = foundRef.getOrElse("checkout", base.checkout),
-      setupJava = foundRef.getOrElse("setupJava", base.setupJava),
-      setupSbt = foundRef.getOrElse("setupSbt", base.setupSbt),
-      cache = foundRef.getOrElse("cache", base.cache),
-      uploadArtifact = foundRef.getOrElse("uploadArtifact", base.uploadArtifact),
-      downloadArtifact = foundRef.getOrElse("downloadArtifact", base.downloadArtifact),
-      scalaSteward = foundRef.getOrElse("scalaSteward", base.scalaSteward),
-      versions = base.versions ++ foundVer.toMap,
-    )
+    val pulled = foundRef.foldLeft(base) { case (pins, (field, ref)) => pins.withField(field, ref) }
+    pulled.copy(versions = base.versions ++ foundVer.toMap)
   end pullFromWorkflow
 
   /** Append `# vX.Y.Z` comments to `uses:` lines for pins that carry a version label. */
@@ -109,8 +93,8 @@ object ActionPinFile:
     val lines      = yaml.linesIterator.toList
     val annotated  = lines.map { line =>
       val trimmed = line.trim
-      FieldPrefixes.foldLeft(line) { case (current, (field, _)) =>
-        pins.versions.get(field) match
+      ActionPins.Field.values.foldLeft(line) { (current, field) =>
+        pins.version(field) match
           case None      => current
           case Some(ver) =>
             val ref = pins.field(field)
@@ -128,15 +112,9 @@ object ActionPinFile:
     if idx < 0 then ref.trim else ref.substring(0, idx).trim
 
   private def fromMaps(values: Map[String, String], versions: Map[String, String]): ActionPins =
-    ActionPins(
-      checkout = values.getOrElse("checkout", ActionPins.BootstrapCheckout),
-      setupJava = values.getOrElse("setupJava", ActionPins.BootstrapSetupJava),
-      setupSbt = values.getOrElse("setupSbt", ActionPins.BootstrapSetupSbt),
-      cache = values.getOrElse("cache", ActionPins.BootstrapCache),
-      uploadArtifact = values.getOrElse("uploadArtifact", ActionPins.BootstrapUploadArtifact),
-      downloadArtifact = values.getOrElse("downloadArtifact", ActionPins.BootstrapDownloadArtifact),
-      scalaSteward = values.getOrElse("scalaSteward", ActionPins.BootstrapScalaSteward),
-      versions = ActionPins.BootstrapVersions ++ versions,
-    )
+    val pins = ActionPins.Field.values.foldLeft(ActionPins.Bootstrap) { (acc, field) =>
+      values.get(field.key).fold(acc)(acc.withField(field, _))
+    }
+    pins.copy(versions = ActionPins.BootstrapVersions ++ versions)
 
 end ActionPinFile
