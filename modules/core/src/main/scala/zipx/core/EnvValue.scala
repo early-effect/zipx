@@ -8,11 +8,15 @@ import scala.collection.immutable.ListMap
 /** A value injected into a job's `env:` block, so a build never hand-writes `${{ secrets.X }}`. Secret *values* never
   * appear in the model, only references: zipx owns the rendering, the build owns which names.
   *
-  * Every case holds a name validated at construction, so [[render]] and [[asExpr]] are total. A literal name goes
-  * through an `inline` constructor and is checked while the consumer's build compiles; runtime data goes through the
-  * `*Make` sibling and comes back as an `Either`.
+  * Every case holds a *name* validated at construction, so [[render]] is total. A literal name goes through an `inline`
+  * constructor and is checked while the consumer's build compiles; runtime data goes through the `*Make` sibling and
+  * comes back as an `Either`.
   */
 enum EnvValue:
+
+  /** Arbitrary text, the one case whose *content* is unconstrained: an env value is data the build computes, and GitHub
+    * accepts a multi-line one (a PEM, a JSON blob) as a block scalar.
+    */
   case Plain(value: String)
   case FromSecret(name: SecretName)
   case FromEnv(name: EnvName)
@@ -24,15 +28,19 @@ enum EnvValue:
     */
   case Expr(expr: RawExpr)
 
-  def render: String = asExpr.render
+  def render: String = textOrExpr.fold(identity, _.render)
 
-  /** Named `asExpr` rather than `expr` because the [[EnvValue.Expr]] case already has a field of that name. */
-  def asExpr: GhaExpr = this match
-    case EnvValue.Plain(value)     => GhaExpr.Lit(value)
-    case EnvValue.FromSecret(name) => GhaExpr.Secret(name)
-    case EnvValue.FromEnv(name)    => GhaExpr.Env(name)
-    case EnvValue.Typed(expr)      => expr
-    case EnvValue.Expr(expr)       => GhaExpr.Raw(expr)
+  /** `None` for [[Plain]], whose text is not an expression and can hold more than a [[zipx.workflow.Expr.Lit]] can.
+    * Named `asExpr` rather than `expr` because the [[EnvValue.Expr]] case already has a field of that name.
+    */
+  def asExpr: Option[GhaExpr] = textOrExpr.toOption
+
+  private def textOrExpr: Either[String, GhaExpr] = this match
+    case EnvValue.Plain(value)     => Left(value)
+    case EnvValue.FromSecret(name) => Right(GhaExpr.Secret(name))
+    case EnvValue.FromEnv(name)    => Right(GhaExpr.Env(name))
+    case EnvValue.Typed(expr)      => Right(expr)
+    case EnvValue.Expr(expr)       => Right(GhaExpr.Raw(expr))
 end EnvValue
 
 object EnvValue:

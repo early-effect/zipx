@@ -1,6 +1,7 @@
 package zipx.workflow
 
 import neotype.unwrap
+import zipx.shell.ShText
 
 /** A GitHub Actions expression: the typed replacement for a hand-written `${{ … }}` string.
   *
@@ -48,8 +49,12 @@ enum Expr:
   /** `${{ matrix.<axis> }}`. */
   case Matrix(axis: MatrixAxis)
 
-  /** Literal text, emitted with no `${{ }}` wrapper. The non-expression part of a [[Concat]]. */
-  case Lit(text: String)
+  /** Literal text, emitted with no `${{ }}` wrapper. The non-expression part of a [[Concat]].
+    *
+    * A [[zipx.shell.ShText]] rather than a `String` because a `Concat` holding one becomes a shell word through
+    * [[asWord]], and a newline there would collapse the generated `run:` script to a single quoted YAML line.
+    */
+  case Lit(text: ShText)
 
   /** A single-quoted literal *inside* an expression: the `'refs/tags/v'` of `startsWith(github.ref, 'refs/tags/v')`.
     * Emitted bare, quotes included, since it is only ever an operand of a [[Call]] or [[Compare]].
@@ -84,7 +89,7 @@ enum Expr:
 
   /** Render to the string that lands in the YAML. */
   def render: String = this match
-    case Lit(text)       => text
+    case Lit(text)       => text.unwrap
     case Quoted(text)    => s"'${text.unwrap}'"
     case Raw(expression) => expression.unwrap
     case Concat(parts)   => parts.map(_.render).mkString
@@ -106,7 +111,7 @@ enum Expr:
     case JobOutput(id, name)  => s"needs.${id.unwrap}.outputs.${name.unwrap}"
     case JobResult(id)        => s"needs.${id.unwrap}.result"
     case Matrix(axis)         => s"matrix.${axis.unwrap}"
-    case Lit(text)            => text
+    case Lit(text)            => text.unwrap
     case Quoted(text)         => s"'${text.unwrap}'"
     case Call(fn, args)       => s"${fn.unwrap}(${args.map(_.unwrapped).mkString(", ")})"
     case Compare(l, op, r)    => s"${l.unwrapped} ${op.symbol} ${r.unwrapped}"
@@ -138,13 +143,20 @@ enum Expr:
     case (a, Concat(b))         => Concat(a :: b)
     case (a, b)                 => Concat(List(a, b))
 
+  /** [[render]] as a [[zipx.shell.ShText]], which every case satisfies by construction: each holds either an already
+    * validated newtype or an already validated `Expr`, and the punctuation this adds (`${{ }}`, `'`, `,`, operators) is
+    * printable. `unsafeMake` states that once, here, instead of every consumer re-validating text it built from
+    * validated parts.
+    */
+  def renderShText: ShText = ShText.unsafeMake(render)
+
   /** This expression as a shell [[zipx.shell.Word]], for embedding in a `run:` script.
     *
     * [[zipx.shell.Word.Opaque]] specifically, since an expression's `$` must survive into the YAML unescaped. The
     * return type is the precise `Opaque` rather than `Word` so it can nest inside a double-quoted word, which
     * `"repos/${{ github.repository }}/commits"` needs.
     */
-  def asWord: zipx.shell.Word.Opaque = zipx.shell.Word.Opaque(zipx.shell.ShText.makeOrThrow(render))
+  def asWord: zipx.shell.Word.Opaque = zipx.shell.Word.Opaque(renderShText)
 
 end Expr
 
@@ -217,7 +229,9 @@ object Expr:
   def matrixMake(axis: String): Either[String, Expr] = MatrixAxis.make(axis).map(Matrix(_))
 
   /** Literal text with no `${{ }}` wrapper, for the fixed parts of a [[Concat]]. */
-  def lit(text: String): Expr = Lit(text)
+  inline def lit(inline text: String): Expr = Lit(ShText(text))
+
+  def litMake(text: String): Either[String, Expr] = ShText.make(text).map(Lit(_))
 
   /** `'text'`: a single-quoted literal inside an expression, checked at compile time. */
   inline def quoted(inline text: String): Expr = Quoted(ExprLiteral(text))

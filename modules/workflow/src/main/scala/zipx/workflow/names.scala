@@ -161,16 +161,22 @@ object ExprLiteral extends Newtype[String]:
 /** **Escape hatch.** A raw GitHub Actions expression: non-empty, single-line, length-bounded, with balanced `${{ … }}`
   * if any are present. Enough to keep it from emitting YAML GitHub cannot parse, not enough to make it mean what the
   * caller intended.
+  *
+  * The control-character rule is what makes [[Expr.renderShText]] total: it is the one case whose text is not otherwise
+  * constrained to a character class.
   */
 type RawExpr = RawExpr.Type
 object RawExpr extends Newtype[String]:
   override inline def validate(input: String): Boolean | String =
     if input.trim.isEmpty then "a raw expression must be non-empty"
     else if input.contains("\n") || input.contains("\r") then "a raw expression must be a single line"
+    else if !input.matches(zipx.shell.Patterns.NoControlChars) then
+      "a raw expression must not contain control characters"
     else if input.length > Names.MaxRawExpr then s"a raw expression must be at most ${Names.MaxRawExpr} characters"
     else if input.split("\\$\\{\\{", -1).length != input.split("\\}\\}", -1).length then
       s"unbalanced \\$${{ }} in raw expression '$input'"
     else true
+end RawExpr
 
 /** An hour of the day for [[Cron]]. UTC, since GitHub runs schedules in UTC and offers no timezone field. */
 type CronHour = CronHour.Type

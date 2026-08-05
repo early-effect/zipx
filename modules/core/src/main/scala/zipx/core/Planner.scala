@@ -153,7 +153,7 @@ object Planner:
     */
   private def concurrencyFor(config: PlanConfig): Concurrency =
     Concurrency(
-      group = (Expr.lit(config.workflowName + "-") ++ Expr.github("ref")).render,
+      group = (lit(config.workflowName + "-") ++ Expr.github("ref")).render,
       // `render`, not `unwrapped`: `cancel-in-progress` is a plain field, so the expression needs its `${{ }}`.
       cancelInProgress = (!onAnyTagPush).render,
     )
@@ -714,6 +714,11 @@ object Planner:
   private def jobResultOf(jobId: String): Expr =
     orThrow(s"job id '$jobId'", Expr.jobResultMake(jobId))
 
+  /** [[Expr.lit]] over config-derived text: a workflow name, a runner os, an sbt task name. Only a control character
+    * fails, which is why this is a `Left` a caller reports rather than a case the planner can recover from.
+    */
+  private def lit(text: String): Expr = orThrow(s"literal '$text'", Expr.litMake(text))
+
   private def orThrow(what: String, result: Either[String, Expr]): Expr =
     result.fold(error => throw IllegalArgumentException(s"zipx: invalid $what: $error"), identity)
 
@@ -844,14 +849,14 @@ object Planner:
         val paths  = List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n")
         config.cacheEpoch match
           case CacheEpoch.Fixed(value) =>
-            val epoch        = Expr.lit(s"$prefix$value-")
+            val epoch        = lit(s"$prefix$value-")
             val run          = perRunKey(epoch)
             val priorRelease = priorReleaseEpochKey(prefix, value)
             List(
               cacheStep(
                 cacheAction = config.actions.cache,
                 paths = paths,
-                key = run ++ Expr.lit(jobSuffix),
+                key = run ++ lit(jobSuffix),
                 restoreKeys = run.render :: epoch.render :: priorRelease.toList ::: prefix :: Nil,
               )
             )
@@ -891,7 +896,7 @@ object Planner:
       cacheAction: String,
   ): List[Step] =
     def output(name: String): Expr =
-      Expr.lit(prefix) ++ orThrow(s"cache-epoch step id '$stepId'", Expr.stepOutputMake(stepId, name)) ++ Expr.lit("-")
+      lit(prefix) ++ orThrow(s"cache-epoch step id '$stepId'", Expr.stepOutputMake(stepId, name)) ++ Expr.lit("-")
     val epoch   = output("epoch")
     val run     = perRunKey(epoch)
     val release = output("release")
@@ -904,7 +909,7 @@ object Planner:
       cacheStep(
         cacheAction = cacheAction,
         paths = paths,
-        key = run ++ Expr.lit(jobSuffix),
+        key = run ++ lit(jobSuffix),
         restoreKeys = List(run.render, epoch.render, release.render, prefix),
       ),
     )

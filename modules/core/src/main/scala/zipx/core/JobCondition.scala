@@ -148,7 +148,7 @@ object JobCondition:
   /** A [[zipx.workflow.Expr.Lit]] rather than a [[zipx.workflow.Expr.Quoted]], because `Quoted` wraps an
     * [[ExprLiteral]], which is non-empty by definition.
     */
-  private val EmptyLiteral: Expr = Expr.Lit("''")
+  private val EmptyLiteral: Expr = Expr.lit("''")
 
   private val RepositoryPath: ContextPath = ContextPath("repository")
   private val RefPath: ContextPath        = ContextPath("ref")

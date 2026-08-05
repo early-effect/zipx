@@ -7,22 +7,27 @@ object ExprBridgeSpec extends ZIOSpecDefault:
 
   def spec = suite("Expr bridges")(
     suite("EnvValue.asExpr")(
-      test("each case maps to its Expr counterpart") {
+      test("each expression case maps to its Expr counterpart") {
         assertTrue(
-          EnvValue.secret("PGP_PASSPHRASE").asExpr == Expr.secret("PGP_PASSPHRASE"),
-          EnvValue.env("DEPLOY_ROLE").asExpr == Expr.env("DEPLOY_ROLE"),
-          EnvValue.plain("us-west-2").asExpr == Expr.lit("us-west-2"),
-          EnvValue.expr("${{ github.sha }}").asExpr == Expr.raw("${{ github.sha }}"),
+          EnvValue.secret("PGP_PASSPHRASE").asExpr.contains(Expr.secret("PGP_PASSPHRASE")),
+          EnvValue.env("DEPLOY_ROLE").asExpr.contains(Expr.env("DEPLOY_ROLE")),
+          EnvValue.expr("${{ github.sha }}").asExpr.contains(Expr.raw("${{ github.sha }}")),
         )
       },
-      test("render goes through asExpr, so the two never disagree") {
+      test("Plain has no Expr form, because its text may be more than a Lit can hold") {
+        assertTrue(
+          EnvValue.plain("us-west-2").asExpr.isEmpty,
+          EnvValue.plain("-----BEGIN PGP-----\nline two\n").render == "-----BEGIN PGP-----\nline two\n",
+        )
+      },
+      test("render agrees with asExpr wherever there is one") {
         val values = List(
           EnvValue.secret("PGP_SECRET"),
           EnvValue.env("TIER"),
           EnvValue.plain("staging"),
           EnvValue.expr("${{ github.run_id }}"),
         )
-        assertTrue(values.forall(v => v.render == v.asExpr.render))
+        assertTrue(values.forall(v => v.asExpr.forall(_.render == v.render)))
       },
       test("a case cannot be constructed with an invalid name, even bypassing the constructors") {
         for

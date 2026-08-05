@@ -4,6 +4,9 @@ import zio.test.*
 
 object ExprSpec extends ZIOSpecDefault:
 
+  /** Named rather than written literally, so the source stays readable and greppable. */
+  private val Bell: Char = 0x07.toChar
+
   def spec = suite("Expr")(
     suite("render")(
       test("each context renders its documented expression") {
@@ -218,6 +221,16 @@ object ExprSpec extends ZIOSpecDefault:
       test("a concatenated expression also becomes one opaque word") {
         val word = (Expr.lit("v") ++ Expr.github("sha")).asWord
         assertTrue(word.render == "v${{ github.sha }}")
+      },
+      test("no case can carry a newline or control character, which is what makes renderShText total") {
+        assertTrue(
+          Expr.litMake("a\nb").isLeft,
+          Expr.litMake(s"a${Bell}b").isLeft,
+          Expr.rawMake("a\nb").isLeft,
+          Expr.rawMake(s"always()$Bell").isLeft,
+          Expr.quotedMake("a\nb").isLeft,
+          Expr.litMake("sbt-").map(_.renderShText) == Right(zipx.shell.ShText("sbt-")),
+        )
       },
     ),
     suite("smart constructors")(

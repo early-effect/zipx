@@ -122,6 +122,8 @@ object ExprCompileTimeSpec extends ZIOSpecDefault:
         badMatrix <- typeCheck("""Expr.matrix("include")""")
         badRaw    <- typeCheck("""Expr.raw("${{ unbalanced")""")
         badQuoted <- typeCheck("""Expr.quoted("two words")""")
+        badLit    <- typeCheck("""Expr.lit("a\nb")""")
+        goodLit   <- typeCheck("""Expr.lit("sbt-")""")
         goodStep  <- typeCheck("""Expr.stepOutput("check", "run")""")
       yield assertTrue(
         badSecret.isLeft,
@@ -132,6 +134,8 @@ object ExprCompileTimeSpec extends ZIOSpecDefault:
         badMatrix.isLeft,
         badRaw.isLeft,
         badQuoted.isLeft,
+        badLit.isLeft,
+        goodLit.isRight,
         goodStep.isRight,
       )
     },
