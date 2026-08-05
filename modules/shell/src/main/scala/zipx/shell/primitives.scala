@@ -8,16 +8,27 @@ import neotype.*
 // Validators use only what neotype can evaluate at compile time: isEmpty, contains, startsWith, matches, length, Int
 // comparison. `exists` with a lambda is not, so character-class checks are regexes.
 
-/** Text safe inside a shell word: one line, no control characters. Tabs are allowed. */
+/** Text safe inside a shell word: one line, no control characters, no leading tab. A tab elsewhere is allowed.
+  *
+  * These are [[ScriptLine]]'s rules exactly, which is deliberate: every rendered word can begin a physical line, so
+  * `ShText` being a subset of `ScriptLine` is what lets [[ShLines]] build a script with no revalidation and no partial
+  * conversion. The leading-tab rule is the only one a word does not need for its own sake.
+  *
+  * [[SquoteText]] and [[ParamText]] carry no such rule, and should not: they always render behind a `'` or a `${`, so
+  * the line they land on starts with that delimiter and never with their own first character.
+  */
 type ShText = ShText.Type
 object ShText extends Newtype[String]:
   override inline def validate(input: String): Boolean | String =
     if input.contains("\n") then "shell text must not contain a newline"
     else if input.contains("\r") then "shell text must not contain a carriage return"
+    else if input.startsWith("\t") then
+      "shell text must not start with a tab: it could begin a line, and YAML block scalar indentation must be spaces"
     else if !input.matches(Patterns.NoControlChars) then "shell text must not contain control characters"
     else true
 
   val empty: ShText = ShText("")
+end ShText
 
 /** Text for a single-quoted word. A single quote cannot be escaped inside `'…'`, so it is rejected outright: the
   * alternative renders as `'\''` concatenation, which callers can build explicitly with [[Word.cat]].

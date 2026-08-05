@@ -6,7 +6,6 @@ import zipx.central.ZipxCentral
 import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zipx.docs.DocsRender.yaml
-import neotype.unwrap
 import zipx.shell.*
 import zipx.workflow.{Expr, Step}
 import zio.test.*
@@ -379,13 +378,20 @@ shell function definition), implement it in your own build or pack instead of wa
 ```scala
 final case class WhileRead(name: VarName, body: Block) extends Command:
   def lines(ctx: Script.Ctx): List[ScriptLine] =
-    ctx.line(s"while read -r $${name.unwrap}; do") ::: body.lines(ctx.nested) ::: ctx.line("done")
+    ctx.emit(ShLines.of("while read -r ") ++ ShLines.varName(name) + "; do") :::
+      body.lines(ctx.nested) ::: ctx.line("done")
 ```
 
-The contract: emit lines through `ctx.line` / `ctx.nested` and never by prepending spaces yourself (`Script` owns depth,
-and `ScriptLine` is what guarantees the result is safe inside a YAML block scalar); return one entry per physical line;
-override `rawFragments` if your command carries unvalidated text. Extend `InlineCommand` instead when your construct is
-usable where the shell wants one command, and you get `lines` for free from a total `inlineRender`.
+The contract: emit lines through `ctx.emit` / `ctx.line` / `ctx.nested` and never by prepending spaces yourself (`Script`
+owns depth, and `ScriptLine` is what guarantees the result is safe inside a YAML block scalar); return one entry per
+physical line; override `rawFragments` if your command carries unvalidated text. Extend `InlineCommand` instead when your
+construct is usable where the shell wants one command, and you get `lines` for free from a total `inlineLines`.
+
+Note what you cannot write: `ctx.line(s"while read -r $${name.unwrap}; do")`. `ctx.line` takes a *literal*, validated
+while your file compiles, so interpolating into it is a compile error rather than a runtime one. Structure is built by
+composing `ShLines`, a non-empty sequence of already-validated lines; the typed values you hold (`ShLines.varName`,
+`ShLines.text`, `ShLines.pattern`, a `Word`'s own `lines`) convert into it without a validity check, because their types
+already carry the guarantee. `String` appears once, at `render`.
 
 The knowing cost is that a match over `Command` cannot be exhaustive, which is why rendering is a method on the trait
 rather than a match in `Script`. `Word`, `ShTest` and `Expr` stay **closed**: the shell's grammar and GitHub's context
@@ -394,7 +400,8 @@ list are fixed, so a new case there would be a new upstream feature, not a consu
       exampleValue {
         final case class WhileRead(name: VarName, body: Block) extends Command:
           def lines(ctx: Script.Ctx): List[ScriptLine] =
-            ctx.line(s"while read -r ${name.unwrap}; do") ::: body.lines(ctx.nested) ::: ctx.line("done")
+            ctx.emit(ShLines.of("while read -r ") ++ ShLines.varName(name) + "; do") :::
+              body.lines(ctx.nested) ::: ctx.line("done")
 
         Script
           .strict(

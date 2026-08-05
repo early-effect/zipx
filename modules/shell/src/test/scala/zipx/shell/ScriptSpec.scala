@@ -428,9 +428,9 @@ object ScriptSpec extends ZIOSpecDefault:
         final case class Case(subject: Word, arms: List[(GlobPattern, Block)]) extends Command:
           def lines(ctx: Script.Ctx): List[ScriptLine] =
             val inner = ctx.nested
-            ctx.line(s"case ${subject.render} in") :::
+            ctx.emit(ShLines.of("case ") ++ subject.lines(Quoting.Unquoted) + " in") :::
               arms.flatMap((p, body) =>
-                inner.line(s"${p.unwrap})") ::: body.lines(inner.nested) ::: inner.line(";;")
+                inner.emit(ShLines.pattern(p) + ")") ::: body.lines(inner.nested) ::: inner.line(";;")
               ) ::: ctx.line("esac")
 
         val cmd = Case(Word.vq("mode"), List(GlobPattern("a*") -> Block(Exec("echo", Word.lit("A")))))

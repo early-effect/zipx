@@ -79,29 +79,43 @@ enum ShTest:
   /** `! this`. */
   def unary_! : ShTest = Not(this)
 
+  /** The validated lines between `if` and `; then`. */
+  def lines: ShLines = this match
+    case StrEq(l, r)        => binary(l, "=", r)
+    case StrNe(l, r)        => binary(l, "!=", r)
+    case IntEq(l, r)        => binary(l, "-eq", r)
+    case IntNe(l, r)        => binary(l, "-ne", r)
+    case IntGt(l, r)        => binary(l, "-gt", r)
+    case IntGe(l, r)        => binary(l, "-ge", r)
+    case IntLt(l, r)        => binary(l, "-lt", r)
+    case IntLe(l, r)        => binary(l, "-le", r)
+    case Empty(w)           => unary("-z", w)
+    case NonEmpty(w)        => unary("-n", w)
+    case PathExists(p)      => unary("-e", p)
+    case FileExists(p)      => unary("-f", p)
+    case DirExists(p)       => unary("-d", p)
+    case FileNonEmpty(p)    => unary("-s", p)
+    case Executable(p)      => unary("-x", p)
+    case GlobMatch(w, p)    => glob(w, "==", p)
+    case GlobNotMatch(w, p) => glob(w, "!=", p)
+    case Cmd(command)       => command.inlineLines
+    case And(l, r)          => l.lines + " && " ++ r.lines
+    case Or(l, r)           => l.lines + " || " ++ r.lines
+    case Not(inner)         => ShLines.of("! ") ++ inner.lines
+
   /** Render to the text between `if` and `; then`. */
-  def render: String = this match
-    case StrEq(l, r)        => s"[ ${l.render} = ${r.render} ]"
-    case StrNe(l, r)        => s"[ ${l.render} != ${r.render} ]"
-    case Empty(w)           => s"[ -z ${w.render} ]"
-    case NonEmpty(w)        => s"[ -n ${w.render} ]"
-    case IntEq(l, r)        => s"[ ${l.render} -eq ${r.render} ]"
-    case IntNe(l, r)        => s"[ ${l.render} -ne ${r.render} ]"
-    case IntGt(l, r)        => s"[ ${l.render} -gt ${r.render} ]"
-    case IntGe(l, r)        => s"[ ${l.render} -ge ${r.render} ]"
-    case IntLt(l, r)        => s"[ ${l.render} -lt ${r.render} ]"
-    case IntLe(l, r)        => s"[ ${l.render} -le ${r.render} ]"
-    case GlobMatch(w, p)    => s"[[ ${w.render} == ${p.unwrap} ]]"
-    case GlobNotMatch(w, p) => s"[[ ${w.render} != ${p.unwrap} ]]"
-    case PathExists(p)      => s"[ -e ${p.render} ]"
-    case FileExists(p)      => s"[ -f ${p.render} ]"
-    case DirExists(p)       => s"[ -d ${p.render} ]"
-    case FileNonEmpty(p)    => s"[ -s ${p.render} ]"
-    case Executable(p)      => s"[ -x ${p.render} ]"
-    case Cmd(command)       => command.inlineRender
-    case And(l, r)          => s"${l.render} && ${r.render}"
-    case Or(l, r)           => s"${l.render} || ${r.render}"
-    case Not(inner)         => s"! ${inner.render}"
+  def render: String = lines.render
+
+  private def word(w: Word): ShLines = w.lines(Quoting.Unquoted)
+
+  private def binary(left: Word, op: String, right: Word): ShLines =
+    ShLines.of("[ ") ++ word(left) ++ ShLines.composed(s" $op ") ++ word(right) + " ]"
+
+  private def unary(op: String, w: Word): ShLines =
+    ShLines.composed(s"[ $op ") ++ word(w) + " ]"
+
+  private def glob(w: Word, op: String, pattern: GlobPattern): ShLines =
+    ShLines.of("[[ ") ++ word(w) ++ ShLines.composed(s" $op ${pattern.unwrap} ]]")
 
   /** Raw fragments carried by a [[Cmd]] test, for the generate-time warning. */
   def rawFragments: List[String] = this match

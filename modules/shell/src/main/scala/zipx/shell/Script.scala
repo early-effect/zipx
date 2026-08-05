@@ -53,16 +53,16 @@ object Script:
     /** One level deeper, for a nested body. */
     def nested: Ctx = Ctx(depth + 1)
 
-    /** Indent and validate `text` as one logical line. Text spanning several physical lines is split and each part
-      * indented and validated, since a `\` continuation or a wrapped `$(…)` is one logical command over several.
-      */
-    def line(text: String): List[ScriptLine] =
-      text.split("\n", -1).toList.map(part => indent(ScriptLine.makeOrThrow(part)))
+    /** Indent an already-validated unit for this depth. Indentation is spaces, never tabs. */
+    def indent(unit: ShLines): ShLines = unit.indentBy(depth * Ctx.IndentWidth)
 
-    /** Indent an already-validated line. Indentation is spaces, never tabs. */
-    def indent(line: ScriptLine): ScriptLine =
-      if depth == 0 || line.unwrap.isEmpty then line
-      else ScriptLine.unsafeMake(" " * (depth * Ctx.IndentWidth) + line.unwrap)
+    /** [[indent]], as the line list a [[Command]] returns. */
+    def emit(unit: ShLines): List[ScriptLine] = indent(unit).lines.toList
+
+    /** [[emit]] a literal, checked while the calling file compiles. A [[Command]] with structure to render should build
+      * [[ShLines]] instead; this is for the fixed keywords (`else`, `fi`, `done`).
+      */
+    inline def line(inline text: String): List[ScriptLine] = emit(ShLines.of(text))
   end Ctx
 
   object Ctx:

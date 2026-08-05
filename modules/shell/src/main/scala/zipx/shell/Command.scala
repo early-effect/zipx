@@ -28,7 +28,9 @@ object Block:
   */
 trait Command:
 
-  /** The physical lines this command contributes, indented for `ctx`. */
+  /** The physical lines this command contributes, indented for `ctx`. Possibly none: a fully disabled [[SetOpts]] emits
+    * nothing. An [[InlineCommand]] always emits at least one, which is what its [[ShLines]] expresses.
+    */
   def lines(ctx: Script.Ctx): List[ScriptLine]
 
   /** This command's own lines joined, for a position that accepts more than one. Renders at depth zero; the surrounding
@@ -50,10 +52,15 @@ end Command
   */
 trait InlineCommand extends Command:
 
-  /** This command as one logical command. */
-  def inlineRender: String
+  /** This command as one logical command: at least one validated line, since the positions an `InlineCommand` may
+    * occupy are exactly those where the shell requires a command.
+    */
+  def inlineLines: ShLines
 
-  final def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(inlineRender)
+  /** This command as one logical command. */
+  final def inlineRender: String = inlineLines.render
+
+  final def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.indent(inlineLines).lines.toList
 
   /** `this | other`. */
   infix def |(other: InlineCommand): InlineCommand = Pipe(this, other)
@@ -84,7 +91,7 @@ end InlineCommand
   * to suppress globbing versus `v*` to use it). Use [[Word.quoted]] / [[Word.vq]] to ask for quotes.
   */
 final case class Exec(program: Word, args: List[Word]) extends InlineCommand:
-  def inlineRender: String = (program :: args).map(_.render).mkString(" ")
+  def inlineLines: ShLines = Word.spaceJoined(program :: args)
 
   override def rawFragments: List[String] = (program :: args).flatMap(_.rawFragments)
 
@@ -113,17 +120,16 @@ end Exec
   */
 final case class Continued(program: Word, argLines: List[List[Word]], continuationIndent: Int = 2)
     extends InlineCommand:
-  def inlineRender: String =
-    val pad      = " " * continuationIndent
-    val rendered = argLines.map(_.map(_.render).mkString(" "))
-    val first    = (program.render :: rendered.headOption.toList).mkString(" ")
-    val rest     = rendered.drop(1).map(pad + _)
-    // Counted off the emitted lines rather than off `argLines`, so a program with no arguments is one unterminated line.
+  def inlineLines: ShLines =
+    val head     = program.lines(Quoting.Unquoted)
+    val rendered = argLines.map(Word.spaceJoined)
+    val first    = rendered.headOption.fold(head)(args => head + " " ++ args)
+    val rest     = rendered.drop(1).map(_.indentBy(continuationIndent))
+    // Counted off the emitted units rather than off `argLines`, so a program with no arguments is one unterminated line.
     val emitted = first :: rest
-    emitted.zipWithIndex
-      .map((text, i) => if i == emitted.length - 1 then text else s"$text \\")
-      .mkString("\n")
-  end inlineRender
+    val joined  = emitted.dropRight(1).map(_ + " \\") :+ emitted.last
+    ShLines.stack(joined.head, joined.tail)
+  end inlineLines
 
   override def rawFragments: List[String] = (program :: argLines.flatten).flatMap(_.rawFragments)
 end Continued
@@ -134,55 +140,58 @@ object Continued:
   inline def apply(inline program: String, argLines: List[List[Word]]): Continued =
     Continued(Word.Lit(ShText.unsafeMake(ProgramName(program).unwrap)), argLines)
 
+// The three list operators join onto the left side's *last* line, so `Continued(…) | wc -l` puts the pipe after the
+// final continuation rather than after the first line.
+
 /** `left | right`. */
 final case class Pipe(left: InlineCommand, right: InlineCommand) extends InlineCommand:
-  def inlineRender: String                = s"${left.inlineRender} | ${right.inlineRender}"
+  def inlineLines: ShLines                = left.inlineLines + " | " ++ right.inlineLines
   override def rawFragments: List[String] = left.rawFragments ++ right.rawFragments
 
 /** `left && right`. */
 final case class AndThen(left: InlineCommand, right: InlineCommand) extends InlineCommand:
-  def inlineRender: String                = s"${left.inlineRender} && ${right.inlineRender}"
+  def inlineLines: ShLines                = left.inlineLines + " && " ++ right.inlineLines
   override def rawFragments: List[String] = left.rawFragments ++ right.rawFragments
 
 /** `left || right`. */
 final case class OrElse(left: InlineCommand, right: InlineCommand) extends InlineCommand:
-  def inlineRender: String                = s"${left.inlineRender} || ${right.inlineRender}"
+  def inlineLines: ShLines                = left.inlineLines + " || " ++ right.inlineLines
   override def rawFragments: List[String] = left.rawFragments ++ right.rawFragments
 
 /** `command > target` or `command >> target`, optionally from a specific file descriptor (`2> log`). */
 final case class Redirect(command: InlineCommand, target: Word, append: Boolean, from: Option[FileDescriptor] = None)
     extends InlineCommand:
-  def inlineRender: String =
+  def inlineLines: ShLines =
     val fd    = from.fold("")(_.unwrap.toString)
     val arrow = if append then ">>" else ">"
-    s"${command.inlineRender} $fd$arrow ${target.render}"
+    command.inlineLines ++ ShLines.composed(s" $fd$arrow ") ++ target.lines(Quoting.Unquoted)
 
   override def rawFragments: List[String] = command.rawFragments ++ target.rawFragments
 
 /** `command 2>&1`: duplicate one file descriptor onto another. */
 final case class RedirectFd(command: InlineCommand, from: FileDescriptor, to: FileDescriptor) extends InlineCommand:
-  def inlineRender: String                = s"${command.inlineRender} ${from.unwrap}>&${to.unwrap}"
+  def inlineLines: ShLines                = command.inlineLines ++ ShLines.composed(s" ${from.unwrap}>&${to.unwrap}")
   override def rawFragments: List[String] = command.rawFragments
 
 /** `command >/dev/null 2>&1`: discard both streams, keep the exit status. */
 final case class Silence(command: InlineCommand) extends InlineCommand:
-  def inlineRender: String                = s"${command.inlineRender} >/dev/null 2>&1"
+  def inlineLines: ShLines                = command.inlineLines + " >/dev/null 2>&1"
   override def rawFragments: List[String] = command.rawFragments
 
 /** `command 2>/dev/null`: discard stderr only. */
 final case class SilenceErr(command: InlineCommand) extends InlineCommand:
-  def inlineRender: String                = s"${command.inlineRender} 2>/dev/null"
+  def inlineLines: ShLines                = command.inlineLines + " 2>/dev/null"
   override def rawFragments: List[String] = command.rawFragments
 
 /** `name=value`, optionally `local` / `export` / `readonly`. */
 final case class Assign(name: VarName, value: Word, scope: Assign.Scope = Assign.Scope.Plain) extends InlineCommand:
-  def inlineRender: String =
+  def inlineLines: ShLines =
     val prefix = scope match
-      case Assign.Scope.Plain    => ""
-      case Assign.Scope.Local    => "local "
-      case Assign.Scope.Export   => "export "
-      case Assign.Scope.ReadOnly => "readonly "
-    s"$prefix${name.unwrap}=${value.render}"
+      case Assign.Scope.Plain    => ShLines.empty
+      case Assign.Scope.Local    => ShLines.of("local ")
+      case Assign.Scope.Export   => ShLines.of("export ")
+      case Assign.Scope.ReadOnly => ShLines.of("readonly ")
+    prefix ++ ShLines.varName(name) + "=" ++ value.lines(Quoting.Unquoted)
 
   override def rawFragments: List[String] = value.rawFragments
 end Assign
@@ -202,10 +211,12 @@ final case class If(
     elseDo: Option[Block] = None,
 ) extends Command:
   def lines(ctx: Script.Ctx): List[ScriptLine] =
-    val inner = ctx.nested
-    val head  = ctx.line(s"if ${cond.render}; then") ::: thenDo.lines(inner)
-    val mid   = elifs.flatMap((c, body) => ctx.line(s"elif ${c.render}; then") ::: body.lines(inner))
-    val tail  = elseDo.fold(List.empty[ScriptLine])(body => ctx.line("else") ::: body.lines(inner))
+    val inner                                                  = ctx.nested
+    def opens(keyword: String, test: ShTest): List[ScriptLine] =
+      ctx.emit(ShLines.composed(s"$keyword ") ++ test.lines + "; then")
+    val head = opens("if", cond) ::: thenDo.lines(inner)
+    val mid  = elifs.flatMap((c, body) => opens("elif", c) ::: body.lines(inner))
+    val tail = elseDo.fold(List.empty[ScriptLine])(body => ctx.line("else") ::: body.lines(inner))
     head ++ mid ++ tail ++ ctx.line("fi")
 
   override def rawFragments: List[String] =
@@ -217,7 +228,7 @@ end If
 /** `for name in words…; do … done`. */
 final case class ForIn(name: VarName, words: List[Word], body: Block) extends Command:
   def lines(ctx: Script.Ctx): List[ScriptLine] =
-    ctx.line(s"for ${name.unwrap} in ${words.map(_.render).mkString(" ")}; do") :::
+    ctx.emit(ShLines.of("for ") ++ ShLines.varName(name) + " in " ++ Word.spaceJoined(words) + "; do") :::
       body.lines(ctx.nested) ::: ctx.line("done")
 
   override def rawFragments: List[String] = words.flatMap(_.rawFragments) ++ body.rawFragments
@@ -225,7 +236,7 @@ final case class ForIn(name: VarName, words: List[Word], body: Block) extends Co
 /** `while cond; do … done`. */
 final case class While(cond: ShTest, body: Block) extends Command:
   def lines(ctx: Script.Ctx): List[ScriptLine] =
-    ctx.line(s"while ${cond.render}; do") ::: body.lines(ctx.nested) ::: ctx.line("done")
+    ctx.emit(ShLines.of("while ") ++ cond.lines + "; do") ::: body.lines(ctx.nested) ::: ctx.line("done")
 
   override def rawFragments: List[String] = cond.rawFragments ++ body.rawFragments
 
@@ -241,8 +252,8 @@ final case class Heredoc(command: InlineCommand, tag: HeredocTag, body: List[Scr
     val open = if quoted then s"<<'${tag.unwrap}'" else s"<<${tag.unwrap}"
     // The body and closing delimiter are column-zero: an indented delimiter needs <<- plus real tabs, the leading-tab
     // hazard ScriptLine exists to prevent.
-    // unsafeMake: a HeredocTag is identifier-shaped, so it satisfies ScriptLine by construction.
-    ctx.line(s"${command.inlineRender} $open") ::: body ::: List(ScriptLine.unsafeMake(tag.unwrap))
+    // composed: a HeredocTag is identifier-shaped, so it satisfies ScriptLine by construction.
+    ctx.emit(command.inlineLines ++ ShLines.composed(s" $open")) ::: body ::: ShLines.composed(tag.unwrap).lines.toList
 
   override def rawFragments: List[String] = command.rawFragments
 end Heredoc
@@ -252,13 +263,13 @@ final case class SetOpts(errexit: Boolean = true, nounset: Boolean = true, pipef
   def lines(ctx: Script.Ctx): List[ScriptLine] =
     val short = (if errexit then "e" else "") + (if nounset then "u" else "")
     if short.isEmpty && !pipefail then Nil
-    else if pipefail && short.nonEmpty then ctx.line(s"set -${short}o pipefail")
+    else if pipefail && short.nonEmpty then ctx.emit(ShLines.composed(s"set -${short}o pipefail"))
     else if pipefail then ctx.line("set -o pipefail")
-    else ctx.line(s"set -$short")
+    else ctx.emit(ShLines.composed(s"set -$short"))
 
 /** `exit <code>`. */
 final case class Exit(code: ExitCode = ExitCode.Success) extends InlineCommand:
-  def inlineRender: String = s"exit ${code.unwrap}"
+  def inlineLines: ShLines = ShLines.composed(s"exit ${code.unwrap}")
 
 /** A shell comment (`# text`).
   *
@@ -266,7 +277,7 @@ final case class Exit(code: ExitCode = ExitCode.Success) extends InlineCommand:
   * it was joined to.
   */
 final case class Comment(text: ShText) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.line(s"# ${text.unwrap}")
+  def lines(ctx: Script.Ctx): List[ScriptLine] = ctx.emit(ShLines.of("# ") ++ ShLines.text(text))
 
 object Comment:
   // @targetName because ShText erases to String, so this collides with the case class apply.
@@ -287,7 +298,7 @@ case object BlankLine extends Command:
   * reusable, where `Raw` is none of the three.
   */
 final case class Raw(rawLines: List[ScriptLine]) extends Command:
-  def lines(ctx: Script.Ctx): List[ScriptLine] = rawLines.map(l => ctx.indent(l))
+  def lines(ctx: Script.Ctx): List[ScriptLine] = rawLines.flatMap(l => ctx.emit(ShLines.one(l)))
   override def rawFragments: List[String]      = rawLines.map(_.unwrap)
 
 object Raw:
@@ -304,7 +315,7 @@ object Raw:
   * list cannot promise one line; the guarantees are otherwise the same.
   */
 final case class RawLine(rawLine: ScriptLine) extends InlineCommand:
-  def inlineRender: String                = rawLine.unwrap
+  def inlineLines: ShLines                = ShLines.one(rawLine)
   override def rawFragments: List[String] = List(rawLine.unwrap)
 
 object RawLine:

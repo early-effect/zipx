@@ -32,7 +32,7 @@ enum ParamMod:
   /** `${name%%pattern}`: remove the longest matching suffix. */
   case StripSuffixLong(pattern: ParamText)
 
-  /** Renders the modifier text that follows the name inside `${…}`. */
+  /** The modifier text that follows the name inside `${…}`. */
   def render: String = this match
     case Default(t)         => s":-${t.unwrap}"
     case DefaultIfUnset(t)  => s"-${t.unwrap}"
@@ -52,11 +52,16 @@ end ParamMod
   */
 sealed trait Word:
 
+  /** The validated lines of this word in an explicit quoting context. More than one only for a [[Word.Subst]] of a
+    * command that wraps, which is a position the shell accepts.
+    */
+  def lines(quoting: Quoting): ShLines
+
   /** Render as an unquoted word. */
   def render: String = render(Quoting.Unquoted)
 
-  /** Render into an explicit quoting context. */
-  def render(quoting: Quoting): String
+  /** Render into an explicit quoting context. The serialization boundary; everything above it composes [[ShLines]]. */
+  final def render(quoting: Quoting): String = lines(quoting).render
 
   /** Raw fragments carried by nested commands (a `Subst` of a `Raw`), for the generate-time warning. */
   def rawFragments: List[String] = this match
@@ -75,23 +80,22 @@ object Word:
     * shell sees the characters as written, metacharacters included; inside `"…"` they are escaped to stay literal.
     */
   final case class Lit(text: ShText) extends Quotable:
-    def render(quoting: Quoting): String = quoting match
-      case Quoting.Unquoted => text.unwrap
-      case Quoting.InDouble => escapeInDouble(text.unwrap)
+    def lines(quoting: Quoting): ShLines = quoting match
+      case Quoting.Unquoted => ShLines.text(text)
+      // Escaping only adds backslashes before printable characters, so the result is still one ScriptLine.
+      case Quoting.InDouble => ShLines.composed(escapeInDouble(text.unwrap))
 
   /** A single-quoted string, `'text'`: no expansion of any kind. Not [[Quotable]]; see [[Word]]. */
   final case class Squote(text: SquoteText) extends Word:
-    def render(quoting: Quoting): String = s"'${text.unwrap}'"
+    def lines(quoting: Quoting): ShLines = ShLines.composed(s"'${text.unwrap}'")
 
   /** A double-quoted string, `"…"`. The parts list is the concatenation, so `"${release}-ci"` is a `Dquote` of two
     * parts. Nested inside another `Dquote` this emits `\"…\"`, the form a `--jq` argument needs.
     */
   final case class Dquote(parts: List[Quotable]) extends Quotable:
-    def render(quoting: Quoting): String =
-      val body = parts.map(_.render(Quoting.InDouble)).mkString
-      quoting match
-        case Quoting.Unquoted => s"\"$body\""
-        case Quoting.InDouble => s"\\\"$body\\\""
+    def lines(quoting: Quoting): ShLines =
+      val quote = ShLines.composed(if quoting == Quoting.Unquoted then "\"" else "\\\"")
+      quote ++ ShLines.concatAll(parts.map(_.lines(Quoting.InDouble))) ++ quote
 
   /** A parameter expansion: `$name`, `${name}`, or `${name…}` with a [[ParamMod]].
     *
@@ -99,10 +103,10 @@ object Word:
     *   force `${name}` with no modifier, needed when a name character follows, as in `"${release}x"`.
     */
   final case class VarRef(name: VarName, mod: Option[ParamMod] = None, braced: Boolean = false) extends Quotable:
-    def render(quoting: Quoting): String = mod match
+    def lines(quoting: Quoting): ShLines = ShLines.composed(mod match
       case Some(m)        => s"$${${name.unwrap}${m.render}}"
       case None if braced => s"$${${name.unwrap}}"
-      case None           => s"$$${name.unwrap}"
+      case None           => s"$$${name.unwrap}")
 
   /** A command substitution, `$(command)`.
     *
@@ -110,7 +114,8 @@ object Word:
     * where the shell accepts a wrapped command, and the closing paren lands on the last line.
     */
   final case class Subst(command: Command) extends Quotable:
-    def render(quoting: Quoting): String = s"$$(${command.render})"
+    def lines(quoting: Quoting): ShLines =
+      ShLines.of("$(") ++ ShLines.fromLines(command.lines(Script.Ctx.root)) + ")"
 
   /** Escape hatch: text emitted verbatim in every quoting context, never escaped and never quoted.
     *
@@ -118,11 +123,11 @@ object Word:
     * still guarantees it cannot break the surrounding YAML.
     */
   final case class Opaque(rendered: ShText) extends Quotable:
-    def render(quoting: Quoting): String = rendered.unwrap
+    def lines(quoting: Quoting): ShLines = ShLines.text(rendered)
 
   /** Concatenation with no separator, for mixing quote styles: `'literal'"$expanded"`. */
   final case class Cat(parts: List[Word]) extends Word:
-    def render(quoting: Quoting): String = parts.map(_.render(quoting)).mkString
+    def lines(quoting: Quoting): ShLines = ShLines.concatAll(parts.map(_.lines(quoting)))
 
   // Literal constructors are `inline` so the newtype validates at compile time; the `*Make` siblings take runtime input
   // and return the error.
@@ -180,6 +185,10 @@ object Word:
   inline def opaque(inline rendered: String): Opaque = Opaque(ShText(rendered))
 
   def opaqueMake(rendered: String): Either[String, Opaque] = ShText.make(rendered).map(Opaque(_))
+
+  /** Words separated by a single space: an argv, a `for` word list. */
+  def spaceJoined(words: List[Word]): ShLines =
+    ShLines.joinAll(words.map(_.lines(Quoting.Unquoted)), ShLines.of(" "))
 
   /** Inside `"…"` the shell still acts on `$`, backtick, `\` and `"`, so a literal must escape all four. */
   private def escapeInDouble(text: String): String =

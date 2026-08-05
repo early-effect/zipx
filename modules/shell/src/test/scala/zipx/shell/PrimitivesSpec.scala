@@ -36,15 +36,22 @@ object PrimitivesSpec extends ZIOSpecDefault:
 
   def spec = suite("primitives")(
     suite("ShText")(
-      test("accepts ordinary text, including tabs and shell metacharacters") {
+      test("accepts ordinary text, including interior tabs and shell metacharacters") {
         assertTrue(
           ShText.make("echo hi").isRight,
           ShText.make("").isRight,
           ShText.make("a\tb").isRight,
-          ShText.make("\t").isRight,
           ShText.make("$HOME `date` \\ \" '").isRight,
           ShText.make("refs/tags/v*").isRight,
           ShText.make("café ☕").isRight,
+        )
+      },
+      test("rejects a leading tab, so any word can begin a ScriptLine") {
+        assertTrue(
+          ShText.make("\tindented").isLeft,
+          ShText.make("\t").isLeft,
+          ShText.make(" \tafter a space").isRight,
+          ShText.make("\tx").swap.exists(_.contains("tab")),
         )
       },
       test("rejects newlines and carriage returns") {
@@ -106,12 +113,14 @@ object PrimitivesSpec extends ZIOSpecDefault:
           SquoteText.make("it's").swap.exists(_.contains("single quote")),
         )
       },
-      test("also inherits the ShText rules") {
+      test("also inherits the ShText rules, except the leading tab it renders behind a quote") {
         assertTrue(
           SquoteText.make("a\nb").isLeft,
           SquoteText.make("a\rb").isLeft,
           SquoteText.make(surroundedBy(Ascii.Nul)).isLeft,
           SquoteText.make(surroundedBy(Ascii.Delete)).isLeft,
+          SquoteText.make("\tindented").isRight,
+          Word.squoteMake("\tindented").map(_.render) == Right("'\tindented'"),
         )
       },
       test("rejects every control character") {
@@ -137,12 +146,13 @@ object PrimitivesSpec extends ZIOSpecDefault:
           ParamText.make("}").swap.exists(_.contains("close the expansion")),
         )
       },
-      test("also inherits the ShText rules") {
+      test("also inherits the ShText rules, except the leading tab it renders behind ${") {
         assertTrue(
           ParamText.make("a\nb").isLeft,
           ParamText.make("a\rb").isLeft,
           ParamText.make(surroundedBy(Ascii.Nul)).isLeft,
           ParamText.make("a\tb").isRight,
+          ParamText.make("\tindented").isRight,
         )
       },
       test("rejects every control character") {
