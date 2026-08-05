@@ -96,7 +96,7 @@ zipxCapabilities += zipxTasks.deploy(
         DocsRender.jobs("deploy-staging", "deploy-prod")(
           Capability.deploy(
             participates = _.id == "service",
-            command = n => s"${n.id}/promote",
+            command = n => SbtCommand.module(n, SbtCommand("promote")),
             targets = _ => targets,
             needsCapabilities = Nil,
           )

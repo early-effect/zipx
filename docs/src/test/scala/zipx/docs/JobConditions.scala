@@ -222,7 +222,7 @@ Add label `deploy-stg` on the PR → only the stg job's `if` is true; prod still
         val cap = Capability
           .custom(
             name = "docker",
-            command = n => s"${n.id}/Docker/publish",
+            command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
             participates = _.docker,
             gate = Gate.Always,
             targets = _ =>
@@ -280,7 +280,7 @@ Target(
         DocsRender.job("deploy-prod")(
           Capability.deploy(
             participates = _.id == "service",
-            command = n => s"${n.id}/promote",
+            command = n => SbtCommand.module(n, SbtCommand("promote")),
             targets = _ =>
               List(
                 Target(

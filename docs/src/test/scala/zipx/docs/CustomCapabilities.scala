@@ -27,7 +27,7 @@ zipxCapabilities += Capability.test.copy(needsCapabilities = List("fmt"))
 """,
       exampleValue {
         DocsRender.jobs("fmt", "test")(
-          Capability.once("fmt", "scalafmtCheckAll"),
+          Capability.once("fmt", SbtCommand("scalafmtCheckAll")),
           Capability.test.copy(needsCapabilities = List("fmt")),
         )
       }.assert(yaml =>
@@ -72,7 +72,7 @@ zipxCapabilities += Capability
         val docker = Capability
           .custom(
             name = "docker",
-            command = n => s"${n.id}/Docker/publish",
+            command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
             participates = _.docker,
             phase = Phase.Publish,
             targets = _ =>
@@ -107,8 +107,9 @@ Also override `runsOn = Some(List("self-hosted", "linux"))` and `permissions`, t
     ),
     section("Typed task keys (`zipxTasks`)")(
       md"""
-String commands are what ultimately run at the sbt shell. For the common "one task" case, the plugin's `zipxTasks`
-constructors take a real `TaskKey` / `InputKey` so renamed tasks fail at build load:
+An `SbtCommand` is what ultimately runs at the sbt shell: validated as text that cannot corrupt the generated file, but
+not parsed as sbt syntax. For the common "one task" case, the plugin's `zipxTasks` constructors take a real `TaskKey` /
+`InputKey` so renamed tasks fail at build load:
 
 ```scala
 val promote = taskKey[Unit]("promote the image")

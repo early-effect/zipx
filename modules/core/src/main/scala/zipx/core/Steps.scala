@@ -91,17 +91,45 @@ object Steps:
 
   def all(bundles: Steps*): Steps = bundles.foldLeft(empty)(_ ++ _)
 
-  /** One warning line per raw fragment across every bundle a plan can reach.
+  /** One warning line per raw fragment across every bundle and every command a plan can reach.
     *
     * The `case s: Steps` match is what lambda compatibility costs: a field still accepts a bare function, and a bare
     * function has nothing to report, so escape-hatch use inside a plain lambda is invisible here. That is the incentive
     * to use [[Steps.built]].
     */
   def rawWarnings(capabilities: List[Capability], config: PlanConfig): List[String] =
-    val bundles = capabilities.flatMap(c => List(c.extraSteps, c.postSteps)) :+ config.cacheRehydrateExtraSteps
-    bundles.collect { case s: Steps => s }.distinct.flatMap { s =>
+    val bundles        = capabilities.flatMap(c => List(c.extraSteps, c.postSteps)) :+ config.cacheRehydrateExtraSteps
+    val bundleWarnings = bundles.collect { case s: Steps => s }.distinct.flatMap { s =>
       s.rawFragments.map(f => s"step bundle '${s.name}' uses a raw escape hatch, which nothing validates: $f")
     }
+    bundleWarnings ++ commandWarnings(capabilities, config)
+
+  /** The same reporting for [[SbtCommand.Unchecked]]: command text zipx was handed rather than built.
+    *
+    * A `command` is a `ModuleNode => SbtCommand`, so reaching its fragments needs a node. `probeNode` is enough because
+    * provenance does not depend on the module: a combinator threads `Unchecked` through whatever node it is given, so
+    * one application answers the question for all of them. The id it carries is what the fragment shows.
+    *
+    * The exception is a command built from a *node's own* field, `n.testTask`, where the probe reports its default
+    * rather than a real module's. That costs nothing today, because every route into those fields (`zipxTestTask`,
+    * `zipxPublishTask`) goes through [[SbtCommand.make]] and so is `Built`.
+    */
+  private def commandWarnings(capabilities: List[Capability], config: PlanConfig): List[String] =
+    val capabilityFragments = capabilities.flatMap { c =>
+      c.command(probeNode).rawFragments.map(f => s"capability '${c.name}' uses an unchecked sbt command: $f")
+    }
+    val rehydrateFragments =
+      config.cacheRehydrateTask.rawFragments.map(f => s"cacheRehydrateTask is an unchecked sbt command: $f")
+    (capabilityFragments ++ rehydrateFragments).map(w =>
+      s"$w. zipx validates it as text that cannot corrupt the generated file, but not as sbt syntax, so a typo is a " +
+        "failing job rather than a compile error"
+    )
+  end commandWarnings
+
+  /** A stand-in module for asking a `command` lambda about its provenance. Underscore-prefixed for the same reason
+    * `Planner`'s synthetic node is: no real sbt project id can collide with it.
+    */
+  private val probeNode = ModuleNode(id = ModuleId("_probe"))
 
   /** `unwrapped` rather than `render` because an `if:` is already an expression context: `${{ a }} && ${{ b }}` is a
     * template string that evaluates to neither operand, where `a && b` is the conjunction the caller asked for.

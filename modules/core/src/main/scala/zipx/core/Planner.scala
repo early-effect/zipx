@@ -59,8 +59,11 @@ object Planner:
   private def participants(capability: Capability, graph: ModuleGraph): List[ModuleNode] =
     graph.topologicalSort.flatMap(graph.get).filter(capability.participates)
 
-  private def joinCommands(capability: Capability, nodes: List[ModuleNode]): String =
-    nodes.map(capability.command).mkString("; ")
+  /** One sbt session per job, the point of the Aggregate and Layer scopes. `None` only for no participating nodes,
+    * which both callers have already excluded, and `joinCommands` is called with the nodes they kept.
+    */
+  private def joinCommands(capability: Capability, nodes: List[ModuleNode]): Option[SbtCommand] =
+    SbtCommand.join(nodes.map(capability.command))
 
   /** Rejects a `needsCapabilities` cycle, and [[Gate.AffectedOnly]], which is an unimplemented seam: honoring it
     * silently as [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run.
@@ -270,7 +273,7 @@ object Planner:
         Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
       ) ++ jdkAndSbtSteps(config) ++ localDirCacheSteps(config, cacheRehydrateJobId) ++
         config.cacheRehydrateExtraSteps(ctx) ++ List(
-          Step.run(Script(sbt("", config.cacheRehydrateTask))).named(cacheRehydrateJobId).build
+          Step.run(Script(config.cacheRehydrateTask.render)).named(cacheRehydrateJobId).build
         ),
     )
   end cacheRehydrateJob
@@ -455,7 +458,6 @@ object Planner:
 
       distinctTargets(capability, graph) match
         case Nil =>
-          val cmd = joinCommands(capability, nodes)
           List(
             capability.name -> Job(
               name = Some(capability.name),
@@ -472,15 +474,14 @@ object Planner:
                 config,
                 hasMatrix = false,
                 cache,
-                commandOverride = Some(cmd),
+                commandOverride = joinCommands(capability, nodes),
                 jobSuffix = capability.name,
               ),
             )
           )
         case targets =>
           targets.map { target =>
-            val id  = aggregateTargetJobId(capability, target)
-            val cmd = joinCommands(capability, nodes)
+            val id = aggregateTargetJobId(capability, target)
             id -> Job(
               name = Some(s"${capability.name} (${target.name})"),
               runsOn = runner,
@@ -497,7 +498,7 @@ object Planner:
                 config,
                 hasMatrix = false,
                 cache,
-                commandOverride = Some(cmd),
+                commandOverride = joinCommands(capability, nodes),
                 jobSuffix = id,
               ),
             )
@@ -533,7 +534,6 @@ object Planner:
           else (layerNeeds, releaseCond)
         val cond       = andConditions(base, JobCondition.renderOpt(capability.condition))
         val layerNodes = layerIds.flatMap(graph.get)
-        val cmd        = joinCommands(capability, layerNodes)
         id -> Job(
           name = Some(s"${capability.name} L$i"),
           runsOn = runner,
@@ -549,7 +549,7 @@ object Planner:
             config,
             hasMatrix = false,
             cache,
-            commandOverride = Some(cmd),
+            commandOverride = joinCommands(capability, layerNodes),
             jobSuffix = id,
           ),
         )
@@ -762,14 +762,14 @@ object Planner:
       config: PlanConfig,
       hasMatrix: Boolean,
       cache: CacheContribution,
-      commandOverride: Option[String],
+      commandOverride: Option[SbtCommand],
       jobSuffix: String,
   ): List[Step] =
-    val scalaArg    = if hasMatrix then "++${{ matrix.scala }} " else ""
-    val raw         = commandOverride.getOrElse(capability.command(node))
+    val command     = commandOverride.getOrElse(capability.command(node))
+    val onMatrixLeg = if hasMatrix then underMatrixScala else identity[SbtCommand]
     val commandStep =
-      if capability.phase == Phase.Verify then verifyCommandStep(capability.name, scalaArg, raw, config)
-      else Step.run(Script(sbt(scalaArg, raw))).named(capability.name).build
+      if capability.phase == Phase.Verify then verifyCommandStep(capability.name, onMatrixLeg, command, config)
+      else Step.run(Script(onMatrixLeg(command).render)).named(capability.name).build
     val cacheSteps =
       if cache.steps.isEmpty then localDirCacheSteps(config, jobSuffix) else cache.steps
     List(
@@ -783,8 +783,17 @@ object Planner:
 
   /** A static [[VerifyClean]] prefix when one is set, otherwise a runtime `cleanFull` decided by
     * [[PlanConfig.verifyCleanLabel]].
+    *
+    * `onMatrixLeg` rather than a matrix flag: whether this job has a Scala axis is [[stepsFor]]'s to know, and the two
+    * branches below each have to apply the switch to a *different* command, the cleaned one and the plain one.
     */
-  private def verifyCommandStep(name: String, scalaArg: String, raw: String, config: PlanConfig): Step =
+  private def verifyCommandStep(
+      name: String,
+      onMatrixLeg: SbtCommand => SbtCommand,
+      command: SbtCommand,
+      config: PlanConfig,
+  ): Step =
+    def sbtStep(command: SbtCommand): Command = onMatrixLeg(command).render
     config.verifyClean match
       case VerifyClean.None =>
         config.verifyCleanLabel match
@@ -801,8 +810,8 @@ object Planner:
                 Script(
                   If(
                     ShTest.StrEq(Word.Dquote(List(Word.VarRef(verifyCleanFullVar))), Word.quoted("true")),
-                    Block(sbt(scalaArg, VerifyClean.CleanFull.prefixCommand(raw))),
-                    elseDo = Some(Block(sbt(scalaArg, raw))),
+                    Block(sbtStep(VerifyClean.CleanFull.prefixCommand(command))),
+                    elseDo = Some(Block(sbtStep(command))),
                   )
                 )
               )
@@ -810,22 +819,15 @@ object Planner:
               .withEnvName(verifyCleanFullName, labelled)
               .build
           case None =>
-            Step.run(Script(sbt(scalaArg, raw))).named(name).build
+            Step.run(Script(sbtStep(command))).named(name).build
       case mode =>
-        Step.run(Script(sbt(scalaArg, mode.prefixCommand(raw)))).named(name).build
+        Step.run(Script(sbtStep(mode.prefixCommand(command)))).named(name).build
+    end match
+  end verifyCommandStep
 
-  /** `sbt '++3.3.6 test'`. The quoted text is an *sbt* command, not shell structure, so it is one word rather than an
-    * attempt to model sbt's own syntax. What the type guarantees is that it reaches sbt as a single argument, and that
-    * a quote inside it is a generate-time error rather than a script that splits mid-command.
-    */
-  private def sbt(scalaArg: String, command: String): Command =
-    val argument = scalaArg + command
-    Exec(
-      "sbt",
-      Word
-        .squoteMake(argument)
-        .fold(error => throw IllegalArgumentException(s"zipx: invalid sbt command '$argument': $error"), identity),
-    )
+  /** `test` → `++${{ matrix.scala }} test`, so a matrixed job's one leg runs under its own Scala version. */
+  private def underMatrixScala(command: SbtCommand): SbtCommand =
+    SbtCommand.underScalaVersion(Expr.matrix("scala"), command)
 
   // One name in the two types its two positions need: an `env:` key and the shell variable the generated script reads.
   // `EnvName` delegates to `zipx.shell.Patterns.Ident`, so the two agree on shape by construction.

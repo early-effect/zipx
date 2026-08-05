@@ -41,7 +41,7 @@ object ZipxDocs:
     Capability
       .once(
         name = "docs",
-        command = "true", // unused: workflowCall replaces local steps
+        command = SbtCommand("true"), // unused: workflowCall replaces local steps
         phase = Phase.Deploy,
         gate = Gate.Always,
         permissions = pagesPermissions,

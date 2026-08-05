@@ -58,7 +58,7 @@ lazy val root = (project in file("."))
         // Parallel with Aggregate test (needs verify-gate only): live remote-cache IT.
         Capability.once(
           name = "remote-cache-it",
-          command = "it/test",
+          command = SbtCommand("it/test"),
           phase = Phase.Verify,
           gate = Gate.Always,
           needsCapabilities = Nil,

@@ -66,9 +66,11 @@ end ModuleId
   * @param crossScalaVersions
   *   the module's Scala versions; drives the per-module build matrix. A single-element list means no matrix axis.
   * @param testTask
-  *   sbt task name used to test this module (default "test"; e.g. "testFull").
+  *   sbt task used to test this module (default `test`; e.g. `testFull`). An [[SbtCommand]] rather than a task name:
+  *   `Compile/test` and `test:compile` are both legitimate here, so this is command text, and typing it means
+  *   [[Capability.testJoined]] builds `<id>/<task>` rather than interpolating one.
   * @param publishTask
-  *   sbt task name used to publish this module (default "publish").
+  *   sbt task used to publish this module (default `publish`).
   * @param baseDir
   *   the module's base directory relative to the build root (e.g. "core-lib"), or "" for the root project. Used to map
   *   changed files back to owning modules for affected-only CI.
@@ -82,11 +84,15 @@ final case class ModuleNode(
     publishes: Boolean = false,
     ciRelevant: Boolean = true,
     crossScalaVersions: List[String] = Nil,
-    testTask: String = "test",
-    publishTask: String = "publish",
+    testTask: SbtCommand = ModuleNode.DefaultTestTask,
+    publishTask: SbtCommand = ModuleNode.DefaultPublishTask,
     baseDir: String = "",
     docker: Boolean = false,
 )
+
+object ModuleNode:
+  val DefaultTestTask: SbtCommand    = SbtCommand("test")
+  val DefaultPublishTask: SbtCommand = SbtCommand("publish")
 
 /** The module dependency graph. Nodes are keyed by id; edges are `dependsOn` (child → its dependencies).
   *

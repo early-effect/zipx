@@ -95,7 +95,7 @@ object ZipxCentral:
   val release: Capability =
     Capability.once(
       name = "publish",
-      command = "publishSigned; sonaRelease",
+      command = SbtCommand("publishSigned; sonaRelease"),
       phase = Phase.Publish,
       gate = Gate.OnReleaseTag,
       env = signingEnv,
@@ -105,10 +105,7 @@ object ZipxCentral:
   /** Pair with [[releaseOnce]]: this publishes per module, that merges the staging trees and releases once. */
   val publishSigned: Capability =
     Capability.publishGraph.copy(
-      command = n =>
-        val task = "publishSigned"
-        if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/$task" else s"${n.id}/$task"
-      ,
+      command = n => SbtCommand.crossModule(n, SbtCommand("publishSigned")),
       env = signingEnv,
       extraSteps = gpgImportSteps,
       postSteps = uploadStagingSteps,
@@ -117,7 +114,7 @@ object ZipxCentral:
   val releaseOnce: Capability =
     Capability.once(
       name = "central-release",
-      command = "sonaRelease",
+      command = SbtCommand("sonaRelease"),
       phase = Phase.Publish,
       gate = Gate.OnReleaseTag,
       needsCapabilities = List("publish"),

@@ -82,7 +82,7 @@ object ZipxGitHubPackages:
       case CapabilityScope.Once      =>
         Capability.once(
           name = name,
-          command = "publish",
+          command = ModuleNode.DefaultPublishTask,
           phase = Phase.Publish,
           gate = Gate.OnReleaseTag,
         )

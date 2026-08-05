@@ -39,6 +39,14 @@ object ZipxPlugin extends AutoPlugin:
     val Target = zipx.core.Target
     type StepContext = zipx.core.StepContext
     val StepContext = zipx.core.StepContext
+
+    /** Exported under its own name rather than as `Command`, which is sbt's own name in a `build.sbt` (see the note at
+      * the end of this object). A `Capability`'s `command` is this type, so a build that writes one literally needs it.
+      */
+    type SbtCommand = zipx.core.SbtCommand
+    val SbtCommand = zipx.core.SbtCommand
+    type SbtCommandText = zipx.core.SbtCommandText
+    val SbtCommandText = zipx.core.SbtCommandText
     type Phase = zipx.core.Phase
     val Phase = zipx.core.Phase
     type Gate = zipx.core.Gate
@@ -382,8 +390,8 @@ object ZipxPlugin extends AutoPlugin:
         publishes = publishes,
         ciRelevant = read(zipxCiRelevant, true),
         crossScalaVersions = crossVersions,
-        testTask = read(zipxTestTask, "test"),
-        publishTask = read(zipxPublishTask, "publish"),
+        testTask = orFail(typedCommand("zipxTestTask", read(zipxTestTask, "test"))),
+        publishTask = orFail(typedCommand("zipxPublishTask", read(zipxPublishTask, "publish"))),
         baseDir = baseDir,
         docker = read(zipxDocker, false),
       )
@@ -424,7 +432,7 @@ object ZipxPlugin extends AutoPlugin:
       workflowDispatch = read(zipxWorkflowDispatch, false),
       skipMergedPrPush = read(zipxSkipMergedPrPush, true),
       cacheRehydrateOnMerge = read(zipxCacheRehydrateOnMerge, true),
-      cacheRehydrateTask = read(zipxCacheRehydrateTask, "compile"),
+      cacheRehydrateTask = orFail(typedCommand("zipxCacheRehydrateTask", read(zipxCacheRehydrateTask, "compile"))),
       cacheRehydrateExtraSteps = read(zipxCacheRehydrateExtraSteps, (_ => Nil)),
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
       env = read(zipxEnv, Map.empty),
@@ -446,7 +454,7 @@ object ZipxPlugin extends AutoPlugin:
   /** Clean prefixes come from [[PlanConfig.verifyClean]] rather than from `verifyTask`, so the command string here is
     * only the task.
     */
-  private def builtinCapabilities(graph: ModuleGraph, verifyTask: String): List[Capability] =
+  private def builtinCapabilities(graph: ModuleGraph, verifyTask: SbtCommand): List[Capability] =
     val test = Capability.once(name = "test", command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
     val base = List(test, Capability.publish)
     if graph.nodes.exists(_.docker) then base :+ Capability.docker else base
@@ -464,12 +472,20 @@ object ZipxPlugin extends AutoPlugin:
       case Some(value) =>
         PlanConfig.verifyCleanLabelMake(value).left.map(error => s"zipxVerifyCleanLabel: $error")
 
+  /** A command-valued setting as an [[SbtCommand]]. The settings stay `String`-typed, because a `build.sbt` assigns
+    * them as ordinary strings and an opaque type in a `settingKey` would need an sbt `JsonFormat`; the check moves
+    * here, where every other config value is already checked. `zipxTasks` and `cmd"…"` are the typed route that skips
+    * this.
+    */
+  private def typedCommand(setting: String, command: String): Either[String, SbtCommand] =
+    SbtCommand.make(command).left.map(error => s"$setting: $error")
+
   private def renderWorkflow: Def.Initialize[Task[String]] = Def.task {
     val graph        = buildGraph.value
     val cfg          = planConfig.value
     val extracted    = Project.extract(state.value)
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
-    val verifyTask   = readBuildSetting(extracted, zipxTestTask, "test")
+    val verifyTask   = orFail(typedCommand("zipxTestTask", readBuildSetting(extracted, zipxTestTask, "test")))
     val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
     val yaml         = orFail(Render.render(Planner.plan(graph, capabilities, cfg)))
     ActionPinFile.annotateUses(yaml, cfg.actions)
@@ -495,7 +511,7 @@ object ZipxPlugin extends AutoPlugin:
     val cfg          = planConfig.value
     val extracted    = Project.extract(state.value)
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
-    val verifyTask   = readBuildSetting(extracted, zipxTestTask, "test")
+    val verifyTask   = orFail(typedCommand("zipxTestTask", readBuildSetting(extracted, zipxTestTask, "test")))
     val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
     Steps.rawWarnings(capabilities, cfg).foreach(w => log.warn(s"zipx: $w"))
   }

@@ -11,7 +11,7 @@ object Fixtures:
 
   val sampleGraph: ModuleGraph = ModuleGraph(
     List(
-      ModuleNode(ModuleId("core"), crossScalaVersions = List(scala3), testTask = "testFull"),
+      ModuleNode(ModuleId("core"), crossScalaVersions = List(scala3), testTask = SbtCommand("testFull")),
       ModuleNode(ModuleId("schema"), publishes = true, crossScalaVersions = cross),
       ModuleNode(ModuleId("api"), dependsOn = List("schema"), publishes = true, crossScalaVersions = cross),
       ModuleNode(
@@ -26,19 +26,19 @@ object Fixtures:
         ModuleId("serviceA"),
         dependsOn = List("core", "api"),
         crossScalaVersions = List(scala3),
-        testTask = "testFull",
+        testTask = SbtCommand("testFull"),
       ),
       ModuleNode(
         ModuleId("serviceB"),
         dependsOn = List("core", "api"),
         crossScalaVersions = List(scala3),
-        testTask = "testFull",
+        testTask = SbtCommand("testFull"),
       ),
       ModuleNode(
         ModuleId("serviceC"),
         dependsOn = List("api"),
         crossScalaVersions = List(scala3),
-        testTask = "testFull",
+        testTask = SbtCommand("testFull"),
       ),
       ModuleNode(ModuleId("serviceD"), dependsOn = List("core", "api"), crossScalaVersions = List(scala3)),
       ModuleNode(ModuleId("workerA"), dependsOn = List("core"), crossScalaVersions = List(scala3)),

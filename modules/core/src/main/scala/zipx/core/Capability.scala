@@ -78,7 +78,9 @@ final case class Target(
   * @param ordering
   *   applies to [[CapabilityScope.Graph]] only; ignored for the other scopes.
   * @param command
-  *   the sbt command for one participating module. Aggregate and Layer join these with `;`.
+  *   the sbt command for one participating module, as an [[SbtCommand]] rather than a `String`: the combinators on its
+  *   companion build the `<module>/<task>` and `+<module>/<task>` shapes, and `SbtCommand.unchecked` takes command text
+  *   zipx did not build. Aggregate and Layer join these with `;`.
   * @param matrixed
   *   expands a Graph job over Scala versions. Aggregate and Layer are never matrixed.
   * @param targets
@@ -102,7 +104,7 @@ final case class Capability(
     ordering: Ordering,
     gate: Gate,
     participates: ModuleNode => Boolean,
-    command: ModuleNode => String,
+    command: ModuleNode => SbtCommand,
     matrixed: Boolean,
     targets: ModuleNode => List[Target] = _ => Nil,
     needsCapabilities: List[String] = Nil,
@@ -130,13 +132,16 @@ end Capability
 
 object Capability:
 
+  /** sbt-native-packager's `Docker / publish`, in the config-axis form the sbt CLI takes. */
+  private val dockerPublish: SbtCommand = SbtCommand("Docker/publish")
+
   private def testBody(scope: CapabilityScope, matrixed: Boolean): Capability = Capability(
     name = "test",
     phase = Phase.Verify,
     ordering = Ordering.ParallelWithUpstream,
     gate = Gate.Always,
     participates = _.ciRelevant,
-    command = n => s"${n.id}/${n.testTask}",
+    command = n => SbtCommand.module(n, n.testTask),
     matrixed = matrixed,
     scope = scope,
   )
@@ -147,8 +152,7 @@ object Capability:
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
     participates = _.publishes,
-    command =
-      n => if n.crossScalaVersions.sizeIs > 1 then s"+${n.id}/${n.publishTask}" else s"${n.id}/${n.publishTask}",
+    command = n => SbtCommand.crossModule(n, n.publishTask),
     matrixed = false,
     scope = scope,
   )
@@ -159,7 +163,7 @@ object Capability:
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
     participates = _.docker,
-    command = n => s"${n.id}/Docker/publish",
+    command = n => SbtCommand.module(n, dockerPublish),
     matrixed = false,
     scope = scope,
   )
@@ -168,7 +172,7 @@ object Capability:
     * prepends a clean.
     */
   val test: Capability =
-    Capability.once(name = "test", command = "test", phase = Phase.Verify, gate = Gate.Always)
+    Capability.once(name = "test", command = ModuleNode.DefaultTestTask, phase = Phase.Verify, gate = Gate.Always)
 
   /** Joins per-module `<id>/<testTask>` commands instead of running one root task. The escape hatch for a build with
     * mixed `zipxTestTask` overrides, where a root aggregate task would run the wrong thing.
@@ -188,7 +192,7 @@ object Capability:
 
   def deploy(
       participates: ModuleNode => Boolean,
-      command: ModuleNode => String,
+      command: ModuleNode => SbtCommand,
       targets: ModuleNode => List[Target],
       name: String = "deploy",
       needsCapabilities: List[String] = List("docker"),
@@ -212,7 +216,7 @@ object Capability:
 
   def deployGraph(
       participates: ModuleNode => Boolean,
-      command: ModuleNode => String,
+      command: ModuleNode => SbtCommand,
       targets: ModuleNode => List[Target],
       name: String = "deploy",
       needsCapabilities: List[String] = List("docker"),
@@ -237,7 +241,7 @@ object Capability:
   private def deployBody(
       scope: CapabilityScope,
       participates: ModuleNode => Boolean,
-      command: ModuleNode => String,
+      command: ModuleNode => SbtCommand,
       targets: ModuleNode => List[Target],
       name: String,
       needsCapabilities: List[String],
@@ -267,7 +271,7 @@ object Capability:
     */
   def custom(
       name: String,
-      command: ModuleNode => String,
+      command: ModuleNode => SbtCommand,
       participates: ModuleNode => Boolean = _ => true,
       phase: Phase = Phase.Publish,
       ordering: Ordering = Ordering.DependencyOrdered,
@@ -310,7 +314,7 @@ object Capability:
     */
   def once(
       name: String,
-      command: String,
+      command: SbtCommand,
       phase: Phase = Phase.Verify,
       gate: Gate = Gate.Always,
       runsOn: Option[List[String]] = None,

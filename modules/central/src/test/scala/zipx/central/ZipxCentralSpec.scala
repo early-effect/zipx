@@ -106,13 +106,13 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       }
       val multiDocker = Capability.custom(
         name = "docker",
-        command = n => s"${n.id}/Docker/publish",
+        command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
         participates = _.docker,
         targets = _ => List(Target("us"), Target("eu")),
       )
       val after = Capability.once(
         name = "notify",
-        command = "echo done",
+        command = SbtCommand("echo done"),
         phase = Phase.Publish,
         gate = Gate.Always,
         needsCapabilities = List("docker"),

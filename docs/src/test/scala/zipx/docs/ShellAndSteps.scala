@@ -428,6 +428,7 @@ break the *YAML*, and they are **loud**.
 | `Expr.raw(text)` / `Expr.Raw` | balanced `$${{ }}`, expression-shaped | that the expression references anything real |
 | `JobCondition.raw(text)` | non-empty after trimming | that it evaluates to a boolean |
 | `Step.runRaw(text)` | nothing beyond `Step`'s own validity | anything about the body |
+| `SbtCommand.unchecked(text)` | one line, no control characters, so it cannot corrupt the `run:` scalar | that it is valid *sbt* syntax |
 
 The guarantee is structural, not a lint pass: `Raw` holds `List[ScriptLine]`, so the *type* is what rules out YAML
 GitHub fails to parse. There is no separate check to forget to run.
@@ -443,6 +444,11 @@ naming the bundle:
 
 **A bare lambda reports nothing**, because it has nowhere to carry the information. That is the honest incentive to use
 `Steps.built`: the warning is a feature of the type, not of the generator.
+
+`SbtCommand.unchecked` is reported by the same pass, and for the same reason: a typo in `api/tets` is a failing CI job
+rather than a compile error. Its provenance survives composition, so an unchecked command joined into a larger session
+(`SbtCommand.join`) still warns. Prefer `zipxTasks`, `cmd"…"` or the combinators on `SbtCommand`, all of which take a
+real key or already-validated pieces.
 
 Prefer implementing `Command` over reaching for `Raw` more than once. An implementation is checked, composable and
 reusable; `Raw` is none of the three.
@@ -462,6 +468,20 @@ reusable; `Raw` is none of the three.
           out.contains("step bundle 'legacy-script' uses a raw escape hatch"),
           out.contains("./scripts/legacy.sh --ci"),
           out.contains("from a bare lambda: 0 warnings"),
+        )
+      ),
+      md"""
+The same pass covers an unchecked sbt command, including one composed into a joined session:
+""",
+      exampleValue {
+        val hand = SbtCommand.unchecked("promote --dry-run").toOption.get
+        val cap  = Capability.custom(name = "promote", command = n => SbtCommand.module(n, hand))
+        Steps.rawWarnings(List(cap), config).mkString("\n")
+      }.assert(out =>
+        assertTrue(
+          out.contains("capability 'promote' uses an unchecked sbt command"),
+          out.contains("promote --dry-run"),
+          out.contains("a typo is a failing job rather than a compile error"),
         )
       ),
     ),

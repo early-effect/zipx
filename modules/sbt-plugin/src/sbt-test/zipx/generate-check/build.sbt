@@ -48,7 +48,7 @@ zipxCapabilities += zipxTasks.custom(
 )
 
 // The cmd"…" interpolator: literal command syntax (`+ `) + a typed key splice, module-scoped → +<module>/publish.
-// cmd produces a ModuleNode => String, so it's passed to the core Capability.custom (which takes that function).
+// cmd produces a ModuleNode => SbtCommand, so it's passed to the core Capability.custom (which takes that function).
 zipxCapabilities += Capability.custom(
   name = "crossPublishCheck",
   command = cmd"+ ${publish}",

@@ -58,7 +58,7 @@ final case class PlanConfig(
     workflowDispatch: Boolean = false,
     skipMergedPrPush: Boolean = true,
     cacheRehydrateOnMerge: Boolean = true,
-    cacheRehydrateTask: String = "compile",
+    cacheRehydrateTask: SbtCommand = PlanConfig.DefaultCacheRehydrateTask,
     cacheRehydrateExtraSteps: StepContext => List[Step] = _ => Nil,
     cacheRehydrateEnv: Map[String, EnvValue] = Map.empty,
     env: Map[String, EnvValue] = Map.empty,
@@ -70,6 +70,8 @@ final case class PlanConfig(
 object PlanConfig:
 
   val DefaultVerifyCleanLabel: ExprLiteral = ExprLiteral("clean")
+
+  val DefaultCacheRehydrateTask: SbtCommand = SbtCommand("compile")
 
   inline def verifyCleanLabel(inline label: String): Option[ExprLiteral] = Some(ExprLiteral(label))
 
