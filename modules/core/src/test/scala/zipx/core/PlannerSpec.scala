@@ -407,10 +407,10 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("docker capability emits release-gated Docker/publish jobs only for docker-enabled modules") {
-      val withDocker = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val withDocker = sampleGraph.mapNodes {
         case n if n.id == "serviceA" || n.id == "serviceB" => n.copy(docker = true)
         case n                                             => n
-      })
+      }
       val wf = Planner.plan(withDocker, List(Capability.dockerGraph), config)
       assertTrue(
         wf.jobs.contains("docker-serviceA"),
@@ -469,10 +469,10 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("deploy jobs need the module's docker job (cross-capability needs)") {
-      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
-      })
+      }
       val deploy = Capability.deployGraph(
         participates = _.id == "serviceA",
         command = n => s"${n.id}/deploy",
@@ -485,10 +485,10 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("deploy jobs sort after docker jobs in the workflow (phase order)") {
-      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
-      })
+      }
       val deploy = Capability.deployGraph(_.id == "serviceA", n => s"${n.id}/deploy", _ => stagingProd)
       val wf     = Planner.plan(graph, List(deploy, Capability.dockerGraph), config)
       val keys   = wf.jobs.keys.toList
@@ -584,10 +584,10 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("a docker capability fans out over registry targets with per-registry credential steps") {
-      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
-      })
+      }
       val registries = List(
         Target("us", env = Map("REGISTRY" -> EnvValue.plain("111.dkr.ecr.us-east-1"), "ROLE" -> secret"US_ROLE")),
         Target("eu", env = Map("REGISTRY" -> EnvValue.plain("222.dkr.ecr.eu-west-1"), "ROLE" -> secret"EU_ROLE")),
@@ -744,10 +744,10 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("cross-capability needs fans out over all per-target jobs of the dependency") {
-      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
-      })
+      }
       val multiDocker = Capability.custom(
         name = "docker",
         command = n => s"${n.id}/Docker/publish",
@@ -771,10 +771,10 @@ object PlannerSpec extends ZIOSpecDefault:
       assertTrue(!wf.jobs("test-schema").needs.contains("does-not-exist"))
     },
     test("ciRelevant=false modules are excluded from the test fan-out") {
-      val g = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val g = sampleGraph.mapNodes {
         case n if n.id == "core" => n.copy(ciRelevant = false)
         case n                   => n
-      })
+      }
       val wf = Planner.plan(g, List(Capability.testGraph), config)
       assertTrue(!wf.jobs.contains("test-core"), wf.jobs.contains("test-schema"))
     },
@@ -907,10 +907,10 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("Aggregate docker joins Docker/publish for each docker module") {
-      val withDocker = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val withDocker = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
-      })
+      }
       val wf = Planner.plan(withDocker, List(Capability.docker), config)
       assertTrue(
         wf.jobs.keys.toList == List("docker"),
@@ -918,10 +918,10 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("Aggregate deploy is one job per target, not per module") {
-      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" || n.id == "clientA" => n.copy(docker = true)
         case n                                            => n
-      })
+      }
       val deploy = Capability.deploy(
         participates = n => n.id == "serviceA" || n.id == "clientA",
         command = n => s"${n.id}/promote",
@@ -1124,10 +1124,10 @@ object PlannerSpec extends ZIOSpecDefault:
       val cap = Capability.docker
         .copy(gate = Gate.Always)
         .withCondition(JobCondition.hasPrLabel("deploy-stg"))
-      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
-      })
+      }
       val cond = Planner.plan(graph, List(cap), config).jobs("docker").`if`.getOrElse("")
       assertTrue(
         cond.contains("deploy-stg"),
@@ -1164,10 +1164,10 @@ object PlannerSpec extends ZIOSpecDefault:
         gate = Gate.OnReleaseTag,
         targets = _ => List(Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
       )
-      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
-      })
+      }
       val cond = Planner.plan(graph, List(cap), config).jobs("docker-serviceA-stg").`if`.getOrElse("")
       assertTrue(
         cond.contains("startsWith(github.ref, 'refs/tags/v')"),

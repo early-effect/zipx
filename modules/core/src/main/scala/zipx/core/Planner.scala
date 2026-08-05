@@ -75,12 +75,11 @@ object Planner:
             "zipxAffectedOnPush on Graph Verify capabilities, not by Gate. Use Gate.Always (Verify capabilities are " +
             "affected-gated automatically) or Gate.OnReleaseTag."
         )
-    val names    = capabilities.map(_.name).toSet
-    val capGraph = ModuleGraph(
-      capabilities.map(c => ModuleNode(c.name, dependsOn = c.needsCapabilities.filter(names.contains)))
-    )
-    capGraph.topologicalSort
-    ()
+    // `ModuleGraph.cycle` rather than `make`: the nodes here are capabilities, so the error has to name them as such.
+    val names = capabilities.map(_.name).toSet
+    ModuleGraph
+      .cycle(capabilities.map(c => ModuleNode(c.name, dependsOn = c.needsCapabilities.filter(names.contains))))
+      .foreach(involved => sys.error(s"zipx: needsCapabilities cycle among ${involved.mkString(", ")}"))
   end validateCapabilities
 
   // The JobId is the definition and the String is derived from it, because these ids are both public API and operands of

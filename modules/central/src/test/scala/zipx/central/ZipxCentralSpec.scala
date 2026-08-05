@@ -100,10 +100,10 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       )
     },
     test("Once needsCapabilities fans out over all per-target jobs of a dependency") {
-      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
-      })
+      }
       val multiDocker = Capability.custom(
         name = "docker",
         command = n => s"${n.id}/Docker/publish",

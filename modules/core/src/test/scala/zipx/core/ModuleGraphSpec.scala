@@ -49,9 +49,18 @@ object ModuleGraphSpec extends ZIOSpecDefault:
     test("affected closure of a leaf is just itself") {
       assertTrue(sampleGraph.affectedClosure(Set("clientA")) == Set("clientA"))
     },
-    test("detects cycles") {
-      val cyclic = ModuleGraph(List(ModuleNode("a", List("b")), ModuleNode("b", List("a"))))
-      assertTrue(scala.util.Try(cyclic.topologicalSort).isFailure)
+    test("make rejects a cycle, naming the modules involved") {
+      val cyclic = ModuleGraph.make(List(ModuleNode("a", List("b")), ModuleNode("b", List("a"))))
+      assertTrue(
+        cyclic.isLeft,
+        cyclic.swap.exists(_.contains("cycle")),
+        cyclic.swap.exists(_.contains("a, b")),
+      )
+    },
+    test("apply throws where make reports, for a fixture whose cycle would be a test bug") {
+      assertTrue(
+        scala.util.Try(ModuleGraph(List(ModuleNode("a", List("b")), ModuleNode("b", List("a"))))).isFailure
+      )
     },
     test("subsetLayers gives the contracted publish order (L0/L1/L2)") {
       val layers = sampleGraph.subsetLayers(_.publishes)
@@ -74,18 +83,44 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       assertTrue(g.subsetLayers(n => n.id == "a" || n.id == "c") == List(List("a"), List("c")))
     },
     test("self-cycle is detected") {
-      val self = ModuleGraph(List(ModuleNode("a", dependsOn = List("a"))))
-      assertTrue(scala.util.Try(self.topologicalSort).isFailure)
+      assertTrue(ModuleGraph.make(List(ModuleNode("a", dependsOn = List("a")))).isLeft)
     },
-    test("three-node cycle is detected") {
-      val cyclic = ModuleGraph(
+    test("three-node cycle is detected, and every id in it is reported") {
+      val cyclic = ModuleGraph.make(
         List(
           ModuleNode("a", dependsOn = List("c")),
           ModuleNode("b", dependsOn = List("a")),
           ModuleNode("c", dependsOn = List("b")),
         )
       )
-      assertTrue(scala.util.Try(cyclic.topologicalSort).isFailure)
+      assertTrue(cyclic.isLeft, cyclic.swap.exists(_.contains("a, b, c")))
+    },
+    test("cycle reports the ids without building a graph, for a caller wording its own error") {
+      assertTrue(
+        ModuleGraph.cycle(List(ModuleNode("a", List("b")), ModuleNode("b", List("a")))) == Some(List("a", "b")),
+        ModuleGraph.cycle(List(ModuleNode("a"), ModuleNode("b", List("a")))).isEmpty,
+      )
+    },
+    test("mapNodes rewrites attributes and keeps the layers") {
+      val flagged = sampleGraph.mapNodes {
+        case n if n.id == "api" => n.copy(docker = true)
+        case n                  => n
+      }
+      assertTrue(
+        flagged.get("api").exists(_.docker),
+        !flagged.get("schema").exists(_.docker),
+        flagged.topologicalLayers == sampleGraph.topologicalLayers,
+        flagged.ids == sampleGraph.ids,
+      )
+    },
+    test("mapNodes ignores edits to id and dependsOn, which is what makes it total") {
+      // A structure-preserving map cannot invalidate the layers, so there is no cycle to report and no Either to unwrap.
+      val rewired = sampleGraph.mapNodes(n => n.copy(id = "renamed", dependsOn = List("clientA")))
+      assertTrue(
+        rewired.ids == sampleGraph.ids,
+        rewired.directDeps("clientA") == sampleGraph.directDeps("clientA"),
+        rewired.topologicalSort == sampleGraph.topologicalSort,
+      )
     },
     test("external dependsOn ids are dropped from directDeps") {
       val g = ModuleGraph(List(ModuleNode("a", dependsOn = List("outside", "b")), ModuleNode("b")))

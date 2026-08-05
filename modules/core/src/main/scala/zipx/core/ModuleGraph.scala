@@ -38,8 +38,23 @@ final case class ModuleNode(
     docker: Boolean = false,
 )
 
-/** The module dependency graph. Nodes are keyed by id; edges are `dependsOn` (child → its dependencies). */
-final case class ModuleGraph(nodes: List[ModuleNode]):
+/** The module dependency graph. Nodes are keyed by id; edges are `dependsOn` (child → its dependencies).
+  *
+  * Acyclic by construction: [[ModuleGraph.make]] runs the toposort, reports a cycle as a `Left`, and passes the layers
+  * it computed to the private constructor. So [[topologicalLayers]] is a field rather than a computation that could
+  * fail, and every ordering query below is total with no cycle case to handle. Validating once at the boundary removes
+  * the failure from four public methods at once, and the sbt plugin (the only place a graph comes from user input)
+  * already has a seam for reporting it.
+  *
+  * A `dependsOn` id absent from the node list is *not* an error: it is how an external library dependency appears, and
+  * [[directDeps]] drops it.
+  *
+  * @param topologicalLayers
+  *   layer 0 has no in-graph dependencies; each subsequent layer depends only on earlier layers. Within a layer, ids
+  *   are sorted, so the result is stable across runs, which the generate/check round-trip requires. Derived from
+  *   `nodes`, never passed by a caller.
+  */
+final case class ModuleGraph private (nodes: List[ModuleNode], topologicalLayers: List[List[String]]):
   private val byId: Map[String, ModuleNode] = nodes.map(n => n.id -> n).toMap
 
   /** All node ids, sorted: the canonical deterministic ordering used everywhere planning must be stable. */
@@ -78,53 +93,97 @@ final case class ModuleGraph(nodes: List[ModuleNode]):
     go(seeds.toList, seeds.filter(byId.contains))
 
   /** A deterministic topological sort: dependencies before dependents. Ties are broken by sorted id so the result is
-    * stable across runs (required for the generate/check round-trip). Throws [[CyclicGraphError]] on a cycle.
+    * stable across runs (required for the generate/check round-trip).
     */
   def topologicalSort: List[String] = topologicalLayers.flatten
 
-  /** Topological *layers*: layer 0 has no in-graph dependencies; each subsequent layer depends only on earlier layers.
-    * Within a layer, ids are sorted. This is the basis for wave-based scheduling and for reasoning about publish order.
+  /** Rewrite each node's attributes, keeping the graph structure. `id` and `dependsOn` are taken from the original
+    * node, so whatever `f` does to those two is ignored: that is what makes this total, since the edges are unchanged
+    * and the layers already computed for them stay valid. To change edges, build a new graph with [[ModuleGraph.make]].
     */
-  def topologicalLayers: List[List[String]] =
-    kahnLayers(ids, id => directDeps(id).toSet)
+  def mapNodes(f: ModuleNode => ModuleNode): ModuleGraph =
+    new ModuleGraph(nodes.map(n => f(n).copy(id = n.id, dependsOn = n.dependsOn)), topologicalLayers)
 
   /** Topological layers over the subset of modules matching `include`, with edges *contracted* through excluded
     * intermediates: an included node depends on the nearest included ancestors reachable through any chain of excluded
     * nodes. This is the publish-ordering view, e.g. layers of just the publishing modules. Empty when nothing matches.
+    *
+    * Derived by walking [[topologicalSort]] and giving each included node a depth one past its deepest included
+    * ancestor. That reuses the acyclicity already established at construction instead of re-deriving it: every included
+    * ancestor of a node is one of its dependencies, so it precedes the node in topological order and its depth is
+    * already known. Contraction cannot introduce a cycle either, since it preserves reachability and reachability in a
+    * DAG is a strict partial order.
     */
   def subsetLayers(include: ModuleNode => Boolean): List[List[String]] =
-    val included: Set[String]                             = nodes.filter(include).map(_.id).toSet
-    def nearestIncludedAncestors(id: String): Set[String] =
-      def go(frontier: List[String], found: Set[String], seen: Set[String]): Set[String] =
-        frontier match
-          case Nil    => found
-          case h :: t =>
-            val deps               = directDeps(h).filterNot(seen)
-            val (inc, passthrough) = deps.partition(included.contains)
-            go(passthrough ++ t, found ++ inc, seen ++ deps)
-      go(List(id), Set.empty, Set.empty)
-    kahnLayers(included.toList.sorted, nearestIncludedAncestors)
+    val included: Set[String] = nodes.filter(include).map(_.id).toSet
+    val depths                =
+      topologicalSort.filter(included).foldLeft(Map.empty[String, Int]) { (acc, id) =>
+        val ancestors = nearestAncestors(id, included)
+        acc + (id -> (if ancestors.isEmpty then 0 else ancestors.map(acc).max + 1))
+      }
+    depths.groupBy(_._2).toList.sortBy(_._1).map((_, group) => group.keys.toList.sorted)
   end subsetLayers
 
-  /** Kahn's algorithm producing deterministic layers over `nodeIds`, using `depsOf` for in-edges (restricted to
-    * `nodeIds`). Ties broken by sorted id. Throws [[CyclicGraphError]] on a cycle.
+  /** The nearest ids in `included` reachable from `id` through any chain of excluded nodes. */
+  private def nearestAncestors(id: String, included: Set[String]): Set[String] =
+    def go(frontier: List[String], found: Set[String], seen: Set[String]): Set[String] =
+      frontier match
+        case Nil    => found
+        case h :: t =>
+          val deps               = directDeps(h).filterNot(seen)
+          val (inc, passthrough) = deps.partition(included.contains)
+          go(passthrough ++ t, found ++ inc, seen ++ deps)
+    go(List(id), Set.empty, Set.empty)
+
+end ModuleGraph
+
+object ModuleGraph:
+
+  /** A graph, or the ids involved in a dependency cycle. sbt itself forbids a cycle, so this fires only for a graph
+    * built by hand; the planner's capability-ordering check is the other caller.
     */
-  private def kahnLayers(nodeIds: List[String], depsOf: String => Set[String]): List[List[String]] =
+  def make(nodes: List[ModuleNode]): Either[String, ModuleGraph] =
+    layers(nodes) match
+      case Right(layers)  => Right(new ModuleGraph(nodes, layers))
+      case Left(involved) => Left(s"dependency cycle among modules: ${involved.mkString(", ")}")
+
+  /** The ids involved in a cycle, if there is one. For a caller that is not building a module graph and needs to word
+    * the error in its own terms, as [[Planner]] does for a `needsCapabilities` cycle.
+    */
+  def cycle(nodes: List[ModuleNode]): Option[List[String]] = layers(nodes).left.toOption
+
+  private def layers(nodes: List[ModuleNode]): Either[List[String], List[List[String]]] =
+    // The sort runs over distinct ids: a duplicated id is one node to order, and `byId` resolves it
+    // last-definition-wins. `ModuleGraph.ids` keeps every occurrence, which is a separate, tested behaviour.
+    val present                        = nodes.map(_.id).toSet
+    val deps: Map[String, Set[String]] =
+      nodes.groupMapReduce(_.id)(_.dependsOn.toSet.intersect(present))(_ ++ _)
+    layersOrCycle(nodes.map(_.id).distinct, id => deps.getOrElse(id, Set.empty))
+
+  /** A graph whose node list is known acyclic: a test fixture, or a graph derived from one that is already validated. A
+    * cycle here is a programming error rather than user input, which is why it throws where [[make]] reports.
+    */
+  def apply(nodes: List[ModuleNode]): ModuleGraph =
+    make(nodes).fold(error => throw IllegalArgumentException(s"zipx: $error"), identity)
+
+  /** Kahn's algorithm producing deterministic layers over `nodeIds`, using `depsOf` for in-edges (restricted to
+    * `nodeIds`). Ties broken by sorted id. `Left` carries the ids still holding unmet dependencies, which is the cycle.
+    */
+  private def layersOrCycle(
+      nodeIds: List[String],
+      depsOf: String => Set[String],
+  ): Either[List[String], List[List[String]]] =
     val present                                                          = nodeIds.toSet
     val remainingDeps: scala.collection.mutable.Map[String, Set[String]] =
       scala.collection.mutable.Map.from(nodeIds.map(id => id -> depsOf(id).intersect(present)))
     val layers = scala.collection.mutable.ListBuffer.empty[List[String]]
     while remainingDeps.nonEmpty do
       val ready = remainingDeps.collect { case (id, deps) if deps.isEmpty => id }.toList.sorted
-      if ready.isEmpty then throw CyclicGraphError(remainingDeps.keys.toList.sorted)
+      if ready.isEmpty then return Left(remainingDeps.keys.toList.sorted)
       layers += ready
       ready.foreach(remainingDeps.remove)
       remainingDeps.mapValuesInPlace((_, deps) => deps -- ready.toSet)
-    layers.toList
-  end kahnLayers
+    Right(layers.toList)
+  end layersOrCycle
 
 end ModuleGraph
-
-/** Raised when the module graph contains a dependency cycle (which sbt itself forbids, but we guard anyway). */
-final case class CyclicGraphError(involved: List[String])
-    extends RuntimeException(s"Dependency cycle among modules: ${involved.mkString(", ")}")

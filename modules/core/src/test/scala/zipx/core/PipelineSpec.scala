@@ -7,10 +7,10 @@ object PipelineSpec extends ZIOSpecDefault:
   import Fixtures.*
   import EnvValue.secret
 
-  private val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+  private val graph = sampleGraph.mapNodes {
     case n if n.id == "serviceA" => n.copy(docker = true)
     case n                       => n
-  })
+  }
 
   private val deployTargets = List(
     Target(

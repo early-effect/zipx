@@ -385,7 +385,9 @@ object ZipxPlugin extends AutoPlugin:
       )
     }.toList
 
-    ModuleGraph(nodes)
+    // sbt rejects a `dependsOn` cycle when it loads the build, so this cannot fail for a build that got this far. It
+    // goes through `orFail` anyway: that is the boundary's job, and a graph is user input regardless of who checked it.
+    orFail(ModuleGraph.make(nodes))
   }
 
   private def rootRef(structure: sbt.internal.BuildStructure): ProjectRef =
