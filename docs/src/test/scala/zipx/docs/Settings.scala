@@ -103,6 +103,10 @@ SHA pins for generated `uses:` lines. Full guide: **Action pins**.
 Resolve order: explicit `zipxActions` (≠ `Defaults`) → `.github/zipx/action-pins.yml` when present → jar
 `ActionPins.Defaults`. Dependabot bumps workflow YAML; `zipxActionsPull` (or the sync workflow) writes the pin file
 and regenerates so `zipxWorkflowCheck` stays green.
+
+A present pin file must be readable in full: a line `zipx` cannot use (a typo'd key, an unpinned ref, a key pointing
+at a different action) fails `zipxWorkflowGenerate` naming the line, rather than falling back to the jar pin for that
+field. An *absent* file still falls back silently, since that is the documented default.
 """
     ),
   )

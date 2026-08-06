@@ -1,5 +1,6 @@
 package zipx.core
 
+import neotype.unwrap
 import zio.test.*
 import zipx.workflow.Step
 
@@ -199,7 +200,7 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       .plan(Fixtures.sampleGraph, List(Capability.test), config)
       .jobs("test")
       .steps
-      .find(_.uses.exists(_.startsWith("actions/cache@")))
+      .find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
       .getOrElse(throw AssertionError("cache step missing"))
 
   private def affectedScript(affectedOnPush: Boolean): Option[String] =

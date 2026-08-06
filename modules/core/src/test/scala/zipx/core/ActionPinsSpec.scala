@@ -1,6 +1,8 @@
 package zipx.core
 
+import neotype.unwrap
 import zio.test.*
+import zipx.workflow.ActionRef
 
 object ActionPinsSpec extends ZIOSpecDefault:
 
@@ -13,52 +15,50 @@ object ActionPinsSpec extends ZIOSpecDefault:
 
   def spec = suite("ActionPins")(
     test("defaults are pinned to commit SHAs, not mutable tags or branches") {
+      // Stricter than [[ActionRef]] on purpose: `actions/checkout@v4` is a legal `uses:` value and would pass the
+      // field's own type, but a *default* zipx ships must be a SHA. Over every `Field`, so a new pin cannot escape it.
+      def isShaPinned(ref: ActionRef) = ref.unwrap.matches("^[^@]+@[0-9A-Fa-f]{40}$")
+
       val p = ActionPins.Defaults
-
-      def isShaPinned(ref: String) = ref.matches("^[^@]+@[0-9A-Fa-f]{40}$")
-
       assertTrue(
-        isShaPinned(p.checkout),
-        isShaPinned(p.setupJava),
-        isShaPinned(p.setupSbt),
-        isShaPinned(p.cache),
-        isShaPinned(p.uploadArtifact),
-        isShaPinned(p.downloadArtifact),
-        isShaPinned(p.scalaSteward),
-      ) &&
-      assertTrue(
+        ActionPins.Field.values.forall(f => isShaPinned(p.field(f))),
         p.versions.nonEmpty,
         p.versions.values.exists(_.startsWith("v")),
       )
     },
     test("planner emits the configured pins on every job") {
       val custom = ActionPins(
-        checkout = "actions/checkout@deadbeef",
-        setupJava = "actions/setup-java@cafebabe",
-        setupSbt = "sbt/setup-sbt@feedface",
-        cache = "actions/cache@00ff00ff",
+        checkout = ActionRef("actions/checkout@deadbeef"),
+        setupJava = ActionRef("actions/setup-java@cafebabe"),
+        setupSbt = ActionRef("sbt/setup-sbt@feedface"),
+        cache = ActionRef("actions/cache@00ff00ff"),
       )
       val wf  = Planner.plan(Fixtures.sampleGraph, List(Capability.testGraph), config.copy(actions = custom))
       val job = wf.jobs("test-core")
       assertTrue(
-        job.steps.exists(_.uses.contains("actions/checkout@deadbeef")),
-        job.steps.exists(_.uses.contains("sbt/setup-sbt@feedface")),
-        job.steps.exists(_.uses.contains("actions/setup-java@cafebabe")),
-        job.steps.exists(_.uses.contains("actions/cache@00ff00ff")),
-        job.steps.find(_.uses.exists(_.contains("checkout"))).exists(_.`with`.get("fetch-depth").contains("0")),
+        job.steps.exists(_.uses.contains(ActionRef("actions/checkout@deadbeef"))),
+        job.steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@feedface"))),
+        job.steps.exists(_.uses.contains(ActionRef("actions/setup-java@cafebabe"))),
+        job.steps.exists(_.uses.contains(ActionRef("actions/cache@00ff00ff"))),
+        job.steps
+          .find(_.uses.exists(_.unwrap.contains("checkout")))
+          .exists(_.`with`.get("fetch-depth").contains("0")),
       )
     },
     test("affected setup job also uses the configured checkout and setup-sbt pins") {
-      val custom = ActionPins.Defaults.copy(checkout = "actions/checkout@aabbccdd", setupSbt = "sbt/setup-sbt@11223344")
-      val wf     = Planner.plan(
+      val custom = ActionPins.Defaults.copy(
+        checkout = ActionRef("actions/checkout@aabbccdd"),
+        setupSbt = ActionRef("sbt/setup-sbt@11223344"),
+      )
+      val wf = Planner.plan(
         Fixtures.sampleGraph,
         List(Capability.testGraph),
         config.copy(affected = AffectedMode.AffectedOnPR, actions = custom),
       )
       val steps = wf.jobs("affected").steps
       assertTrue(
-        steps.exists(_.uses.contains("actions/checkout@aabbccdd")),
-        steps.exists(_.uses.contains("sbt/setup-sbt@11223344")),
+        steps.exists(_.uses.contains(ActionRef("actions/checkout@aabbccdd"))),
+        steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@11223344"))),
       )
     },
   )

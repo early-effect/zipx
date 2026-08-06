@@ -1,5 +1,7 @@
 package zipx.core
 
+import zipx.workflow.ActionRef
+
 /** Hash-pinned GitHub Actions used in generated workflows.
   *
   * Editable source of truth in a repo is [[ActionPinFile.DefaultPath]] (`.github/zipx/action-pins.yml`). Published
@@ -8,9 +10,13 @@ package zipx.core
   *
   * {{{
   * zipxActions := ActionPins.Defaults.copy(
-  *   checkout = "actions/checkout@<sha>",
+  *   checkout = ActionRef("actions/checkout@<sha>"),
   * )
   * }}}
+  *
+  * Fields are [[zipx.workflow.ActionRef]], so a literal is checked while the build compiles and a pin read from the
+  * file is checked where [[ActionPinFile.parse]] reads it. A pin therefore reaches `Step.uses` with nothing left to
+  * validate, which is what makes an unpinned `uses:` unrepresentable rather than merely rejected.
   *
   * @param checkout
   *   `actions/checkout` pin (`owner/action@sha`).
@@ -30,18 +36,18 @@ package zipx.core
   *   Optional semver labels (`v7.0.1`) keyed by field name for `# vX.Y.Z` comments on generated `uses:` lines.
   */
 final case class ActionPins(
-    checkout: String = ActionPins.BootstrapCheckout,
-    setupJava: String = ActionPins.BootstrapSetupJava,
-    setupSbt: String = ActionPins.BootstrapSetupSbt,
-    cache: String = ActionPins.BootstrapCache,
-    uploadArtifact: String = ActionPins.BootstrapUploadArtifact,
-    downloadArtifact: String = ActionPins.BootstrapDownloadArtifact,
-    scalaSteward: String = ActionPins.BootstrapScalaSteward,
+    checkout: ActionRef = ActionPins.BootstrapCheckout,
+    setupJava: ActionRef = ActionPins.BootstrapSetupJava,
+    setupSbt: ActionRef = ActionPins.BootstrapSetupSbt,
+    cache: ActionRef = ActionPins.BootstrapCache,
+    uploadArtifact: ActionRef = ActionPins.BootstrapUploadArtifact,
+    downloadArtifact: ActionRef = ActionPins.BootstrapDownloadArtifact,
+    scalaSteward: ActionRef = ActionPins.BootstrapScalaSteward,
     versions: Map[String, String] = Map.empty,
 ):
   import ActionPins.Field
 
-  def field(f: Field): String = f match
+  def field(f: Field): ActionRef = f match
     case Field.Checkout         => checkout
     case Field.SetupJava        => setupJava
     case Field.SetupSbt         => setupSbt
@@ -50,7 +56,7 @@ final case class ActionPins(
     case Field.DownloadArtifact => downloadArtifact
     case Field.ScalaSteward     => scalaSteward
 
-  def withField(f: Field, ref: String): ActionPins = f match
+  def withField(f: Field, ref: ActionRef): ActionPins = f match
     case Field.Checkout         => copy(checkout = ref)
     case Field.SetupJava        => copy(setupJava = ref)
     case Field.SetupSbt         => copy(setupSbt = ref)
@@ -81,20 +87,21 @@ object ActionPins:
 
   // Bootstrap fallbacks (keep in sync with `.github/zipx/action-pins.yml`). Used only when the classpath resource is
   // missing, e.g. incomplete dogfood classpath. Prefer [[ActionPins.Defaults]] from the embedded pin file.
-  private[core] val BootstrapCheckout: String =
-    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
-  private[core] val BootstrapSetupJava: String =
-    "actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961"
-  private[core] val BootstrapSetupSbt: String =
-    "sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf"
-  private[core] val BootstrapCache: String =
-    "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9"
-  private[core] val BootstrapUploadArtifact: String =
-    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
-  private[core] val BootstrapDownloadArtifact: String =
-    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c"
-  private[core] val BootstrapScalaSteward: String =
-    "scala-steward-org/scala-steward-action@41bd88543dcf5e5455689f04d041b095eb901660"
+  // Literals, so each one's shape is checked while this file compiles.
+  private[core] val BootstrapCheckout: ActionRef =
+    ActionRef("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
+  private[core] val BootstrapSetupJava: ActionRef =
+    ActionRef("actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961")
+  private[core] val BootstrapSetupSbt: ActionRef =
+    ActionRef("sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf")
+  private[core] val BootstrapCache: ActionRef =
+    ActionRef("actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9")
+  private[core] val BootstrapUploadArtifact: ActionRef =
+    ActionRef("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a")
+  private[core] val BootstrapDownloadArtifact: ActionRef =
+    ActionRef("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
+  private[core] val BootstrapScalaSteward: ActionRef =
+    ActionRef("scala-steward-org/scala-steward-action@41bd88543dcf5e5455689f04d041b095eb901660")
 
   private[core] val BootstrapVersions: Map[String, String] = Map(
     Field.Checkout.key         -> "v7.0.1",
@@ -122,12 +129,12 @@ object ActionPins:
     ActionPinFile.loadResource().getOrElse(Bootstrap)
 
   /** Convenience aliases matching older call sites / docs. */
-  def Checkout: String         = Defaults.checkout
-  def SetupJava: String        = Defaults.setupJava
-  def SetupSbt: String         = Defaults.setupSbt
-  def Cache: String            = Defaults.cache
-  def UploadArtifact: String   = Defaults.uploadArtifact
-  def DownloadArtifact: String = Defaults.downloadArtifact
-  def ScalaSteward: String     = Defaults.scalaSteward
+  def Checkout: ActionRef         = Defaults.checkout
+  def SetupJava: ActionRef        = Defaults.setupJava
+  def SetupSbt: ActionRef         = Defaults.setupSbt
+  def Cache: ActionRef            = Defaults.cache
+  def UploadArtifact: ActionRef   = Defaults.uploadArtifact
+  def DownloadArtifact: ActionRef = Defaults.downloadArtifact
+  def ScalaSteward: ActionRef     = Defaults.scalaSteward
 
 end ActionPins

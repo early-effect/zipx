@@ -1,6 +1,7 @@
 package zipx.specular
 
 import zipx.core.*
+import zipx.workflow.ActionRef
 
 /** Early-effect Specular docs paved path for zipx: a once-job that delegates to the org reusable workflow rather than
   * running steps of its own, so generated CI owns what a hand-written `docs.yml` used to.
@@ -17,8 +18,8 @@ import zipx.core.*
 object ZipxDocs:
 
   /** Builds `sbt <project>/specularSite` and deploys it to GitHub Pages. */
-  val ReusableWorkflow: String =
-    "early-effect/.github/.github/workflows/specular-docs.yml@main"
+  val ReusableWorkflow: ActionRef =
+    ActionRef("early-effect/.github/.github/workflows/specular-docs.yml@main")
 
   /** Also what a build names in `needsCapabilities` to sequence something after the docs deploy. */
   val DocsName: CapabilityName = CapabilityName("docs")

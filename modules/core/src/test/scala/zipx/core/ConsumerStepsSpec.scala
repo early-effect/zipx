@@ -2,7 +2,7 @@ package zipx.core
 
 import zio.test.*
 import zipx.shell.*
-import zipx.workflow.{Expr, Step}
+import zipx.workflow.{ActionRef, Expr, Step}
 
 import scala.collection.immutable.ListMap
 
@@ -94,12 +94,12 @@ object ConsumerStepsSpec extends ZIOSpecDefault:
       )
       .withTrailingNewline(true)
 
-  private def cacheStep(pin: String) =
-    Step.usesMake(pin).fold(error => throw AssertionError(s"bad action pin: $error"), identity)
-
   private def browserSetup(pins: ActionPins): Steps =
     Steps.built("browsers")(
-      cacheStep(pins.cache)
+      // `usesRef`, not `usesMake`: an `ActionPins` field is already an `ActionRef`, so there is no failure here for a
+      // consumer to fake a handler for. This used to need a `throw` on an unreachable branch.
+      Step
+        .usesRef(pins.cache)
         .named("Cache Playwright apt packages")
         .withInputs(
           ListMap(
@@ -177,7 +177,7 @@ object ConsumerStepsSpec extends ZIOSpecDefault:
           "key"          -> "${{ runner.os }}-chekhov-apt-${{ hashFiles('package-lock.json') }}",
           "restore-keys" -> "${{ runner.os }}-chekhov-apt-",
         ),
-        node.uses.contains("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e"),
+        node.uses.contains(ActionRef("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e")),
         node.`with` == ListMap("node-version" -> "24", "cache" -> "npm"),
         stepNamed(steps, "npm ci").run.contains("npm ci"),
         stepNamed(steps, "npm ci (vite fixture)").run.contains("npm ci --prefix examples/vite-fixture"),

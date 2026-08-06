@@ -14,6 +14,8 @@ object NamesSpec extends ZIOSpecDefault:
       tail <- Gen.listOf(gIdentRest)
     yield (head :: tail).mkString
 
+  private val gSha: Gen[Any, String] = Gen.stringN(40)(Gen.elements("0123456789abcdefABCDEF".toList*))
+
   private val expressionChars = List("$", "{", "}", " ", "'", "\"", ".", "/", "(", ")", "*", "[", "]", "!", "&", "|")
 
   def spec = suite("names")(
@@ -249,6 +251,23 @@ object NamesSpec extends ZIOSpecDefault:
           ActionRef.make("actions/checkout@v4 ").isLeft,
           ActionRef.make("${{ env.ACTION }}").isLeft,
         )
+      },
+      test("accepts any owner/repo@40-hex, which is the shape every SHA pin takes") {
+        // The form `ActionPinFile` reads and every generated `uses:` carries, so it is worth a property rather than
+        // the handful of examples above: a validator that rejected some SHA alphabet would break real pin files.
+        check(gIdent, gIdent, gSha) { (owner, repo, sha) =>
+          assertTrue(ActionRef.make(s"$owner/$repo@$sha").isRight)
+        }
+      },
+      test("an @ref alone is never enough: the owner/repo half must be well formed too") {
+        check(gSha) { sha =>
+          assertTrue(
+            ActionRef.make(s"@$sha").isLeft,
+            ActionRef.make(s"owner@$sha").isLeft,
+            ActionRef.make(s"owner/@$sha").isLeft,
+            ActionRef.make(s"/repo@$sha").isLeft,
+          )
+        }
       },
     ),
     suite("EventName")(

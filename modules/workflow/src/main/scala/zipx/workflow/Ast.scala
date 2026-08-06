@@ -113,7 +113,7 @@ final case class Job(
     outputs: Map[String, String] = ListMap.empty,
     steps: List[Step] = Nil,
     /** A reusable-workflow call. When set, [[steps]] and [[runsOn]] must be empty. */
-    uses: Option[String] = None,
+    uses: Option[ActionRef] = None,
     `with`: Map[String, String] = ListMap.empty,
 ) derives Schema
 
@@ -134,12 +134,16 @@ final case class Strategy(
   * The cost is that `Step()` and `Step(uses = …, run = …)` both compile and both render YAML GitHub rejects. Prefer the
   * builders [[Step.run]] / [[Step.uses]], which cannot express either; [[Step.validate]] catches what is hand-built,
   * and [[Render]] calls it on every step it encodes.
+  *
+  * `uses` is an [[ActionRef]], not a `String`: the *shape* of an action ref is the field's own business, so a step
+  * cannot be built around an unpinned or malformed one even by hand-construction. zio-blocks derives a `Schema` for a
+  * neotype as its underlying primitive, so this renders as the same YAML scalar a `String` did.
   */
 final case class Step(
     name: Option[String] = None,
     id: Option[String] = None,
     `if`: Option[String] = None,
-    uses: Option[String] = None,
+    uses: Option[ActionRef] = None,
     run: Option[String] = None,
     `with`: Map[String, String] = ListMap.empty,
     env: Map[String, String] = ListMap.empty,
@@ -157,6 +161,9 @@ object Step:
 
   /** See [[StepBuilder.uses]]. */
   inline def uses(inline action: String): StepBuilder.Uses = StepBuilder.uses(action)
+
+  /** See [[StepBuilder.usesRef]]. */
+  def usesRef(action: ActionRef): StepBuilder.Uses = StepBuilder.usesRef(action)
 
   /** See [[StepBuilder.usesMake]]. */
   def usesMake(action: String): Either[String, StepBuilder.Uses] = StepBuilder.usesMake(action)

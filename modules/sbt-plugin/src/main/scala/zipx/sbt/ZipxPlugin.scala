@@ -466,6 +466,11 @@ object ZipxPlugin extends AutoPlugin:
     )
   }
 
+  /** A pin file that is present but unreadable fails the build through [[orFail]] rather than falling back to
+    * `Defaults`. The fallback is what made a typo'd key silently revert a deliberately held-back pin to the version
+    * baked into the zipx jar. An *absent* file still falls back, since that is the documented way to take the jar
+    * defaults.
+    */
   private def resolveActionPins(extracted: Extracted, root: File): ActionPins =
     val setting        = readBuildSetting(extracted, zipxActions, ActionPins.Defaults)
     val userOverrodeIt = setting != ActionPins.Defaults
@@ -473,7 +478,7 @@ object ZipxPlugin extends AutoPlugin:
     else
       val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
       if rel.isEmpty then ActionPins.Defaults
-      else ActionPinFile.loadOption((root / rel).toPath).getOrElse(ActionPins.Defaults)
+      else ActionPinFile.loadOption((root / rel).toPath).fold(ActionPins.Defaults)(orFail)
 
   /** Clean prefixes come from [[PlanConfig.verifyClean]] rather than from `verifyTask`, so the command string here is
     * only the task.
@@ -599,8 +604,10 @@ object ZipxPlugin extends AutoPlugin:
     val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
     if rel.isEmpty then sys.error("zipxActionsPath is empty; refuse to pull pins without a pin file path.")
     val pinPath = (root / rel).toPath
-    val base    = ActionPinFile.loadOption(pinPath).getOrElse(ActionPins.Defaults)
-    val pulled  = ActionPinFile.pullFromWorkflow(IO.read(wfFile), base)
+    // A pull rewrites the pin file, so both reads fail loudly: overwriting a file zipx could not read would launder the
+    // unreadable line away, and a workflow whose `uses:` is not a valid ref is exactly what must not be pulled in.
+    val base   = ActionPinFile.loadOption(pinPath).fold(ActionPins.Defaults)(orFail)
+    val pulled = orFail(ActionPinFile.pullFromWorkflow(IO.read(wfFile), base))
     ActionPinFile.write(pinPath, pulled)
     log.info(s"zipx wrote ${pinPath}")
     writeGeneratedWorkflows.value

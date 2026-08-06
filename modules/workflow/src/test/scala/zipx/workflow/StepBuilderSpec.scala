@@ -1,5 +1,6 @@
 package zipx.workflow
 
+import neotype.unwrap
 import zio.test.*
 import zipx.shell.*
 
@@ -70,7 +71,7 @@ object StepBuilderSpec extends ZIOSpecDefault:
       test("an action ref becomes the uses value") {
         val step = Step.uses("actions/checkout@v4").withInput("fetch-depth", "0").build
         assertTrue(
-          step.uses.contains("actions/checkout@v4"),
+          step.uses.contains(ActionRef("actions/checkout@v4")),
           step.`with` == ListMap("fetch-depth" -> "0"),
           step.run.isEmpty,
         )
@@ -105,11 +106,20 @@ object StepBuilderSpec extends ZIOSpecDefault:
       test("a runtime ref goes through usesMake, which reports the reason as a value") {
         val pin = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
         assertTrue(
-          Step.usesMake(pin).map(_.build.uses).contains(Some(pin)),
+          Step.usesMake(pin).map(_.build.uses.map(_.unwrap)) == Right(Some(pin)),
           Step.usesMake("actions/checkout").isLeft,
           Step.usesMake("").isLeft,
           Step.usesMake("actions/checkout").left.exists(_.contains("@ref")),
           Step.usesMake(pin).map(_.named("Checkout").build.name).contains(Some("Checkout")),
+        )
+      },
+      test("an already-typed ref goes through usesRef, with no Either to unwrap") {
+        // The reason `usesRef` exists: an `ActionRef` in hand has nothing left to validate, so a caller holding one
+        // (an `ActionPins` field, say) should not have to handle a failure that cannot occur.
+        val ref = ActionRef("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
+        assertTrue(
+          Step.usesRef(ref).build.uses.contains(ref),
+          Step.usesRef(ref).build == Step.usesMake(ref.unwrap).map(_.build).toOption.get,
         )
       },
     ),
@@ -117,13 +127,13 @@ object StepBuilderSpec extends ZIOSpecDefault:
       test("no problem with the two valid shapes") {
         assertTrue(
           Step.problem(Step(run = Some("echo hi"))).isEmpty,
-          Step.problem(Step(uses = Some("actions/checkout@v4"))).isEmpty,
-          Step.problem(Step(uses = Some("a/b@v1"), `with` = ListMap("k" -> "v"))).isEmpty,
+          Step.problem(Step(uses = Some(ActionRef("actions/checkout@v4")))).isEmpty,
+          Step.problem(Step(uses = Some(ActionRef("a/b@v1")), `with` = ListMap("k" -> "v"))).isEmpty,
           Step.validate(Step(run = Some("echo hi"))).isRight,
         )
       },
       test("reports a step with both uses and run") {
-        val both = Step(name = Some("Confused"), uses = Some("actions/checkout@v4"), run = Some("echo hi"))
+        val both = Step(name = Some("Confused"), uses = Some(ActionRef("actions/checkout@v4")), run = Some("echo hi"))
         assertTrue(
           Step.problem(both).exists(_.contains("both uses and run")),
           Step.validate(both).isLeft,
@@ -154,7 +164,7 @@ object StepBuilderSpec extends ZIOSpecDefault:
         assertTrue(Render.renderSteps(List(Step(run = Some("ok")), Step())).isLeft)
       },
       test("an invalid step is a Left when rendered inside a job") {
-        val job = Job(steps = List(Step(uses = Some("a/b@v1"), run = Some("echo hi"))))
+        val job = Job(steps = List(Step(uses = Some(ActionRef("a/b@v1")), run = Some("echo hi"))))
         assertTrue(
           Render.renderJob("build", job).isLeft,
           Render.renderJobs(ListMap("build" -> job)).isLeft,
@@ -172,7 +182,7 @@ object StepBuilderSpec extends ZIOSpecDefault:
         val wf = Workflow(
           name = "CI",
           on = Triggers(push = Some(BranchFilter(branches = List("main")))),
-          jobs = ListMap("call" -> Job(runsOn = Nil, uses = Some("org/repo/.github/workflows/w.yml@main"))),
+          jobs = ListMap("call" -> Job(runsOn = Nil, uses = Some(ActionRef("org/repo/.github/workflows/w.yml@main")))),
         )
         assertTrue(Render.render(wf).exists(_.contains("uses: org/repo/.github/workflows/w.yml@main")))
       },

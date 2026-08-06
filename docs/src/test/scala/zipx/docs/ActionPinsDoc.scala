@@ -75,11 +75,41 @@ If `zipxDependabotSync := true`, also commit `.github/workflows/zipx-action-pins
           """checkout: actions/checkout@abc123 # v9.0.0
             |setupSbt: sbt/setup-sbt@def456 # v1.9.9
             |""".stripMargin
-        ActionPinFile.render(ActionPinFile.parse(text))
+        ActionPinFile.parse(text).map(ActionPinFile.render)
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("checkout: actions/checkout@abc123 # v9.0.0"),
-          yaml.contains("setupSbt: sbt/setup-sbt@def456 # v1.9.9"),
+          yaml.exists(_.contains("checkout: actions/checkout@abc123 # v9.0.0")),
+          yaml.exists(_.contains("setupSbt: sbt/setup-sbt@def456 # v1.9.9")),
+        )
+      ),
+    ),
+    section("A line zipx cannot read fails the build")(
+      md"""
+`ActionPinFile.parse` returns an `Either`, and `zipxWorkflowGenerate` turns a `Left` into a build error naming the
+line. A pin file that is *present* must be wholly readable; only an *absent* file falls back to jar defaults.
+
+That matters because the fallback used to be silent. A key with a typo in it (`setup-jav:`) simply did not match, so
+the field quietly reverted to the SHA baked into the zipx jar, undoing a pin the repo had deliberately held back. Four
+things are refused, and the error names the file, the line number, and the line:
+
+| The line | Why |
+|---|---|
+| `setup-jav: actions/setup-java@<sha>` | not a pin, a comment, or blank |
+| `setupJava2: actions/setup-java@<sha>` | `setupJava2` is not an `ActionPins` field (the message lists the ones that are) |
+| `checkout: actions/checkout` | no `@ref`: an unpinned action is the risk this file exists to remove |
+| `checkout: evil/malware@<sha>` | a valid ref, but `checkout:` may only name `actions/checkout` |
+
+The last is the one a shape check alone misses, and the reason a `uses:` value is an
+[[zipx.workflow.ActionRef]] everywhere rather than a `String`: the pin file is where an action ref becomes typed, and
+after that no step, job or reusable-workflow call can carry an unvalidated one.
+""",
+      exampleValue {
+        ActionPinFile.parse("checkout: actions/checkout\n")
+      }.assert(result =>
+        assertTrue(
+          result.isLeft,
+          result.swap.exists(_.contains(".github/zipx/action-pins.yml:1:")),
+          result.swap.exists(_.contains("@ref")),
         )
       ),
     ),
@@ -148,9 +178,13 @@ Prefer the pin file for ongoing SHA tracking. Use `zipxActions` only for tempora
 
 ```scala
 zipxActions := ActionPins.Defaults.copy(
-  setupSbt = "sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e",
+  setupSbt = ActionRef("sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e"),
 )
 ```
+
+The `ActionRef(...)` wrapper is not ceremony: it is validated while your `build.sbt` compiles, so
+`ActionRef("sbt/setup-sbt")` is a compile error naming the missing `@ref` rather than an unpinned action in `ci.yml`.
+For a ref your build computes rather than writes out, `ActionRef.make(...)` returns an `Either` instead.
 
 An explicit `zipxActions` that differs from `ActionPins.Defaults` **wins over** the pin file. Setting
 `zipxActions := ActionPins.Defaults` (or leaving the default) lets the pin file take effect when present.

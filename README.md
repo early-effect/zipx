@@ -40,7 +40,9 @@ Generated `uses:` lines are SHA-pinned (with `# vX.Y.Z` comments). To track upst
 2. Enable Dependabot for `github-actions` (see [`.github/dependabot.yml`](.github/dependabot.yml))
 3. On Dependabot PRs run `sbt zipxActionsPull`, **or** set `zipxDependabotSync := true` so zipx also generates `.github/workflows/zipx-action-pins-sync.yml`
 
-Resolve order: explicit `zipxActions` → pin file when present → jar defaults. Full guide: **Action pins** on the docs site.
+Resolve order: explicit `zipxActions` → pin file when present → jar defaults. Every line of a present pin file is
+validated, so a typo'd key or an unpinned ref fails the build naming the line instead of silently reverting that pin to
+the jar default. Full guide: **Action pins** on the docs site.
 
 ### Scala Steward (optional)
 
