@@ -57,7 +57,7 @@ lazy val root = (project in file("."))
         ZipxDocs.pages().andCondition(upstream),
         // Parallel with Aggregate test (needs verify-gate only): live remote-cache IT.
         Capability.once(
-          name = "remote-cache-it",
+          name = CapabilityName("remote-cache-it"),
           command = SbtCommand("it/test"),
           phase = Phase.Verify,
           gate = Gate.Always,
@@ -66,7 +66,7 @@ lazy val root = (project in file("."))
         ),
       )
     },
-    zipxJavaVersion      := "25",
+    zipxJavaVersion      := JdkVersion("25"),
     zipxWorkflowDispatch := true,
     zipxDependabotSync   := true,
     zipxScalaSteward     := true,

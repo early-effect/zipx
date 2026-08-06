@@ -166,7 +166,7 @@ lazy val root = (project in file("."))
         ZipxDocs.pages().andCondition(upstream),
       )
     },
-    zipxJavaVersion      := "25",
+    zipxJavaVersion      := JdkVersion("25"),
     zipxWorkflowDispatch := true,
   )
 
@@ -206,7 +206,7 @@ lazy val root = (project in file("."))
   .aggregate(lib)
   .settings(
     zipxCapabilities += ZipxCentral.release, // optional paved path
-    zipxJavaVersion  := "25",
+    zipxJavaVersion  := JdkVersion("25"),
   )
 ```
 

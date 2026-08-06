@@ -10,9 +10,11 @@ object RemoteCacheSmoke:
     List(ModuleNode(ModuleId("lib"), publishes = false, crossScalaVersions = List("3.8.4"), baseDir = "lib"))
   )
 
-  def config(javaVersion: String = "21", runnerOs: String = "ubuntu-latest"): PlanConfig =
+  def config(
+      javaVersion: JdkVersion = PlanConfig.DefaultJdkVersion,
+      runnerOs: RunnerOs = PlanConfig.DefaultRunnerOs,
+  ): PlanConfig =
     PlanConfig(
-      workflowName = "CI",
       javaVersion = javaVersion,
       runnerOs = runnerOs,
       cache = RemoteCacheProof.sidecar,
@@ -22,7 +24,10 @@ object RemoteCacheSmoke:
       verifyCleanLabel = None,
     )
 
-  def plan(javaVersion: String = "21", runnerOs: String = "ubuntu-latest"): Workflow =
+  def plan(
+      javaVersion: JdkVersion = PlanConfig.DefaultJdkVersion,
+      runnerOs: RunnerOs = PlanConfig.DefaultRunnerOs,
+  ): Workflow =
     Planner.plan(graph, List(Capability.test), config(javaVersion, runnerOs))
 
 end RemoteCacheSmoke

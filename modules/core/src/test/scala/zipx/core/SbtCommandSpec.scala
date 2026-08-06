@@ -90,7 +90,7 @@ object SbtCommandSpec extends ZIOSpecDefault:
       },
       test("Steps.rawWarnings names the capability whose command is unchecked") {
         val hand     = SbtCommand.unchecked("promote").toOption.get
-        val cap      = Capability.custom(name = "promote", command = _ => hand)
+        val cap      = Capability.custom(name = CapabilityName("promote"), command = _ => hand)
         val warnings = Steps.rawWarnings(List(cap, Capability.test), PlanConfig())
         assertTrue(
           warnings.length == 1,

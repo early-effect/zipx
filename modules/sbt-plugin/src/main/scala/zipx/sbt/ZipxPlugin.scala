@@ -40,6 +40,29 @@ object ZipxPlugin extends AutoPlugin:
     type StepContext = zipx.core.StepContext
     val StepContext = zipx.core.StepContext
 
+    /** The names that become GitHub job ids, so a `build.sbt` can write one: `CapabilityName("docker-stg")`,
+      * `Target(TargetName("stg"))`. Both are validated at compile time when the argument is a literal, which is the
+      * usual case in a build file.
+      */
+    type CapabilityName = zipx.core.CapabilityName
+    val CapabilityName = zipx.core.CapabilityName
+    type TargetName = zipx.core.TargetName
+    val TargetName = zipx.core.TargetName
+
+    /** The validated settings types: see [[zipxWorkflowName]], [[zipxJavaVersion]] and [[zipxRunnerOs]]. A build names
+      * one when it overrides the setting, `zipxJavaVersion := JdkVersion("17")`, and gets the check at the point of
+      * writing rather than at generate time.
+      *
+      * The JDK one is `JdkVersion` and not `JavaVersion` because sbt 2.0 exports a `sbt.JavaVersion`: with both in a
+      * `build.sbt`'s scope, naming it would be an ambiguous reference rather than a shadow.
+      */
+    type WorkflowName = zipx.core.WorkflowName
+    val WorkflowName = zipx.core.WorkflowName
+    type JdkVersion = zipx.core.JdkVersion
+    val JdkVersion = zipx.core.JdkVersion
+    type RunnerOs = zipx.core.RunnerOs
+    val RunnerOs = zipx.core.RunnerOs
+
     /** Exported under its own name rather than as `Command`, which is sbt's own name in a `build.sbt` (see the note at
       * the end of this object). A `Capability`'s `command` is this type, so a build that writes one literally needs it.
       */
@@ -77,23 +100,24 @@ object ZipxPlugin extends AutoPlugin:
     end ZipxCentral
 
     object ZipxDocs:
-      def pages(sbtProject: String = "docs", javaVersion: Option[String] = None): Capability =
+      def pages(sbtProject: String = "docs", javaVersion: Option[JdkVersion] = None): Capability =
         zipx.specular.ZipxDocs.pages(sbtProject, javaVersion)
       def ReusableWorkflow = zipx.specular.ZipxDocs.ReusableWorkflow
       def pagesPermissions = zipx.specular.ZipxDocs.pagesPermissions
       def deployWhen       = zipx.specular.ZipxDocs.deployWhen
+      def DocsName         = zipx.specular.ZipxDocs.DocsName
     end ZipxDocs
 
     object ZipxGitHubPackages:
       def sameRepo(
-          name: String = zipx.github.ZipxGitHubPackages.DefaultName,
+          name: CapabilityName = zipx.github.ZipxGitHubPackages.DefaultName,
           scope: CapabilityScope = CapabilityScope.Aggregate,
           condition: Option[JobCondition] = None,
       ): Capability =
         zipx.github.ZipxGitHubPackages.sameRepo(name, scope, condition)
       def sharedRegistry(
           token: EnvValue = zipx.core.EnvValue.secret("GH_PACKAGES_TOKEN"),
-          name: String = zipx.github.ZipxGitHubPackages.DefaultName,
+          name: CapabilityName = zipx.github.ZipxGitHubPackages.DefaultName,
           scope: CapabilityScope = CapabilityScope.Aggregate,
           condition: Option[JobCondition] = None,
           packagesRepo: Option[String] = None,
@@ -149,11 +173,11 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[Seq[Capability]]("CI capabilities (default: test, publish, docker?). Append custom ones here.")
     val zipxCache =
       settingKey[CacheBackend]("Cache backend: LocalDir (default), BazelRemoteSidecar, or ManagedRemote.")
-    val zipxWorkflowName = settingKey[String]("Name of the generated GitHub Actions workflow.")
+    val zipxWorkflowName = settingKey[WorkflowName]("Name of the generated GitHub Actions workflow.")
     val zipxWorkflowPath =
       settingKey[String]("Workflow file path relative to the build root (default .github/workflows/ci.yml).")
-    val zipxJavaVersion = settingKey[String]("JDK major version for the CI matrix and cache key.")
-    val zipxRunnerOs    = settingKey[String]("GitHub Actions runner label (default ubuntu-latest).")
+    val zipxJavaVersion = settingKey[JdkVersion]("JDK major version for the CI matrix and cache key.")
+    val zipxRunnerOs    = settingKey[RunnerOs]("GitHub Actions runner label (default ubuntu-latest).")
     val zipxScalaMatrix = settingKey[Boolean]("Expand a per-module Scala matrix over crossScalaVersions.")
     val zipxCacheEpoch  =
       settingKey[CacheEpoch](
@@ -259,9 +283,9 @@ object ZipxPlugin extends AutoPlugin:
     zipxCapabilities             := Seq.empty,
     zipxCache                    := CacheBackend.LocalDir,
     zipxCacheEpoch               := CacheEpoch.GitTags(),
-    zipxWorkflowName             := "CI",
-    zipxJavaVersion              := "21",
-    zipxRunnerOs                 := "ubuntu-latest",
+    zipxWorkflowName             := PlanConfig.DefaultWorkflowName,
+    zipxJavaVersion              := PlanConfig.DefaultJdkVersion,
+    zipxRunnerOs                 := PlanConfig.DefaultRunnerOs,
     zipxScalaMatrix              := true,
     zipxPushBranches             := Seq("main"),
     zipxReleaseTagPattern        := "v[0-9]+.[0-9]+.[0-9]+",
@@ -418,10 +442,10 @@ object ZipxPlugin extends AutoPlugin:
     def read[A](key: SettingKey[A], default: A): A = readBuildSetting(extracted, key, default)
     val root                                       = (LocalRootProject / baseDirectory).value
     PlanConfig(
-      workflowName = read(zipxWorkflowName, "CI"),
+      workflowName = read(zipxWorkflowName, PlanConfig.DefaultWorkflowName),
       scalaMatrix = read(zipxScalaMatrix, true),
-      javaVersion = read(zipxJavaVersion, "21"),
-      runnerOs = read(zipxRunnerOs, "ubuntu-latest"),
+      javaVersion = read(zipxJavaVersion, PlanConfig.DefaultJdkVersion),
+      runnerOs = read(zipxRunnerOs, PlanConfig.DefaultRunnerOs),
       affected = if read(zipxAffectedOnPR, true) then AffectedMode.AffectedOnPR else AffectedMode.Always,
       affectedOnPush = read(zipxAffectedOnPush, false),
       cache = read(zipxCache, CacheBackend.LocalDir),
@@ -455,7 +479,8 @@ object ZipxPlugin extends AutoPlugin:
     * only the task.
     */
   private def builtinCapabilities(graph: ModuleGraph, verifyTask: SbtCommand): List[Capability] =
-    val test = Capability.once(name = "test", command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
+    val test =
+      Capability.once(name = Capability.TestName, command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
     val base = List(test, Capability.publish)
     if graph.nodes.exists(_.docker) then base :+ Capability.docker else base
 

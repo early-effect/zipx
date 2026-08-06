@@ -9,7 +9,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
   private val stepContext = StepContext(ModuleNode(id = ModuleId("schema")), None, matrixed = false)
 
   private val config = PlanConfig(
-    workflowName = "CI",
+    workflowName = WorkflowName("CI"),
     cacheEpoch = CacheEpoch.Fixed("1.0.0"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
@@ -105,17 +105,17 @@ object ZipxCentralSpec extends ZIOSpecDefault:
         case n                       => n
       }
       val multiDocker = Capability.custom(
-        name = "docker",
+        name = Capability.DockerName,
         command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
         participates = _.docker,
-        targets = _ => List(Target("us"), Target("eu")),
+        targets = _ => List(Target(TargetName("us")), Target(TargetName("eu"))),
       )
       val after = Capability.once(
-        name = "notify",
+        name = CapabilityName("notify"),
         command = SbtCommand("echo done"),
         phase = Phase.Publish,
         gate = Gate.Always,
-        needsCapabilities = List("docker"),
+        needsCapabilities = List(Capability.DockerName),
       )
       val needs = Planner.plan(graph, List(multiDocker, after), config).jobs("notify").needs
       assertTrue(needs.contains("docker-serviceA-us"), needs.contains("docker-serviceA-eu"))

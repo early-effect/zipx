@@ -15,10 +15,10 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | Setting | Type | Default | Purpose |
 |---|---|---|---|
 | `zipxCapabilities` | `Seq[Capability]` | `Seq.empty` | custom capabilities (same name replaces built-in) |
-| `zipxWorkflowName` | `String` | `"CI"` | workflow `name:` |
+| `zipxWorkflowName` | `WorkflowName` | `"CI"` | workflow `name:` |
 | `zipxWorkflowPath` | `String` | `.github/workflows/ci.yml` | output path |
-| `zipxJavaVersion` | `String` | `"21"` | JDK for setup-java and cache key |
-| `zipxRunnerOs` | `String` | `"ubuntu-latest"` | default runner |
+| `zipxJavaVersion` | `JdkVersion` | `"21"` | JDK for setup-java and cache key |
+| `zipxRunnerOs` | `RunnerOs` | `"ubuntu-latest"` | default runner |
 | `zipxScalaMatrix` | `Boolean` | `true` | per-module Scala matrix (**Graph** test only) |
 | `zipxActions` | `ActionPins` | jar defaults | one-off `uses:` override (**prefer pin file**; see **Action pins**) |
 | `zipxActionsPath` | `String` | `.github/zipx/action-pins.yml` | pin file path (`""` disables file loading) |
@@ -59,8 +59,9 @@ only to override that derivation.
     ),
     section("Capability model")(
       md"""
-`Capability` fields: `name`, `phase`, `ordering`, `gate`, `participates`, `command`, `matrixed`, `targets`,
-`needsCapabilities`, `permissions`, `runsOn`, `extraSteps`, `scope` (`Aggregate` / `Layer` / `Graph` / `Once`),
+`Capability` fields: `name` (a `CapabilityName`), `phase`, `ordering`, `gate`, `participates`, `command`, `matrixed`,
+`targets`, `needsCapabilities` (`List[CapabilityName]`), `permissions`, `runsOn`, `extraSteps`, `scope`
+(`Aggregate` / `Layer` / `Graph` / `Once`),
 `env`, `workflowCall`, `condition` (`Option[JobCondition]`, default `None`; prefer `withCondition(...)` to set, or
 `andCondition(...)` to layer onto packs that already ship a condition). Compose with `JobCondition` `&&` / `||` / `!`.
 
@@ -70,7 +71,14 @@ with `.when(...)`, so a pack can publish one and a build can extend it. See **Sh
 
 Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Layers`, `.*Graph`, `.deploy` /
 `.deployGraph`, `.custom`, `.once`. Packs: `ZipxCentral.*`, `ZipxGitHubPackages.*`, `ZipxDocs.pages`. A `Target` is
-`(name, environment, env, condition)` with typed `EnvValue`s and `JobCondition`. Job env merge: `zipxEnv` → cache
+`(name, environment, env, condition)` with typed `EnvValue`s and `JobCondition`.
+
+`CapabilityName` and `TargetName` are validated wrappers, not aliases for `String`: joined with `-` they *are* the
+`jobs.<job_id>` key GitHub sees, so a space or a `/` in one used to produce a workflow that failed on push. A literal
+is checked where you write it, `CapabilityName("docker-stg")`, and the built-in names are available as
+`Capability.TestName` / `.PublishName` / `.DockerName` / `.DeployName` for `needsCapabilities`.
+
+Job env merge: `zipxEnv` → cache
 backend → capability → target (`zipxCacheRehydrateEnv` overlays `zipxEnv` on rehydrate only). `zipxEnv` is omitted on
 reusable-workflow caller jobs (`workflowCall` / `uses:`). See **Job conditions** for recipes (fork gate, PR-label
 stage ECR, multi-publish, docs on dispatch).

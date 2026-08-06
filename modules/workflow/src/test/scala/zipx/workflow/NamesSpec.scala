@@ -52,8 +52,10 @@ object NamesSpec extends ZIOSpecDefault:
       test("accepts any identifier") {
         check(gIdent)(s => assertTrue(JobId.make(s).isRight, StepId.make(s).isRight))
       },
-      test("make round-trips the input unchanged") {
-        assertTrue(JobId.make("build-1").map(_.unwrap) == Right("build-1"))
+      test("make round-trips the input unchanged, with no unwrapping needed") {
+        // No `.unwrap`: `JobId` is a `Subtype`, so the validated value *is* the `String` that went in. That is the
+        // property the planner relies on to hold an id typed from construction through to the YAML.
+        assertTrue(JobId.make("build-1").map(id => id: String) == Right("build-1"))
       },
     ),
     suite("SecretName")(

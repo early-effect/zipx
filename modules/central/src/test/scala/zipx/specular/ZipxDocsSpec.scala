@@ -6,7 +6,11 @@ import zipx.core.*
 object ZipxDocsSpec extends ZIOSpecDefault:
 
   private val config =
-    PlanConfig(workflowName = "CI", cacheEpoch = CacheEpoch.Fixed("1.0.0"), affected = AffectedMode.Always)
+    PlanConfig(
+      workflowName = WorkflowName("CI"),
+      cacheEpoch = CacheEpoch.Fixed("1.0.0"),
+      affected = AffectedMode.Always,
+    )
 
   def spec = suite("ZipxDocs")(
     test("pages emits a reusable-workflow job with Pages permissions, on tag or workflow_dispatch") {
@@ -40,7 +44,11 @@ object ZipxDocsSpec extends ZIOSpecDefault:
     },
     test("pages forwards sbtProject and javaVersion inputs") {
       val job = Planner
-        .plan(ModuleGraph(Nil), List(ZipxDocs.pages(sbtProject = "site", javaVersion = Some("25"))), config)
+        .plan(
+          ModuleGraph(Nil),
+          List(ZipxDocs.pages(sbtProject = "site", javaVersion = Some(JdkVersion("25")))),
+          config,
+        )
         .jobs("docs")
       assertTrue(
         job.`with`.get("sbt-project").contains("site"),

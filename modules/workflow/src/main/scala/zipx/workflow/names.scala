@@ -11,9 +11,14 @@ import neotype.*
 
 /** A `jobs.<job_id>` key: must start with a letter or `_` and contain only alphanumerics, `-`, or `_`. Uniqueness is a
   * property of the *collection*, so it is checked where the job map is assembled.
+  *
+  * A `Subtype` rather than a `Newtype`, so `JobId <: String`, for the same reason `zipx.core.ModuleId` is one: a job id
+  * is read in far more positions than it is built. It is a `Workflow.jobs` key, an element of another job's `needs`,
+  * and part of a step name, all of which are plain `String`. Only *construction* is checked, so a planner can keep an
+  * id typed from the moment it assembles it through to the YAML without unwrapping it at each hand-off.
   */
 type JobId = JobId.Type
-object JobId extends Newtype[String]:
+object JobId extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
     if input.isEmpty then "a job id must be non-empty"
     else if input.matches(Names.ActionsId) then true

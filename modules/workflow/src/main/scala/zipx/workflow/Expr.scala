@@ -108,8 +108,8 @@ enum Expr:
     case Github(path)         => s"github.${path.unwrap}"
     case Runner(path)         => s"runner.${path.unwrap}"
     case StepOutput(id, name) => s"steps.${id.unwrap}.outputs.${name.unwrap}"
-    case JobOutput(id, name)  => s"needs.${id.unwrap}.outputs.${name.unwrap}"
-    case JobResult(id)        => s"needs.${id.unwrap}.result"
+    case JobOutput(id, name)  => s"needs.$id.outputs.${name.unwrap}"
+    case JobResult(id)        => s"needs.$id.result"
     case Matrix(axis)         => s"matrix.${axis.unwrap}"
     case Lit(text)            => text.unwrap
     case Quoted(text)         => s"'${text.unwrap}'"

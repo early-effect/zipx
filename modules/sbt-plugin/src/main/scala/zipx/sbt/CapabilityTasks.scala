@@ -3,6 +3,7 @@ package zipx.sbt
 import sbt.*
 import zipx.core.{
   Capability,
+  CapabilityName,
   EnvValue,
   Gate,
   JobCondition,
@@ -154,8 +155,8 @@ object CapabilityTasks:
       participates: ModuleNode => Boolean,
       command: Scoped,
       targets: ModuleNode => List[Target],
-      name: String = "deploy",
-      needsCapabilities: List[String] = List("docker"),
+      name: CapabilityName = Capability.DeployName,
+      needsCapabilities: List[CapabilityName] = List(Capability.DockerName),
       permissions: Map[String, String] = Map.empty,
       env: Map[String, EnvValue] = Map.empty,
       gate: Gate = Gate.OnReleaseTag,
@@ -178,8 +179,8 @@ object CapabilityTasks:
       participates: ModuleNode => Boolean,
       command: Scoped,
       targets: ModuleNode => List[Target],
-      name: String = "deploy",
-      needsCapabilities: List[String] = List("docker"),
+      name: CapabilityName = Capability.DeployName,
+      needsCapabilities: List[CapabilityName] = List(Capability.DockerName),
       permissions: Map[String, String] = Map.empty,
       env: Map[String, EnvValue] = Map.empty,
       gate: Gate = Gate.OnReleaseTag,
@@ -199,7 +200,7 @@ object CapabilityTasks:
 
   /** [[zipx.core.Capability.custom]] with the command given as a task key (rendered `<module>/<label>`). */
   def custom(
-      name: String,
+      name: CapabilityName,
       command: Scoped,
       participates: ModuleNode => Boolean = _ => true,
       phase: Phase = Phase.Publish,
@@ -207,7 +208,7 @@ object CapabilityTasks:
       gate: Gate = Gate.OnReleaseTag,
       matrixed: Boolean = false,
       targets: ModuleNode => List[Target] = _ => Nil,
-      needsCapabilities: List[String] = Nil,
+      needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
       runsOn: Option[List[String]] = None,
       extraSteps: StepContext => List[Step] = _ => Nil,
@@ -235,14 +236,14 @@ object CapabilityTasks:
     * `<label>`).
     */
   def once(
-      name: String,
+      name: CapabilityName,
       command: Scoped,
       phase: Phase = Phase.Verify,
       gate: Gate = Gate.Always,
       runsOn: Option[List[String]] = None,
       extraSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
-      needsCapabilities: List[String] = Nil,
+      needsCapabilities: List[CapabilityName] = Nil,
       condition: Option[JobCondition] = None,
   ): Capability =
     Capability.once(

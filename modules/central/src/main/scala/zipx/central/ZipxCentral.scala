@@ -94,7 +94,7 @@ object ZipxCentral:
     */
   val release: Capability =
     Capability.once(
-      name = "publish",
+      name = Capability.PublishName,
       command = SbtCommand("publishSigned; sonaRelease"),
       phase = Phase.Publish,
       gate = Gate.OnReleaseTag,
@@ -113,11 +113,11 @@ object ZipxCentral:
 
   val releaseOnce: Capability =
     Capability.once(
-      name = "central-release",
+      name = CapabilityName("central-release"),
       command = SbtCommand("sonaRelease"),
       phase = Phase.Publish,
       gate = Gate.OnReleaseTag,
-      needsCapabilities = List("publish"),
+      needsCapabilities = List(Capability.PublishName),
       env = signingEnv,
       extraSteps = downloadStagingSteps ++ gpgImportSteps,
     )

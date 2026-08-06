@@ -19,7 +19,7 @@ import zipx.core.EnvValue.{plain, secret}
   */
 object ZipxGitHubPackages:
 
-  val DefaultName: String = "github-packages"
+  val DefaultName: CapabilityName = CapabilityName("github-packages")
 
   val packagesPermissions: Map[String, String] =
     Map("contents" -> "read", "packages" -> "write")
@@ -30,7 +30,7 @@ object ZipxGitHubPackages:
     * [[zipx.core.JobCondition]] like any other: `condition = Some(JobCondition.repositoryIs("acme/my-fork"))`.
     */
   def sameRepo(
-      name: String = DefaultName,
+      name: CapabilityName = DefaultName,
       scope: CapabilityScope = CapabilityScope.Aggregate,
       condition: Option[JobCondition] = None,
   ): Capability =
@@ -47,7 +47,7 @@ object ZipxGitHubPackages:
     */
   def sharedRegistry(
       token: EnvValue = secret"GH_PACKAGES_TOKEN",
-      name: String = DefaultName,
+      name: CapabilityName = DefaultName,
       scope: CapabilityScope = CapabilityScope.Aggregate,
       condition: Option[JobCondition] = None,
       packagesRepo: Option[String] = None,
@@ -69,7 +69,7 @@ object ZipxGitHubPackages:
   end sharedRegistry
 
   private def publishCap(
-      name: String,
+      name: CapabilityName,
       scope: CapabilityScope,
       token: EnvValue,
       condition: Option[JobCondition],

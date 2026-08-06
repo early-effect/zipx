@@ -37,7 +37,7 @@ object ModuleId extends Subtype[String]:
     * coincidence: a module id is constrained *because* it becomes a job id. If they ever diverge, this is the one place
     * that has to change.
     */
-  def fromJobId(id: zipx.workflow.JobId): ModuleId = unsafeMake(id.unwrap)
+  def fromJobId(id: zipx.workflow.JobId): ModuleId = unsafeMake(id)
 
   extension (id: ModuleId)
     /** The id as an expression literal, for the `'api'` of `contains(fromJson(…), 'api')`.

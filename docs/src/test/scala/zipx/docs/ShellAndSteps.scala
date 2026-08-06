@@ -475,7 +475,7 @@ The same pass covers an unchecked sbt command, including one composed into a joi
 """,
       exampleValue {
         val hand = SbtCommand.unchecked("promote --dry-run").toOption.get
-        val cap  = Capability.custom(name = "promote", command = n => SbtCommand.module(n, hand))
+        val cap  = Capability.custom(name = CapabilityName("promote"), command = n => SbtCommand.module(n, hand))
         Steps.rawWarnings(List(cap), config).mkString("\n")
       }.assert(out =>
         assertTrue(

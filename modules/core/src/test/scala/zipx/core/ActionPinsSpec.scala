@@ -5,7 +5,7 @@ import zio.test.*
 object ActionPinsSpec extends ZIOSpecDefault:
 
   private val config = PlanConfig(
-    workflowName = "CI",
+    workflowName = WorkflowName("CI"),
     cacheEpoch = CacheEpoch.Fixed("1.0.0"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,

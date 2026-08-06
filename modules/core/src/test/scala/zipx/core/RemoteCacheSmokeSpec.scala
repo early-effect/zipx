@@ -19,7 +19,7 @@ object RemoteCacheSmokeSpec extends ZIOSpecDefault:
         RemoteCacheSmoke.graph,
         List(
           Capability.test,
-          Capability.once(name = "remote-cache-it", command = SbtCommand("it/test")),
+          Capability.once(name = CapabilityName("remote-cache-it"), command = SbtCommand("it/test")),
         ),
         RemoteCacheSmoke.config().copy(skipMergedPrPush = true),
       )

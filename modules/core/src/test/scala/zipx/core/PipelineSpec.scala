@@ -14,7 +14,7 @@ object PipelineSpec extends ZIOSpecDefault:
 
   private val deployTargets = List(
     Target(
-      "staging",
+      TargetName("staging"),
       env = Map(
         "AWS_REGION"  -> EnvValue.plain("us-west-2"),
         "DEPLOY_ROLE" -> secret"STAGING_ROLE",
@@ -22,7 +22,7 @@ object PipelineSpec extends ZIOSpecDefault:
       ),
     ),
     Target(
-      "prod",
+      TargetName("prod"),
       environment = Some("production"),
       env = Map(
         "AWS_REGION"  -> EnvValue.plain("us-east-1"),

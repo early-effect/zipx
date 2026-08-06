@@ -40,7 +40,7 @@ object StepsSpec extends ZIOSpecDefault:
       test("the planner needs no edit: a bundle reaches the rendered job") {
         val capability =
           Capability
-            .once("check", SbtCommand("scalafmtCheckAll"))
+            .once(CapabilityName("check"), SbtCommand("scalafmtCheckAll"))
             .copy(extraSteps = Steps.of("marker")(named("mark")))
         val plan = Planner.plan(ModuleGraph(List(node)), List(capability), PlanConfig())
         assertTrue(plan.jobs("check").steps.exists(_.name.contains("mark")))
@@ -145,7 +145,7 @@ object StepsSpec extends ZIOSpecDefault:
         }
         assertTrue(
           bundle(ctxFor(ModuleId("core"))).head.name.contains("no-target"),
-          bundle(ctxFor(ModuleId("core"), Some(Target("staging")))).head.name.contains("staging"),
+          bundle(ctxFor(ModuleId("core"), Some(Target(TargetName("staging"))))).head.name.contains("staging"),
           bundle(ctxFor(ModuleId("core"))).head.uses.contains(ActionPins.Defaults.checkout),
         )
       },

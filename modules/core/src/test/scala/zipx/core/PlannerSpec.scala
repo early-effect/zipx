@@ -8,7 +8,7 @@ object PlannerSpec extends ZIOSpecDefault:
   import EnvValue.secret
 
   private val config = PlanConfig(
-    workflowName = "CI",
+    workflowName = WorkflowName("CI"),
     cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
@@ -16,7 +16,7 @@ object PlannerSpec extends ZIOSpecDefault:
   )
 
   private def deployCap(targets: List[Target]) = Capability(
-    name = "deploy",
+    name = Capability.DeployName,
     phase = Phase.Publish,
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
@@ -27,9 +27,12 @@ object PlannerSpec extends ZIOSpecDefault:
     scope = CapabilityScope.Graph,
   )
   private val stagingProd = List(
-    Target("staging", env = Map("DEPLOY_ROLE" -> secret"STAGING_ROLE", "TIER" -> EnvValue.plain("staging"))),
     Target(
-      "prod",
+      TargetName("staging"),
+      env = Map("DEPLOY_ROLE" -> secret"STAGING_ROLE", "TIER" -> EnvValue.plain("staging")),
+    ),
+    Target(
+      TargetName("prod"),
       environment = Some("production"),
       env = Map("DEPLOY_ROLE" -> secret"PROD_ROLE", "TIER" -> EnvValue.plain("prod")),
       condition = Some(JobCondition.refIs("refs/heads/main")),
@@ -510,24 +513,24 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("a needsCapabilities cycle is rejected") {
       val a = Capability(
-        "a",
+        CapabilityName("a"),
         Phase.Publish,
         Ordering.DependencyOrdered,
         Gate.Always,
         _ => true,
         _ => SbtCommand("a"),
         false,
-        needsCapabilities = List("b"),
+        needsCapabilities = List(CapabilityName("b")),
       )
       val b = Capability(
-        "b",
+        CapabilityName("b"),
         Phase.Publish,
         Ordering.DependencyOrdered,
         Gate.Always,
         _ => true,
         _ => SbtCommand("b"),
         false,
-        needsCapabilities = List("a"),
+        needsCapabilities = List(CapabilityName("a")),
       )
       assertTrue(scala.util.Try(Planner.plan(sampleGraph, List(a, b), config)).isFailure)
     },
@@ -555,7 +558,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("postSteps are injected after the command") {
       val cap = Capability.custom(
-        name = "publish",
+        name = Capability.PublishName,
         command = n => SbtCommand.module(n, SbtCommand("publish")),
         participates = _.id == "schema",
         postSteps = _ => List(Step(name = Some("Upload"), run = Some("echo uploaded"))),
@@ -567,7 +570,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("Capability.runsOn overrides the build-level runner (list form)") {
       val cap = Capability.custom(
-        name = "release",
+        name = CapabilityName("release"),
         command = _ => SbtCommand("release"),
         participates = _.id == "serviceA",
         runsOn = Some(List("self-hosted", "linux")),
@@ -578,7 +581,11 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("Capability.custom emits a job with its command and defaults") {
       val cap =
-        Capability.custom(name = "notify", command = _ => SbtCommand("notify"), participates = _.id == "schema")
+        Capability.custom(
+          name = CapabilityName("notify"),
+          command = _ => SbtCommand("notify"),
+          participates = _.id == "schema",
+        )
       val wf = Planner.plan(sampleGraph, List(cap), config)
       assertTrue(
         wf.jobs.contains("notify-schema"),
@@ -591,12 +598,18 @@ object PlannerSpec extends ZIOSpecDefault:
         case n                       => n
       }
       val registries = List(
-        Target("us", env = Map("REGISTRY" -> EnvValue.plain("111.dkr.ecr.us-east-1"), "ROLE" -> secret"US_ROLE")),
-        Target("eu", env = Map("REGISTRY" -> EnvValue.plain("222.dkr.ecr.eu-west-1"), "ROLE" -> secret"EU_ROLE")),
+        Target(
+          TargetName("us"),
+          env = Map("REGISTRY" -> EnvValue.plain("111.dkr.ecr.us-east-1"), "ROLE" -> secret"US_ROLE"),
+        ),
+        Target(
+          TargetName("eu"),
+          env = Map("REGISTRY" -> EnvValue.plain("222.dkr.ecr.eu-west-1"), "ROLE" -> secret"EU_ROLE"),
+        ),
       )
       val multiDocker = Capability
         .custom(
-          name = "docker",
+          name = Capability.DockerName,
           command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
           participates = _.docker,
           phase = Phase.Publish,
@@ -623,7 +636,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("a Once capability emits a single build-wide job (no module suffix)") {
-      val fmt = Capability.once("fmt", SbtCommand("scalafmtCheckAll"))
+      val fmt = Capability.once(CapabilityName("fmt"), SbtCommand("scalafmtCheckAll"))
       val wf  = Planner.plan(sampleGraph, List(fmt), config)
       assertTrue(
         wf.jobs.contains("fmt"),
@@ -632,8 +645,8 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("per-module capabilities can depend on a Once gate by name") {
-      val fmt  = Capability.once("fmt", SbtCommand("scalafmtCheckAll"))
-      val test = Capability.testGraph.copy(needsCapabilities = List("fmt"))
+      val fmt  = Capability.once(CapabilityName("fmt"), SbtCommand("scalafmtCheckAll"))
+      val test = Capability.testGraph.copy(needsCapabilities = List(fmt.name))
       val wf   = Planner.plan(sampleGraph, List(fmt, test), config)
       assertTrue(
         wf.jobs("test-schema").needs.contains("fmt"),
@@ -658,7 +671,7 @@ object PlannerSpec extends ZIOSpecDefault:
         sampleGraph,
         List(
           Capability.custom(
-            name = "ship",
+            name = CapabilityName("ship"),
             command = _ => SbtCommand("ship"),
             participates = _.id == "serviceA",
             gate = Gate.Always,
@@ -666,7 +679,7 @@ object PlannerSpec extends ZIOSpecDefault:
             targets = _ =>
               List(
                 Target(
-                  "prod",
+                  TargetName("prod"),
                   env = Map("TIER" -> EnvValue.plain("prod"), "EXTRA" -> EnvValue.plain("only-target")),
                 )
               ),
@@ -685,14 +698,18 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("Once jobs receive capability.env") {
       val fmt =
-        Capability.once("fmt", SbtCommand("scalafmtCheckAll"), env = Map("SCALAFMT_VERSION" -> EnvValue.plain("3.8")))
+        Capability.once(
+          CapabilityName("fmt"),
+          SbtCommand("scalafmtCheckAll"),
+          env = Map("SCALAFMT_VERSION" -> EnvValue.plain("3.8")),
+        )
       assertTrue(
         Planner.plan(sampleGraph, List(fmt), config).jobs("fmt").env.get("SCALAFMT_VERSION").contains("3.8")
       )
     },
     test("FromEnv renders as ${{ env.NAME }}") {
       val cap = Capability.custom(
-        name = "relay",
+        name = CapabilityName("relay"),
         command = _ => SbtCommand("relay"),
         participates = _.id == "schema",
         gate = Gate.Always,
@@ -709,7 +726,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("Expr is an escape hatch rendered verbatim") {
       val cap = Capability.custom(
-        name = "expr",
+        name = CapabilityName("expr"),
         command = _ => SbtCommand("x"),
         participates = _.id == "schema",
         gate = Gate.Always,
@@ -762,15 +779,15 @@ object PlannerSpec extends ZIOSpecDefault:
         case n                       => n
       }
       val multiDocker = Capability.custom(
-        name = "docker",
+        name = Capability.DockerName,
         command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
         participates = _.docker,
-        targets = _ => List(Target("us"), Target("eu")),
+        targets = _ => List(Target(TargetName("us")), Target(TargetName("eu"))),
       )
       val deploy = Capability.deployGraph(
         participates = _.id == "serviceA",
         command = n => SbtCommand.module(n, SbtCommand("promote")),
-        targets = _ => List(Target("staging")),
+        targets = _ => List(Target(TargetName("staging"))),
       )
       val needs = Planner.plan(graph, List(multiDocker, deploy), config).jobs("deploy-serviceA-staging").needs
       assertTrue(
@@ -779,7 +796,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("unknown needsCapabilities names are ignored (do not crash)") {
-      val cap = Capability.testGraph.copy(needsCapabilities = List("does-not-exist"))
+      val cap = Capability.testGraph.copy(needsCapabilities = List(CapabilityName("does-not-exist")))
       val wf  = Planner.plan(sampleGraph, List(cap), config)
       assertTrue(!wf.jobs("test-schema").needs.contains("does-not-exist"))
     },
@@ -808,11 +825,11 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("andConditions with Always gate still applies a bare target condition") {
       val cap = Capability.custom(
-        name = "gate",
+        name = CapabilityName("gate"),
         command = _ => SbtCommand("x"),
         participates = _.id == "schema",
         gate = Gate.Always,
-        targets = _ => List(Target("only", condition = Some(JobCondition.refIs("refs/heads/main")))),
+        targets = _ => List(Target(TargetName("only"), condition = Some(JobCondition.refIs("refs/heads/main")))),
       )
       assertTrue(
         Planner
@@ -823,7 +840,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("Once capability with OnReleaseTag is gated") {
-      val once = Capability.once("releaseNotes", SbtCommand("notes"), gate = Gate.OnReleaseTag)
+      val once = Capability.once(CapabilityName("releaseNotes"), SbtCommand("notes"), gate = Gate.OnReleaseTag)
       assertTrue(
         Planner
           .plan(sampleGraph, List(once), config)
@@ -1097,7 +1114,12 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("PlanConfig.env is omitted on workflow_call caller jobs") {
       val docs = Capability
-        .once(name = "docs", command = SbtCommand("true"), phase = Phase.Publish, gate = Gate.OnReleaseTag)
+        .once(
+          name = CapabilityName("docs"),
+          command = SbtCommand("true"),
+          phase = Phase.Publish,
+          gate = Gate.OnReleaseTag,
+        )
         .copy(workflowCall = Some(WorkflowCall("org/repo/.github/workflows/pages.yml@main")))
       val wf = Planner.plan(
         sampleGraph,
@@ -1154,8 +1176,8 @@ object PlannerSpec extends ZIOSpecDefault:
         command = n => SbtCommand.module(n, SbtCommand("promote")),
         targets = _ =>
           List(
-            Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg"))),
-            Target("prod", condition = Some(JobCondition.refStartsWith("refs/tags/v"))),
+            Target(TargetName("stg"), condition = Some(JobCondition.hasPrLabel("deploy-stg"))),
+            Target(TargetName("prod"), condition = Some(JobCondition.refStartsWith("refs/tags/v"))),
           ),
         needsCapabilities = Nil,
         gate = Gate.Always,
@@ -1176,7 +1198,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("OnReleaseTag + Target HasPrLabel still includes tag clause (stage-on-PR footgun)") {
       val cap = Capability.dockerGraph.copy(
         gate = Gate.OnReleaseTag,
-        targets = _ => List(Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
+        targets = _ => List(Target(TargetName("stg"), condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
       )
       val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
@@ -1190,7 +1212,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("Once capability condition appears on the single job") {
       val cap = Capability.once(
-        name = "publish",
+        name = Capability.PublishName,
         command = SbtCommand("publishSigned; sonaRelease"),
         phase = Phase.Publish,
         gate = Gate.OnReleaseTag,
@@ -1204,7 +1226,12 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("Once workflowCall job also gets capability condition") {
       val cap = Capability
-        .once(name = "docs", command = SbtCommand("true"), phase = Phase.Publish, gate = Gate.OnReleaseTag)
+        .once(
+          name = CapabilityName("docs"),
+          command = SbtCommand("true"),
+          phase = Phase.Publish,
+          gate = Gate.OnReleaseTag,
+        )
         .copy(workflowCall = Some(WorkflowCall("org/repo/.github/workflows/pages.yml@main")))
         .withCondition(JobCondition.repositoryIs("org/repo"))
       val job = Planner.plan(sampleGraph, List(cap), config).jobs("docs")
@@ -1237,7 +1264,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("two Publish caps keep independent conditions") {
       val central = Capability.publish
       val ghp     = Capability.publish
-        .copy(name = "github-packages")
+        .copy(name = CapabilityName("github-packages"))
         .withCondition(JobCondition.repositoryIs("acme/fork"))
       val wf = Planner.plan(sampleGraph, List(central, ghp), config)
       assertTrue(
@@ -1285,7 +1312,7 @@ object PlannerSpec extends ZIOSpecDefault:
 
     test("Capability with zero participants produces no jobs") {
       val nobody = Capability(
-        name = "nobody",
+        name = CapabilityName("nobody"),
         phase = Phase.Verify,
         ordering = Ordering.DependencyOrdered,
         gate = Gate.Always,

@@ -1,6 +1,61 @@
 package zipx.core
 
+import neotype.Subtype
+import zipx.workflow.JobId
+import zipx.workflow.Names
 import zipx.workflow.Step
+
+/** A capability's name, which is also the prefix of every job id it produces: `test` becomes the job `test`, or
+  * `test-<module>` under [[CapabilityScope.Graph]].
+  *
+  * Typed for the same reason [[ModuleId]] is, and against the same rule: a name reaches a `jobs.<job_id>` key, so a
+  * space or a `/` in one produced a workflow GitHub rejects on push. The planner noticed neither, because it assembled
+  * the id by interpolation. This catches it where the capability is declared.
+  *
+  * A `Subtype` rather than a `Newtype`, so `CapabilityName <: String`: `c.name == "test"` and
+  * `s"${capability.name} ${node.id}"` keep working, and only construction is checked. Its character set is also what
+  * lets the planner *build* a [[zipx.workflow.JobId]] rather than validate one; see `asJobId` below.
+  */
+type CapabilityName = CapabilityName.Type
+object CapabilityName extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a capability name must be non-empty"
+    else if input.matches(Names.ActionsId) then true
+    else
+      s"invalid capability name '$input': it becomes a GitHub job id, so it must start with an ASCII letter or _ and " +
+        "contain only ASCII letters, digits, - or _"
+
+  extension (name: CapabilityName)
+    /** This name as a job id in its own right, which is what a [[CapabilityScope.Once]] capability's job is called.
+      *
+      * Total, and `unsafeMake` only because neotype cannot see it: [[JobId]] validates the same two things this type
+      * does, [[Names.ActionsId]] and non-empty. That is not a coincidence, it is *why* a capability name is
+      * constrained.
+      */
+    def asJobId: JobId = JobId.unsafeMake(name)
+
+    /** This name joined with the segments that distinguish one of its jobs from another, `-` between each.
+      *
+      * Also total: `-` is in [[Names.ActionsId]]'s trailing character set, and every caller passes segments drawn from
+      * it, a [[ModuleId]], a [[TargetName]] or `L<index>`. Restricted to this module so that stays true by inspection.
+      */
+    private[core] def jobId(rest: String*): JobId = JobId.unsafeMake((name +: rest).mkString("-"))
+  end extension
+end CapabilityName
+
+/** A target's name, the job-id suffix that keeps one destination's job distinct from another's.
+  *
+  * Same rule and same reason as [[CapabilityName]]: it lands in a `jobs.<job_id>` key, joined on with `-`.
+  */
+type TargetName = TargetName.Type
+object TargetName extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a target name must be non-empty"
+    else if input.matches(Names.ActionsId) then true
+    else
+      s"invalid target name '$input': it becomes part of a GitHub job id, so it must start with an ASCII letter or _ " +
+        "and contain only ASCII letters, digits, - or _"
+end TargetName
 
 /** What a capability's `extraSteps` / `postSteps` see. `target` is populated only when the capability fans out. */
 final case class StepContext(
@@ -62,7 +117,7 @@ enum CapabilityScope:
   *   merged *after* [[Capability.env]], so a target wins on a key clash.
   */
 final case class Target(
-    name: String,
+    name: TargetName,
     environment: Option[String] = None,
     env: Map[String, EnvValue] = Map.empty,
     condition: Option[JobCondition] = None,
@@ -99,7 +154,7 @@ final case class Target(
   *   pack val; the factories below take it explicitly.
   */
 final case class Capability(
-    name: String,
+    name: CapabilityName,
     phase: Phase,
     ordering: Ordering,
     gate: Gate,
@@ -107,7 +162,7 @@ final case class Capability(
     command: ModuleNode => SbtCommand,
     matrixed: Boolean,
     targets: ModuleNode => List[Target] = _ => Nil,
-    needsCapabilities: List[String] = Nil,
+    needsCapabilities: List[CapabilityName] = Nil,
     permissions: Map[String, String] = Map.empty,
     runsOn: Option[List[String]] = None,
     extraSteps: StepContext => List[Step] = _ => Nil,
@@ -135,8 +190,17 @@ object Capability:
   /** sbt-native-packager's `Docker / publish`, in the config-axis form the sbt CLI takes. */
   private val dockerPublish: SbtCommand = SbtCommand("Docker/publish")
 
+  /** The names of the built-ins, and the default name of a [[deploy]]. Named because they are also what a build writes
+    * in `needsCapabilities` to depend on one, and a default argument cannot be a bare literal now that the parameter is
+    * a [[CapabilityName]].
+    */
+  val TestName: CapabilityName    = CapabilityName("test")
+  val PublishName: CapabilityName = CapabilityName("publish")
+  val DockerName: CapabilityName  = CapabilityName("docker")
+  val DeployName: CapabilityName  = CapabilityName("deploy")
+
   private def testBody(scope: CapabilityScope, matrixed: Boolean): Capability = Capability(
-    name = "test",
+    name = TestName,
     phase = Phase.Verify,
     ordering = Ordering.ParallelWithUpstream,
     gate = Gate.Always,
@@ -147,7 +211,7 @@ object Capability:
   )
 
   private def publishBody(scope: CapabilityScope): Capability = Capability(
-    name = "publish",
+    name = PublishName,
     phase = Phase.Publish,
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
@@ -158,7 +222,7 @@ object Capability:
   )
 
   private def dockerBody(scope: CapabilityScope): Capability = Capability(
-    name = "docker",
+    name = DockerName,
     phase = Phase.Publish,
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
@@ -172,7 +236,7 @@ object Capability:
     * prepends a clean.
     */
   val test: Capability =
-    Capability.once(name = "test", command = ModuleNode.DefaultTestTask, phase = Phase.Verify, gate = Gate.Always)
+    Capability.once(name = TestName, command = ModuleNode.DefaultTestTask, phase = Phase.Verify, gate = Gate.Always)
 
   /** Joins per-module `<id>/<testTask>` commands instead of running one root task. The escape hatch for a build with
     * mixed `zipxTestTask` overrides, where a root aggregate task would run the wrong thing.
@@ -194,8 +258,8 @@ object Capability:
       participates: ModuleNode => Boolean,
       command: ModuleNode => SbtCommand,
       targets: ModuleNode => List[Target],
-      name: String = "deploy",
-      needsCapabilities: List[String] = List("docker"),
+      name: CapabilityName = DeployName,
+      needsCapabilities: List[CapabilityName] = List(DockerName),
       permissions: Map[String, String] = Map.empty,
       env: Map[String, EnvValue] = Map.empty,
       gate: Gate = Gate.OnReleaseTag,
@@ -218,8 +282,8 @@ object Capability:
       participates: ModuleNode => Boolean,
       command: ModuleNode => SbtCommand,
       targets: ModuleNode => List[Target],
-      name: String = "deploy",
-      needsCapabilities: List[String] = List("docker"),
+      name: CapabilityName = DeployName,
+      needsCapabilities: List[CapabilityName] = List(DockerName),
       permissions: Map[String, String] = Map.empty,
       env: Map[String, EnvValue] = Map.empty,
       gate: Gate = Gate.OnReleaseTag,
@@ -243,8 +307,8 @@ object Capability:
       participates: ModuleNode => Boolean,
       command: ModuleNode => SbtCommand,
       targets: ModuleNode => List[Target],
-      name: String,
-      needsCapabilities: List[String],
+      name: CapabilityName,
+      needsCapabilities: List[CapabilityName],
       permissions: Map[String, String],
       env: Map[String, EnvValue],
       gate: Gate,
@@ -270,7 +334,7 @@ object Capability:
     * custom capability is per-module target fan-out, such as multi-registry docker.
     */
   def custom(
-      name: String,
+      name: CapabilityName,
       command: ModuleNode => SbtCommand,
       participates: ModuleNode => Boolean = _ => true,
       phase: Phase = Phase.Publish,
@@ -278,7 +342,7 @@ object Capability:
       gate: Gate = Gate.OnReleaseTag,
       matrixed: Boolean = false,
       targets: ModuleNode => List[Target] = _ => Nil,
-      needsCapabilities: List[String] = Nil,
+      needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
       runsOn: Option[List[String]] = None,
       extraSteps: StepContext => List[Step] = _ => Nil,
@@ -313,7 +377,7 @@ object Capability:
     * For a reusable-workflow call with no local steps, `.copy` in a [[Capability.workflowCall]]; see `ZipxDocs`.
     */
   def once(
-      name: String,
+      name: CapabilityName,
       command: SbtCommand,
       phase: Phase = Phase.Verify,
       gate: Gate = Gate.Always,
@@ -321,7 +385,7 @@ object Capability:
       extraSteps: StepContext => List[Step] = _ => Nil,
       postSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
-      needsCapabilities: List[String] = Nil,
+      needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
       condition: Option[JobCondition] = None,
   ): Capability =

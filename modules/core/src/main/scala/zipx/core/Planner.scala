@@ -10,24 +10,30 @@ import scala.collection.immutable.ListMap
   */
 object Planner:
 
-  def jobId(capability: Capability, moduleId: String): String = s"${capability.name}-$moduleId"
+  // Every id below is *built* from validated pieces rather than assembled as text and validated afterwards: a
+  // `CapabilityName`, a `TargetName` and a `ModuleId` all satisfy `Names.ActionsId`, and `-` joins two such strings into
+  // a third. That is the whole reason those three types exist, and it is what makes this file free of a job-id failure
+  // case to report.
 
-  def jobId(capability: Capability, moduleId: String, target: Target): String =
-    s"${capability.name}-$moduleId-${target.name}"
+  def jobId(capability: Capability, moduleId: ModuleId): JobId = capability.name.jobId(moduleId)
 
-  def aggregateTargetJobId(capability: Capability, target: Target): String =
-    s"${capability.name}-${target.name}"
+  def jobId(capability: Capability, moduleId: ModuleId, target: Target): JobId =
+    capability.name.jobId(moduleId, target.name)
 
-  def layerJobId(capability: Capability, layerIndex: Int): String =
-    s"${capability.name}-L$layerIndex"
+  def aggregateTargetJobId(capability: Capability, target: Target): JobId =
+    capability.name.jobId(target.name)
+
+  /** `L<index>` is an ASCII letter followed by digits, so it is an `ActionsId` segment like the others. */
+  def layerJobId(capability: Capability, layerIndex: Int): JobId =
+    capability.name.jobId(s"L$layerIndex")
 
   /** Every job id a capability produces, which is how one capability's `needs` names another's jobs. */
-  def allJobIds(capability: Capability, graph: ModuleGraph): List[String] =
+  def allJobIds(capability: Capability, graph: ModuleGraph): List[JobId] =
     capability.scope match
-      case CapabilityScope.Once      => List(capability.name)
+      case CapabilityScope.Once      => List(capability.name.asJobId)
       case CapabilityScope.Aggregate =>
         distinctTargets(capability, graph) match
-          case Nil     => List(capability.name)
+          case Nil     => List(capability.name.asJobId)
           case targets => targets.map(t => aggregateTargetJobId(capability, t))
       case CapabilityScope.Layer =>
         val layers = graph.subsetLayers(capability.participates)
@@ -39,7 +45,7 @@ object Planner:
           .distinct
           .sorted
 
-  private def jobIdsForGraph(capability: Capability, node: ModuleNode): List[String] =
+  private def jobIdsForGraph(capability: Capability, node: ModuleNode): List[JobId] =
     capability.targets(node) match
       case Nil     => List(jobId(capability, node.id))
       case targets => targets.sortBy(_.name).map(t => jobId(capability, node.id, t))
@@ -47,7 +53,7 @@ object Planner:
   /** Deduplicated by name, first-seen winning, so two modules naming `prod` differently do not produce two `prod` jobs.
     */
   private def distinctTargets(capability: Capability, graph: ModuleGraph): List[Target] =
-    val seen = scala.collection.mutable.LinkedHashMap.empty[String, Target]
+    val seen = scala.collection.mutable.LinkedHashMap.empty[TargetName, Target]
     for
       moduleId <- graph.topologicalSort
       node     <- graph.get(moduleId).toList
@@ -84,15 +90,11 @@ object Planner:
       .foreach(involved => sys.error(s"zipx: needsCapabilities cycle among ${involved.mkString(", ")}"))
   end validateCapabilities
 
-  // The JobId is the definition and the String is derived from it, because these ids are both public API and operands of
-  // `Expr.JobOutput` / `Expr.JobResult`, which take a validated value rather than a literal.
-  private val affectedId       = JobId("affected")
-  private val verifyGateId     = JobId("verify-gate")
-  private val cacheRehydrateId = JobId("cache-rehydrate")
-
-  val affectedJobId: String       = affectedId.unwrap
-  val verifyGateJobId: String     = verifyGateId.unwrap
-  val cacheRehydrateJobId: String = cacheRehydrateId.unwrap
+  // The three jobs zipx invents. `JobId` is a subtype of `String`, so one val serves both roles these had to be split
+  // for before: the operand of `Expr.JobOutput` / `Expr.JobResult`, which take a validated value, and the `jobs` key.
+  val affectedJobId: JobId       = JobId("affected")
+  val verifyGateJobId: JobId     = JobId("verify-gate")
+  val cacheRehydrateJobId: JobId = JobId("cache-rehydrate")
 
   def plan(graph: ModuleGraph, capabilities: List[Capability], config: PlanConfig): Workflow =
     validateCapabilities(capabilities)
@@ -137,7 +139,9 @@ object Planner:
         ),
       ).flatten
 
-    val jobs = ListMap.from(leading ++ capabilityJobs)
+    // Widening the key to `String` is the last responsible moment: `Workflow` is the serialization model, and a
+    // `jobs:` key is a YAML scalar. Every id above is a `JobId`, which is what the widening is allowed to forget.
+    val jobs = ListMap.from[String, Job](leading ++ capabilityJobs)
 
     Workflow(
       name = config.workflowName,
@@ -170,9 +174,9 @@ object Planner:
     Expr.github("event_name") === Expr.quoted(name)
 
   /** Compared against a quoted `'true'` rather than negated, because every `$GITHUB_OUTPUT` value is a string. */
-  private val verifyGateRuns: Expr = Expr.JobOutput(verifyGateId, OutputName("run"))
+  private val verifyGateRuns: Expr = Expr.JobOutput(verifyGateJobId, OutputName("run"))
 
-  private val verifyGateResult: Expr = Expr.JobResult(verifyGateId)
+  private val verifyGateResult: Expr = Expr.JobResult(verifyGateJobId)
 
   /** Fail-open: when this job is skipped or fails, Verify still runs. */
   private def verifyGateJob(config: PlanConfig): Job =
@@ -253,7 +257,7 @@ object Planner:
     */
   private def cacheRehydrateJob(config: PlanConfig): Job =
     val ctx = StepContext(
-      node = ModuleNode(id = ModuleId.fromJobId(cacheRehydrateId), publishes = false, ciRelevant = false),
+      node = ModuleNode(id = ModuleId.fromJobId(cacheRehydrateJobId), publishes = false, ciRelevant = false),
       target = None,
       matrixed = false,
       actions = config.actions,
@@ -282,11 +286,11 @@ object Planner:
     * run is for a docs-only deploy). Non-Verify phases pass through untouched.
     */
   private def applyVerifyGate(
-      needs: List[String],
+      needs: List[JobId],
       cond: Option[String],
       phase: Phase,
       usesVerifyGate: Boolean,
-  ): (List[String], Option[String]) =
+  ): (List[JobId], Option[String]) =
     if phase != Phase.Verify then (needs, cond)
     else
       val notOnTagOrDispatch = !onAnyTagPush && (Expr.github("event_name") !== Expr.quoted("workflow_dispatch"))
@@ -381,8 +385,8 @@ object Planner:
   private def crossCapabilityNeeds(
       capability: Capability,
       graph: ModuleGraph,
-      byName: Map[String, Capability],
-  ): List[String] =
+      byName: Map[CapabilityName, Capability],
+  ): List[JobId] =
     (for
       capName <- capability.needsCapabilities
       dep     <- byName.get(capName).toList
@@ -393,9 +397,9 @@ object Planner:
       capability: Capability,
       graph: ModuleGraph,
       config: PlanConfig,
-      byName: Map[String, Capability],
+      byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
-  ): (String, Job) =
+  ): (JobId, Job) =
     val releaseCond   = Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
     val crossNeeds    = crossCapabilityNeeds(capability, graph, byName)
     val (needs, base) = applyVerifyGate(crossNeeds, releaseCond, capability.phase, usesVerifyGate)
@@ -403,7 +407,7 @@ object Planner:
     capability.workflowCall match
       case Some(call) =>
         // GitHub rejects job-level `env` and `runs-on` alongside `uses`, hence neither here.
-        capability.name -> Job(
+        capability.name.asJobId -> Job(
           name = Some(capability.name),
           runsOn = Nil,
           needs = needs,
@@ -414,7 +418,7 @@ object Planner:
         )
       case None =>
         val cache = cacheContribution(config)
-        capability.name -> Job(
+        capability.name.asJobId -> Job(
           name = Some(capability.name),
           runsOn = capability.runsOn.getOrElse(List(config.runnerOs)),
           needs = needs,
@@ -430,7 +434,7 @@ object Planner:
             hasMatrix = false,
             cache,
             commandOverride = None,
-            jobSuffix = capability.name,
+            jobSuffix = capability.name.asJobId,
           ),
         )
     end match
@@ -442,9 +446,9 @@ object Planner:
       capability: Capability,
       graph: ModuleGraph,
       config: PlanConfig,
-      byName: Map[String, Capability],
+      byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
-  ): List[(String, Job)] =
+  ): List[(JobId, Job)] =
     val nodes = participants(capability, graph)
     if nodes.isEmpty then Nil
     else
@@ -459,7 +463,7 @@ object Planner:
       distinctTargets(capability, graph) match
         case Nil =>
           List(
-            capability.name -> Job(
+            capability.name.asJobId -> Job(
               name = Some(capability.name),
               runsOn = runner,
               needs = baseNeeds,
@@ -475,7 +479,7 @@ object Planner:
                 hasMatrix = false,
                 cache,
                 commandOverride = joinCommands(capability, nodes),
-                jobSuffix = capability.name,
+                jobSuffix = capability.name.asJobId,
               ),
             )
           )
@@ -511,9 +515,9 @@ object Planner:
       capability: Capability,
       graph: ModuleGraph,
       config: PlanConfig,
-      byName: Map[String, Capability],
+      byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
-  ): List[(String, Job)] =
+  ): List[(JobId, Job)] =
     val layers = graph.subsetLayers(capability.participates)
     if layers.isEmpty then Nil
     else
@@ -563,9 +567,9 @@ object Planner:
       graph: ModuleGraph,
       config: PlanConfig,
       usesAffected: Boolean,
-      byName: Map[String, Capability],
+      byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
-  ): List[(String, Job)] =
+  ): List[(JobId, Job)] =
     val upstreamNeeds = capability.ordering match
       case Ordering.ParallelWithUpstream =>
         graph
@@ -609,13 +613,13 @@ object Planner:
     val runner = capability.runsOn.getOrElse(List(config.runnerOs))
 
     def baseJob(
-        id: String,
+        id: JobId,
         displayName: String,
         target: Option[Target],
         cond: Option[String],
         environment: Option[String],
         targetEnv: Map[String, EnvValue],
-    ): (String, Job) =
+    ): (JobId, Job) =
       id -> Job(
         name = Some(displayName),
         runsOn = runner,
@@ -673,7 +677,7 @@ object Planner:
   private def jobCondition(
       capability: Capability,
       node: ModuleNode,
-      upstreamNeeds: List[String],
+      upstreamNeeds: List[JobId],
       gatedOnAffected: Boolean,
   ): Option[String] =
     val releaseGate =
@@ -686,7 +690,7 @@ object Planner:
     // and that is exactly the case GitHub's implicit `success()` would wrongly block.
     val upstreamGuards =
       if gatedOnAffected && upstreamNeeds.nonEmpty then
-        upstreamNeeds.sorted.map(u => (jobResultOf(u) !== Expr.quoted("failure")).unwrapped)
+        upstreamNeeds.sorted.map(u => (Expr.JobResult(u) !== Expr.quoted("failure")).unwrapped)
       else Nil
     val notCancelled = Option.when(gatedOnAffected)((!Expr.cancelled).unwrapped)
 
@@ -702,7 +706,7 @@ object Planner:
     */
   private def affectedContains(member: ExprLiteral): Expr =
     Expr.contains(
-      Expr.fromJson(Expr.JobOutput(affectedId, OutputName("modules"))),
+      Expr.fromJson(Expr.JobOutput(affectedJobId, OutputName("modules"))),
       Expr.Quoted(member),
     )
 
@@ -711,16 +715,11 @@ object Planner:
     */
   private val affectedContainsAll: Expr = affectedContains(ExprLiteral("all"))
 
-  private def jobResultOf(jobId: String): Expr =
-    orThrow(s"job id '$jobId'", Expr.jobResultMake(jobId))
-
-  /** [[Expr.lit]] over config-derived text: a workflow name, a runner os, an sbt task name. Only a control character
-    * fails, which is why this is a `Left` a caller reports rather than a case the planner can recover from.
+  /** [[Expr.lit]] over text built here from validated parts: a [[WorkflowName]], a [[RunnerOs]], a [[JdkVersion]], a
+    * job id, and the punctuation joining them. Every one of those forbids the control characters [[ShText]] rejects,
+    * which is what makes this total.
     */
-  private def lit(text: String): Expr = orThrow(s"literal '$text'", Expr.litMake(text))
-
-  private def orThrow(what: String, result: Either[String, Expr]): Expr =
-    result.fold(error => throw IllegalArgumentException(s"zipx: invalid $what: $error"), identity)
+  private def lit(text: String): Expr = Expr.Lit(ShText.unsafeMake(text))
 
   private def nearestParticipatingAncestors(
       node: ModuleNode,
@@ -763,7 +762,7 @@ object Planner:
       hasMatrix: Boolean,
       cache: CacheContribution,
       commandOverride: Option[SbtCommand],
-      jobSuffix: String,
+      jobSuffix: JobId,
   ): List[Step] =
     val command     = commandOverride.getOrElse(capability.command(node))
     val onMatrixLeg = if hasMatrix then underMatrixScala else identity[SbtCommand]
@@ -844,7 +843,7 @@ object Planner:
   private val checkoutWith: ListMap[String, String] =
     ListMap("fetch-depth" -> "0", "fetch-tags" -> "true")
 
-  private def localDirCacheSteps(config: PlanConfig, jobSuffix: String): List[Step] =
+  private def localDirCacheSteps(config: PlanConfig, jobSuffix: JobId): List[Step] =
     config.cache match
       case CacheBackend.LocalDir =>
         val prefix = s"${config.runnerOs}-jdk${config.javaVersion}-sbt-"
@@ -892,7 +891,7 @@ object Planner:
   private def runtimeEpochCacheSteps(
       prefix: String,
       paths: String,
-      jobSuffix: String,
+      jobSuffix: JobId,
       stepId: StepId,
       resolveRun: String,
       cacheAction: String,
