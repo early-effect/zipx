@@ -64,7 +64,7 @@ Prefer GitTags so post-tag PRs warm from the release cache without a regenerate 
 ```scala
 zipxCache := CacheBackend.LocalDir
 zipxCache := CacheBackend.BazelRemoteSidecar(RemoteCacheProof.image, RemoteCacheProof.port)
-zipxCache := CacheBackend.ManagedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
+zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
 ```
 
 - **LocalDir**: persist local cache dirs and `target/` with `actions/cache`. Primary key is OS + JDK + epoch + run id +
@@ -94,7 +94,7 @@ store is the persistence); LocalDir uses epoch-keyed `actions/cache` instead.
         )
         val remote = DocsRender.job("test")(Capability.test)(using
           libGraph,
-          config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")),
+          config.copy(cache = CacheBackend.managedRemote("grpcs://cache.example", "CACHE_KEY")),
         )
         local + "\n---\n" + sidecar + "\n---\n" + remote
       }.assert(yaml =>
@@ -103,7 +103,6 @@ store is the persistence); LocalDir uses epoch-keyed `actions/cache` instead.
           RemoteCacheProof.sidecarYamlMustContain.forall(yaml.contains),
           yaml.contains(s"${RemoteCacheProof.envUri}: grpcs://cache.example") ||
             yaml.contains(s"${RemoteCacheProof.envUri}: \"grpcs://cache.example\""),
-          // Sidecar / managed sections must not rely on actions/cache for the remote half: managed block has no cache step
           yaml.split("---").toList match
             case local :: sidecar :: managed :: Nil =>
               local.contains("actions/cache") &&

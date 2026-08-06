@@ -1,146 +1,158 @@
 package zipx.core
 
-/** Typed GitHub Actions job `if:` predicate. Prefer smart constructors over assembling cases by hand.
+import neotype.unwrap
+import zipx.workflow.{ContextPath, EnvName, EventName, Expr, ExprLiteral, RawExpr}
+
+/** A typed job `if:` predicate: an optional extra filter, where [[Gate]] is the timeline axis. The planner ANDs both
+  * [[Capability.condition]] and [[Target.condition]] with its gate and affected clauses.
   *
-  * [[Gate]] is the timeline axis (`Always` / `OnReleaseTag`). [[JobCondition]] is an optional extra filter ANDed into
-  * the job `if` (fork repo, PR label, branch, repo var, …). Both [[Capability.condition]] and [[Target.condition]] use
-  * this AST; the planner renders and ANDs them with gate / affected clauses.
-  *
-  * Compose with [[&&]] / [[||]] (or [[JobCondition.and]] / [[JobCondition.or]]). Infix `&&` / `||` follow Boolean
-  * precedence (`&&` tighter than `||`, both left-associative). [[JobCondition.Raw]] is the escape hatch for expressions
-  * the variants cannot express.
+  * Every case holds a value validated at construction, so [[expr]] and [[render]] are total. A literal goes through an
+  * `inline` constructor and is checked while the consumer's build compiles; runtime data goes through the `*Make`
+  * sibling and comes back as an `Either`.
   */
 enum JobCondition:
-  case RepositoryIs(repo: String)
-  case VarNonEmpty(name: String)
-  case RefIs(ref: String)
-  case RefStartsWith(prefix: String)
-  case EventIs(name: String)
-  case HasPrLabel(label: String)
-  case All(clauses: List[JobCondition])
-  case Any(clauses: List[JobCondition])
-  case Not(inner: JobCondition)
-  case Raw(expression: String)
+  case RepositoryIs(repo: ExprLiteral)
+  case VarNonEmpty(name: EnvName)
+  case RefIs(ref: ExprLiteral)
+  case RefStartsWith(prefix: ExprLiteral)
+  case EventIs(name: EventName)
+  case HasPrLabel(label: ExprLiteral)
 
-  /** Conjunction with `other` (renders as `(this) && (other)`).
-    *
-    * Infix precedence matches Boolean ops: `&&` binds tighter than `||`, both left-associative (`a || b && c` ≡
-    * `a || (b && c)`; `a && b && c` ≡ `(a && b) && c`).
+  /** `first` plus `rest` rather than one list, so `All(Nil)` is unconstructible rather than rejected at render time. */
+  case All(first: JobCondition, rest: List[JobCondition])
+
+  /** Non-empty by the same construction as [[All]]. */
+  case Any(first: JobCondition, rest: List[JobCondition])
+  case Not(inner: JobCondition)
+
+  /** **Escape hatch.** See [[zipx.workflow.RawExpr]] for what it does and does not guarantee.
     */
+  case Raw(expression: RawExpr)
+
+  /** `(this) && (other)`. */
   infix def &&(other: JobCondition): JobCondition = JobCondition.and(this, other)
 
-  /** Disjunction with `other` (renders as `(this) || (other)`).
-    *
-    * Lower precedence than [[&&]] (same as Boolean `||` vs `&&`). Parenthesize when you mean `(a || b) && c`.
-    */
+  /** `(this) || (other)`. */
   infix def ||(other: JobCondition): JobCondition = JobCondition.or(this, other)
 
-  /** Negation (renders as `!(this)`). Prefix `!` binds tighter than [[&&]] / [[||]]. */
+  /** `!(this)`. */
   def unary_! : JobCondition = JobCondition.not(this)
 
-  /** Render to the string that lands in a job's `if:` field. */
-  def render: String = this match
-    case JobCondition.RepositoryIs(repo) =>
-      s"github.repository == '${JobCondition.requireLiteral("repository", repo)}'"
-    case JobCondition.VarNonEmpty(name) =>
-      s"vars.${JobCondition.requireIdent("var", name)} != ''"
-    case JobCondition.RefIs(ref) =>
-      s"github.ref == '${JobCondition.requireLiteral("ref", ref)}'"
-    case JobCondition.RefStartsWith(prefix) =>
-      s"startsWith(github.ref, '${JobCondition.requireLiteral("ref prefix", prefix)}')"
-    case JobCondition.EventIs(name) =>
-      s"github.event_name == '${JobCondition.requireIdent("event", name)}'"
-    case JobCondition.HasPrLabel(label) =>
-      s"contains(github.event.pull_request.labels.*.name, '${JobCondition.requireLiteral("label", label)}')"
-    case JobCondition.All(clauses) =>
-      JobCondition.requireNonEmpty("All", clauses).map(c => s"(${c.render})").mkString(" && ")
-    case JobCondition.Any(clauses) =>
-      JobCondition.requireNonEmpty("Any", clauses).map(c => s"(${c.render})").mkString(" || ")
-    case JobCondition.Not(inner) =>
-      s"!(${inner.render})"
-    case JobCondition.Raw(expression) =>
-      JobCondition.requireRaw(expression)
+  /** This condition as a structural [[zipx.workflow.Expr]] rather than one opaque [[zipx.workflow.Expr.Raw]], so that
+    * operator jointing has a single definition, in `Expr`.
+    *
+    * Every clause of an [[All]] or [[Any]] is wrapped in [[zipx.workflow.Expr.Group]]: a `JobCondition` composes
+    * conditions of unknown shape, where `Expr`'s own `&&` joins operands bare and leaves grouping to the author.
+    */
+  def expr: Expr = this match
+    case RepositoryIs(repo)    => Expr.Github(JobCondition.RepositoryPath) === Expr.Quoted(repo)
+    case VarNonEmpty(name)     => Expr.Var(name) !== JobCondition.EmptyLiteral
+    case RefIs(ref)            => Expr.Github(JobCondition.RefPath) === Expr.Quoted(ref)
+    case RefStartsWith(prefix) => Expr.startsWith(Expr.Github(JobCondition.RefPath), Expr.Quoted(prefix))
+    case EventIs(name)         =>
+      Expr.Github(JobCondition.EventNamePath) === Expr.Quoted(JobCondition.asLiteral(name))
+    case HasPrLabel(label) => Expr.contains(Expr.Github(JobCondition.LabelsPath), Expr.Quoted(label))
+    case All(first, rest)  => JobCondition.joined(first, rest, _ && _)
+    case Any(first, rest)  => JobCondition.joined(first, rest, _ || _)
+    case Not(inner)        => !Expr.group(inner.expr)
+    case Raw(expression)   => Expr.Raw(expression)
+
+  /** [[zipx.workflow.Expr.unwrapped]], not `render`: an `if:` is already an expression context, and two wrapped
+    * conditions concatenate into a template string that evaluates to neither operand.
+    */
+  def render: String = expr.unwrapped
 end JobCondition
 
 object JobCondition:
 
+  // The `inline` constructors trim, which neotype folds at compile time along with the rest of the validator. Trimming
+  // is not laxness: `ExprLiteral` rejects whitespace outright, so without it a copied-in value with a trailing space
+  // would be a compile error naming a character the author cannot see.
+
   /** `github.repository == 'owner/repo'`. */
-  def repositoryIs(repo: String): JobCondition = RepositoryIs(requireLiteral("repository", repo))
+  inline def repositoryIs(inline repo: String): JobCondition = RepositoryIs(ExprLiteral(repo.trim))
+
+  def repositoryIsMake(repo: String): Either[String, JobCondition] =
+    ExprLiteral.make(repo.trim).map(RepositoryIs(_))
 
   /** `vars.NAME != ''`. */
-  def varNonEmpty(name: String): JobCondition = VarNonEmpty(requireIdent("var", name))
+  inline def varNonEmpty(inline name: String): JobCondition = VarNonEmpty(EnvName(name))
+
+  def varNonEmptyMake(name: String): Either[String, JobCondition] = EnvName.make(name).map(VarNonEmpty(_))
 
   /** `github.ref == 'refs/…'`. */
-  def refIs(ref: String): JobCondition = RefIs(requireLiteral("ref", ref))
+  inline def refIs(inline ref: String): JobCondition = RefIs(ExprLiteral(ref.trim))
+
+  def refIsMake(ref: String): Either[String, JobCondition] = ExprLiteral.make(ref.trim).map(RefIs(_))
 
   /** `startsWith(github.ref, 'prefix')`. */
-  def refStartsWith(prefix: String): JobCondition = RefStartsWith(requireLiteral("ref prefix", prefix))
+  inline def refStartsWith(inline prefix: String): JobCondition = RefStartsWith(ExprLiteral(prefix.trim))
 
-  /** `github.event_name == 'name'` (e.g. `pull_request`, `workflow_dispatch`). */
-  def eventIs(name: String): JobCondition = EventIs(requireIdent("event", name))
+  def refStartsWithMake(prefix: String): Either[String, JobCondition] =
+    ExprLiteral.make(prefix.trim).map(RefStartsWith(_))
 
-  /** Manual **Actions → Run workflow** (requires `zipxWorkflowDispatch := true`). */
+  /** `github.event_name == 'name'`. */
+  inline def eventIs(inline name: String): JobCondition = EventIs(EventName(name))
+
+  def eventIsMake(name: String): Either[String, JobCondition] = EventName.make(name).map(EventIs(_))
+
+  /** Manual **Actions → Run workflow**, which needs `zipxWorkflowDispatch := true` to be reachable. */
   def onWorkflowDispatch: JobCondition = eventIs("workflow_dispatch")
 
-  /** Release tag refs (`refs/tags/v…`), same shape as [[Gate.OnReleaseTag]]. */
+  /** The same refs as [[Gate.OnReleaseTag]]. */
   def onReleaseTag: JobCondition = refStartsWith("refs/tags/v")
 
-  /** PR has a label with this exact name. */
-  def hasPrLabel(label: String): JobCondition = HasPrLabel(requireLiteral("label", label))
+  /** `contains(github.event.pull_request.labels.*.name, 'label')`. */
+  inline def hasPrLabel(inline label: String): JobCondition = HasPrLabel(ExprLiteral(label.trim))
 
-  /** Conjunction; rejects an empty list. */
-  def and(clauses: JobCondition*): JobCondition = All(requireNonEmpty("and", clauses.toList))
+  def hasPrLabelMake(label: String): Either[String, JobCondition] = ExprLiteral.make(label.trim).map(HasPrLabel(_))
 
-  /** Disjunction; rejects an empty list. */
-  def or(clauses: JobCondition*): JobCondition = Any(requireNonEmpty("or", clauses.toList))
+  /** The signature is what rejects an empty conjunction: there is no `and()` to call. */
+  def and(first: JobCondition, rest: JobCondition*): JobCondition = All(first, rest.toList)
+
+  def or(first: JobCondition, rest: JobCondition*): JobCondition = Any(first, rest.toList)
+
+  /** [[and]] over a list of unknown length. `None` for an empty list, since "no clauses" is not a condition, and a
+    * caller assembling clauses conditionally wants the `Option[JobCondition]` that [[Capability.condition]] holds.
+    */
+  def allOf(clauses: List[JobCondition]): Option[JobCondition] = clauses match
+    case Nil          => None
+    case head :: tail => Some(All(head, tail))
+
+  /** See [[allOf]]. */
+  def anyOf(clauses: List[JobCondition]): Option[JobCondition] = clauses match
+    case Nil          => None
+    case head :: tail => Some(Any(head, tail))
 
   def not(inner: JobCondition): JobCondition = Not(inner)
 
-  /** Escape hatch: raw GHA expression, trimmed; must be non-empty. */
-  def raw(expression: String): JobCondition = Raw(requireRaw(expression))
+  /** **Escape hatch.** A raw GHA expression, trimmed and checked at compile time.
+    */
+  inline def raw(inline expression: String): JobCondition = Raw(RawExpr(expression.trim))
 
-  /** Render an optional condition for planner `if:` assembly. */
+  def rawMake(expression: String): Either[String, JobCondition] = RawExpr.make(expression.trim).map(Raw(_))
+
   def renderOpt(c: Option[JobCondition]): Option[String] = c.map(_.render)
 
-  private val IdentPattern = raw"[A-Za-z_][A-Za-z0-9_]*".r
+  private def joined(
+      first: JobCondition,
+      rest: List[JobCondition],
+      op: (Expr, Expr) => Expr,
+  ): Expr = (first :: rest).map(c => Expr.group(c.expr)).reduceLeft(op)
 
-  /** owner/repo, refs, labels: printable ASCII without quotes, `$`, or whitespace. */
-  private val LiteralPattern = raw"""[A-Za-z0-9_./@+:-][A-Za-z0-9_./@+:-]*""".r
+  /** `unsafeMake` because [[EventName]]'s character set (letters, digits, `_`) is a subset of [[ExprLiteral]]'s, so the
+    * alternative would be an `Either` with an unreachable `Left`.
+    */
+  private def asLiteral(name: EventName): ExprLiteral = ExprLiteral.unsafeMake(name.unwrap)
 
-  private val MaxLiteralLen = 256
+  /** A [[zipx.workflow.Expr.Lit]] rather than a [[zipx.workflow.Expr.Quoted]], because `Quoted` wraps an
+    * [[ExprLiteral]], which is non-empty by definition.
+    */
+  private val EmptyLiteral: Expr = Expr.lit("''")
 
-  private def requireIdent(kind: String, name: String): String =
-    if name.isEmpty then throw IllegalArgumentException(s"$kind name must be non-empty")
-    if IdentPattern.matches(name) then name
-    else
-      throw IllegalArgumentException(
-        s"invalid $kind name '$name': must match ${IdentPattern.regex}"
-      )
-
-  private def requireLiteral(kind: String, value: String): String =
-    val trimmed = value.trim
-    if trimmed.isEmpty then throw IllegalArgumentException(s"$kind must be non-empty")
-    if trimmed.length > MaxLiteralLen then throw IllegalArgumentException(s"$kind exceeds $MaxLiteralLen characters")
-    if trimmed.contains('\'') || trimmed.contains('"') || trimmed.contains('$') || trimmed.exists(_.isWhitespace) then
-      throw IllegalArgumentException(
-        s"invalid $kind '$trimmed': must not contain quotes, $$ , or whitespace"
-      )
-    if LiteralPattern.matches(trimmed) then trimmed
-    else
-      throw IllegalArgumentException(
-        s"invalid $kind '$trimmed': allowed characters are letters, digits, _ . / @ + : -"
-      )
-  end requireLiteral
-
-  private def requireRaw(expression: String): String =
-    val trimmed = expression.trim
-    if trimmed.isEmpty then throw IllegalArgumentException("raw JobCondition expression must be non-empty")
-    if trimmed.length > MaxLiteralLen * 4 then
-      throw IllegalArgumentException(s"raw JobCondition expression exceeds ${MaxLiteralLen * 4} characters")
-    trimmed
-
-  private def requireNonEmpty(op: String, clauses: List[JobCondition]): List[JobCondition] =
-    if clauses.isEmpty then throw IllegalArgumentException(s"JobCondition.$op requires at least one clause")
-    clauses
+  private val RepositoryPath: ContextPath = ContextPath("repository")
+  private val RefPath: ContextPath        = ContextPath("ref")
+  private val EventNamePath: ContextPath  = ContextPath("event_name")
+  private val LabelsPath: ContextPath     = ContextPath("event.pull_request.labels.*.name")
 
 end JobCondition

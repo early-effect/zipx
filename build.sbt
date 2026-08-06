@@ -43,7 +43,7 @@ val commonSettings = Seq(
 )
 
 lazy val root = (project in file("."))
-  .aggregate(workflow, core, central, plugin, docs)
+  .aggregate(shell, workflow, core, central, plugin, docs)
   .settings(
     name           := "zipx",
     publish / skip := true,
@@ -57,8 +57,8 @@ lazy val root = (project in file("."))
         ZipxDocs.pages().andCondition(upstream),
         // Parallel with Aggregate test (needs verify-gate only): live remote-cache IT.
         Capability.once(
-          name = "remote-cache-it",
-          command = "it/test",
+          name = CapabilityName("remote-cache-it"),
+          command = SbtCommand("it/test"),
           phase = Phase.Verify,
           gate = Gate.Always,
           needsCapabilities = Nil,
@@ -66,7 +66,7 @@ lazy val root = (project in file("."))
         ),
       )
     },
-    zipxJavaVersion      := "25",
+    zipxJavaVersion      := JdkVersion("25"),
     zipxWorkflowDispatch := true,
     zipxDependabotSync   := true,
     zipxScalaSteward     := true,
@@ -75,8 +75,18 @@ lazy val root = (project in file("."))
 // Keep `it` on the build even though it is not aggregated (parallel CI job runs it/test).
 lazy val zipxItRef = LocalProject("it")
 
+// Scala 3. Shell AST: no zipx concepts, no zio-blocks, usable standalone.
+lazy val shell = (project in file("modules/shell"))
+  .settings(commonSettings)
+  .settings(
+    name        := "zipx-shell",
+    description := "Typed, composable shell script AST with compile-time-validated primitives",
+    libraryDependencies ++= shellLibraryDeps,
+  )
+
 // Scala 3. GitHub Actions AST + deterministic YAML renderer.
 lazy val workflow = (project in file("modules/workflow"))
+  .dependsOn(shell)
   .settings(commonSettings)
   .settings(
     name        := "zipx-workflow",

@@ -61,12 +61,12 @@ lazy val root = (project in file("."))
     // nothing required for Aggregate test + publish
     // optional paved Central path:
     zipxCapabilities += ZipxCentral.release,
-    zipxJavaVersion  := "25",
+    zipxJavaVersion  := JdkVersion("25"),
   )
 ```
 """,
       exampleValue {
-        val g = ModuleGraph(List(ModuleNode("lib", publishes = true, crossScalaVersions = List("3.8.4"))))
+        val g = GraphFixture(List(ModuleNode(ModuleId("lib"), publishes = true, crossScalaVersions = List("3.8.4"))))
         DocsRender.jobs("test", "publish")(Capability.test, Capability.publish)(using g)
       }.assert(yaml =>
         assertTrue(
@@ -83,7 +83,7 @@ zipx reads build-level settings from the root project's scope, so write plain ba
 A bare `zipxTestTask := "testFull"` applies to every module; any module can override it in its own `.settings(...)`.
 
 ```scala
-zipxJavaVersion := "25"
+zipxJavaVersion := JavaVersion("25")
 zipxTestTask    := "testFull"
 zipxWorkflowDispatch := true
 ```

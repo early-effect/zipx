@@ -16,8 +16,8 @@ version      := "1.4.2-ci" // stands in for sbt-dynver-ci output; drives the cac
 
 // Build-level zipx config: plain bare settings (sbt 2.0 common settings). zipx reads these from the root project's
 // scope, so no `ThisBuild /` prefix is needed.
-zipxWorkflowName := "CI"
-zipxJavaVersion  := "21"
+zipxWorkflowName := WorkflowName("CI")
+zipxJavaVersion  := JdkVersion("21")
 
 lazy val models = project
   .settings(crossScalaVersions := Seq(scala2, scala3))
@@ -67,9 +67,12 @@ lazy val root = (project in file("."))
 // Format gate, then Layer-mode test/publish (dependency-ordered waves, few sbt sessions).
 // Deploy stays Aggregate-by-target (one job per staging/prod; modules batched). Multi-registry
 // docker below remains Graph (per registry target).
-zipxCapabilities += zipxTasks.once("fmt", scalafmtCheckAll)
+// `Fmt` is named once and referred to twice: a capability name is a validated `CapabilityName` (it becomes the
+// `jobs.fmt` key), so naming the val is also how the dependent capability avoids repeating the literal.
+val Fmt = CapabilityName("fmt")
+zipxCapabilities += zipxTasks.once(Fmt, scalafmtCheckAll)
 zipxCapabilities ++= Seq(
-  Capability.testLayers.copy(needsCapabilities = List("fmt")),
+  Capability.testLayers.copy(needsCapabilities = List(Fmt)),
   Capability.publishLayers,
 )
 
@@ -80,7 +83,7 @@ zipxCapabilities ++= Seq(
 // command syntax around a key when you need it, e.g. `cmd"+ ${publish}"` or `cmd"++${scalaV}; ${publish}"`.)
 zipxCapabilities += Capability
   .custom(
-    name = "docker",
+    name = Capability.DockerName,
     command = cmd"${Docker / publish}",
     participates = _.docker,
     phase = Phase.Publish,
@@ -90,20 +93,22 @@ zipxCapabilities += Capability
           name = r.name,
           env = Map(
             "REGISTRY"    -> EnvValue.plain(r.host),
-            "DEPLOY_ROLE" -> secret"${r.roleSecret}",
+            "DEPLOY_ROLE" -> r.roleSecret,
           ),
         )
       ),
     permissions = Map("id-token" -> "write", "contents" -> "read"),
   )
   .copy(
+    // `Expr.env` rather than the string `"${{ env.DEPLOY_ROLE }}"`: the name is validated at compile time, so a typo is
+    // a build error here instead of an empty input on the runner.
     extraSteps = _ =>
       List(
-        Step(
-          name = Some("Login to registry"),
-          uses = Some("aws-actions/configure-aws-credentials@v6"),
-          `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"),
-        )
+        Step
+          .uses("aws-actions/configure-aws-credentials@v6")
+          .named("Login to registry")
+          .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+          .build
       )
   )
 
@@ -125,23 +130,24 @@ zipxCapabilities += zipxTasks
           environment = e.ghEnvironment,
           env = Map(
             "AWS_REGION"  -> EnvValue.plain(e.region),
-            "DEPLOY_ROLE" -> secret"${e.roleSecret}",
+            "DEPLOY_ROLE" -> e.roleSecret,
             "TIER"        -> EnvValue.plain(e.tier),
           ),
           condition = Some(JobCondition.refIs("refs/heads/main")),
         )
       ),
-    needsCapabilities = List("docker"), // deploy waits on the (multi-registry) image publish
+    needsCapabilities = List(Capability.DockerName), // deploy waits on the (multi-registry) image publish
     permissions = Map("id-token" -> "write", "contents" -> "read"), // OIDC
   )
   .copy(
     // The extension seam: assume the cloud role (from the target's env) before running the deploy command.
     extraSteps = _ =>
       List(
-        Step(
-          name = Some("Configure AWS credentials"),
-          uses = Some("aws-actions/configure-aws-credentials@v6"),
-          `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}", "aws-region" -> "${{ env.AWS_REGION }}"),
-        )
+        Step
+          .uses("aws-actions/configure-aws-credentials@v6")
+          .named("Configure AWS credentials")
+          .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+          .withInput("aws-region", Expr.env("AWS_REGION"))
+          .build
       )
   )

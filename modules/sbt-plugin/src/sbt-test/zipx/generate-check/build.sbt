@@ -37,20 +37,20 @@ lazy val root = (project in file("."))
 // IDE-friendly capability API renders to the same `<label>` command.
 val lintAll = taskKey[Unit]("a build-wide lint gate")
 lintAll := ()
-zipxCapabilities += zipxTasks.once("lint", lintAll)
+zipxCapabilities += zipxTasks.once(CapabilityName("lint"), lintAll)
 
 // A typed CONFIG-SCOPED key (`Compile / compile`), proving zipxTasks renders the config axis: <module>/Compile/compile.
 zipxCapabilities += zipxTasks.custom(
-  name = "compileCheck",
+  name = CapabilityName("compileCheck"),
   command = Compile / compile,
   participates = _.id == "schema",
   gate = Gate.Always,
 )
 
 // The cmd"…" interpolator: literal command syntax (`+ `) + a typed key splice, module-scoped → +<module>/publish.
-// cmd produces a ModuleNode => String, so it's passed to the core Capability.custom (which takes that function).
+// cmd produces a ModuleNode => SbtCommand, so it's passed to the core Capability.custom (which takes that function).
 zipxCapabilities += Capability.custom(
-  name = "crossPublishCheck",
+  name = CapabilityName("crossPublishCheck"),
   command = cmd"+ ${publish}",
   participates = _.id == "schema",
   gate = Gate.Always,
@@ -59,7 +59,7 @@ zipxCapabilities += Capability.custom(
 // MIXED splices (the macro's point): a String value AND a typed key in one command → `++2.13.16; <module>/publish`.
 val scalaSwitch = "2.13.16"
 zipxCapabilities += Capability.custom(
-  name = "mixedCheck",
+  name = CapabilityName("mixedCheck"),
   command = cmd"++${scalaSwitch}; ${publish}",
   participates = _.id == "api",
   gate = Gate.Always,

@@ -1,82 +1,111 @@
 package zipx.core
 
-import zipx.workflow.Step
+import neotype.Subtype
+import zipx.workflow.{ExprLiteral, Step}
 
-/** Whether Verify-phase jobs (test/build) run for every module or only for affected modules on pull requests. */
 enum AffectedMode:
   case Always, AffectedOnPR
 
-/** Build-level configuration for the workflow the planner produces. Everything here is what the build genuinely cannot
-  * infer from the graph (triggers, matrix axes, cache choice, action pins); module identity and edges are always
-  * derived.
+/** The workflow's `name:`, which is also the first segment of its `concurrency` group so sibling workflows never
+  * contend.
   *
-  * @param workflowName
-  *   the GitHub Actions workflow `name:`.
-  * @param scalaMatrix
-  *   whether to expand a per-module build matrix over each module's `crossScalaVersions`.
-  * @param javaVersion
-  *   the JDK major version used for `actions/setup-java` and folded into the cache key.
-  * @param runnerOs
-  *   the runner label (e.g. "ubuntu-latest"), also folded into the cache key.
-  * @param affected
-  *   whether Verify jobs run for every module or only affected ones on PRs.
+  * Single-line and control-character-free, because both of those positions are YAML scalars zipx emits without quoting.
+  * Nothing narrower: a workflow name is display text, so spaces and punctuation are the point.
+  */
+type WorkflowName = WorkflowName.Type
+object WorkflowName extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.trim.isEmpty then "a workflow name must be non-empty"
+    else if input.contains("\n") || input.contains("\r") then "a workflow name must be a single line"
+    else if !input.matches(zipx.shell.Patterns.NoControlChars) then
+      "a workflow name must not contain control characters"
+    else true
+
+/** A `runs-on` label, as in `ubuntu-latest`, `macos-14` or a self-hosted label.
+  *
+  * Constrained to [[PlanText.KeySegment]] rather than merely to printable text because the same value is the leading
+  * segment of every `actions/cache` key: a comma there would split one key into two, and whitespace would make the
+  * restore-keys list ambiguous. GitHub's own labels satisfy this, and so does every conventional self-hosted one.
+  */
+type RunnerOs = RunnerOs.Type
+object RunnerOs extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a runner label must be non-empty"
+    else if input.matches(PlanText.KeySegment) then true
+    else s"invalid runner label '$input': allowed characters are letters, digits and . _ -"
+
+/** A `setup-java` `java-version` value: `21`, `21.0.2`, `17.0.11+9`, `21-ea`.
+  *
+  * Also a cache-key segment, so [[PlanText.VersionSegment]] is [[PlanText.KeySegment]] plus the `+` a build number uses
+  * and the `@` of setup-java's `temurin@21` form.
+  *
+  * Named `JdkVersion` and not `JavaVersion` because sbt 2.0 has a `sbt.JavaVersion` of its own, and the plugin
+  * re-exports this one into `build.sbt`'s scope: two `JavaVersion`s there is an ambiguous reference, not a shadow.
+  */
+type JdkVersion = JdkVersion.Type
+object JdkVersion extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a java version must be non-empty"
+    else if input.matches(PlanText.VersionSegment) then true
+    else s"invalid java version '$input': allowed characters are letters, digits and . _ - + @"
+
+/** Patterns as `inline val` Strings so `validate` can evaluate them while a consumer's build compiles, the same
+  * arrangement as `zipx.workflow.Names`.
+  */
+object PlanText:
+
+  /** One segment of an `actions/cache` key: no whitespace (the restore-keys list is newline-separated) and no comma
+    * (GitHub splits a key on it).
+    */
+  inline val KeySegment = "[A-Za-z0-9._-]+"
+
+  /** [[KeySegment]] plus `+` and `@`, which version strings use. */
+  inline val VersionSegment = "[A-Za-z0-9._+@-]+"
+end PlanText
+
+/** What the planner needs that the module graph cannot supply: triggers, matrix axes, cache choice, action pins. Module
+  * identity and edges are always derived from the build.
+  *
   * @param affectedOnPush
-  *   when affected mode is on, also restrict pushes (not just PRs) to affected modules by diffing against the push
-  *   `before` sha. Off by default: pushes to main build everything (safer, since a bad `before`, e.g. a force-push or
-  *   the first push to a branch, would otherwise silently under-build). Tags always build everything.
-  * @param cache
-  *   the cache backend strategy.
+  *   restricts pushes as well as PRs to affected modules, by diffing against the push `before` sha. Off by default,
+  *   because a bad `before` (a force-push, a branch's first push) would silently under-build. Tags always build all.
   * @param cacheEpoch
-  *   how LocalDir picks its commit-stable cache namespace ([[CacheEpoch]]; default [[CacheEpoch.GitTags]]). Mid-PR
-  *   commits share hits; a release tag rolls the namespace. Prefer runtime tags so keys stay fresh without regenerating
-  *   the workflow; use [[CacheEpoch.Fixed]] to bake a literal at generate time.
-  * @param pushBranches
-  *   branches whose pushes trigger the workflow.
-  * @param releaseTagPattern
-  *   the tag glob that gates publishing (e.g. "v[0-9]+.[0-9]+.[0-9]+").
+  *   how [[CacheBackend.LocalDir]] picks its commit-stable cache namespace: mid-PR commits share hits and a release tag
+  *   rolls the namespace. Prefer the runtime-tag default so keys stay fresh without regenerating the workflow.
   * @param actions
-  *   hash-pinned GitHub Actions (`uses:` values). Prefer `.github/zipx/action-pins.yml` (see [[ActionPinFile]]);
-  *   one-off override via `zipxActions`. Jar [[ActionPins.Defaults]] embed the pin file from the zipx release.
-  * @param workflowDispatch
-  *   when true, emit `on.workflow_dispatch` so the workflow can be run manually (useful for docs Pages deploys).
+  *   prefer `.github/zipx/action-pins.yml` (see [[ActionPinFile]]) over setting this; [[ActionPins.Defaults]] are the
+  *   pins embedded in the zipx release jar.
   * @param skipMergedPrPush
-  *   when true (default), Verify jobs skip on a push to a branch if that commit already belongs to a PR merged into the
-  *   same branch (merge or squash). Direct pushes to main still run; PRs, tags, and `workflow_dispatch` are unaffected.
-  *   Avoids running tests twice after a PR merge.
+  *   skips Verify on a branch push whose commit already belongs to a PR merged into that branch, so tests do not run
+  *   twice after a merge. Direct pushes still run, as do PRs, tags and `workflow_dispatch`.
   * @param cacheRehydrateOnMerge
-  *   when true (default) and [[skipMergedPrPush]] is on with [[CacheBackend.LocalDir]], emit a minimal
-  *   `cache-rehydrate` job that runs only when verify-gate skips Verify (merged-PR push). Recreates a default-branch
-  *   `actions/cache` save so the next PR can restore from main; GitHub does not share PR-scoped caches across refs.
-  *   Inert for remote cache backends and when skip-on-merge is off.
+  *   emits a minimal `cache-rehydrate` job that runs exactly when [[skipMergedPrPush]] skips Verify, recreating a
+  *   default-branch `actions/cache` save so the next PR can restore from main. GitHub does not share PR-scoped caches
+  *   across refs. Inert for remote backends and when skip-on-merge is off.
   * @param cacheRehydrateTask
-  *   sbt command for the rehydrate job (default `compile`). Not a full Verify: no `zipxTestTask`, no [[verifyClean]].
+  *   not a full Verify: no `zipxTestTask` and no [[verifyClean]].
   * @param cacheRehydrateExtraSteps
-  *   optional steps on the rehydrate job only, after LocalDir cache restore and before [[cacheRehydrateTask]] (default
-  *   empty). Same shape as capability `extraSteps`. Not copied from Verify capabilities; assign the same function
-  *   explicitly when you want parity (e.g. Playwright browser install under `target/`).
+  *   runs after the LocalDir restore and before [[cacheRehydrateTask]]. Deliberately *not* copied from Verify
+  *   capabilities; naming the same [[Steps]] bundle in both places is how you get parity without duplicating a lambda.
   * @param cacheRehydrateEnv
-  *   optional job `env` for the rehydrate job only (default empty). Overlay on [[env]]; wins on key clash.
+  *   overlays [[env]] and wins on a key clash.
   * @param env
-  *   build-wide job `env` merged into normal generated jobs (default empty). Typed [[EnvValue]]s. Capability and target
-  *   env overlay this (more specific wins). Prefer this for vars needed on Verify **and** rehydrate (e.g. Playwright
-  *   browsers path under `target/`). Not applied to reusable-workflow caller jobs ([[Capability.workflowCall]]); GHA
-  *   forbids job-level `env` alongside `uses:`.
-  * @param verifyClean
-  *   optional `clean` / `cleanFull` prepended to every Verify-phase sbt command (Aggregate, Layer, and Graph).
+  *   overlaid in turn by capability and target env. Not applied to reusable-workflow caller jobs
+  *   ([[Capability.workflowCall]]), since GHA forbids job-level `env` alongside `uses:`.
   * @param verifyCleanLabel
-  *   when [[verifyClean]] is [[VerifyClean.None]], optionally prepend `cleanFull` at workflow runtime if the PR has
-  *   this GitHub label (default `Some("clean")`). One-off LocalDir/action-cache bust without a permanent clean setting.
-  *   `None` disables the label check. Ignored when [[verifyClean]] is already `Clean` / `CleanFull`.
+  *   prepends `cleanFull` at workflow runtime when the PR carries this label, a one-off cache bust that needs no
+  *   permanent [[verifyClean]] setting. Ignored when [[verifyClean]] is already set; `None` disables the check. An
+  *   [[zipx.workflow.ExprLiteral]] because the label is emitted between `'…'` inside `contains(…)`, where GitHub offers
+  *   no escaping, so a label containing a quote must be unrepresentable rather than reported at generate time.
   * @param cancelSupersededRuns
-  *   when true (default), emit workflow-level `concurrency` keyed on ref so pushing again to a PR cancels the still-
-  *   running earlier build. Never cancels release-tag runs: the group folds in the ref, and a half-cancelled publish is
-  *   worse than a wasted runner.
+  *   emits workflow-level `concurrency` keyed on ref, so pushing again to a PR cancels the running build. Release-tag
+  *   runs are never cancelled: the group folds in the ref, and a half-cancelled publish is worse than a wasted runner.
   */
 final case class PlanConfig(
-    workflowName: String = "CI",
+    workflowName: WorkflowName = PlanConfig.DefaultWorkflowName,
     scalaMatrix: Boolean = true,
-    javaVersion: String = "21",
-    runnerOs: String = "ubuntu-latest",
+    javaVersion: JdkVersion = PlanConfig.DefaultJdkVersion,
+    runnerOs: RunnerOs = PlanConfig.DefaultRunnerOs,
     affected: AffectedMode = AffectedMode.AffectedOnPR,
     affectedOnPush: Boolean = false,
     cache: CacheBackend = CacheBackend.LocalDir,
@@ -87,11 +116,28 @@ final case class PlanConfig(
     workflowDispatch: Boolean = false,
     skipMergedPrPush: Boolean = true,
     cacheRehydrateOnMerge: Boolean = true,
-    cacheRehydrateTask: String = "compile",
+    cacheRehydrateTask: SbtCommand = PlanConfig.DefaultCacheRehydrateTask,
     cacheRehydrateExtraSteps: StepContext => List[Step] = _ => Nil,
     cacheRehydrateEnv: Map[String, EnvValue] = Map.empty,
     env: Map[String, EnvValue] = Map.empty,
     verifyClean: VerifyClean = VerifyClean.None,
-    verifyCleanLabel: Option[String] = Some("clean"),
+    verifyCleanLabel: Option[ExprLiteral] = Some(PlanConfig.DefaultVerifyCleanLabel),
     cancelSupersededRuns: Boolean = true,
 )
+
+object PlanConfig:
+
+  val DefaultWorkflowName: WorkflowName = WorkflowName("CI")
+  val DefaultJdkVersion: JdkVersion     = JdkVersion("21")
+  val DefaultRunnerOs: RunnerOs         = RunnerOs("ubuntu-latest")
+
+  val DefaultVerifyCleanLabel: ExprLiteral = ExprLiteral("clean")
+
+  val DefaultCacheRehydrateTask: SbtCommand = SbtCommand("compile")
+
+  inline def verifyCleanLabel(inline label: String): Option[ExprLiteral] = Some(ExprLiteral(label))
+
+  def verifyCleanLabelMake(label: String): Either[String, Option[ExprLiteral]] =
+    ExprLiteral.make(label).map(Some(_))
+
+end PlanConfig

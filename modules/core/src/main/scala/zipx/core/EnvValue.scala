@@ -1,72 +1,85 @@
 package zipx.core
 
+// Expr is aliased: `EnvValue` has its own `Expr` case, and inside the enum that name wins.
+import zipx.workflow.{EnvName, Expr as GhaExpr, RawExpr, SecretName}
+
 import scala.collection.immutable.ListMap
 
-/** A value injected into a GitHub Actions job's `env:` block.
+/** A value injected into a job's `env:` block, so a build never hand-writes `${{ secrets.X }}`. Secret *values* never
+  * appear in the model, only references: zipx owns the rendering, the build owns which names.
   *
-  * Typed so consumers stop hand-writing `${{ secrets.X }}` strings. zipx owns *rendering* to GHA expressions; the build
-  * owns *which* secrets/names. Secret *values* never appear in the model, only references.
-  *
-  *   - [[EnvValue.Plain]]: a literal string (region, tier, URI, …).
-  *   - [[EnvValue.FromSecret]]: `${{ secrets.NAME }}` (GitHub Actions secret reference).
-  *   - [[EnvValue.FromEnv]]: `${{ env.NAME }}` (reference another job/env key; rare, but useful for chaining).
-  *   - [[EnvValue.Expr]]: escape hatch for a raw GHA expression the other variants can't express.
-  *
-  * Prefer the smart constructors [[EnvValue.secret]], [[EnvValue.env]], [[EnvValue.plain]], [[EnvValue.expr]] (and the
-  * `secret"NAME"` interpolator) over assembling cases by hand; constructors validate names.
+  * Every case holds a *name* validated at construction, so [[render]] is total. A literal name goes through an `inline`
+  * constructor and is checked while the consumer's build compiles; runtime data goes through the `*Make` sibling and
+  * comes back as an `Either`.
   */
 enum EnvValue:
-  case Plain(value: String)
-  case FromSecret(name: String)
-  case FromEnv(name: String)
-  case Expr(expr: String)
 
-  /** Render to the string that lands in the workflow YAML `env:` block. */
-  def render: String = this match
-    case EnvValue.Plain(value)     => value
-    case EnvValue.FromSecret(name) => s"$${{ secrets.$name }}"
-    case EnvValue.FromEnv(name)    => s"$${{ env.$name }}"
-    case EnvValue.Expr(expr)       => expr
+  /** Arbitrary text, the one case whose *content* is unconstrained: an env value is data the build computes, and GitHub
+    * accepts a multi-line one (a PEM, a JSON blob) as a block scalar.
+    */
+  case Plain(value: String)
+  case FromSecret(name: SecretName)
+  case FromEnv(name: EnvName)
+
+  /** Any [[zipx.workflow.Expr]], for a value the named cases cannot express. */
+  case Typed(expr: GhaExpr)
+
+  /** **Escape hatch.** See [[zipx.workflow.RawExpr]] for what it does and does not guarantee.
+    */
+  case Expr(expr: RawExpr)
+
+  def render: String = textOrExpr.fold(identity, _.render)
+
+  /** `None` for [[Plain]], whose text is not an expression and can hold more than a [[zipx.workflow.Expr.Lit]] can.
+    * Named `asExpr` rather than `expr` because the [[EnvValue.Expr]] case already has a field of that name.
+    */
+  def asExpr: Option[GhaExpr] = textOrExpr.toOption
+
+  private def textOrExpr: Either[String, GhaExpr] = this match
+    case EnvValue.Plain(value)     => Left(value)
+    case EnvValue.FromSecret(name) => Right(GhaExpr.Secret(name))
+    case EnvValue.FromEnv(name)    => Right(GhaExpr.Env(name))
+    case EnvValue.Typed(expr)      => Right(expr)
+    case EnvValue.Expr(expr)       => Right(GhaExpr.Raw(expr))
 end EnvValue
 
 object EnvValue:
 
-  /** GitHub Actions secret / env names: start with a letter or underscore, then alphanumerics and underscores. Rejects
-    * empty, spaces, `${{`, hyphens-at-start, and other characters that would produce broken or surprising YAML.
-    */
-  private val NamePattern = raw"[A-Za-z_][A-Za-z0-9_]*".r
+  // `SecretName` and `EnvName` are separate newtypes because the rules genuinely differ: a secret may be named
+  // `GITHUB_TOKEN`, an env key may not be `GITHUB_`-prefixed at all.
 
-  /** Validate a GitHub Actions identifier used as a secret or env name. */
-  def requireName(kind: String, name: String): String =
-    if name.isEmpty then throw IllegalArgumentException(s"$kind name must be non-empty")
-    if NamePattern.matches(name) then name
-    else
-      throw IllegalArgumentException(
-        s"invalid $kind name '$name': must match ${NamePattern.regex} (letters, digits, underscore; no spaces or expressions)"
-      )
+  inline def secret(inline name: String): EnvValue = FromSecret(SecretName(name))
 
-  /** A GitHub Actions secret reference: renders as `${{ secrets.<name> }}`. */
-  def secret(name: String): EnvValue = FromSecret(requireName("secret", name))
+  def secretMake(name: String): Either[String, EnvValue] = SecretName.make(name).map(FromSecret(_))
 
-  /** A reference to another env key: renders as `${{ env.<name> }}`. */
-  def env(name: String): EnvValue = FromEnv(requireName("env", name))
+  inline def env(inline name: String): EnvValue = FromEnv(EnvName(name))
 
-  /** A literal (non-secret) value. */
+  def envMake(name: String): Either[String, EnvValue] = EnvName.make(name).map(FromEnv(_))
+
   def plain(value: String): EnvValue = Plain(value)
 
-  /** Escape hatch: a raw expression string, rendered verbatim. Use sparingly. */
-  def expr(raw: String): EnvValue = Expr(raw)
+  def typed(expr: GhaExpr): EnvValue = Typed(expr)
 
-  /** Render a map to deterministic `ListMap` of strings (keys sorted) for job `env:` blocks. */
+  val githubToken: EnvValue = Typed(GhaExpr.githubToken)
+
+  /** **Escape hatch.** Prefer [[typed]]; use this only for an expression the [[zipx.workflow.Expr]] AST cannot build.
+    */
+  inline def expr(inline raw: String): EnvValue = Expr(RawExpr(raw))
+
+  def exprMake(raw: String): Either[String, EnvValue] = RawExpr.make(raw).map(Expr(_))
+
+  /** Keys sorted, so a `Map` still renders deterministically. */
   def renderAll(m: Map[String, EnvValue]): ListMap[String, String] =
     ListMap.from(m.toList.sortBy(_._1).map((k, v) => k -> v.render))
 
-  /** `secret"PGP_PASSPHRASE"` → [[FromSecret]]. Rejects interpolated forms that fail [[requireName]]. */
-  extension (sc: StringContext) def secret(args: Any*): EnvValue = EnvValue.secret(sc.s(args*))
+  /** `secret"PGP_PASSPHRASE"`. `inline` all the way down, so an interpolation of *compile-time-known* parts is still
+    * checked: `secret"${prefix}_TOKEN"` for an `inline val prefix` is folded and validated. A name assembled from
+    * runtime data is a compile error naming the input rather than a silent runtime check; use [[secretMake]] there.
+    */
+  extension (inline sc: StringContext) inline def secret(inline args: Any*): EnvValue = EnvValue.secret(sc.s(args*))
 
 end EnvValue
 
-/** Convenience aliases for secret references: `Secret("PGP_PASSPHRASE")` / `Secret.ref("…")`. */
 object Secret:
-  def apply(name: String): EnvValue = EnvValue.secret(name)
-  def ref(name: String): EnvValue   = EnvValue.secret(name)
+  inline def apply(inline name: String): EnvValue = EnvValue.secret(name)
+  inline def ref(inline name: String): EnvValue   = EnvValue.secret(name)

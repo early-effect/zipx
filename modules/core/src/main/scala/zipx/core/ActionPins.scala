@@ -39,18 +39,45 @@ final case class ActionPins(
     scalaSteward: String = ActionPins.BootstrapScalaSteward,
     versions: Map[String, String] = Map.empty,
 ):
-  def field(name: String): String = name match
-    case "checkout"         => checkout
-    case "setupJava"        => setupJava
-    case "setupSbt"         => setupSbt
-    case "cache"            => cache
-    case "uploadArtifact"   => uploadArtifact
-    case "downloadArtifact" => downloadArtifact
-    case "scalaSteward"     => scalaSteward
-    case other              => throw new IllegalArgumentException(s"Unknown action pin field: $other")
+  import ActionPins.Field
+
+  def field(f: Field): String = f match
+    case Field.Checkout         => checkout
+    case Field.SetupJava        => setupJava
+    case Field.SetupSbt         => setupSbt
+    case Field.Cache            => cache
+    case Field.UploadArtifact   => uploadArtifact
+    case Field.DownloadArtifact => downloadArtifact
+    case Field.ScalaSteward     => scalaSteward
+
+  def withField(f: Field, ref: String): ActionPins = f match
+    case Field.Checkout         => copy(checkout = ref)
+    case Field.SetupJava        => copy(setupJava = ref)
+    case Field.SetupSbt         => copy(setupSbt = ref)
+    case Field.Cache            => copy(cache = ref)
+    case Field.UploadArtifact   => copy(uploadArtifact = ref)
+    case Field.DownloadArtifact => copy(downloadArtifact = ref)
+    case Field.ScalaSteward     => copy(scalaSteward = ref)
+
+  def version(f: Field): Option[String] = versions.get(f.key)
+
 end ActionPins
 
 object ActionPins:
+
+  /** The pins, enumerated: one case per field of [[ActionPins]].
+    *
+    * Declaration order is the line order of the committed `.github/zipx/action-pins.yml`, since
+    * [[ActionPinFile.render]] folds over `Field.values`.
+    */
+  enum Field(val key: String, val prefix: String):
+    case Checkout         extends Field("checkout", "actions/checkout")
+    case SetupJava        extends Field("setupJava", "actions/setup-java")
+    case SetupSbt         extends Field("setupSbt", "sbt/setup-sbt")
+    case Cache            extends Field("cache", "actions/cache")
+    case UploadArtifact   extends Field("uploadArtifact", "actions/upload-artifact")
+    case DownloadArtifact extends Field("downloadArtifact", "actions/download-artifact")
+    case ScalaSteward     extends Field("scalaSteward", "scala-steward-org/scala-steward-action")
 
   // Bootstrap fallbacks (keep in sync with `.github/zipx/action-pins.yml`). Used only when the classpath resource is
   // missing, e.g. incomplete dogfood classpath. Prefer [[ActionPins.Defaults]] from the embedded pin file.
@@ -70,30 +97,29 @@ object ActionPins:
     "scala-steward-org/scala-steward-action@41bd88543dcf5e5455689f04d041b095eb901660"
 
   private[core] val BootstrapVersions: Map[String, String] = Map(
-    "checkout"         -> "v7.0.1",
-    "setupJava"        -> "v5.7.0",
-    "setupSbt"         -> "v1.5.6",
-    "cache"            -> "v6.1.0",
-    "uploadArtifact"   -> "v7.0.1",
-    "downloadArtifact" -> "v8.0.1",
-    "scalaSteward"     -> "v2.93.0",
+    Field.Checkout.key         -> "v7.0.1",
+    Field.SetupJava.key        -> "v5.7.0",
+    Field.SetupSbt.key         -> "v1.5.6",
+    Field.Cache.key            -> "v6.1.0",
+    Field.UploadArtifact.key   -> "v7.0.1",
+    Field.DownloadArtifact.key -> "v8.0.1",
+    Field.ScalaSteward.key     -> "v2.93.0",
+  )
+
+  private[core] val Bootstrap: ActionPins = ActionPins(
+    BootstrapCheckout,
+    BootstrapSetupJava,
+    BootstrapSetupSbt,
+    BootstrapCache,
+    BootstrapUploadArtifact,
+    BootstrapDownloadArtifact,
+    BootstrapScalaSteward,
+    BootstrapVersions,
   )
 
   /** Current zipx defaults, loaded from classpath `zipx/action-pins.yml` when present. */
   lazy val Defaults: ActionPins =
-    try ActionPinFile.loadResource()
-    catch
-      case _: IllegalStateException =>
-        ActionPins(
-          BootstrapCheckout,
-          BootstrapSetupJava,
-          BootstrapSetupSbt,
-          BootstrapCache,
-          BootstrapUploadArtifact,
-          BootstrapDownloadArtifact,
-          BootstrapScalaSteward,
-          BootstrapVersions,
-        )
+    ActionPinFile.loadResource().getOrElse(Bootstrap)
 
   /** Convenience aliases matching older call sites / docs. */
   def Checkout: String         = Defaults.checkout

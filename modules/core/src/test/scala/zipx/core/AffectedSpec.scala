@@ -4,13 +4,12 @@ import zio.test.*
 
 object AffectedSpec extends ZIOSpecDefault:
 
-  // A small graph with base dirs, mirroring the example monorepo layout.
-  private val graph = ModuleGraph(
+  private val graph = GraphFixture(
     List(
-      ModuleNode("models", baseDir = "models"),
-      ModuleNode("coreLib", dependsOn = List("models"), baseDir = "core-lib"),
-      ModuleNode("client", dependsOn = List("coreLib"), baseDir = "client"),
-      ModuleNode("service", dependsOn = List("coreLib"), baseDir = "service"),
+      ModuleNode(ModuleId("models"), baseDir = "models"),
+      ModuleNode(ModuleId("coreLib"), dependsOn = List("models"), baseDir = "core-lib"),
+      ModuleNode(ModuleId("client"), dependsOn = List("coreLib"), baseDir = "client"),
+      ModuleNode(ModuleId("service"), dependsOn = List("coreLib"), baseDir = "service"),
     )
   )
 
@@ -23,7 +22,6 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     test("affected set includes the changed module and all its transitive dependents") {
-      // Changing models affects everything downstream.
       assertTrue(
         Affected.affectedModules(graph, List("models/src/main/scala/Models.scala")) ==
           Set("models", "coreLib", "client", "service")
@@ -45,28 +43,21 @@ object AffectedSpec extends ZIOSpecDefault:
       assertTrue(
         Affected.affectedModules(graph, List("build.sbt")) == graph.ids.toSet,
         Affected.affectedModules(graph, List("project/plugins.sbt")) == graph.ids.toSet,
-        // Even mixed with a leaf change, a build file wins.
         Affected.affectedModules(graph, List("client/x.scala", "build.sbt")) == graph.ids.toSet,
       )
     },
     test("files under no module are ignored (empty affected set)") {
       assertTrue(Affected.affectedModules(graph, List("docs/readme.md", ".github/CODEOWNERS")) == Set.empty)
     },
-    // ---- Fail-open on a broken diff ----
-    // The generated condition is `contains(fromJson(needs.affected.outputs.modules), '<id>')`, so an empty
-    // module list skips every Verify job and the PR reports green untested. A diff that could not run must
-    // therefore cost CI minutes, not coverage.
     test("a failed diff (None) emits the 'all' sentinel, not an empty list") {
       assertTrue(
         Affected.outputModules(graph, None) == List("all"),
         Affected.outputModules(graph, None) == Affected.AllSentinel,
-        // The bug: had this been empty, every module's `contains(...)` gate would be false.
         Affected.outputModules(graph, None).nonEmpty,
         graph.ids.forall(id => !Affected.outputModules(graph, None).contains(id)),
       )
     },
     test("the sentinel satisfies the generated job condition for every module") {
-      // Mirrors Planner's `contains(fromJson(modules), '<id>') || contains(fromJson(modules), 'all')`.
       val emitted                               = Affected.outputModules(graph, None)
       def gatePasses(moduleId: String): Boolean =
         emitted.contains(moduleId) || emitted.contains("all")
@@ -75,7 +66,6 @@ object AffectedSpec extends ZIOSpecDefault:
     test("a successful diff finding nothing (Some(Nil)) stays empty: it is not a failure") {
       assertTrue(
         Affected.outputModules(graph, Some(Nil)).isEmpty,
-        // ...and so gates nothing, which is the correct, deliberate skip.
         graph.ids.forall(id => !Affected.outputModules(graph, Some(Nil)).contains(id)),
       )
     },
@@ -83,16 +73,15 @@ object AffectedSpec extends ZIOSpecDefault:
       assertTrue(
         Affected.outputModules(graph, Some(List("client/src/main/scala/Client.scala"))) == List("client"),
         Affected.outputModules(graph, Some(List("build.sbt"))) == graph.ids.toList.sorted,
-        // Sorted, so the emitted JSON is deterministic across runs.
         Affected.outputModules(graph, Some(List("models/x.scala"))) ==
           List("client", "coreLib", "models", "service"),
       )
     },
     test("longest-prefix wins when base dirs would otherwise overlap") {
-      val nested = ModuleGraph(
+      val nested = GraphFixture(
         List(
-          ModuleNode("outer", baseDir = "mods"),
-          ModuleNode("inner", baseDir = "mods/inner"),
+          ModuleNode(ModuleId("outer"), baseDir = "mods"),
+          ModuleNode(ModuleId("inner"), baseDir = "mods/inner"),
         )
       )
       assertTrue(
@@ -100,39 +89,37 @@ object AffectedSpec extends ZIOSpecDefault:
         Affected.owningModule(nested, "mods/Other.scala").contains("outer"),
       )
     },
-    // ---- Pathological cases ----
     test("sibling base dirs that share a name prefix must not cross-match") {
-      // `core` and `core-lib` share the prefix "core"; a naive startsWith would map core-lib files to core.
-      val g = ModuleGraph(List(ModuleNode("core", baseDir = "core"), ModuleNode("coreLib", baseDir = "core-lib")))
+      val g =
+        GraphFixture(
+          List(ModuleNode(ModuleId("core"), baseDir = "core"), ModuleNode(ModuleId("coreLib"), baseDir = "core-lib"))
+        )
       assertTrue(
         Affected.owningModule(g, "core-lib/src/X.scala").contains("coreLib"),
         Affected.owningModule(g, "core/src/X.scala").contains("core"),
-        // `core-extra` belongs to neither module.
         Affected.owningModule(g, "core-extra/X.scala").isEmpty,
       )
     },
     test("a directory name that is a strict superstring of a base dir does not match") {
-      val g = ModuleGraph(List(ModuleNode("app", baseDir = "app")))
+      val g = GraphFixture(List(ModuleNode(ModuleId("app"), baseDir = "app")))
       assertTrue(
-        Affected.owningModule(g, "application/Main.scala").isEmpty, // NOT "app"
+        Affected.owningModule(g, "application/Main.scala").isEmpty,
         Affected.owningModule(g, "app/Main.scala").contains("app"),
       )
     },
     test("diamond dependency: closure dedupes the shared apex") {
-      // a → b, a → c, b → d, c → d ; changing d affects everything above it exactly once.
-      val diamond = ModuleGraph(
+      val diamond = GraphFixture(
         List(
-          ModuleNode("d", baseDir = "d"),
-          ModuleNode("b", dependsOn = List("d"), baseDir = "b"),
-          ModuleNode("c", dependsOn = List("d"), baseDir = "c"),
-          ModuleNode("a", dependsOn = List("b", "c"), baseDir = "a"),
+          ModuleNode(ModuleId("d"), baseDir = "d"),
+          ModuleNode(ModuleId("b"), dependsOn = List("d"), baseDir = "b"),
+          ModuleNode(ModuleId("c"), dependsOn = List("d"), baseDir = "c"),
+          ModuleNode(ModuleId("a"), dependsOn = List("b", "c"), baseDir = "a"),
         )
       )
       assertTrue(Affected.affectedModules(diamond, List("d/X.scala")) == Set("a", "b", "c", "d"))
     },
     test("multiple seeds across independent subtrees union their closures") {
       val affected = Affected.affectedModules(graph, List("models/X.scala", "client/Y.scala"))
-      // models pulls in everything downstream; client adds only itself (already covered) → full set.
       assertTrue(affected == Set("models", "coreLib", "client", "service"))
     },
     test("empty change set affects nothing") {
@@ -145,29 +132,26 @@ object AffectedSpec extends ZIOSpecDefault:
       assertTrue(Affected.affectedModules(graph, List(".github/workflows/ci.yml", "LICENSE")) == Set.empty)
     },
     test("a build file nested under a module dir still forces a full build") {
-      // e.g. a module-local `project/` meta-build change, or a stray .sbt under a module.
       assertTrue(
         Affected.affectedModules(graph, List("core-lib/project/plugins.sbt")) == graph.ids.toSet,
         Affected.affectedModules(graph, List("core-lib/build.sbt")) == graph.ids.toSet,
       )
     },
     test("empty baseDir never owns a file (root aggregators are invisible)") {
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
-          ModuleNode("root", baseDir = ""),
-          ModuleNode("lib", baseDir = "lib"),
+          ModuleNode(ModuleId("root"), baseDir = ""),
+          ModuleNode(ModuleId("lib"), baseDir = "lib"),
         )
       )
       assertTrue(
-        Affected
-          .owningModule(g, "build.sbt")
-          .isEmpty, // owningModule itself; build.sbt is handled by isBuildFile upstream
+        Affected.owningModule(g, "build.sbt").isEmpty,
         Affected.owningModule(g, "something.txt").isEmpty,
         Affected.owningModule(g, "lib/X.scala").contains("lib"),
       )
     },
     test("baseDir with a trailing slash still matches") {
-      val g = ModuleGraph(List(ModuleNode("app", baseDir = "app/")))
+      val g = GraphFixture(List(ModuleNode(ModuleId("app"), baseDir = "app/")))
       assertTrue(
         Affected.owningModule(g, "app/Main.scala").contains("app"),
         Affected.owningModule(g, "app").contains("app"),
@@ -177,18 +161,16 @@ object AffectedSpec extends ZIOSpecDefault:
       assertTrue(Affected.affectedModules(graph, List("project")) == graph.ids.toSet)
     },
     test("`.sbt.bak` is not a build file (suffix must be exactly `.sbt`)") {
-      // endsWith(".sbt") must not match `foo.sbt.bak`.
       assertTrue(
-        Affected.affectedModules(graph, List("docs/foo.sbt.bak")) == Set.empty, // unowned + not a build file
-        // Under a leaf module: affects only that leaf, proving isBuildFile did not fire (else full set).
+        Affected.affectedModules(graph, List("docs/foo.sbt.bak")) == Set.empty,
         Affected.affectedModules(graph, List("client/foo.sbt.bak")) == Set("client"),
       )
     },
     test("path that equals a baseDir with nested sibling does not steal the sibling") {
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
-          ModuleNode("a", baseDir = "pkgs/a"),
-          ModuleNode("ab", baseDir = "pkgs/ab"),
+          ModuleNode(ModuleId("a"), baseDir = "pkgs/a"),
+          ModuleNode(ModuleId("ab"), baseDir = "pkgs/ab"),
         )
       )
       assertTrue(

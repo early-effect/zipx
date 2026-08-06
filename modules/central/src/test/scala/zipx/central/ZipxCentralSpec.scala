@@ -6,8 +6,10 @@ import zipx.core.*
 object ZipxCentralSpec extends ZIOSpecDefault:
   import Fixtures.*
 
+  private val stepContext = StepContext(ModuleNode(id = ModuleId("schema")), None, matrixed = false)
+
   private val config = PlanConfig(
-    workflowName = "CI",
+    workflowName = WorkflowName("CI"),
     cacheEpoch = CacheEpoch.Fixed("1.0.0"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
@@ -20,10 +22,10 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       val run = job.steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
       assertTrue(
         run.contains("publishSigned"),
-        !run.contains("/publish'"), // not the unsigned task as the sole command
+        !run.contains("/publish'"),
         job.env.get("PGP_PASSPHRASE").contains("${{ secrets.PGP_PASSPHRASE }}"),
         job.env.get("SONATYPE_USERNAME").contains("${{ secrets.SONATYPE_USERNAME }}"),
-        !job.env.contains("PGP_SECRET"), // secret stays on the import step, not job env
+        !job.env.contains("PGP_SECRET"),
         job.steps.exists(s =>
           s.name.contains("Import signing key") && s.env.get("PGP_SECRET").contains("${{ secrets.PGP_SECRET }}")
         ),
@@ -41,6 +43,19 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       assertTrue(
         importRun.contains("""echo "$PGP_SECRET" | base64 --decode | gpg --batch --import"""),
         !importRun.contains("$$PGP_SECRET"),
+      )
+    },
+    test("the typed gpg import script renders the exact bytes the hand-written one did") {
+      val importRun = ZipxCentral.gpgImportSteps(stepContext).head.run.getOrElse("")
+      assertTrue(
+        importRun ==
+          """mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
+            |echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+            |echo "pinentry-mode loopback"   >> ~/.gnupg/gpg.conf
+            |gpgconf --kill gpg-agent || true
+            |echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""".stripMargin,
+        !importRun.startsWith("set -"),
+        ZipxCentral.gpgImportSteps.rawFragments.isEmpty,
       )
     },
     test("cross-built modules get +publishSigned; single-version do not") {
@@ -72,9 +87,9 @@ object ZipxCentralSpec extends ZIOSpecDefault:
         download.exists(_.`with`.get("path").contains(ZipxCentral.StagingDir)),
         download.exists(_.`with`.get("merge-multiple").contains("true")),
         pubIdx >= 0,
-        upIdx > pubIdx, // upload after publishSigned
+        upIdx > pubIdx,
         dlIdx >= 0,
-        runIdx > dlIdx, // download before sonaRelease
+        runIdx > dlIdx,
         rel.needs.contains("publish-schema"),
         rel.needs.contains("publish-api"),
         rel.needs.contains("publish-clientA"),
@@ -85,22 +100,22 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       )
     },
     test("Once needsCapabilities fans out over all per-target jobs of a dependency") {
-      val graph = sampleGraph.copy(nodes = sampleGraph.nodes.map {
+      val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
-      })
+      }
       val multiDocker = Capability.custom(
-        name = "docker",
-        command = n => s"${n.id}/Docker/publish",
+        name = Capability.DockerName,
+        command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
         participates = _.docker,
-        targets = _ => List(Target("us"), Target("eu")),
+        targets = _ => List(Target(TargetName("us")), Target(TargetName("eu"))),
       )
       val after = Capability.once(
-        name = "notify",
-        command = "echo done",
+        name = CapabilityName("notify"),
+        command = SbtCommand("echo done"),
         phase = Phase.Publish,
         gate = Gate.Always,
-        needsCapabilities = List("docker"),
+        needsCapabilities = List(Capability.DockerName),
       )
       val needs = Planner.plan(graph, List(multiDocker, after), config).jobs("notify").needs
       assertTrue(needs.contains("docker-serviceA-us"), needs.contains("docker-serviceA-eu"))

@@ -104,7 +104,7 @@ execution would need hermetic action workers inside sbt; that is build-tool work
 Backends and generated YAML live on the **Caching** page. The short version:
 
 ```scala
-zipxCache := CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")
+zipxCache := CacheBackend.managedRemote("grpcs://cache.example", "CACHE_KEY")
 // or proof-pinned sidecar:
 zipxCache := RemoteCacheProof.sidecar
 ```
@@ -115,7 +115,7 @@ zero-infra start, keep **LocalDir** and graduate to ManagedRemote when the team 
       exampleValue {
         val managed = DocsRender.job("test")(Capability.test)(using
           libGraph,
-          config.copy(cache = CacheBackend.ManagedRemote("grpcs://cache.example", "CACHE_KEY")),
+          config.copy(cache = CacheBackend.managedRemote("grpcs://cache.example", "CACHE_KEY")),
         )
         val sidecar = DocsRender.job("test")(Capability.test)(using
           libGraph,

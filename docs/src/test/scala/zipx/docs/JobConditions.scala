@@ -5,6 +5,7 @@ import specular.ziotest.DocSpecSuite
 import zipx.central.ZipxCentral
 import zipx.core.*
 import zipx.docs.DocsFixtures.*
+import zipx.docs.DocsRender.yaml
 import zipx.github.ZipxGitHubPackages
 import zipx.workflow.Render
 import zio.test.*
@@ -54,7 +55,7 @@ when you mean `(a || b) && c`. Typed leaves also include `eventIs`, `onWorkflowD
       exampleValue {
         val c = (JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch) &&
           JobCondition.repositoryIs("early-effect/zipx")
-        Render.renderMapping(ListMap("if" -> c.render))
+        Render.renderMapping(ListMap("if" -> c.render)).yaml
       }.assert(yaml =>
         assertTrue(
           yaml.contains("workflow_dispatch"),
@@ -80,7 +81,7 @@ capabilities.
 // Footgun: OnReleaseTag ∧ HasPrLabel still requires a v* tag
 Capability.dockerGraph.copy(
   gate = Gate.OnReleaseTag,
-  targets = _ => List(Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
+  targets = _ => List(Target(TargetName("stg"), condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
 )
 ```
 """,
@@ -88,7 +89,7 @@ Capability.dockerGraph.copy(
         DocsRender.job("docker-service-stg")(
           Capability.dockerGraph.copy(
             gate = Gate.OnReleaseTag,
-            targets = _ => List(Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
+            targets = _ => List(Target(TargetName("stg"), condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
           )
         )(using dockerLibGraph)
       }.assert(yaml =>
@@ -146,14 +147,14 @@ Distinct capability names coexist. zipx wires permissions + token env; **sbt** o
 ```scala
 zipxCapabilities ++= Seq(
   ZipxCentral.release,
-  ZipxGitHubPackages.sameRepo(repository = Some("acme/my-fork")),
+  ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/my-fork"))),
 )
 ```
 """,
       exampleValue {
         DocsRender.jobs("publish", "github-packages")(
           ZipxCentral.release,
-          ZipxGitHubPackages.sameRepo(repository = Some("acme/fork")),
+          ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/fork"))),
         )
       }.assert(yaml =>
         assertTrue(
@@ -179,14 +180,14 @@ Publish container images to stg/dev ECR from a labeled PR **without** waiting fo
 ```scala
 zipxCapabilities += Capability
   .custom(
-    name = "docker",
+    name = CapabilityName("docker"),
     command = cmd"$${Docker / publish}",
     participates = _.docker,
     phase = Phase.Publish,
     gate = Gate.Always,
     targets = _ => List(
       Target(
-        name = "stg",
+        name = TargetName("stg"),
         env = Map(
           "REGISTRY"    -> EnvValue.plain("111.dkr.ecr.us-east-1.amazonaws.com/stg"),
           "DEPLOY_ROLE" -> secret"STG_REGISTRY_ROLE",
@@ -194,7 +195,7 @@ zipxCapabilities += Capability
         condition = Some(JobCondition.hasPrLabel("deploy-stg")),
       ),
       Target(
-        name = "prod",
+        name = TargetName("prod"),
         env = Map(
           "REGISTRY"    -> EnvValue.plain("111.dkr.ecr.us-east-1.amazonaws.com/prod"),
           "DEPLOY_ROLE" -> secret"PROD_REGISTRY_ROLE",
@@ -206,11 +207,11 @@ zipxCapabilities += Capability
   )
   .copy(
     extraSteps = _ => List(
-      Step(
-        name = Some("Login to registry"),
-        uses = Some("aws-actions/configure-aws-credentials@v6"),
-        `with` = Map("role-to-assume" -> "$${{ env.DEPLOY_ROLE }}"),
-      )
+      Step
+        .uses("aws-actions/configure-aws-credentials@v6")
+        .named("Login to registry")
+        .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+        .build
     )
   )
 ```
@@ -220,14 +221,14 @@ Add label `deploy-stg` on the PR → only the stg job's `if` is true; prod still
       exampleValue {
         val cap = Capability
           .custom(
-            name = "docker",
-            command = n => s"${n.id}/Docker/publish",
+            name = Capability.DockerName,
+            command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
             participates = _.docker,
             gate = Gate.Always,
             targets = _ =>
               List(
-                Target("stg", condition = Some(JobCondition.hasPrLabel("deploy-stg"))),
-                Target("prod", condition = Some(JobCondition.refStartsWith("refs/tags/v"))),
+                Target(TargetName("stg"), condition = Some(JobCondition.hasPrLabel("deploy-stg"))),
+                Target(TargetName("prod"), condition = Some(JobCondition.refStartsWith("refs/tags/v"))),
               ),
             permissions = Map("id-token" -> "write"),
           )
@@ -247,14 +248,14 @@ Alternate to per-Target conditions: a separate capability name so it does not re
 
 ```scala
 zipxCapabilities += Capability.dockerGraph
-  .copy(name = "docker-stg", gate = Gate.Always)
+  .copy(name = CapabilityName("docker-stg"), gate = Gate.Always)
   .withCondition(JobCondition.hasPrLabel("deploy-stg"))
 ```
 """,
       exampleValue {
         DocsRender.job("docker-stg-service")(
           Capability.dockerGraph
-            .copy(name = "docker-stg", gate = Gate.Always)
+            .copy(name = CapabilityName("docker-stg"), gate = Gate.Always)
             .withCondition(JobCondition.hasPrLabel("deploy-stg"))
         )(using dockerLibGraph)
       }.assert(yaml =>
@@ -269,7 +270,7 @@ zipxCapabilities += Capability.dockerGraph
       md"""
 ```scala
 Target(
-  "prod",
+  TargetName("prod"),
   environment = Some("production"),
   condition = Some(JobCondition.refIs("refs/heads/main")),
 )
@@ -279,11 +280,11 @@ Target(
         DocsRender.job("deploy-prod")(
           Capability.deploy(
             participates = _.id == "service",
-            command = n => s"${n.id}/promote",
+            command = n => SbtCommand.module(n, SbtCommand("promote")),
             targets = _ =>
               List(
                 Target(
-                  "prod",
+                  TargetName("prod"),
                   environment = Some("production"),
                   condition = Some(JobCondition.refIs("refs/heads/main")),
                 )
@@ -308,7 +309,7 @@ JobCondition.raw("always()")
 Prefer typed leaves and `&&` / `||` when possible; `Raw` is for expressions the AST does not cover yet.
 """,
       exampleValue {
-        Render.renderMapping(ListMap("if" -> JobCondition.raw("always()").render))
+        Render.renderMapping(ListMap("if" -> JobCondition.raw("always()").render)).yaml
       }.assert(yaml => assertTrue(yaml.contains("if: always()"))),
     ),
   )

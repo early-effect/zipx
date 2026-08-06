@@ -1,54 +1,54 @@
 package zipx.github
 
 import zipx.core.*
-import zipx.core.EnvValue.{expr, plain, secret}
+import zipx.core.EnvValue.{plain, secret}
 
-/** GitHub Packages paved path for zipx.
+/** GitHub Packages paved path for zipx: CI wiring only, so the build keeps ownership of `publishTo` and Credentials.
+  * What this generates is `packages: write`, a token in `GITHUB_TOKEN`, and [[PublishFlagEnv]] for the build to branch
+  * on.
   *
-  * Thin CI wiring only: `packages: write`, a token in `GITHUB_TOKEN`, and `PUBLISH_GITHUB_PACKAGES=true` so the
-  * **build** can switch `publishTo` / Credentials. zipx does not generate sbt publish settings.
-  *
-  * Capability name defaults to `"github-packages"` so it coexists with [[zipx.central.ZipxCentral.release]]
-  * (`"publish"`) without replace-by-name.
+  * The default capability name differs from [[zipx.central.ZipxCentral.release]]'s `publish`, so the two coexist rather
+  * than one replacing the other by name.
   *
   * {{{
   * zipxCapabilities ++= Seq(
   *   ZipxCentral.release,
-  *   ZipxGitHubPackages.sameRepo(repository = Some("acme/my-fork")),
+  *   ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/my-fork"))),
   * )
   * }}}
   */
 object ZipxGitHubPackages:
 
-  val DefaultName: String = "github-packages"
+  val DefaultName: CapabilityName = CapabilityName("github-packages")
 
   val packagesPermissions: Map[String, String] =
     Map("contents" -> "read", "packages" -> "write")
 
-  /** Env flag builds use to opt `publishTo` into GitHub Packages (work / mechanoid convention). */
   val PublishFlagEnv: String = "PUBLISH_GITHUB_PACKAGES"
 
-  /** Same-repo Packages: default `GITHUB_TOKEN` from `${{ github.token }}`. */
+  /** Publishes to this repository's own Packages registry, using the workflow's injected token. A fork gate is a
+    * [[zipx.core.JobCondition]] like any other: `condition = Some(JobCondition.repositoryIs("acme/my-fork"))`.
+    */
   def sameRepo(
-      name: String = DefaultName,
+      name: CapabilityName = DefaultName,
       scope: CapabilityScope = CapabilityScope.Aggregate,
-      repository: Option[String] = None,
       condition: Option[JobCondition] = None,
   ): Capability =
     publishCap(
       name = name,
       scope = scope,
-      token = expr("${{ github.token }}"),
-      condition = resolveCondition(repository, condition),
+      token = EnvValue.githubToken,
+      condition = condition,
       extraEnv = Map.empty,
     )
 
-  /** Shared / cross-repo Packages: token from a repository or org secret (e.g. `GH_PACKAGES_TOKEN`). */
+  /** Publishes to another repository's or org's registry. `token` is an [[zipx.core.EnvValue]] rather than a secret
+    * name, so the name is validated where it is written: `secret"GH_PACKAGES_TOKEN"` does not compile if malformed.
+    */
   def sharedRegistry(
-      tokenSecret: String = "GH_PACKAGES_TOKEN",
-      name: String = DefaultName,
+      token: EnvValue = secret"GH_PACKAGES_TOKEN",
+      name: CapabilityName = DefaultName,
       scope: CapabilityScope = CapabilityScope.Aggregate,
-      repository: Option[String] = None,
       condition: Option[JobCondition] = None,
       packagesRepo: Option[String] = None,
       publishOrg: Option[String] = None,
@@ -62,23 +62,14 @@ object ZipxGitHubPackages:
     publishCap(
       name = name,
       scope = scope,
-      token = secret(tokenSecret),
-      condition = resolveCondition(repository, condition),
+      token = token,
+      condition = condition,
       extraEnv = extras,
     )
   end sharedRegistry
 
-  private def resolveCondition(
-      repository: Option[String],
-      condition: Option[JobCondition],
-  ): Option[JobCondition] =
-    (repository, condition) match
-      case (Some(repo), Some(c)) => Some(JobCondition.and(JobCondition.repositoryIs(repo), c))
-      case (Some(repo), None)    => Some(JobCondition.repositoryIs(repo))
-      case (None, c)             => c
-
   private def publishCap(
-      name: String,
+      name: CapabilityName,
       scope: CapabilityScope,
       token: EnvValue,
       condition: Option[JobCondition],
@@ -91,7 +82,7 @@ object ZipxGitHubPackages:
       case CapabilityScope.Once      =>
         Capability.once(
           name = name,
-          command = "publish",
+          command = ModuleNode.DefaultPublishTask,
           phase = Phase.Publish,
           gate = Gate.OnReleaseTag,
         )

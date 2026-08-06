@@ -70,24 +70,24 @@ zipxCapabilities += zipxTasks.deploy(
   participates = _.id == "service",
   command = promote,
   targets = _ => List(
-    Target("staging", env = Map("TIER" -> EnvValue.plain("staging"))),
+    Target(TargetName("staging"), env = Map("TIER" -> EnvValue.plain("staging"))),
     Target(
-      "prod",
+      TargetName("prod"),
       environment = Some("production"),
       env = Map("TIER" -> EnvValue.plain("prod"), "DEPLOY_ROLE" -> secret"PROD_ROLE"),
       condition = Some(JobCondition.refIs("refs/heads/main")),
     ),
   ),
-  needsCapabilities = List("docker"),
+  needsCapabilities = List(Capability.DockerName),
   permissions = Map("id-token" -> "write", "contents" -> "read"),
 )
 ```
 """,
       exampleValue {
         val targets = List(
-          Target("staging", env = Map("TIER" -> EnvValue.plain("staging"))),
+          Target(TargetName("staging"), env = Map("TIER" -> EnvValue.plain("staging"))),
           Target(
-            "prod",
+            TargetName("prod"),
             environment = Some("production"),
             env = Map("TIER" -> EnvValue.plain("prod"), "DEPLOY_ROLE" -> secret"PROD_ROLE"),
             condition = Some(JobCondition.refIs("refs/heads/main")),
@@ -96,7 +96,7 @@ zipxCapabilities += zipxTasks.deploy(
         DocsRender.jobs("deploy-staging", "deploy-prod")(
           Capability.deploy(
             participates = _.id == "service",
-            command = n => s"${n.id}/promote",
+            command = n => SbtCommand.module(n, SbtCommand("promote")),
             targets = _ => targets,
             needsCapabilities = Nil,
           )

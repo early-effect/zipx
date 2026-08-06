@@ -6,6 +6,24 @@ import java.nio.file.Files
 object ActionPinFileSpec extends ZIOSpecDefault:
 
   def spec = suite("ActionPinFile")(
+    test("every Field reads and writes its own pin, so no field can be missed") {
+      val stamped = ActionPins.Field.values.foldLeft(ActionPins.Bootstrap) { (pins, field) =>
+        pins.withField(field, s"${field.prefix}@${field.key}")
+      }
+      assertTrue(
+        ActionPins.Field.values.forall(f => stamped.field(f) == s"${f.prefix}@${f.key}"),
+        ActionPins.Field.values.map(_.key).distinct.length == ActionPins.Field.values.length,
+        ActionPins.Field.values.map(_.prefix).distinct.length == ActionPins.Field.values.length,
+      )
+    },
+    test("rendered line order is Field declaration order, which is the committed pin file's order") {
+      val keys = ActionPinFile
+        .render(ActionPins.Defaults)
+        .linesIterator
+        .collect { case line if !line.startsWith("#") => line.takeWhile(_ != ':') }
+        .toList
+      assertTrue(keys == ActionPins.Field.values.toList.map(_.key))
+    },
     test("parse pin file with version comments") {
       val pins = ActionPinFile.parse(
         """
@@ -63,6 +81,13 @@ object ActionPinFileSpec extends ZIOSpecDefault:
       ActionPinFile.write(path, ActionPins.Defaults)
       val loaded = ActionPinFile.loadOption(path)
       assertTrue(loaded.exists(_.checkout == ActionPins.Defaults.checkout))
+    },
+    test("an absent classpath resource is None, and Defaults falls back to the bootstrap pins") {
+      assertTrue(
+        ActionPinFile.loadResource("zipx/does-not-exist.yml").isEmpty,
+        ActionPinFile.loadResource().isDefined,
+        ActionPins.Defaults.checkout.startsWith(ActionPins.Field.Checkout.prefix + "@"),
+      )
     },
   )
 end ActionPinFileSpec

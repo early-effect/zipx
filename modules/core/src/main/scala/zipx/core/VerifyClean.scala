@@ -7,8 +7,12 @@ enum VerifyClean:
   case None, Clean, CleanFull
 
   /** Prepend this clean mode to an sbt command, e.g. `test` → `cleanFull; test`. */
-  def prefixCommand(command: String): String = this match
+  def prefixCommand(command: SbtCommand): SbtCommand = this match
     case VerifyClean.None      => command
-    case VerifyClean.Clean     => s"clean; $command"
-    case VerifyClean.CleanFull => s"cleanFull; $command"
+    case VerifyClean.Clean     => SbtCommand.prefixedBy(VerifyClean.CleanCommand, command)
+    case VerifyClean.CleanFull => SbtCommand.prefixedBy(VerifyClean.CleanFullCommand, command)
 end VerifyClean
+
+object VerifyClean:
+  private val CleanCommand: SbtCommand     = SbtCommand("clean")
+  private val CleanFullCommand: SbtCommand = SbtCommand("cleanFull")

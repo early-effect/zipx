@@ -6,11 +6,15 @@ import zipx.core.*
 object ZipxDocsSpec extends ZIOSpecDefault:
 
   private val config =
-    PlanConfig(workflowName = "CI", cacheEpoch = CacheEpoch.Fixed("1.0.0"), affected = AffectedMode.Always)
+    PlanConfig(
+      workflowName = WorkflowName("CI"),
+      cacheEpoch = CacheEpoch.Fixed("1.0.0"),
+      affected = AffectedMode.Always,
+    )
 
   def spec = suite("ZipxDocs")(
     test("pages emits a reusable-workflow job with Pages permissions, on tag or workflow_dispatch") {
-      val wf  = Planner.plan(ModuleGraph(Nil), List(ZipxDocs.pages()), config)
+      val wf  = Planner.plan(GraphFixture(Nil), List(ZipxDocs.pages()), config)
       val job = wf.jobs("docs")
       assertTrue(
         job.uses.contains(ZipxDocs.ReusableWorkflow),
@@ -27,7 +31,7 @@ object ZipxDocsSpec extends ZIOSpecDefault:
     test("pages andCondition layers a fork gate without wiping tag|dispatch") {
       val job = Planner
         .plan(
-          ModuleGraph(Nil),
+          GraphFixture(Nil),
           List(ZipxDocs.pages().andCondition(JobCondition.repositoryIs("early-effect/zipx"))),
           config,
         )
@@ -40,7 +44,11 @@ object ZipxDocsSpec extends ZIOSpecDefault:
     },
     test("pages forwards sbtProject and javaVersion inputs") {
       val job = Planner
-        .plan(ModuleGraph(Nil), List(ZipxDocs.pages(sbtProject = "site", javaVersion = Some("25"))), config)
+        .plan(
+          GraphFixture(Nil),
+          List(ZipxDocs.pages(sbtProject = "site", javaVersion = Some(JdkVersion("25")))),
+          config,
+        )
         .jobs("docs")
       assertTrue(
         job.`with`.get("sbt-project").contains("site"),
@@ -50,7 +58,7 @@ object ZipxDocsSpec extends ZIOSpecDefault:
     test("pages omits PlanConfig.env so GHA accepts the uses: caller job") {
       val job = Planner
         .plan(
-          ModuleGraph(Nil),
+          GraphFixture(Nil),
           List(ZipxDocs.pages()),
           config.copy(env = Map("PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.plain("/tmp/browsers"))),
         )

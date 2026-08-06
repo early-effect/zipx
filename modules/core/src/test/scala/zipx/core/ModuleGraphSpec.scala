@@ -23,10 +23,8 @@ object ModuleGraphSpec extends ZIOSpecDefault:
     },
     test("topological layers group independent modules; roots first") {
       val layers = sampleGraph.topologicalLayers
-      // Layer 0 = modules with no in-graph deps: core, schema (sorted).
       assertTrue(
         layers.head == List("core", "schema"),
-        // api and legacyClient (both need only schema) land in the same layer, after schema.
         layers.exists(l => l.contains("api") && l.contains("legacyClient")),
       )
     },
@@ -37,7 +35,6 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       )
     },
     test("affected closure includes seeds and all transitive dependents") {
-      // Changing schema affects everything downstream of it.
       val affected = sampleGraph.affectedClosure(Set("schema"))
       assertTrue(
         affected.contains("schema"),
@@ -45,7 +42,6 @@ object ModuleGraphSpec extends ZIOSpecDefault:
         affected.contains("clientA"),
         affected.contains("clientB"),
         affected.contains("legacyClient"),
-        // core is not downstream of schema.
         !affected.contains("core"),
         !affected.contains("workerA"),
       )
@@ -53,48 +49,90 @@ object ModuleGraphSpec extends ZIOSpecDefault:
     test("affected closure of a leaf is just itself") {
       assertTrue(sampleGraph.affectedClosure(Set("clientA")) == Set("clientA"))
     },
-    test("detects cycles") {
-      val cyclic = ModuleGraph(List(ModuleNode("a", List("b")), ModuleNode("b", List("a"))))
-      assertTrue(scala.util.Try(cyclic.topologicalSort).isFailure)
+    test("make rejects a cycle, naming the modules involved") {
+      val cyclic = ModuleGraph.make(List(ModuleNode(ModuleId("a"), List("b")), ModuleNode(ModuleId("b"), List("a"))))
+      assertTrue(
+        cyclic.isLeft,
+        cyclic.swap.exists(_.contains("cycle")),
+        cyclic.swap.exists(_.contains("a, b")),
+      )
+    },
+    test("the test-scope fixture throws where make reports, so a bad fixture fails at the fixture") {
+      // `make` is the only constructor `src/main` offers; `GraphFixture` is the test-scope helper that unwraps it, and a
+      // cycle in a literal node list is a bug in the test rather than user input. Asserted so the helper cannot quietly
+      // start returning some default graph instead.
+      assertTrue(
+        scala.util
+          .Try(GraphFixture(List(ModuleNode(ModuleId("a"), List("b")), ModuleNode(ModuleId("b"), List("a")))))
+          .isFailure
+      )
     },
     test("subsetLayers gives the contracted publish order (L0/L1/L2)") {
-      // Publishers only, edges contracted through non-publishers.
       val layers = sampleGraph.subsetLayers(_.publishes)
       assertTrue(
         layers == List(
-          List("schema"),              // L0
-          List("api", "legacyClient"), // L1 (both need only schema)
-          List("clientA", "clientB"),  // L2 (need api)
+          List("schema"),
+          List("api", "legacyClient"),
+          List("clientA", "clientB"),
         )
       )
     },
     test("subsetLayers contracts edges through excluded intermediates") {
-      // a(inc) → b(excl) → c(inc): c's nearest included ancestor is a, so a before c despite b between them.
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
-          ModuleNode("a"),
-          ModuleNode("b", dependsOn = List("a")),
-          ModuleNode("c", dependsOn = List("b")),
+          ModuleNode(ModuleId("a")),
+          ModuleNode(ModuleId("b"), dependsOn = List("a")),
+          ModuleNode(ModuleId("c"), dependsOn = List("b")),
         )
       )
       assertTrue(g.subsetLayers(n => n.id == "a" || n.id == "c") == List(List("a"), List("c")))
     },
     test("self-cycle is detected") {
-      val self = ModuleGraph(List(ModuleNode("a", dependsOn = List("a"))))
-      assertTrue(scala.util.Try(self.topologicalSort).isFailure)
+      assertTrue(ModuleGraph.make(List(ModuleNode(ModuleId("a"), dependsOn = List("a")))).isLeft)
     },
-    test("three-node cycle is detected") {
-      val cyclic = ModuleGraph(
+    test("three-node cycle is detected, and every id in it is reported") {
+      val cyclic = ModuleGraph.make(
         List(
-          ModuleNode("a", dependsOn = List("c")),
-          ModuleNode("b", dependsOn = List("a")),
-          ModuleNode("c", dependsOn = List("b")),
+          ModuleNode(ModuleId("a"), dependsOn = List("c")),
+          ModuleNode(ModuleId("b"), dependsOn = List("a")),
+          ModuleNode(ModuleId("c"), dependsOn = List("b")),
         )
       )
-      assertTrue(scala.util.Try(cyclic.topologicalSort).isFailure)
+      assertTrue(cyclic.isLeft, cyclic.swap.exists(_.contains("a, b, c")))
+    },
+    test("cycle reports the names without building a graph, for a caller wording its own error") {
+      // Edges rather than nodes: the caller that needs this is ordering capabilities, whose names are not module ids.
+      assertTrue(
+        ModuleGraph.cycle(Map("a" -> List("b"), "b" -> List("a"))) == Some(List("a", "b")),
+        ModuleGraph.cycle(Map("a" -> Nil, "b" -> List("a"))).isEmpty,
+      )
+    },
+    test("cycle ignores a dependency on a name it has no edges for, as an external dep is ignored") {
+      assertTrue(ModuleGraph.cycle(Map("a" -> List("absent"))).isEmpty)
+    },
+    test("mapNodes rewrites attributes and keeps the layers") {
+      val flagged = sampleGraph.mapNodes {
+        case n if n.id == "api" => n.copy(docker = true)
+        case n                  => n
+      }
+      assertTrue(
+        flagged.get("api").exists(_.docker),
+        !flagged.get("schema").exists(_.docker),
+        flagged.topologicalLayers == sampleGraph.topologicalLayers,
+        flagged.ids == sampleGraph.ids,
+      )
+    },
+    test("mapNodes ignores edits to id and dependsOn, which is what makes it total") {
+      // A structure-preserving map cannot invalidate the layers, so there is no cycle to report and no Either to unwrap.
+      val rewired = sampleGraph.mapNodes(n => n.copy(id = ModuleId("renamed"), dependsOn = List("clientA")))
+      assertTrue(
+        rewired.ids == sampleGraph.ids,
+        rewired.directDeps("clientA") == sampleGraph.directDeps("clientA"),
+        rewired.topologicalSort == sampleGraph.topologicalSort,
+      )
     },
     test("external dependsOn ids are dropped from directDeps") {
-      val g = ModuleGraph(List(ModuleNode("a", dependsOn = List("outside", "b")), ModuleNode("b")))
+      val g = GraphFixture(List(ModuleNode(ModuleId("a"), dependsOn = List("outside", "b")), ModuleNode(ModuleId("b"))))
       assertTrue(g.directDeps("a") == List("b"), g.transitiveDeps("a") == Set("b"))
     },
     test("affectedClosure ignores seed ids absent from the graph") {
@@ -102,27 +140,25 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       assertTrue(!sampleGraph.affectedClosure(Set("nope")).contains("nope"))
     },
     test("duplicate node ids: last definition wins in get; ids lists every occurrence") {
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
-          ModuleNode("a", publishes = false),
-          ModuleNode("a", publishes = true),
+          ModuleNode(ModuleId("a"), publishes = false),
+          ModuleNode(ModuleId("a"), publishes = true),
         )
       )
-      // byId last-wins; ids is derived from the raw node list (callers must not duplicate).
       assertTrue(g.get("a").exists(_.publishes), g.ids == List("a", "a"))
     },
     test("empty graph sorts and layers to empty") {
-      val g = ModuleGraph(Nil)
+      val g = GraphFixture(Nil)
       assertTrue(g.topologicalSort == Nil, g.topologicalLayers == Nil, g.subsetLayers(_ => true) == Nil)
     },
     test("diamond publish contraction: two paths to the same publisher") {
-      // leaf depends on midA and midB; both depend on root; only root+leaf publish.
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
-          ModuleNode("root", publishes = true),
-          ModuleNode("midA", dependsOn = List("root")),
-          ModuleNode("midB", dependsOn = List("root")),
-          ModuleNode("leaf", dependsOn = List("midA", "midB"), publishes = true),
+          ModuleNode(ModuleId("root"), publishes = true),
+          ModuleNode(ModuleId("midA"), dependsOn = List("root")),
+          ModuleNode(ModuleId("midB"), dependsOn = List("root")),
+          ModuleNode(ModuleId("leaf"), dependsOn = List("midA", "midB"), publishes = true),
         )
       )
       assertTrue(g.subsetLayers(_.publishes) == List(List("root"), List("leaf")))

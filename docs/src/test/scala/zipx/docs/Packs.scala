@@ -55,9 +55,9 @@ zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
 ```scala
 zipxCapabilities ++= Seq(
   ZipxCentral.release,
-  ZipxGitHubPackages.sameRepo(repository = Some("acme/my-fork")),
+  ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/my-fork"))),
 )
-// Shared registry PAT: ZipxGitHubPackages.sharedRegistry(tokenSecret = "GH_PACKAGES_TOKEN")
+// Shared registry PAT: ZipxGitHubPackages.sharedRegistry(token = secret"GH_PACKAGES_TOKEN")
 ```
 
 Thin CI wiring (`packages: write` + token + `PUBLISH_GITHUB_PACKAGES=true`). **sbt** owns `publishTo` / Credentials.
@@ -65,7 +65,7 @@ See **Job conditions** for fork gates and multi-publish recipes.
 """,
       exampleValue {
         DocsRender.job("github-packages")(
-          ZipxGitHubPackages.sameRepo(repository = Some("acme/fork"))
+          ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/fork")))
         )
       }.assert(yaml =>
         assertTrue(
@@ -89,7 +89,7 @@ zipxCapabilities += ZipxDocs.pages().andCondition(JobCondition.repositoryIs("acm
 dispatch so a manual run is docs-cheap; publish stays tag-only. No hand-rolled `docs.yml`.
 """,
       exampleValue {
-        DocsRender.job("docs")(ZipxDocs.pages())(using ModuleGraph(Nil))
+        DocsRender.job("docs")(ZipxDocs.pages())(using GraphFixture(Nil))
       }.assert(yaml =>
         assertTrue(
           yaml.contains(ZipxDocs.ReusableWorkflow),

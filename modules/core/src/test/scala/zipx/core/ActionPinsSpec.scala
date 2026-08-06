@@ -5,7 +5,7 @@ import zio.test.*
 object ActionPinsSpec extends ZIOSpecDefault:
 
   private val config = PlanConfig(
-    workflowName = "CI",
+    workflowName = WorkflowName("CI"),
     cacheEpoch = CacheEpoch.Fixed("1.0.0"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
@@ -15,7 +15,6 @@ object ActionPinsSpec extends ZIOSpecDefault:
     test("defaults are pinned to commit SHAs, not mutable tags or branches") {
       val p = ActionPins.Defaults
 
-      // Each action reference must be pinned to a 40-char hex SHA (not vN, main, etc.)
       def isShaPinned(ref: String) = ref.matches("^[^@]+@[0-9A-Fa-f]{40}$")
 
       assertTrue(
@@ -27,7 +26,6 @@ object ActionPinsSpec extends ZIOSpecDefault:
         isShaPinned(p.downloadArtifact),
         isShaPinned(p.scalaSteward),
       ) &&
-      // versions map documents the human-readable tag each SHA came from (shape check, not exact values)
       assertTrue(
         p.versions.nonEmpty,
         p.versions.values.exists(_.startsWith("v")),

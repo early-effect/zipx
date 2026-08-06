@@ -4,10 +4,8 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zipx.core.EnvValue.secret
-import zipx.workflow.Step
+import zipx.workflow.{Expr, Step}
 import zio.test.*
-
-import scala.collection.immutable.ListMap
 
 /** How to invent pipeline stages beyond the built-ins. */
 object CustomCapabilities extends DocSpecSuite:
@@ -21,16 +19,22 @@ object CustomCapabilities extends DocSpecSuite:
       md"""
 `Capability.once` emits a **single build-wide job** (not per module), e.g. format/lint that every test job waits on:
 
+A capability's name becomes a `jobs.<job_id>` key, so it is a `CapabilityName` rather than a bare `String`: a literal is
+checked where you write it, and naming the `val` once is what lets a dependent capability refer to it without repeating
+the string.
+
 ```scala
-zipxCapabilities += zipxTasks.once("fmt", scalafmtCheckAll)
-zipxCapabilities += Capability.test.copy(needsCapabilities = List("fmt"))
-// or Layers: Capability.testLayers.copy(needsCapabilities = List("fmt"))
+val Fmt = CapabilityName("fmt")
+zipxCapabilities += zipxTasks.once(Fmt, scalafmtCheckAll)
+zipxCapabilities += Capability.test.copy(needsCapabilities = List(Fmt))
+// or Layers: Capability.testLayers.copy(needsCapabilities = List(Fmt))
 ```
 """,
       exampleValue {
+        val fmt = CapabilityName("fmt")
         DocsRender.jobs("fmt", "test")(
-          Capability.once("fmt", "scalafmtCheckAll"),
-          Capability.test.copy(needsCapabilities = List("fmt")),
+          Capability.once(fmt, SbtCommand("scalafmtCheckAll")),
+          Capability.test.copy(needsCapabilities = List(fmt)),
         )
       }.assert(yaml =>
         assertTrue(
@@ -49,23 +53,23 @@ examples. Same `name` as a built-in **replaces** it.
 ```scala
 zipxCapabilities += Capability
   .custom(
-    name = "docker",
+    name = CapabilityName("docker"),
     command = cmd"$${Docker / publish}",
     participates = _.docker,
     phase = Phase.Publish,
     targets = _ => List(
-      Target("us", env = Map("REGISTRY" -> EnvValue.plain("us.example"), "DEPLOY_ROLE" -> secret"US_ROLE")),
-      Target("eu", env = Map("REGISTRY" -> EnvValue.plain("eu.example"), "DEPLOY_ROLE" -> secret"EU_ROLE")),
+      Target(TargetName("us"), env = Map("REGISTRY" -> EnvValue.plain("us.example"), "DEPLOY_ROLE" -> secret"US_ROLE")),
+      Target(TargetName("eu"), env = Map("REGISTRY" -> EnvValue.plain("eu.example"), "DEPLOY_ROLE" -> secret"EU_ROLE")),
     ),
     permissions = Map("id-token" -> "write", "contents" -> "read"),
   )
   .copy(
     extraSteps = _ => List(
-      Step(
-        name = Some("Login"),
-        uses = Some("aws-actions/configure-aws-credentials@v6"),
-        `with` = Map("role-to-assume" -> "$${{ env.DEPLOY_ROLE }}"),
-      )
+      Step
+        .uses("aws-actions/configure-aws-credentials@v6")
+        .named("Login")
+        .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+        .build
     )
   )
 ```
@@ -73,25 +77,31 @@ zipxCapabilities += Capability
       exampleValue {
         val docker = Capability
           .custom(
-            name = "docker",
-            command = n => s"${n.id}/Docker/publish",
+            name = Capability.DockerName,
+            command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
             participates = _.docker,
             phase = Phase.Publish,
             targets = _ =>
               List(
-                Target("us", env = Map("REGISTRY" -> EnvValue.plain("us.example"), "DEPLOY_ROLE" -> secret"US_ROLE")),
-                Target("eu", env = Map("REGISTRY" -> EnvValue.plain("eu.example"), "DEPLOY_ROLE" -> secret"EU_ROLE")),
+                Target(
+                  TargetName("us"),
+                  env = Map("REGISTRY" -> EnvValue.plain("us.example"), "DEPLOY_ROLE" -> secret"US_ROLE"),
+                ),
+                Target(
+                  TargetName("eu"),
+                  env = Map("REGISTRY" -> EnvValue.plain("eu.example"), "DEPLOY_ROLE" -> secret"EU_ROLE"),
+                ),
               ),
             permissions = Map("id-token" -> "write", "contents" -> "read"),
           )
           .copy(extraSteps =
             _ =>
               List(
-                Step(
-                  name = Some("Login"),
-                  uses = Some("aws-actions/configure-aws-credentials@v6"),
-                  `with` = ListMap("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"),
-                )
+                Step
+                  .uses("aws-actions/configure-aws-credentials@v6")
+                  .named("Login")
+                  .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
+                  .build
               )
           )
         DocsRender.jobs("docker-service-us", "docker-service-eu")(docker)
@@ -109,12 +119,13 @@ Also override `runsOn = Some(List("self-hosted", "linux"))` and `permissions`, t
     ),
     section("Typed task keys (`zipxTasks`)")(
       md"""
-String commands are what ultimately run at the sbt shell. For the common "one task" case, the plugin's `zipxTasks`
-constructors take a real `TaskKey` / `InputKey` so renamed tasks fail at build load:
+An `SbtCommand` is what ultimately runs at the sbt shell: validated as text that cannot corrupt the generated file, but
+not parsed as sbt syntax. For the common "one task" case, the plugin's `zipxTasks` constructors take a real `TaskKey` /
+`InputKey` so renamed tasks fail at build load:
 
 ```scala
 val promote = taskKey[Unit]("promote the image")
-zipxCapabilities += zipxTasks.once("fmt", scalafmtCheckAll)
+zipxCapabilities += zipxTasks.once(CapabilityName("fmt"), scalafmtCheckAll)
 zipxCapabilities += zipxTasks.deploy(_.id == "service", promote, targets)
 zipxCapabilities += zipxTasks.deployGraph(_.id == "service", promote, targets)
 ```

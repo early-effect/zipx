@@ -3,6 +3,7 @@ package zipx.docs
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
+import zipx.docs.DocsRender.yaml
 import zipx.workflow.Render
 import zio.test.*
 
@@ -165,7 +166,7 @@ lazy val root = (project in file("."))
         ZipxDocs.pages().andCondition(upstream),
       )
     },
-    zipxJavaVersion      := "25",
+    zipxJavaVersion      := JdkVersion("25"),
     zipxWorkflowDispatch := true,
   )
 
@@ -205,7 +206,7 @@ lazy val root = (project in file("."))
   .aggregate(lib)
   .settings(
     zipxCapabilities += ZipxCentral.release, // optional paved path
-    zipxJavaVersion  := "25",
+    zipxJavaVersion  := JdkVersion("25"),
   )
 ```
 
@@ -274,13 +275,15 @@ env = Map(
 ```
 """,
       exampleValue {
-        Render.renderMapping(
-          ListMap(
-            "PGP_PASSPHRASE" -> EnvValue.secret("PGP_PASSPHRASE").render,
-            "AWS_REGION"     -> EnvValue.plain("us-west-2").render,
-            "DEPLOY_ROLE"    -> EnvValue.env("DEPLOY_ROLE").render,
+        Render
+          .renderMapping(
+            ListMap(
+              "PGP_PASSPHRASE" -> EnvValue.secret("PGP_PASSPHRASE").render,
+              "AWS_REGION"     -> EnvValue.plain("us-west-2").render,
+              "DEPLOY_ROLE"    -> EnvValue.env("DEPLOY_ROLE").render,
+            )
           )
-        )
+          .yaml
       }.assert(yaml =>
         assertTrue(
           yaml.contains("PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}"),
