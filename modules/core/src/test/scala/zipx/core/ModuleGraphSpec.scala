@@ -57,10 +57,13 @@ object ModuleGraphSpec extends ZIOSpecDefault:
         cyclic.swap.exists(_.contains("a, b")),
       )
     },
-    test("apply throws where make reports, for a fixture whose cycle would be a test bug") {
+    test("the test-scope fixture throws where make reports, so a bad fixture fails at the fixture") {
+      // `make` is the only constructor `src/main` offers; `GraphFixture` is the test-scope helper that unwraps it, and a
+      // cycle in a literal node list is a bug in the test rather than user input. Asserted so the helper cannot quietly
+      // start returning some default graph instead.
       assertTrue(
         scala.util
-          .Try(ModuleGraph(List(ModuleNode(ModuleId("a"), List("b")), ModuleNode(ModuleId("b"), List("a")))))
+          .Try(GraphFixture(List(ModuleNode(ModuleId("a"), List("b")), ModuleNode(ModuleId("b"), List("a")))))
           .isFailure
       )
     },
@@ -75,7 +78,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       )
     },
     test("subsetLayers contracts edges through excluded intermediates") {
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
           ModuleNode(ModuleId("a")),
           ModuleNode(ModuleId("b"), dependsOn = List("a")),
@@ -129,7 +132,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       )
     },
     test("external dependsOn ids are dropped from directDeps") {
-      val g = ModuleGraph(List(ModuleNode(ModuleId("a"), dependsOn = List("outside", "b")), ModuleNode(ModuleId("b"))))
+      val g = GraphFixture(List(ModuleNode(ModuleId("a"), dependsOn = List("outside", "b")), ModuleNode(ModuleId("b"))))
       assertTrue(g.directDeps("a") == List("b"), g.transitiveDeps("a") == Set("b"))
     },
     test("affectedClosure ignores seed ids absent from the graph") {
@@ -137,7 +140,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       assertTrue(!sampleGraph.affectedClosure(Set("nope")).contains("nope"))
     },
     test("duplicate node ids: last definition wins in get; ids lists every occurrence") {
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
           ModuleNode(ModuleId("a"), publishes = false),
           ModuleNode(ModuleId("a"), publishes = true),
@@ -146,11 +149,11 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       assertTrue(g.get("a").exists(_.publishes), g.ids == List("a", "a"))
     },
     test("empty graph sorts and layers to empty") {
-      val g = ModuleGraph(Nil)
+      val g = GraphFixture(Nil)
       assertTrue(g.topologicalSort == Nil, g.topologicalLayers == Nil, g.subsetLayers(_ => true) == Nil)
     },
     test("diamond publish contraction: two paths to the same publisher") {
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
           ModuleNode(ModuleId("root"), publishes = true),
           ModuleNode(ModuleId("midA"), dependsOn = List("root")),

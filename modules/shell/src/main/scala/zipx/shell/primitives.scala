@@ -3,7 +3,9 @@ package zipx.shell
 import neotype.*
 
 // Validated primitives. Every other type in this module holds these, not String. `ShText("echo hi")` validates the
-// literal at compile time; a runtime string goes through `ShText.make` (Either) or `makeOrThrow`.
+// literal at compile time; a runtime string goes through `ShText.make`, which returns an `Either` the caller carries to
+// the sbt boundary. neotype's throwing constructor is deliberately unused in main sources: nothing here raises, which
+// the ROADMAP's guardrail-5 grep enforces (so this comment names no throwing method either).
 //
 // Validators use only what neotype can evaluate at compile time: isEmpty, contains, startsWith, matches, length, Int
 // comparison. `exists` with a lambda is not, so character-class checks are regexes.

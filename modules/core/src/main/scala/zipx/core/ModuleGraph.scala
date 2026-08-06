@@ -102,6 +102,10 @@ object ModuleNode:
   * the failure from four public methods at once, and the sbt plugin (the only place a graph comes from user input)
   * already has a seam for reporting it.
   *
+  * `make` is deliberately the *only* constructor, with no throwing `apply` beside it: a graph is either checked or it
+  * does not exist. Tests that want a fixture from a literal node list use `GraphFixture` in test scope, which is where
+  * an unchecked one belongs.
+  *
   * A `dependsOn` id absent from the node list is *not* an error: it is how an external library dependency appears, and
   * [[directDeps]] drops it.
   *
@@ -222,12 +226,6 @@ object ModuleGraph:
     val deps: Map[String, Set[String]] =
       nodes.groupMapReduce(n => n.id: String)(_.dependsOn.toSet.intersect(present))(_ ++ _)
     layersOrCycle(nodes.map(_.id).distinct, id => deps.getOrElse(id, Set.empty))
-
-  /** A graph whose node list is known acyclic: a test fixture, or a graph derived from one that is already validated. A
-    * cycle here is a programming error rather than user input, which is why it throws where [[make]] reports.
-    */
-  def apply(nodes: List[ModuleNode]): ModuleGraph =
-    make(nodes).fold(error => throw IllegalArgumentException(s"zipx: $error"), identity)
 
   /** Kahn's algorithm producing deterministic layers over `nodeIds`, using `depsOf` for in-edges (restricted to
     * `nodeIds`). Ties broken by sorted id. `Left` carries the ids still holding unmet dependencies, which is the cycle.

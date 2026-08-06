@@ -42,7 +42,7 @@ object StepsSpec extends ZIOSpecDefault:
           Capability
             .once(CapabilityName("check"), SbtCommand("scalafmtCheckAll"))
             .copy(extraSteps = Steps.of("marker")(named("mark")))
-        val plan = Planner.plan(ModuleGraph(List(node)), List(capability), PlanConfig())
+        val plan = Planner.plan(GraphFixture(List(node)), List(capability), PlanConfig())
         assertTrue(plan.jobs("check").steps.exists(_.name.contains("mark")))
       },
     ),

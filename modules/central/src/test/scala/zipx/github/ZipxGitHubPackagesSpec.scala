@@ -12,7 +12,7 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
     skipMergedPrPush = false,
   )
 
-  private val graph = ModuleGraph(
+  private val graph = GraphFixture(
     List(
       ModuleNode(ModuleId("lib"), publishes = true, crossScalaVersions = List("3.3.3"))
     )

@@ -4,7 +4,7 @@ import zio.test.*
 
 object AffectedSpec extends ZIOSpecDefault:
 
-  private val graph = ModuleGraph(
+  private val graph = GraphFixture(
     List(
       ModuleNode(ModuleId("models"), baseDir = "models"),
       ModuleNode(ModuleId("coreLib"), dependsOn = List("models"), baseDir = "core-lib"),
@@ -78,7 +78,7 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     test("longest-prefix wins when base dirs would otherwise overlap") {
-      val nested = ModuleGraph(
+      val nested = GraphFixture(
         List(
           ModuleNode(ModuleId("outer"), baseDir = "mods"),
           ModuleNode(ModuleId("inner"), baseDir = "mods/inner"),
@@ -91,7 +91,7 @@ object AffectedSpec extends ZIOSpecDefault:
     },
     test("sibling base dirs that share a name prefix must not cross-match") {
       val g =
-        ModuleGraph(
+        GraphFixture(
           List(ModuleNode(ModuleId("core"), baseDir = "core"), ModuleNode(ModuleId("coreLib"), baseDir = "core-lib"))
         )
       assertTrue(
@@ -101,14 +101,14 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     test("a directory name that is a strict superstring of a base dir does not match") {
-      val g = ModuleGraph(List(ModuleNode(ModuleId("app"), baseDir = "app")))
+      val g = GraphFixture(List(ModuleNode(ModuleId("app"), baseDir = "app")))
       assertTrue(
         Affected.owningModule(g, "application/Main.scala").isEmpty,
         Affected.owningModule(g, "app/Main.scala").contains("app"),
       )
     },
     test("diamond dependency: closure dedupes the shared apex") {
-      val diamond = ModuleGraph(
+      val diamond = GraphFixture(
         List(
           ModuleNode(ModuleId("d"), baseDir = "d"),
           ModuleNode(ModuleId("b"), dependsOn = List("d"), baseDir = "b"),
@@ -138,7 +138,7 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     test("empty baseDir never owns a file (root aggregators are invisible)") {
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
           ModuleNode(ModuleId("root"), baseDir = ""),
           ModuleNode(ModuleId("lib"), baseDir = "lib"),
@@ -151,7 +151,7 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     test("baseDir with a trailing slash still matches") {
-      val g = ModuleGraph(List(ModuleNode(ModuleId("app"), baseDir = "app/")))
+      val g = GraphFixture(List(ModuleNode(ModuleId("app"), baseDir = "app/")))
       assertTrue(
         Affected.owningModule(g, "app/Main.scala").contains("app"),
         Affected.owningModule(g, "app").contains("app"),
@@ -167,7 +167,7 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     test("path that equals a baseDir with nested sibling does not steal the sibling") {
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
           ModuleNode(ModuleId("a"), baseDir = "pkgs/a"),
           ModuleNode(ModuleId("ab"), baseDir = "pkgs/ab"),

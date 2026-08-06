@@ -750,7 +750,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("publish contracts edges through a non-publishing intermediate") {
-      val g = ModuleGraph(
+      val g = GraphFixture(
         List(
           ModuleNode(ModuleId("pubRoot"), publishes = true, crossScalaVersions = List(scala3)),
           ModuleNode(
@@ -851,7 +851,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("root modules with empty baseDir never own changed files via the planner path") {
       val g =
-        ModuleGraph(List(ModuleNode(ModuleId("root"), baseDir = ""), ModuleNode(ModuleId("lib"), baseDir = "lib")))
+        GraphFixture(List(ModuleNode(ModuleId("root"), baseDir = ""), ModuleNode(ModuleId("lib"), baseDir = "lib")))
       assertTrue(Affected.owningModule(g, "README.md").isEmpty, Affected.owningModule(g, "lib/X.scala").contains("lib"))
     },
     test("Aggregate test emits one root Once job (sbt test)") {
@@ -1300,7 +1300,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("empty ModuleGraph produces valid workflow with no capability jobs") {
-      val empty = ModuleGraph(Nil)
+      val empty = GraphFixture(Nil)
       val wf    = Planner.plan(empty, List(Capability.testGraph), config)
       assertTrue(
         wf.jobs.isEmpty,
@@ -1330,7 +1330,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
 
     test("Aggregate capability with empty graph produces no jobs (nothing to aggregate)") {
-      val empty = ModuleGraph(Nil)
+      val empty = GraphFixture(Nil)
       val cap   = Capability.testGraph.copy(scope = CapabilityScope.Aggregate)
       val wf    = Planner.plan(empty, List(cap), config)
       assertTrue(
@@ -1339,7 +1339,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
 
     test("Once capability with empty graph produces single job") {
-      val empty = ModuleGraph(Nil)
+      val empty = GraphFixture(Nil)
       val cap   = Capability.testGraph.copy(scope = CapabilityScope.Once)
       val wf    = Planner.plan(empty, List(cap), config)
       assertTrue(
@@ -1349,7 +1349,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
 
     test("Layer capability with empty graph produces no jobs") {
-      val empty = ModuleGraph(Nil)
+      val empty = GraphFixture(Nil)
       val cap   = Capability.testGraph.copy(scope = CapabilityScope.Layer)
       val wf    = Planner.plan(empty, List(cap), config)
       assertTrue(

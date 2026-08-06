@@ -9,7 +9,7 @@ object Fixtures:
   val scala3 = "3.8.4"
   val cross  = List(scala2, scala3)
 
-  val sampleGraph: ModuleGraph = ModuleGraph(
+  val sampleGraph: ModuleGraph = GraphFixture(
     List(
       ModuleNode(ModuleId("core"), crossScalaVersions = List(scala3), testTask = SbtCommand("testFull")),
       ModuleNode(ModuleId("schema"), publishes = true, crossScalaVersions = cross),

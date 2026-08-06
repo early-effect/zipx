@@ -5,9 +5,10 @@ import neotype.*
 // GitHub Actions syntax rules as types. GitHub's rules, which is why they live here rather than in the deliberately
 // GHA-agnostic zipx-shell.
 //
-// Same compile-time contract as zipx.shell: `StepId("check")` validates the literal during compilation, a runtime
-// string goes through `make` (Either) or `makeOrThrow`. Validators use only what neotype can evaluate at compile
-// time, so character classes are `matches` against `inline val` patterns rather than lambdas or compiled Regexes.
+// Same compile-time contract as zipx.shell: `StepId("check")` validates the literal during compilation, and a runtime
+// string goes through `make`, whose `Either` the caller carries rather than raising. Validators use only what neotype
+// can evaluate at compile time, so character classes are `matches` against `inline val` patterns rather than lambdas or
+// compiled Regexes.
 
 /** A `jobs.<job_id>` key: must start with a letter or `_` and contain only alphanumerics, `-`, or `_`. Uniqueness is a
   * property of the *collection*, so it is checked where the job map is assembled.

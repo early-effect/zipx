@@ -89,7 +89,7 @@ zipxCapabilities += ZipxDocs.pages().andCondition(JobCondition.repositoryIs("acm
 dispatch so a manual run is docs-cheap; publish stays tag-only. No hand-rolled `docs.yml`.
 """,
       exampleValue {
-        DocsRender.job("docs")(ZipxDocs.pages())(using ModuleGraph(Nil))
+        DocsRender.job("docs")(ZipxDocs.pages())(using GraphFixture(Nil))
       }.assert(yaml =>
         assertTrue(
           yaml.contains(ZipxDocs.ReusableWorkflow),

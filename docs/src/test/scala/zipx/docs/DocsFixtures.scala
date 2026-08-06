@@ -8,7 +8,7 @@ object DocsFixtures:
   val config: PlanConfig =
     PlanConfig(cacheEpoch = CacheEpoch.Fixed("0.1.0-ci"), skipMergedPrPush = false, verifyCleanLabel = None)
 
-  val libGraph: ModuleGraph = ModuleGraph(
+  val libGraph: ModuleGraph = GraphFixture(
     List(
       ModuleNode(ModuleId("schema"), publishes = true, crossScalaVersions = List("3.8.4"), baseDir = "schema"),
       ModuleNode(
