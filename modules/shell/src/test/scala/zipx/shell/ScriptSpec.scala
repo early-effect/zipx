@@ -402,13 +402,8 @@ object ScriptSpec extends ZIOSpecDefault:
           sh"$tag$tag".render == "\"$TAG\"\"$TAG\"",
         )
       },
-      test("a literal part is validated, so a multi-line sh literal throws") {
-        val failed =
-          try
-            StringContext("first\nsecond ", "").sh(Word.vq("TAG")); false
-          catch case _: IllegalArgumentException => true
-        assertTrue(failed)
-      },
+      // A multi-line literal part is a compile error rather than a runtime one, so the negative case is in
+      // `CompileTimeSpec`: there is no way to construct one here for a runtime assertion to catch.
       test("splices keep their own quoting; the interpolator adds none") {
         assertTrue(
           sh"${Word.squote("v*")}-${Word.v("x")}".render == "'v*'-$x",
