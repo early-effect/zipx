@@ -1,5 +1,6 @@
 package zipx.core
 
+import neotype.unwrap
 import zio.test.*
 import zipx.workflow.*
 
@@ -131,8 +132,8 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("LocalDir cache primary key includes run_id + job id so same-run jobs accumulate and can save") {
       val wf       = Planner.plan(sampleGraph, List(Capability.testGraph), config)
-      val coreStep = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
-      val apiStep  = wf.jobs("test-api").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val coreStep = wf.jobs("test-core").steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
+      val apiStep  = wf.jobs("test-api").steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
       val coreKey  = coreStep.map(_.`with`("key")).getOrElse("")
       val apiKey   = apiStep.map(_.`with`("key")).getOrElse("")
       assertTrue(
@@ -143,7 +144,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("LocalDir cache paths cover sbt tooling and target directories") {
       val wf    = Planner.plan(sampleGraph, List(Capability.testGraph), config)
-      val step  = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val step  = wf.jobs("test-core").steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
       val paths = step.map(_.`with`("path")).getOrElse("")
       assertTrue(
         paths.contains("~/.sbt"),
@@ -154,8 +155,8 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("LocalDir cache disables setup-java and sbt/setup-sbt internal caching") {
       val wf   = Planner.plan(sampleGraph, List(Capability.testGraph), config)
-      val java = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("actions/setup-java@")))
-      val sbt  = wf.jobs("test-core").steps.find(_.uses.exists(_.startsWith("sbt/setup-sbt@")))
+      val java = wf.jobs("test-core").steps.find(_.uses.exists(_.unwrap.startsWith("actions/setup-java@")))
+      val sbt  = wf.jobs("test-core").steps.find(_.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@")))
       assertTrue(
         !java.exists(_.`with`.contains("cache")),
         sbt.exists(_.`with`.get("disk-cache").contains("false")),
@@ -172,7 +173,7 @@ object PlannerSpec extends ZIOSpecDefault:
           )
           .jobs("test")
           .steps
-          .find(_.uses.exists(_.startsWith("actions/cache@")))
+          .find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
           .map(_.`with`("restore-keys"))
           .getOrElse("")
       val ci      = restore("1.2.3-ci")
@@ -207,7 +208,7 @@ object PlannerSpec extends ZIOSpecDefault:
           .plan(sampleGraph, List(Capability.testGraph), config.copy(cacheEpoch = CacheEpoch.Fixed(epoch)))
           .jobs("test-core")
           .steps
-          .find(_.uses.exists(_.startsWith("actions/cache@")))
+          .find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
           .map(_.`with`("key"))
       assertTrue(
         keyFor("1.2.3-ci") == keyFor("1.2.3-ci"),
@@ -216,7 +217,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("GitTags epoch configures checkout with full history and tags") {
       val wf       = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = CacheEpoch.GitTags()))
-      val checkout = wf.jobs("test").steps.find(_.uses.exists(_.contains("checkout")))
+      val checkout = wf.jobs("test").steps.find(_.uses.exists(_.unwrap.contains("checkout")))
       assertTrue(
         checkout.exists(_.`with`.get("fetch-tags").contains("true")),
         checkout.exists(_.`with`.get("fetch-depth").contains("0")),
@@ -238,7 +239,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("GitTags wires resolve step outputs into cache key and restore-keys") {
       val wf      = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = CacheEpoch.GitTags()))
       val steps   = wf.jobs("test").steps
-      val cache   = steps.find(_.uses.exists(_.startsWith("actions/cache@")))
+      val cache   = steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
       val key     = cache.map(_.`with`("key")).getOrElse("")
       val restore = cache.map(_.`with`("restore-keys")).getOrElse("")
       assertTrue(
@@ -262,7 +263,7 @@ object PlannerSpec extends ZIOSpecDefault:
         .steps
       assertTrue(
         steps.indexWhere(_.id.contains(CacheEpoch.GitTagsStepId)) <
-          steps.indexWhere(_.uses.exists(_.startsWith("actions/cache@")))
+          steps.indexWhere(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
       )
     },
     test("Script epoch strategy uses the caller step id and run body") {
@@ -275,7 +276,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val wf      = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = custom))
       val steps   = wf.jobs("test").steps
       val resolve = steps.find(_.id.contains("my-epoch"))
-      val key     = steps.find(_.uses.exists(_.startsWith("actions/cache@"))).map(_.`with`("key")).getOrElse("")
+      val key     = steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@"))).map(_.`with`("key")).getOrElse("")
       assertTrue(
         resolve.flatMap(_.run).exists(_.contains("epoch=9.9.9-ci")),
         key.contains("${{ steps.my-epoch.outputs.epoch }}"),
@@ -340,7 +341,7 @@ object PlannerSpec extends ZIOSpecDefault:
         script.contains("sbt -batch --error \"zipxAffectedModules $BASE\""),
         script.contains("modules=$(cat target/zipx-affected.json)"),
         !script.contains("modules=$(sbt"),
-        wf.jobs("affected").steps.exists(_.uses.exists(_.startsWith("actions/setup-java@"))),
+        wf.jobs("affected").steps.exists(_.uses.exists(_.unwrap.startsWith("actions/setup-java@"))),
       )
     },
     test("affectedOnPush adds a guarded before-sha diff for pushes") {
@@ -374,9 +375,9 @@ object PlannerSpec extends ZIOSpecDefault:
       assertTrue(
         job.services.isEmpty,
         job.env.isEmpty,
-        job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
+        job.steps.exists(_.uses.exists(_.unwrap.startsWith("actions/cache@"))),
         job.steps.exists(s =>
-          s.uses.exists(_.startsWith("sbt/setup-sbt@")) && s.`with`.get("disk-cache").contains("false")
+          s.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@")) && s.`with`.get("disk-cache").contains("false")
         ),
       )
     },
@@ -392,8 +393,8 @@ object PlannerSpec extends ZIOSpecDefault:
         job.services(RemoteCacheProof.serviceName).image == RemoteCacheProof.image,
         job.services(RemoteCacheProof.serviceName).ports == List(RemoteCacheProof.portMapping),
         job.env.get(RemoteCacheProof.envUri).contains(RemoteCacheProof.grpcLocalhost),
-        !job.steps.exists(_.uses.exists(_.startsWith("actions/cache@"))),
-        !job.steps.exists(s => s.uses.exists(_.startsWith("sbt/setup-sbt@")) && s.`with`.contains("disk-cache")),
+        !job.steps.exists(_.uses.exists(_.unwrap.startsWith("actions/cache@"))),
+        !job.steps.exists(s => s.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@")) && s.`with`.contains("disk-cache")),
       )
     },
     test("ManagedRemote backend sets the endpoint + header-from-secret env, no service") {
@@ -546,13 +547,13 @@ object PlannerSpec extends ZIOSpecDefault:
             List(
               Step(
                 name = Some("Configure credentials"),
-                uses = Some("aws-actions/configure-aws-credentials@v6"),
+                uses = Some(ActionRef("aws-actions/configure-aws-credentials@v6")),
                 `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}"),
               )
             )
         )
       val steps   = Planner.plan(sampleGraph, List(cap), config).jobs("deploy-serviceA-prod").steps
-      val credIdx = steps.indexWhere(_.uses.contains("aws-actions/configure-aws-credentials@v6"))
+      val credIdx = steps.indexWhere(_.uses.contains(ActionRef("aws-actions/configure-aws-credentials@v6")))
       val cmdIdx  = steps.indexWhere(_.run.exists(_.contains("serviceA/deploy")))
       assertTrue(credIdx >= 0, cmdIdx >= 0, credIdx < cmdIdx)
     },
@@ -621,7 +622,7 @@ object PlannerSpec extends ZIOSpecDefault:
             List(
               Step(
                 name = Some("Login"),
-                uses = Some("aws-actions/amazon-ecr-login@v2"),
+                uses = Some(ActionRef("aws-actions/amazon-ecr-login@v2")),
                 env = Map("R" -> "${{ env.REGISTRY }}"),
               )
             )
@@ -632,7 +633,7 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs.contains("docker-serviceA-eu"),
         wf.jobs("docker-serviceA-us").env.get("REGISTRY").contains("111.dkr.ecr.us-east-1"),
         wf.jobs("docker-serviceA-eu").env.get("ROLE").contains("${{ secrets.EU_ROLE }}"),
-        wf.jobs("docker-serviceA-us").steps.exists(_.uses.contains("aws-actions/amazon-ecr-login@v2")),
+        wf.jobs("docker-serviceA-us").steps.exists(_.uses.contains(ActionRef("aws-actions/amazon-ecr-login@v2"))),
       )
     },
     test("a Once capability emits a single build-wide job (no module suffix)") {
@@ -1033,7 +1034,7 @@ object PlannerSpec extends ZIOSpecDefault:
         rehydrate.`if`.contains(
           "needs.verify-gate.result == 'success' && needs.verify-gate.outputs.run == 'false'"
         ),
-        rehydrate.steps.exists(_.uses.exists(_.contains("actions/cache"))),
+        rehydrate.steps.exists(_.uses.exists(_.unwrap.contains("actions/cache"))),
         rehydrate.steps.exists(_.run.contains("sbt 'compile'")),
         !rehydrate.steps.exists(_.run.exists(_.contains("test"))),
       )
@@ -1082,7 +1083,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
       val rehydrate = Planner.plan(sampleGraph, List(Capability.test), withExtras).jobs("cache-rehydrate")
       val names     = rehydrate.steps.flatMap(_.name)
-      val cacheIdx  = rehydrate.steps.indexWhere(_.uses.exists(_.contains("actions/cache")))
+      val cacheIdx  = rehydrate.steps.indexWhere(_.uses.exists(_.unwrap.contains("actions/cache")))
       val extraIdx  = rehydrate.steps.indexWhere(_.name.contains("Install browsers"))
       val cmdIdx    = rehydrate.steps.indexWhere(_.run.exists(_.contains("sbt 'compile'")))
       val plain     = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = true))
@@ -1120,7 +1121,7 @@ object PlannerSpec extends ZIOSpecDefault:
           phase = Phase.Publish,
           gate = Gate.OnReleaseTag,
         )
-        .copy(workflowCall = Some(WorkflowCall("org/repo/.github/workflows/pages.yml@main")))
+        .copy(workflowCall = Some(WorkflowCall(ActionRef("org/repo/.github/workflows/pages.yml@main"))))
       val wf = Planner.plan(
         sampleGraph,
         List(Capability.test, docs),
@@ -1128,7 +1129,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
       assertTrue(
         wf.jobs("test").env.get("SHARED").contains("everywhere"),
-        wf.jobs("docs").uses.contains("org/repo/.github/workflows/pages.yml@main"),
+        wf.jobs("docs").uses.contains(ActionRef("org/repo/.github/workflows/pages.yml@main")),
         wf.jobs("docs").env.isEmpty,
         wf.jobs("docs").runsOn.isEmpty,
       )
@@ -1232,11 +1233,11 @@ object PlannerSpec extends ZIOSpecDefault:
           phase = Phase.Publish,
           gate = Gate.OnReleaseTag,
         )
-        .copy(workflowCall = Some(WorkflowCall("org/repo/.github/workflows/pages.yml@main")))
+        .copy(workflowCall = Some(WorkflowCall(ActionRef("org/repo/.github/workflows/pages.yml@main"))))
         .withCondition(JobCondition.repositoryIs("org/repo"))
       val job = Planner.plan(sampleGraph, List(cap), config).jobs("docs")
       assertTrue(
-        job.uses.contains("org/repo/.github/workflows/pages.yml@main"),
+        job.uses.contains(ActionRef("org/repo/.github/workflows/pages.yml@main")),
         job.`if`.exists(_.contains("github.repository == 'org/repo'")),
         job.`if`.exists(_.contains("refs/tags/v")),
       )

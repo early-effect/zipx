@@ -165,7 +165,7 @@ object StepsSpec extends ZIOSpecDefault:
         )
       },
       test("built takes builders, so a definition site never calls .build") {
-        val checkout = Step.usesMake(ActionPins.Defaults.checkout).toOption.get
+        val checkout = Step.usesRef(ActionPins.Defaults.checkout)
         val bundle   = Steps.built("verify")(
           checkout,
           Step.run(Script.strict(Exec("sbt", Word.squote("test")))).named("Test"),

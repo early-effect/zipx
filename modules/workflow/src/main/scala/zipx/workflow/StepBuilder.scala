@@ -88,14 +88,18 @@ object StepBuilder:
     Run(Step(run = Some(text)), List(text))
 
   /** `Step.uses("actions/checkout")` is a compile error naming the missing `@ref`. That is the form a build writes,
-    * which is why it gets the short name; [[usesMake]] is the normal case *inside* zipx, where an `ActionPins` field
-    * comes from the pin file and cannot reach an `inline` check.
+    * which is why it gets the short name.
     */
   inline def uses(inline action: String): Uses = usesRef(ActionRef(action))
 
+  /** For a ref that is genuinely untrusted text: read from a workflow file, or typed into a setting. An `ActionPins`
+    * field is *not* one of those, since a pin is validated where the pin file is parsed; use [[usesRef]] there and
+    * carry no `Either` a consumer would have to fake a failure for.
+    */
   def usesMake(action: String): Either[String, Uses] =
     ActionRef.make(action).map(usesRef)
 
-  def usesRef(action: ActionRef): Uses = Uses(Step(uses = Some(action.unwrap)))
+  /** The normal case inside zipx: the ref is already an [[ActionRef]], so there is nothing left to check. */
+  def usesRef(action: ActionRef): Uses = Uses(Step(uses = Some(action)))
 
 end StepBuilder

@@ -1,5 +1,6 @@
 package zipx.docs
 
+import neotype.unwrap
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
@@ -101,7 +102,7 @@ to parse escapes every version-filtered group.
       }.assert(yaml =>
         assertTrue(
           yaml.contains("repo-config: .github/.scala-steward.conf"),
-          yaml.indexOf(ActionPins.Defaults.checkout) < yaml.indexOf(ActionPins.Defaults.scalaSteward),
+          yaml.indexOf(ActionPins.Defaults.checkout.unwrap) < yaml.indexOf(ActionPins.Defaults.scalaSteward.unwrap),
         )
       ),
     ),

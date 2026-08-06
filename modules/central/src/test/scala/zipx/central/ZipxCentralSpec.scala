@@ -1,5 +1,6 @@
 package zipx.central
 
+import neotype.unwrap
 import zio.test.*
 import zipx.core.*
 
@@ -79,10 +80,10 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       val dlIdx    = rel.steps.indexWhere(_.name.contains("Download sona staging"))
       val runIdx   = rel.steps.indexWhere(_.run.exists(_.contains("sonaRelease")))
       assertTrue(
-        upload.exists(_.uses.exists(_.startsWith("actions/upload-artifact@"))),
+        upload.exists(_.uses.exists(_.unwrap.startsWith("actions/upload-artifact@"))),
         upload.exists(_.`with`.get("name").contains("sona-staging-publish-schema")),
         upload.exists(_.`with`.get("path").contains(ZipxCentral.StagingDir)),
-        download.exists(_.uses.exists(_.startsWith("actions/download-artifact@"))),
+        download.exists(_.uses.exists(_.unwrap.startsWith("actions/download-artifact@"))),
         download.exists(_.`with`.get("pattern").contains("sona-staging-*")),
         download.exists(_.`with`.get("path").contains(ZipxCentral.StagingDir)),
         download.exists(_.`with`.get("merge-multiple").contains("true")),

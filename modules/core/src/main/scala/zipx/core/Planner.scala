@@ -894,7 +894,7 @@ object Planner:
       jobSuffix: JobId,
       stepId: StepId,
       resolveRun: String,
-      cacheAction: String,
+      cacheAction: ActionRef,
   ): List[Step] =
     // `Expr.StepOutput` directly rather than `stepOutputMake`: both arguments are already validated, so there is no
     // failure left for a caller to report. `CacheEpoch` holding a `StepId` is what bought that.
@@ -924,7 +924,7 @@ object Planner:
   /** `path` and `restore-keys` are newline-joined strings because that is the multi-line form `actions/cache` reads and
     * [[zipx.workflow.YamlPrinter]] emits as a block scalar.
     */
-  private def cacheStep(cacheAction: String, paths: String, key: Expr, restoreKeys: List[String]): Step =
+  private def cacheStep(cacheAction: ActionRef, paths: String, key: Expr, restoreKeys: List[String]): Step =
     Step(
       name = Some("Cache sbt"),
       uses = Some(cacheAction),

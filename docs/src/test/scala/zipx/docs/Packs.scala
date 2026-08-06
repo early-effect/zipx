@@ -1,5 +1,6 @@
 package zipx.docs
 
+import neotype.unwrap
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.central.ZipxCentral
@@ -92,7 +93,7 @@ dispatch so a manual run is docs-cheap; publish stays tag-only. No hand-rolled `
         DocsRender.job("docs")(ZipxDocs.pages())(using GraphFixture(Nil))
       }.assert(yaml =>
         assertTrue(
-          yaml.contains(ZipxDocs.ReusableWorkflow),
+          yaml.contains(ZipxDocs.ReusableWorkflow.unwrap),
           yaml.contains("sbt-project: docs"),
           yaml.contains("pages: write"),
           yaml.contains("workflow_dispatch"),

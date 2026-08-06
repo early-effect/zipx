@@ -7,7 +7,7 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zipx.docs.DocsRender.yaml
 import zipx.shell.*
-import zipx.workflow.{Expr, Step}
+import zipx.workflow.{ActionRef, Expr, Step}
 import zio.test.*
 
 /** The typed DSL a build writes steps with: shell scripts, expressions, step builders, and step bundles. */
@@ -226,7 +226,8 @@ would reject a value a codec is still filling in.
           .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
           .withId("aws")
           .build
-        val handBuilt = Step(name = Some("Both keys"), run = Some("echo hi"), uses = Some("actions/checkout@v5"))
+        val handBuilt =
+          Step(name = Some("Both keys"), run = Some("echo hi"), uses = Some(ActionRef("actions/checkout@v5")))
         List(
           zipx.workflow.Render.renderSteps(List(step)).yaml,
           s"hand-built step with both keys is rejected: ${Step.validate(handBuilt).isLeft}",

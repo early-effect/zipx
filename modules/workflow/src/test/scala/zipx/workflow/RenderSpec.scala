@@ -21,7 +21,7 @@ object RenderSpec extends ZIOSpecDefault:
         name = Some("Test zipx-workflow"),
         strategy = Some(Strategy(matrix = ListMap("scala" -> List("3.8.4")))),
         steps = List(
-          Step(uses = Some("actions/checkout@v4")),
+          Step(uses = Some(ActionRef("actions/checkout@v4"))),
           Step(name = Some("Test"), run = Some("sbt workflow/test")),
         ),
       ),
@@ -29,7 +29,7 @@ object RenderSpec extends ZIOSpecDefault:
         needs = List("test-workflow"),
         `if` = Some("github.ref == 'refs/heads/main'"),
         env = ListMap("MY_TOKEN" -> "abc"),
-        steps = List(Step(uses = Some("actions/checkout@v4"))),
+        steps = List(Step(uses = Some(ActionRef("actions/checkout@v4")))),
       ),
     ),
   )
@@ -102,7 +102,7 @@ object RenderSpec extends ZIOSpecDefault:
             List(
               Step(
                 name = Some("Cache"),
-                uses = Some("actions/cache@v4"),
+                uses = Some(ActionRef("actions/cache@v4")),
                 `with` = ListMap("path" -> "~/.sbt\n~/.cache/sbt"),
               )
             )
@@ -148,7 +148,7 @@ object RenderSpec extends ZIOSpecDefault:
             environment = Some("production"),
             permissions = ListMap("id-token" -> "write", "contents" -> "read"),
             env = ListMap("DEPLOY_ROLE" -> "${{ secrets.PROD_ROLE }}", "TIER" -> "prod"),
-            steps = List(Step(uses = Some("actions/checkout@v4"))),
+            steps = List(Step(uses = Some(ActionRef("actions/checkout@v4")))),
           )
         ),
       )
@@ -168,7 +168,8 @@ object RenderSpec extends ZIOSpecDefault:
             Workflow(
               name = "CI",
               on = Triggers(push = Some(BranchFilter(branches = List("main")))),
-              jobs = ListMap("j" -> Job(runsOn = labels, steps = List(Step(uses = Some("actions/checkout@v4"))))),
+              jobs =
+                ListMap("j" -> Job(runsOn = labels, steps = List(Step(uses = Some(ActionRef("actions/checkout@v4")))))),
             )
           )
           .yaml
@@ -190,7 +191,7 @@ object RenderSpec extends ZIOSpecDefault:
             name = Some("docs"),
             runsOn = Nil,
             permissions = ListMap("pages" -> "write", "id-token" -> "write", "contents" -> "read"),
-            uses = Some("early-effect/.github/.github/workflows/specular-docs.yml@main"),
+            uses = Some(ActionRef("early-effect/.github/.github/workflows/specular-docs.yml@main")),
             `with` = ListMap("sbt-project" -> "docs"),
           )
         ),
@@ -210,7 +211,9 @@ object RenderSpec extends ZIOSpecDefault:
         name = "Scala Steward",
         on = Triggers(schedule = List(Cron.weekly(DayOfWeek.Sunday)), workflowDispatch = true),
         jobs = ListMap(
-          "scala-steward" -> Job(steps = List(Step(uses = Some("scala-steward-org/scala-steward-action@v2"))))
+          "scala-steward" -> Job(steps =
+            List(Step(uses = Some(ActionRef("scala-steward-org/scala-steward-action@v2"))))
+          )
         ),
       )
       val out = Render.render(wf).yaml
@@ -255,7 +258,7 @@ object RenderSpec extends ZIOSpecDefault:
       val steps = Render
         .renderSteps(
           List(
-            Step(uses = Some("actions/checkout@v4")),
+            Step(uses = Some(ActionRef("actions/checkout@v4"))),
             Step(name = Some("Test"), run = Some("sbt test")),
           )
         )
@@ -349,7 +352,7 @@ object RenderSpec extends ZIOSpecDefault:
       assertTrue(results.distinct.size == 1)
     },
     test("a step GitHub would reject is a Left, not an exception, and names the step") {
-      val both = Step(name = Some("Confused"), uses = Some("actions/checkout@v4"), run = Some("echo hi"))
+      val both = Step(name = Some("Confused"), uses = Some(ActionRef("actions/checkout@v4")), run = Some("echo hi"))
       val wf   = sample.copy(jobs = ListMap("build" -> Job(steps = List(both))))
       assertTrue(
         Render.render(wf).left.exists(_.contains("both uses and run")),

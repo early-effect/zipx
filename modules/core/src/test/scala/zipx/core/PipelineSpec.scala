@@ -45,7 +45,7 @@ object PipelineSpec extends ZIOSpecDefault:
         List(
           Step(
             name = Some("Configure credentials"),
-            uses = Some("aws-actions/configure-aws-credentials@v6"),
+            uses = Some(ActionRef("aws-actions/configure-aws-credentials@v6")),
             `with` = Map("role-to-assume" -> "${{ env.DEPLOY_ROLE }}", "aws-region" -> "${{ env.AWS_REGION }}"),
           )
         )
@@ -93,7 +93,7 @@ object PipelineSpec extends ZIOSpecDefault:
       val prod = job("deploy-serviceA-prod")
       assertTrue(
         prod.permissions.get("id-token").contains("write"),
-        prod.steps.exists(_.uses.contains("aws-actions/configure-aws-credentials@v6")),
+        prod.steps.exists(_.uses.contains(ActionRef("aws-actions/configure-aws-credentials@v6"))),
         prod.env.get("DEPLOY_ROLE").contains("${{ secrets.PROD_ROLE }}"),
       )
     },
