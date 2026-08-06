@@ -1,1 +1,1 @@
-addSbtPlugin("org.scala-sbt" % "sbt-remote-cache" % "2.0.4")
+addSbtPlugin("org.scala-sbt" % "sbt-remote-cache" % "2.0.5")
