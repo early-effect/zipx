@@ -69,6 +69,13 @@ end PlanText
   * @param affectedOnPush
   *   restricts pushes as well as PRs to affected modules, by diffing against the push `before` sha. Off by default,
   *   because a bad `before` (a force-push, a branch's first push) would silently under-build. Tags always build all.
+  * @param affectedPublish
+  *   extends affected-gating to [[Phase.Publish]] jobs under [[CapabilityScope.Graph]], so one changed module does not
+  *   rebuild and push every image. A separate knob from [[affected]] rather than a widening of it, because the two
+  *   phases carry opposite risks: **under-verifying is silently unsafe** (a green PR whose code was never tested),
+  *   while **under-publishing is loudly broken** (the deploy that wants the missing artifact fails immediately). One
+  *   switch for both would price Publish's narrowing at Verify's risk. Off by default; [[Phase.Deploy]] is never
+  *   affected-gated. Fail-open carries over unchanged, and a release tag always publishes everything.
   * @param cacheEpoch
   *   how [[CacheBackend.LocalDir]] picks its commit-stable cache namespace: mid-PR commits share hits and a release tag
   *   rolls the namespace. Prefer the runtime-tag default so keys stay fresh without regenerating the workflow.
@@ -108,6 +115,7 @@ final case class PlanConfig(
     runnerOs: RunnerOs = PlanConfig.DefaultRunnerOs,
     affected: AffectedMode = AffectedMode.AffectedOnPR,
     affectedOnPush: Boolean = false,
+    affectedPublish: Boolean = false,
     cache: CacheBackend = CacheBackend.LocalDir,
     cacheEpoch: CacheEpoch = CacheEpoch.GitTags(),
     pushBranches: List[String] = List("main"),

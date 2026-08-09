@@ -277,6 +277,12 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[Boolean]("Whether Verify jobs run only for affected modules on PRs (default true).")
     val zipxAffectedOnPush =
       settingKey[Boolean]("Also restrict pushes to affected modules via the before-sha diff (default false).")
+    val zipxAffectedPublish =
+      settingKey[Boolean](
+        "Also affected-gate Graph-scope Publish jobs, so one changed module does not rebuild every image " +
+          "(default false; release tags always publish everything). Separate from zipxAffectedOnPR because " +
+          "under-verifying is silently unsafe while under-publishing is loudly broken."
+      )
     val zipxSkipMergedPrPush =
       settingKey[Boolean](
         "Skip Verify on branch pushes when the commit already belongs to a merged PR (default true)."
@@ -336,6 +342,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxWorkflowPath             := ".github/workflows/ci.yml",
     zipxAffectedOnPR             := true,
     zipxAffectedOnPush           := false,
+    zipxAffectedPublish          := false,
     zipxSkipMergedPrPush         := true,
     zipxCacheRehydrateOnMerge    := true,
     zipxCacheRehydrateTask       := "compile",
@@ -492,6 +499,7 @@ object ZipxPlugin extends AutoPlugin:
       runnerOs = read(zipxRunnerOs, PlanConfig.DefaultRunnerOs),
       affected = if read(zipxAffectedOnPR, true) then AffectedMode.AffectedOnPR else AffectedMode.Always,
       affectedOnPush = read(zipxAffectedOnPush, false),
+      affectedPublish = read(zipxAffectedPublish, false),
       cache = read(zipxCache, CacheBackend.LocalDir),
       cacheEpoch = read(zipxCacheEpoch, CacheEpoch.GitTags()),
       pushBranches = read(zipxPushBranches, Seq("main")).toList,

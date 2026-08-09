@@ -65,8 +65,8 @@ final case class StepContext(
     actions: ActionPins = ActionPins.Defaults,
 )
 
-/** Pipeline position, in run order. Only [[Phase.Verify]] jobs are affected-gated; the rest are release-gated. Also
-  * fixes top-to-bottom job order in the generated YAML.
+/** Pipeline position, in run order. [[Verify]] jobs are affected-gated, [[Publish]] jobs only under
+  * [[PlanConfig.affectedPublish]], and [[Deploy]] jobs never. Also fixes top-to-bottom job order in the generated YAML.
   */
 enum Phase:
   case Verify, Publish, Deploy
@@ -87,10 +87,15 @@ enum Ordering:
   * prove never true (see `Satisfiable`): a `OnReleaseTag` gate with a `refs/heads/main` condition is a job that looks
   * deliberate and cannot run.
   *
-  * [[Gate.AffectedOnly]] is a design seam, not a shipped feature: affected-gating is derived from [[Phase.Verify]] plus
-  * [[PlanConfig.affected]], never from `Gate`, so the planner rejects it with an explaining error rather than degrading
-  * silently to [[Gate.Always]]. A green, untested pipeline is the failure mode zipx exists to prevent. See ROADMAP
-  * M3/M6: the Deploy case is resolved (never affected-gated), Publish is still open.
+  * [[Gate.AffectedOnly]] is a design seam, not a shipped feature: affected-gating is derived from the phase plus
+  * [[PlanConfig.affected]] and [[PlanConfig.affectedPublish]], never from `Gate`, so the planner rejects it with an
+  * explaining error rather than degrading silently to [[Gate.Always]]. A green, untested pipeline is the failure mode
+  * zipx exists to prevent.
+  *
+  * Which phases can be narrowed: [[Phase.Verify]] always, [[Phase.Publish]] under [[PlanConfig.affectedPublish]], and
+  * [[Phase.Deploy]] never (a deploy is about a destination's desired state, not about what a diff touched). Publish is
+  * opt-in and Verify is not, because **under-verifying is silently unsafe** while **under-publishing is loudly
+  * broken**.
   */
 enum Gate:
   case Always, OnReleaseTag, AffectedOnly
@@ -100,8 +105,8 @@ enum Gate:
   *   - [[Aggregate]] joins module commands with `;` into one sbt session, so the fewest JVM starts. One job per stage,
   *     or one per [[Target]] for deploy.
   *   - [[Layer]] is one job per toposort wave, commands joined within a wave, waves chained by `needs`.
-  *   - [[Graph]] is one job per participating module (times matrix and targets), and the only scope affected-only PRs
-  *     can narrow.
+  *   - [[Graph]] is one job per participating module (times matrix and targets), and the only scope affected-gating can
+  *     narrow: an Aggregate job runs one sbt session over every module, so there is nothing in it to skip.
   *   - [[Once]] is a single build-wide job running a fixed command, independent of module tasks. Its job id is the
   *     capability name.
   */

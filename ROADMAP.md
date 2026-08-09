@@ -73,9 +73,9 @@ PerModule parallel **test** workflow, correct `needs` from `classpathRefs`, `Loc
 Publish capability, publish-edge contraction (nearest same-capability ancestors), release-tag gating, per-module cross-scala matrix (including a 2.13-only publisher). Publishes in true dependency order instead of a flat parallel matrix, the **headline feature**. Verified against the sample graph: `schema → {api, legacyClient} → {clientA, clientB}`.
 
 ### M3: Affected-only ✅
-A leading `affected` setup job (checkout `fetch-depth: 0`, run `zipxAffectedModules <base>`, output a JSON module array); Verify jobs gated with `if: contains(fromJson(needs.affected.outputs.modules), '<id>') || contains(..., 'all')`. On push/tag the job emits the `"all"` sentinel ⇒ full build. A `.sbt` change or anything under a `project` dir ⇒ full build; unowned files ignored. **The skipped-`needs` hazard** handled with `!cancelled()` + `needs.X.result != 'failure'` so an affected module still runs when an unaffected upstream is skipped. Pure file→module mapping (`Affected`, longest base-dir prefix) is unit-tested including pathological prefix/superstring/diamond cases; the git-diff path (`zipxAffectedModules`) verified against a scratch git repo. Controlled by `zipxAffectedOnPR` (default true).
+A leading `affected` setup job (checkout `fetch-depth: 0`, run `zipxAffectedModules <base>`, output a JSON module array); Verify jobs gated with `if: contains(fromJson(needs.affected.outputs.modules), '<id>') || contains(..., 'all')`. On push/tag the job emits the `"all"` sentinel ⇒ full build. A `.sbt` change or anything under a `project` dir ⇒ full build; unowned files ignored. **The skipped-`needs` hazard** handled with `!cancelled()` + `needs.X.result != 'failure'` so an affected module still runs when an unaffected upstream is skipped. Pure file→module mapping (`Affected`, longest base-dir prefix) is unit-tested including pathological prefix/superstring/diamond cases; the git-diff path (`zipxAffectedModules`) verified against a scratch git repo. Controlled by `zipxAffectedOnPR` (default true); `zipxAffectedPublish` (default false) extends the same gating to Graph Publish, see M6.
 
-**Hardening (post-M3):** a failed git diff must **fail open**. Distinguishing `None` (diff did not run) from `Some(Nil)` (diff ran, nothing changed) prevents a bad base ref from emitting `[]` and skipping every Graph Verify job while the PR reports green. The same `"all"` sentinel used for tags/first-push covers that case. Workflow `concurrency` cancels superseded PR runs but **never** cancels `refs/tags/*` (publish is not idempotent). `Gate.AffectedOnly` is rejected at generate time until Publish can opt into composable affected-gating (Deploy stays never-affected; see M6).
+**Hardening (post-M3):** a failed git diff must **fail open**. Distinguishing `None` (diff did not run) from `Some(Nil)` (diff ran, nothing changed) prevents a bad base ref from emitting `[]` and skipping every Graph Verify job while the PR reports green. The same `"all"` sentinel used for tags/first-push covers that case. Workflow `concurrency` cancels superseded PR runs but **never** cancels `refs/tags/*` (publish is not idempotent). `Gate.AffectedOnly` is rejected at generate time because affected-gating is derived from phase plus `zipxAffectedOnPR` / `zipxAffectedPublish` rather than from `Gate` (Deploy stays never-affected; see M6).
 
 ```mermaid
 flowchart TD
@@ -181,20 +181,34 @@ final case class Capability(             // gains (all defaulting to current beh
 
 **Resolved design choices:** (1) **`Phase.Deploy` is added**: Verify → Publish → Deploy; deploy is never affected-gated, sorts after publish, and uses `needsCapabilities` for its docker/publish dependency. (2) **Env injection uses the job `env:` block**: each explicit per-target job merges `target.env` into its `env:`, referenced in steps as `${{ env.KEY }}` (secret-valued entries like `${{ secrets.X }}` work as env values); no runtime matrix, so no GHA uniform-object constraint. (3) `zipx-aws` convenience module deferred until a second consumer needs it.
 
-**Open seam: affected Publish (not Deploy).** M6 closed Deploy as never affected-gated. Publish still has the original `Gate` scaladoc intent (“affected-gated publishing on a tag”): on `v*`, Graph publish/docker would run only for the affected closure since the previous tag. That needs composable gates (`OnReleaseTag ∩ Affected`), a shared `affected` setup for non-Verify Graph jobs, and a tag base-ref policy that still **fails open**. Until then the planner rejects `Gate.AffectedOnly` so it cannot silently mean Always. Near-term value proof without Gate changes: expensive Graph Verify capabilities (scripted, MiMa, PR-local docker) that already receive path gating.
+**Closed seam: affected Publish (still never Deploy), `zipxAffectedPublish`.** M6 closed Deploy as never affected-gated and left Publish open, wanting "composable gates (`OnReleaseTag ∩ Affected`)". Composition turned out to need no `Gate` change at all: the release gate and the affected clause are separate clauses of one conjunction already, so the whole feature is which *phases* the existing narrowing reaches. `Planner.affectedGatedPhase` is that decision in one place: Verify always, Publish under `PlanConfig.affectedPublish`, Deploy never.
+
+It is a **separate setting** rather than a widening of `zipxAffectedOnPR`, and the asymmetry is the reason: **under-verifying is silently unsafe** (a green PR whose code was never tested) while **under-publishing is loudly broken** (the deploy that wants the missing artifact fails immediately). One switch for both would price Publish's narrowing at Verify's risk, so Verify's default stays on and Publish's has to be asked for. Off by default also means no consumer's committed `ci.yml` moves a byte on upgrade.
+
+The three things that made it safe rather than merely cheap:
+
+- **A release tag publishes everything, for free.** There is no base ref to diff a tag against, and `affectedScript` already emits the `all` sentinel for a tag push without taking a diff. So the "affected relative to what, after a series of merges?" question never arises. The one wiring change is that the `affected` setup job must now *run* on a tag push when a Publish capability reads it (`affectedOnTags`), where a Verify-only setup excludes tags.
+- **Fail-open carries over untouched**: a diff that could not run still emits `["all"]`, which now means "publish everything" as well as "verify everything".
+- **The skipped-`needs` hazard, reopened by this and closed again.** M3 handled it for Verify; narrowing Publish reopens it one level out, because `Capability.deploy` needs `docker` by default and GitHub's implicit `success()` skips a job whose need was *skipped*. So one affected-skipped `docker-<module>` would have silently skipped the deploy that wanted the other modules' images: exactly the class of failure this feature exists to prevent. `Planner.skipTolerantClauses` emits `!cancelled()` plus a per-need `!= 'failure'` at all four job-construction sites, and `tolerateSkips` returns `None` when nothing a job needs can skip, which is what keeps every existing `if:` byte-identical. `!= 'failure'` and not `== 'success'`, since `skipped` is the answer being tolerated; `affected` and `verify-gate` are excluded from the guard because each already has a clause of its own.
+
+`AffectedPublishSpec` is a suite of its own rather than more cases in `PlannerSpec`, because the properties worth pinning are about the *interaction*: off-by-default byte-identity, the release gate surviving the narrowing, the Aggregate/Layer/Deploy exclusions, and a failed need still blocking a skip-tolerant job. `Gate.AffectedOnly` stays rejected: affected-gating is derived from phase plus the two settings, so honoring it there would be a silent Always.
 
 ```mermaid
 flowchart TB
-  subgraph wave1 [Wave 1: prove with Verify Graph]
-    S[scripted / MiMa / dockerLocal]
-    S --> AG[existing affected gating]
+  subgraph verify [Verify · on by default]
+    V[Graph Verify] --> VA[affected clause]
   end
-  subgraph wave2 [Wave 2: Gate composition]
-    G[OnReleaseTag AND Affected]
-    G --> PP[partial publish on tag]
-    G -.->|reject| D[Deploy stays excluded]
+  subgraph publish [Publish · zipxAffectedPublish]
+    P[Graph Publish] --> PA[release gate AND affected clause]
+    PA --> Dep[dependents gain !cancelled + result != failure]
   end
-  wave1 --> wave2
+  subgraph never [Never]
+    A[Aggregate / Layer · nothing to skip]
+    D[Deploy · destination-driven]
+  end
+  verify --> publish
+  class V,VA,P,PA,Dep happy
+  class A,D warn
 ```
 
 **Capability coverage: what a full CI pipeline needs, and how zipx provides it.** M6 is "done" when a `build.sbt` can generate a complete multi-environment pipeline with no external YAML config. Capability-by-capability:
@@ -418,7 +432,8 @@ the runner reporting a *credentials* problem. A second consumer would have copie
 - **`zipxPublishOrder` task** prints the contracted publish layers (`ModuleGraph.subsetLayers(_.publishes)`), e.g. `L0: models / L1: coreLib / L2: client`.
 - **Opt-in push-time affected (`zipxAffectedOnPush`, default false).** When on, pushes also restrict to affected modules by diffing the push `before` sha, guarded against force-push / branch-create (all-zero sha → build everything). Default remains: PRs are affected-scoped, pushes/tags build all.
 - **Affected fail-open + concurrency.** Diff failure emits `["all"]` (not `[]`); workflow concurrency cancels superseded PR runs but never release tags (`zipxCancelSupersededRuns`, default true).
-- **`Gate.AffectedOnly` rejected until implemented.** Keeps the Publish-affected design seam visible; generate fails instead of silently running Always.
+- **`Gate.AffectedOnly` rejected.** Affected-gating is derived from phase plus `zipxAffectedOnPR` / `zipxAffectedPublish`, never from `Gate`, so generate fails instead of silently running Always.
+- **Opt-in affected Publish (`zipxAffectedPublish`, default false, #70).** Narrows Graph Publish jobs to the affected closure so one changed module does not rebuild and push every image. A separate switch from `zipxAffectedOnPR` because **under-verifying is silently unsafe** while **under-publishing is loudly broken**; a release tag still publishes everything (the `all` sentinel needs no diff), fail-open is unchanged, and dependents of a narrowable job gain `!cancelled()` plus a per-need `!= 'failure'` so a skipped image never silently skips its deploy. See M6.
 - **An `if:` that can never be true is rejected (#66).** `Gate`, `Capability.condition` and `Target.condition` are ANDed across three files nobody reads together, so `OnReleaseTag` plus `refIs("refs/heads/main")` produced a job that looked deliberate and could never run (this repo's own example shipped it). `Satisfiable` decides a deliberately narrow subset: single-valued `github` contexts (`ref`, `event_name`, `repository`) inside a conjunction, flattening `All` and De Morgan on `Not(Any)`. `Any`, `Raw`, `vars.*`, PR labels and two negations are left alone, because an unsound rejection is worse than a missed one: a missed contradiction is the status quo, a wrong rejection is a build that cannot generate its own CI.
 
 ## Deviations from the original plan

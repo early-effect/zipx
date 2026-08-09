@@ -59,7 +59,8 @@ zipxVerifyCleanLabel := Some("clean")  // default
 Aggregate and Layer always invoke their full stage command (they do not skip GitHub jobs). That is not the same as
 "always recompile and retest everything": sbt 2's incremental `test` and cross-run task cache (restored by zipx at the
 epoch, or via remote cache) still skip unaffected work, even on a cold JVM. See **Execution modes** ("Two kinds of
-affected") and the **Affected** page for the fail-open handoff and who is gated today.
+affected") and the **Affected** page for the fail-open handoff, who is gated, and `zipxAffectedPublish`, which extends
+the same narrowing to Graph Publish jobs as a separate opt-in.
 
 ```scala
 zipxAffectedOnPR := true   // default with Graph Verify

@@ -82,9 +82,11 @@ object Planner:
         sys.error(
           s"zipx: Gate.AffectedOnly is not implemented, so capabilities ${bad.map(_.name).sorted.mkString(", ")} " +
             "would silently run on every event. Affected-gating is controlled by zipxAffectedOnPR / " +
-            "zipxAffectedOnPush on Graph Verify capabilities, not by Gate. Use Gate.Always (Verify capabilities are " +
-            "affected-gated automatically) or Gate.OnReleaseTag."
+            "zipxAffectedOnPush / zipxAffectedPublish on Graph capabilities, not by Gate. Use Gate.Always (Verify " +
+            "capabilities are affected-gated automatically, Publish ones under zipxAffectedPublish) or " +
+            "Gate.OnReleaseTag."
         )
+    end match
     // `ModuleGraph.cycle` rather than `make`: these are capabilities, so the error has to name them as such.
     ModuleGraph
       .cycle(capabilities.map(c => c.name -> c.needsCapabilities).toMap)
@@ -131,13 +133,36 @@ object Planner:
   val verifyGateJobId: JobId     = JobId("verify-gate")
   val cacheRehydrateJobId: JobId = JobId("cache-rehydrate")
 
+  /** Whether a phase's Graph jobs may be narrowed to the affected modules.
+    *
+    * [[Phase.Verify]] always may; [[Phase.Publish]] only under [[PlanConfig.affectedPublish]]; [[Phase.Deploy]] never,
+    * per ROADMAP M6, because a deploy is about a destination's desired state rather than about what a diff touched.
+    *
+    * Publish is opt-in and Verify is not, because the two failures are not symmetric: **under-verifying is silently
+    * unsafe** (the PR is green and the code was never tested), while **under-publishing is loudly broken** (the deploy
+    * that wants the missing artifact fails immediately). Verify's default is the safe one; Publish's saving is real but
+    * has to be asked for.
+    */
+  private def affectedGatedPhase(phase: Phase, config: PlanConfig): Boolean = phase match
+    case Phase.Verify  => true
+    case Phase.Publish => config.affectedPublish
+    case Phase.Deploy  => false
+
   def plan(graph: ModuleGraph, capabilities: List[Capability], config: PlanConfig): Workflow =
     validateCapabilities(capabilities, graph)
 
-    // Affected-gating is per-module, so only a Graph Verify capability can narrow anything.
+    // Affected-gating is per-module, so only a Graph capability can narrow anything: an Aggregate job runs one sbt
+    // session over every module, and there is nothing there to skip.
     val usesAffected =
       config.affected == AffectedMode.AffectedOnPR &&
-        capabilities.exists(c => c.phase == Phase.Verify && c.scope == CapabilityScope.Graph)
+        capabilities.exists(c => affectedGatedPhase(c.phase, config) && c.scope == CapabilityScope.Graph)
+
+    // Publish jobs run on a release tag, where Verify does not, so the `affected` job they now depend on has to run
+    // there too. It emits the `all` sentinel for a tag push already (see `affectedScript`), which is what makes a
+    // release publish everything regardless of any diff.
+    val affectedOnTags =
+      usesAffected && affectedGatedPhase(Phase.Publish, config) &&
+        capabilities.exists(c => c.phase == Phase.Publish && c.scope == CapabilityScope.Graph)
 
     val hasVerify          = capabilities.exists(_.phase == Phase.Verify)
     val usesVerifyGate     = config.skipMergedPrPush && hasVerify
@@ -146,22 +171,32 @@ object Planner:
 
     val byName = capabilities.map(c => c.name -> c).toMap
 
+    // The capabilities whose jobs can *skip* rather than fail, which is what a dependent has to tolerate. Only Graph
+    // scope, matching `gatedOnAffected` below: an Aggregate or Layer job is never affected-gated, so it never skips.
+    val affectedGatedNames =
+      if !usesAffected then Set.empty[CapabilityName]
+      else
+        capabilities
+          .filter(c => c.scope == CapabilityScope.Graph && affectedGatedPhase(c.phase, config))
+          .map(_.name)
+          .toSet
+
     val topoOrder      = graph.topologicalSort
     val orderedCaps    = capabilities.zipWithIndex.sortBy((c, i) => (c.phase.ordinal, i)).map(_._1)
     val capabilityJobs =
       orderedCaps.flatMap {
         case c if c.scope == CapabilityScope.Once =>
-          List(onceJob(c, graph, config, byName, usesVerifyGate))
+          List(onceJob(c, graph, config, byName, usesVerifyGate, affectedGatedNames))
         case c if c.scope == CapabilityScope.Aggregate =>
-          aggregateJobs(c, graph, config, byName, usesVerifyGate)
+          aggregateJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames)
         case c if c.scope == CapabilityScope.Layer =>
-          layerJobs(c, graph, config, byName, usesVerifyGate)
+          layerJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames)
         case c =>
           for
             moduleId <- topoOrder
             node     <- graph.get(moduleId).toList
             if c.participates(node)
-            job <- graphJobsFor(c, node, graph, config, usesAffected, byName, usesVerifyGate)
+            job <- graphJobsFor(c, node, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames)
           yield job
       }
 
@@ -170,7 +205,7 @@ object Planner:
         Option.when(usesVerifyGate)(verifyGateJobId         -> verifyGateJob(config)),
         Option.when(usesCacheRehydrate)(cacheRehydrateJobId -> cacheRehydrateJob(config)),
         Option.when(usesAffected)(
-          affectedJobId -> affectedSetupJob(config, usesVerifyGate)
+          affectedJobId -> affectedSetupJob(config, usesVerifyGate, affectedOnTags)
         ),
       ).flatten
 
@@ -319,30 +354,44 @@ object Planner:
 
   /** Verify never runs on a tag push (a release tag only needs Publish and Deploy) or a `workflow_dispatch` (a manual
     * run is for a docs-only deploy). Non-Verify phases pass through untouched.
+    *
+    * @param excludeTagsAndDispatch
+    *   `false` keeps the merged-PR skip but drops the tag/dispatch exclusion, for the one job that is Verify-shaped and
+    *   yet has to run on a tag: the `affected` setup job, once Publish reads its output too.
     */
   private def applyVerifyGate(
       needs: List[JobId],
       cond: Option[String],
       phase: Phase,
       usesVerifyGate: Boolean,
+      excludeTagsAndDispatch: Boolean = true,
   ): (List[JobId], Option[String]) =
     if phase != Phase.Verify then (needs, cond)
     else
-      val notOnTagOrDispatch = !onAnyTagPush && (Expr.github("event_name") !== Expr.quoted("workflow_dispatch"))
-      if !usesVerifyGate then (needs, andConditions(Some(notOnTagOrDispatch.unwrapped), cond))
+      val notOnTagOrDispatch =
+        Option.when(excludeTagsAndDispatch)(
+          !onAnyTagPush && (Expr.github("event_name") !== Expr.quoted("workflow_dispatch"))
+        )
+      if !usesVerifyGate then (needs, andConditions(notOnTagOrDispatch.map(_.unwrapped), cond))
       else
         val gatedNeeds = (verifyGateJobId :: needs).distinct.sorted
         // Fail-open: run when the gate said yes, or when the gate itself did not succeed. `!cancelled()` is what keeps
         // this reachable when the gate was skipped entirely.
-        val gateCond = !Expr.cancelled && notOnTagOrDispatch && Expr.group(
+        val gateCond = notOnTagOrDispatch.foldLeft(!Expr.cancelled)(_ && _) && Expr.group(
           Expr.group(verifyGateResult !== Expr.quoted("success")) ||
             Expr.group(verifyGateRuns === Expr.quoted("true"))
         )
         (gatedNeeds, andConditions(Some(gateCond.unwrapped), cond))
       end if
 
-  private def affectedSetupJob(config: PlanConfig, usesVerifyGate: Boolean): Job =
-    val (needs, cond) = applyVerifyGate(Nil, None, Phase.Verify, usesVerifyGate)
+  /** @param runsOnTags
+    *   an affected-gated Publish job runs on a release tag, so the job it reads its module list from has to as well.
+    *   Cheap: on a tag push [[affectedScript]] takes no diff at all, it emits the `all` sentinel directly, which is
+    *   what makes a release publish everything.
+    */
+  private def affectedSetupJob(config: PlanConfig, usesVerifyGate: Boolean, runsOnTags: Boolean): Job =
+    val (needs, cond) =
+      applyVerifyGate(Nil, None, Phase.Verify, usesVerifyGate, excludeTagsAndDispatch = !runsOnTags)
     Job(
       name = Some("affected"),
       runsOn = List(config.runnerOs),
@@ -434,11 +483,14 @@ object Planner:
       config: PlanConfig,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      affectedGatedNames: Set[CapabilityName],
   ): (JobId, Job) =
     val releaseCond   = Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
     val crossNeeds    = crossCapabilityNeeds(capability, graph, byName)
-    val (needs, base) = applyVerifyGate(crossNeeds, releaseCond, capability.phase, usesVerifyGate)
-    val cond          = andConditions(base, JobCondition.renderOpt(capability.condition))
+    val tolerance     = tolerateSkips(capability, crossNeeds, affectedGatedNames)
+    val (needs, base) =
+      applyVerifyGate(crossNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
+    val cond = andConditions(base, JobCondition.renderOpt(capability.condition))
     capability.workflowCall match
       case Some(call) =>
         // GitHub rejects job-level `env` and `runs-on` alongside `uses`, hence neither here.
@@ -483,6 +535,7 @@ object Planner:
       config: PlanConfig,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      affectedGatedNames: Set[CapabilityName],
   ): List[(JobId, Job)] =
     val nodes = participants(capability, graph)
     if nodes.isEmpty then Nil
@@ -492,8 +545,10 @@ object Planner:
       val runner      = capability.runsOn.getOrElse(List(config.runnerOs))
       val releaseCond =
         Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
-      val (baseNeeds, gatedCond) = applyVerifyGate(crossNeeds, releaseCond, capability.phase, usesVerifyGate)
-      val baseCond               = andConditions(gatedCond, JobCondition.renderOpt(capability.condition))
+      val tolerance              = tolerateSkips(capability, crossNeeds, affectedGatedNames)
+      val (baseNeeds, gatedCond) =
+        applyVerifyGate(crossNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
+      val baseCond = andConditions(gatedCond, JobCondition.renderOpt(capability.condition))
 
       distinctTargets(capability, graph) match
         case Nil =>
@@ -552,6 +607,7 @@ object Planner:
       config: PlanConfig,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      affectedGatedNames: Set[CapabilityName],
   ): List[(JobId, Job)] =
     val layers = graph.subsetLayers(capability.participates)
     if layers.isEmpty then Nil
@@ -561,6 +617,9 @@ object Planner:
       val runner      = capability.runsOn.getOrElse(List(config.runnerOs))
       val releaseCond =
         Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
+      // Only L0 names the cross needs, so only L0 has a skip to tolerate; later waves wait on L0, whose own `if:`
+      // already resolved it.
+      val tolerance = tolerateSkips(capability, crossNeeds, affectedGatedNames)
 
       layers.zipWithIndex.map { (layerIds, i) =>
         val id            = layerJobId(capability, i)
@@ -569,7 +628,8 @@ object Planner:
         val layerNeeds    = (prevNeed ++ crossNeeds).distinct.sorted
         val (needs, base) =
           // Later waves already wait on L0, so gating them again would be redundant.
-          if firstWave then applyVerifyGate(layerNeeds, releaseCond, capability.phase, usesVerifyGate)
+          if firstWave then
+            applyVerifyGate(layerNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
           else (layerNeeds, releaseCond)
         val cond       = andConditions(base, JobCondition.renderOpt(capability.condition))
         val layerNodes = layerIds.flatMap(graph.get)
@@ -604,6 +664,7 @@ object Planner:
       usesAffected: Boolean,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      affectedGatedNames: Set[CapabilityName],
   ): List[(JobId, Job)] =
     val upstreamNeeds = capability.ordering match
       case Ordering.ParallelWithUpstream =>
@@ -628,7 +689,7 @@ object Planner:
             case _ => allJobIds(dep, graph)
       yield id
 
-    val gatedOnAffected = usesAffected && capability.phase == Phase.Verify
+    val gatedOnAffected = usesAffected && affectedGatedPhase(capability.phase, config)
     val rawNeeds        =
       (upstreamNeeds ++ crossNeeds ++ (if gatedOnAffected then List(affectedJobId) else Nil)).distinct.sorted
 
@@ -637,8 +698,13 @@ object Planner:
         Some(Strategy(matrix = ListMap("scala" -> node.crossScalaVersions)))
       else None
 
-    val cache    = cacheContribution(config)
-    val baseCond = jobCondition(capability, node, upstreamNeeds, gatedOnAffected)
+    val cache = cacheContribution(config)
+    // Every need except the two jobs with a clause of their own: `affected` is read through its *output*, and
+    // `verify-gate` through `applyVerifyGate`. That includes `crossNeeds`, so a failed `fmt` still blocks the tests
+    // whose `!cancelled()` would otherwise let them through.
+    val guardedNeeds = rawNeeds.filterNot(id => id == affectedJobId || id == verifyGateJobId)
+    val skipTolerant = dependsOnSkippable(capability, affectedGatedNames)
+    val baseCond     = jobCondition(capability, node, guardedNeeds, gatedOnAffected, skipTolerant)
     // The affected setup job already needs verify-gate, so a gated-on-affected job inherits the skip through it and asks
     // only for the tag exclusion.
     val (needs, gated) =
@@ -709,11 +775,49 @@ object Planner:
       case (None, Some(y))    => Some(y)
       case (None, None)       => None
 
+  /** The clauses that let a job tolerate a **skipped** need while still failing on a **failed** one.
+    *
+    * `!cancelled()` is what makes the job reachable at all once a need can skip, since GitHub's implicit `success()`
+    * would block it. That opens the other direction, so every need is then guarded explicitly: `!= 'failure'` rather
+    * than `== 'success'`, because `skipped` is the answer being tolerated.
+    *
+    * Without this, affected-gating a Publish capability would break every dependent: `Capability.deploy` needs `docker`
+    * by default, so one skipped `docker-<module>` would silently skip the deploy that wanted the other modules'.
+    */
+  private def skipTolerantClauses(needs: List[JobId]): List[String] =
+    (!Expr.cancelled).unwrapped +: needs.distinct.sorted.map(n =>
+      (Expr.JobResult(n) !== Expr.quoted("failure")).unwrapped
+    )
+
+  /** Whether a job depending on these capability names has a need that affected-gating can skip. One hop is enough: a
+    * direct dependent becomes skip-tolerant and therefore never skips itself, so its own dependents keep seeing
+    * `success`.
+    */
+  private def dependsOnSkippable(
+      capability: Capability,
+      affectedGatedNames: Set[CapabilityName],
+  ): Boolean =
+    capability.needsCapabilities.exists(affectedGatedNames.contains)
+
+  /** [[skipTolerantClauses]] for the non-Graph scopes, which are never affected-gated themselves and so need this only
+    * when something they depend on is. `None` when nothing they need can skip, which keeps every existing `if:`
+    * byte-for byte unchanged.
+    */
+  private def tolerateSkips(
+      capability: Capability,
+      crossNeeds: List[JobId],
+      affectedGatedNames: Set[CapabilityName],
+  ): Option[String] =
+    Option.when(dependsOnSkippable(capability, affectedGatedNames) && crossNeeds.nonEmpty)(
+      skipTolerantClauses(crossNeeds).mkString(" && ")
+    )
+
   private def jobCondition(
       capability: Capability,
       node: ModuleNode,
-      upstreamNeeds: List[JobId],
+      guardedNeeds: List[JobId],
       gatedOnAffected: Boolean,
+      skipTolerant: Boolean,
   ): Option[String] =
     val releaseGate =
       Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
@@ -721,15 +825,10 @@ object Planner:
       Option.when(gatedOnAffected)(
         Expr.group(affectedContains(node.id.asExprLiteral) || affectedContainsAll).unwrapped
       )
-    // `!= 'failure'` rather than `== 'success'`, because a *skipped* upstream is fine here: its module was not affected,
-    // and that is exactly the case GitHub's implicit `success()` would wrongly block.
-    val upstreamGuards =
-      if gatedOnAffected && upstreamNeeds.nonEmpty then
-        upstreamNeeds.sorted.map(u => (Expr.JobResult(u) !== Expr.quoted("failure")).unwrapped)
-      else Nil
-    val notCancelled = Option.when(gatedOnAffected)((!Expr.cancelled).unwrapped)
+    val tolerance =
+      if gatedOnAffected || skipTolerant then skipTolerantClauses(guardedNeeds) else Nil
 
-    val clauses = notCancelled.toList ++ releaseGate.toList ++ affectedGate.toList ++ upstreamGuards
+    val clauses = tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ tolerance.drop(1)
     if clauses.isEmpty then None else Some(clauses.mkString(" && "))
   end jobCondition
 

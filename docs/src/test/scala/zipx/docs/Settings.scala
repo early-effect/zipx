@@ -31,6 +31,7 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxReleaseTagPattern` | `String` | `v[0-9]+.[0-9]+.[0-9]+` | publish gate |
 | `zipxAffectedOnPR` | `Boolean` | `true` | affected setup when Graph Verify present |
 | `zipxAffectedOnPush` | `Boolean` | `false` | also scope pushes |
+| `zipxAffectedPublish` | `Boolean` | `false` | also narrow Graph **Publish**; opt-in because under-publishing is loudly broken while under-verifying is silently unsafe |
 | `zipxSkipMergedPrPush` | `Boolean` | `true` | skip Verify on merged-PR pushes |
 | `zipxCacheRehydrateOnMerge` | `Boolean` | `true` | LocalDir: rehydrate default-branch cache when Verify skips after merge |
 | `zipxCacheRehydrateTask` | `String` | `"compile"` | sbt command for the rehydrate job |
