@@ -76,6 +76,12 @@ object ZipxPlugin extends AutoPlugin:
     type RunnerOs = zipx.core.RunnerOs
     val RunnerOs = zipx.core.RunnerOs
 
+    /** Not a settings type: a Node toolchain is per-capability,
+      * `Capability.testGraph.withNodeVersion(NodeVersion("22"))`.
+      */
+    type NodeVersion = zipx.core.NodeVersion
+    val NodeVersion = zipx.core.NodeVersion
+
     /** Exported under its own name rather than as `Command`, which is sbt's own name in a `build.sbt` (see the note at
       * the end of this object). A `Capability`'s `command` is this type, so a build that writes one literally needs it.
       */
@@ -475,11 +481,7 @@ object ZipxPlugin extends AutoPlugin:
         read(crossScalaVersions, Nil) match
           case Nil      => List(read(scalaVersion, "")).filter(_.nonEmpty)
           case versions => versions.toList
-      val baseDir =
-        resolvedById
-          .get(ref.project)
-          .map(p => buildRoot.relativize(p.base.toPath).toString.replace('\\', '/'))
-          .getOrElse("")
+      val baseDir = resolvedById.get(ref.project).map(p => relativeToRoot(buildRoot, p.base)).getOrElse("")
       ModuleNode(
         // The one place a project id enters zipx, so the one place it is checked. sbt admits any id starting with a
         // `Character.isLetter`, so `café` is a legal project; GitHub job ids are ASCII, and a workflow naming that
@@ -493,6 +495,7 @@ object ZipxPlugin extends AutoPlugin:
         testTask = orFail(typedCommand("zipxTestTask", read(zipxTestTask, "test"))),
         publishTask = orFail(typedCommand("zipxPublishTask", read(zipxPublishTask, "publish"))),
         baseDir = baseDir,
+        sourcePaths = sourcePathsFor(ref, extracted, buildRoot),
         docker = read(zipxDocker, false),
       )
     }.toList
@@ -501,6 +504,37 @@ object ZipxPlugin extends AutoPlugin:
     // goes through `orFail` anyway: that is the boundary's job, and a graph is user input regardless of who checked it.
     orFail(ModuleGraph.make(nodes))
   }
+
+  /** A path relative to the build root, with forward slashes, matching what `git diff --name-only` prints. */
+  private def relativeToRoot(buildRoot: java.nio.file.Path, f: File): String =
+    buildRoot.relativize(f.toPath).toString.replace('\\', '/')
+
+  /** A project's Compile and Test source directories relative to the build root, for [[ModuleNode.sourcePaths]].
+    *
+    * Two filters: a path outside the build root (`../…`, from a source dependency elsewhere on disk) can never match a
+    * git path, and a machine-owned one (under `target`, or a `projectMatrix` row's `.sbt/matrix/<id>`) is never edited.
+    * Directories that do not exist yet are kept, so creating `src/main/scalajs` later needs no regeneration.
+    */
+  private def sourcePathsFor(
+      ref: ProjectRef,
+      extracted: Extracted,
+      buildRoot: java.nio.file.Path,
+  ): List[String] =
+    val dirs = Seq(Compile, Test).flatMap { config =>
+      extracted.getOpt(ref / config / unmanagedSourceDirectories).toList.flatten
+    }
+    dirs
+      .map(relativeToRoot(buildRoot, _))
+      .filterNot(p => p.isEmpty || p.startsWith("../") || isGeneratedPath(p))
+      .distinct
+      .sorted
+      .toList
+  end sourcePathsFor
+
+  /** sbt's output tree, or a `projectMatrix` row's synthetic base under `.sbt/`. */
+  private def isGeneratedPath(path: String): Boolean =
+    val segments = path.split('/')
+    segments.contains("target") || segments.headOption.contains(".sbt")
 
   private def rootRef(structure: sbt.internal.BuildStructure): ProjectRef =
     ProjectRef(structure.root, structure.rootProject(structure.root))

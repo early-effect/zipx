@@ -413,7 +413,7 @@ object Planner:
       env = EnvValue.renderAll(config.env) ++ EnvValue.renderAll(config.cacheRehydrateEnv),
       steps = List(
         Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
-      ) ++ jdkAndSbtSteps(config) ++ localDirCacheSteps(config, cacheRehydrateJobId) ++
+      ) ++ jdkAndSbtSteps(config, None) ++ localDirCacheSteps(config, cacheRehydrateJobId) ++
         config.cacheRehydrateExtraSteps(ctx) ++ List(
           Step.run(Script(config.cacheRehydrateTask.render)).named(cacheRehydrateJobId).build
         ),
@@ -469,7 +469,7 @@ object Planner:
       outputs = ListMap("modules" -> Expr.stepOutput("compute", "modules").render),
       steps = List(
         Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
-      ) ++ jdkAndSbtSteps(config) ++ List(
+      ) ++ jdkAndSbtSteps(config, None) ++ List(
         Step
           .run(affectedScript(config.affectedOnPush))
           .withId("compute")
@@ -992,10 +992,20 @@ object Planner:
     go(List(node.id), Set.empty, Set.empty).toList.sorted
   end nearestParticipatingAncestors
 
-  private def jdkAndSbtSteps(config: PlanConfig): List[Step] =
+  /** `nodeVersion` is the capability's, not the config's: a Node toolchain is per-suite, so a Scala.js test capability
+    * can ask for one without putting it on every publish job in the build.
+    */
+  private def jdkAndSbtSteps(config: PlanConfig, nodeVersion: Option[NodeVersion]): List[Step] =
     val setupSbtWith =
       if config.cache == CacheBackend.LocalDir then ListMap("disk-cache" -> "false")
       else ListMap.empty[String, String]
+    val nodeSteps = nodeVersion.toList.map { version =>
+      Step(
+        name = Some(s"Setup Node $version"),
+        uses = Some(config.actions.setupNode),
+        `with` = ListMap("node-version" -> version),
+      )
+    }
     List(
       Step(
         name = Some(s"Setup JDK ${config.javaVersion}"),
@@ -1006,7 +1016,7 @@ object Planner:
         ),
       ),
       Step(uses = Some(config.actions.setupSbt), `with` = setupSbtWith),
-    )
+    ) ++ nodeSteps
   end jdkAndSbtSteps
 
   private def stepsFor(
@@ -1030,7 +1040,8 @@ object Planner:
     val ctx = StepContext(node, target, hasMatrix, config.actions, destinations)
     List(
       Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
-    ) ++ jdkAndSbtSteps(config) ++ cacheSteps ++ capability.extraSteps(ctx) ++ List(commandStep) ++
+    ) ++ jdkAndSbtSteps(config, capability.nodeVersion) ++ cacheSteps ++ capability.extraSteps(ctx) ++
+      List(commandStep) ++
       capability.postSteps(ctx)
   end stepsFor
 

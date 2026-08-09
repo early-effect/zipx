@@ -228,6 +228,10 @@ end Target
   *   (or at the service id, under [[container]]). GitHub starts them before the first step and gives no readiness
   *   signal beyond a `--health-cmd` in `options`, so a test that needs one to be *ready* is often better off owning the
   *   lifecycle itself; see the Testcontainers note in the docs.
+  * @param nodeVersion
+  *   when set, an `actions/setup-node` step runs after the JDK setup, pinning Node for this capability's jobs. Off by
+  *   default because sbt-scalajs downloads its own Node for `jsEnv`, so a plain Scala.js test suite needs nothing here.
+  *   Set it when the version matters: a `jsEnv` requiring a specific Node, or a step running `npm ci` for a bundler.
   * @param workflowCall
   *   when set (typically on [[CapabilityScope.Once]]), emits a reusable-workflow job instead of sbt steps. Rejected
   *   together with [[container]] or [[services]], which GitHub does not accept alongside `uses:`.
@@ -254,6 +258,7 @@ final case class Capability(
     env: Map[String, EnvValue] = Map.empty,
     container: Option[String] = None,
     services: Map[String, JobService] = Map.empty,
+    nodeVersion: Option[NodeVersion] = None,
     workflowCall: Option[WorkflowCall] = None,
     condition: Option[JobCondition] = None,
 ):
@@ -301,6 +306,16 @@ final case class Capability(
     */
   def inContainer(image: String): Capability =
     copy(container = Some(image))
+
+  /** Pins Node for this capability's jobs with `actions/setup-node`; see [[Capability.nodeVersion]] for when it is
+    * needed, which is less often than a Scala.js build suggests.
+    *
+    * {{{
+    * Capability.testGraph.withNodeVersion(NodeVersion("22"))
+    * }}}
+    */
+  def withNodeVersion(version: NodeVersion): Capability =
+    copy(nodeVersion = Some(version))
 
 end Capability
 

@@ -984,7 +984,10 @@ object PlannerSpec extends ZIOSpecDefault:
     test("root modules with empty baseDir never own changed files via the planner path") {
       val g =
         GraphFixture(List(ModuleNode(ModuleId("root"), baseDir = ""), ModuleNode(ModuleId("lib"), baseDir = "lib")))
-      assertTrue(Affected.owningModule(g, "README.md").isEmpty, Affected.owningModule(g, "lib/X.scala").contains("lib"))
+      assertTrue(
+        Affected.owningModules(g, "README.md").isEmpty,
+        Affected.owningModules(g, "lib/X.scala") == Set("lib"),
+      )
     },
     test("Aggregate test emits one root Once job (sbt test)") {
       val wf  = Planner.plan(sampleGraph, List(Capability.test), config)

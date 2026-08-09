@@ -13,12 +13,43 @@ object AffectedSpec extends ZIOSpecDefault:
     )
   )
 
+  /** A `projectMatrix` build as sbt 2.0.5 actually resolves one: synthetic `.sbt/matrix/<id>` base dirs, with the real
+    * directories reaching zipx only through `unmanagedSourceDirectories`. Taken from `print coreJS/baseDirectory` and
+    * `print coreJS/Compile/unmanagedSourceDirectories` on a live build.
+    */
+  private val matrix = GraphFixture(
+    List(
+      ModuleNode(
+        ModuleId("core"),
+        baseDir = ".sbt/matrix/core",
+        sourcePaths = List(
+          "core/src/main/scala",
+          "core/src/main/scalajvm",
+          "core/src/test/scala",
+          "core/src/test/scalajvm",
+        ),
+      ),
+      ModuleNode(
+        ModuleId("coreJS"),
+        baseDir = ".sbt/matrix/coreJS",
+        sourcePaths = List(
+          "core/src/main/scala",
+          "core/src/main/scalajs",
+          "core/src/test/scala",
+          "core/src/test/scalajs",
+        ),
+      ),
+      ModuleNode(ModuleId("site"), dependsOn = List("core"), baseDir = "site"),
+      ModuleNode(ModuleId("cli"), dependsOn = List("coreJS"), baseDir = "cli"),
+    )
+  )
+
   def spec = suite("Affected")(
     test("maps a changed file to its owning module by base-dir prefix") {
       assertTrue(
-        Affected.owningModule(graph, "core-lib/src/main/scala/Core.scala").contains("coreLib"),
-        Affected.owningModule(graph, "models/src/main/scala/Models.scala").contains("models"),
-        Affected.owningModule(graph, "README.md").isEmpty,
+        Affected.owningModules(graph, "core-lib/src/main/scala/Core.scala") == Set("coreLib"),
+        Affected.owningModules(graph, "models/src/main/scala/Models.scala") == Set("models"),
+        Affected.owningModules(graph, "README.md").isEmpty,
       )
     },
     test("affected set includes the changed module and all its transitive dependents") {
@@ -85,8 +116,8 @@ object AffectedSpec extends ZIOSpecDefault:
         )
       )
       assertTrue(
-        Affected.owningModule(nested, "mods/inner/X.scala").contains("inner"),
-        Affected.owningModule(nested, "mods/Other.scala").contains("outer"),
+        Affected.owningModules(nested, "mods/inner/X.scala") == Set("inner"),
+        Affected.owningModules(nested, "mods/Other.scala") == Set("outer"),
       )
     },
     test("sibling base dirs that share a name prefix must not cross-match") {
@@ -95,16 +126,16 @@ object AffectedSpec extends ZIOSpecDefault:
           List(ModuleNode(ModuleId("core"), baseDir = "core"), ModuleNode(ModuleId("coreLib"), baseDir = "core-lib"))
         )
       assertTrue(
-        Affected.owningModule(g, "core-lib/src/X.scala").contains("coreLib"),
-        Affected.owningModule(g, "core/src/X.scala").contains("core"),
-        Affected.owningModule(g, "core-extra/X.scala").isEmpty,
+        Affected.owningModules(g, "core-lib/src/X.scala") == Set("coreLib"),
+        Affected.owningModules(g, "core/src/X.scala") == Set("core"),
+        Affected.owningModules(g, "core-extra/X.scala").isEmpty,
       )
     },
     test("a directory name that is a strict superstring of a base dir does not match") {
       val g = GraphFixture(List(ModuleNode(ModuleId("app"), baseDir = "app")))
       assertTrue(
-        Affected.owningModule(g, "application/Main.scala").isEmpty,
-        Affected.owningModule(g, "app/Main.scala").contains("app"),
+        Affected.owningModules(g, "application/Main.scala").isEmpty,
+        Affected.owningModules(g, "app/Main.scala") == Set("app"),
       )
     },
     test("diamond dependency: closure dedupes the shared apex") {
@@ -126,7 +157,7 @@ object AffectedSpec extends ZIOSpecDefault:
       assertTrue(Affected.affectedModules(graph, Nil) == Set.empty)
     },
     test("the base-dir path itself (no trailing slash) maps to its module") {
-      assertTrue(Affected.owningModule(graph, "models").contains("models"))
+      assertTrue(Affected.owningModules(graph, "models") == Set("models"))
     },
     test("a path change unrelated to any module and not a build file affects nothing") {
       assertTrue(Affected.affectedModules(graph, List(".github/workflows/ci.yml", "LICENSE")) == Set.empty)
@@ -145,16 +176,16 @@ object AffectedSpec extends ZIOSpecDefault:
         )
       )
       assertTrue(
-        Affected.owningModule(g, "build.sbt").isEmpty,
-        Affected.owningModule(g, "something.txt").isEmpty,
-        Affected.owningModule(g, "lib/X.scala").contains("lib"),
+        Affected.owningModules(g, "build.sbt").isEmpty,
+        Affected.owningModules(g, "something.txt").isEmpty,
+        Affected.owningModules(g, "lib/X.scala") == Set("lib"),
       )
     },
     test("baseDir with a trailing slash still matches") {
       val g = GraphFixture(List(ModuleNode(ModuleId("app"), baseDir = "app/")))
       assertTrue(
-        Affected.owningModule(g, "app/Main.scala").contains("app"),
-        Affected.owningModule(g, "app").contains("app"),
+        Affected.owningModules(g, "app/Main.scala") == Set("app"),
+        Affected.owningModules(g, "app") == Set("app"),
       )
     },
     test("the exact path `project` (no slash) forces a full build") {
@@ -174,9 +205,39 @@ object AffectedSpec extends ZIOSpecDefault:
         )
       )
       assertTrue(
-        Affected.owningModule(g, "pkgs/ab/X.scala").contains("ab"),
-        Affected.owningModule(g, "pkgs/a/X.scala").contains("a"),
+        Affected.owningModules(g, "pkgs/ab/X.scala") == Set("ab"),
+        Affected.owningModules(g, "pkgs/a/X.scala") == Set("a"),
       )
     },
+    suite("cross-built modules (#73)")(
+      // A `projectMatrix` row's baseDir is a synthetic `.sbt/matrix/<id>`, so only sourcePaths can answer.
+      test("shared sources affect every platform row; platform-specific sources affect one") {
+        assertTrue(
+          Affected.owningModules(matrix, "core/src/main/scala/Foo.scala") == Set("core", "coreJS"),
+          Affected.owningModules(matrix, "core/src/main/scalajs/Foo.scala") == Set("coreJS"),
+          Affected.owningModules(matrix, "core/src/main/scalajvm/Foo.scala") == Set("core"),
+          Affected.owningModules(matrix, "core/src/test/scala/FooSpec.scala") == Set("core", "coreJS"),
+        )
+      },
+      test("sourcePaths are what answer: without them the synthetic base dir owns no source at all") {
+        // The defect, exactly. `.sbt/matrix/<id>` is a real directory git never sees a source file in.
+        val basesOnly = GraphFixture(matrix.nodes.map(_.copy(sourcePaths = Nil)))
+        assertTrue(
+          Affected.owningModules(basesOnly, "core/src/main/scala/Foo.scala").isEmpty,
+          Affected.affectedModules(basesOnly, List("core/src/main/scala/Foo.scala")).isEmpty,
+        )
+      },
+      test("a shared change reaches both rows' dependents, which is the bug this closes") {
+        // Under the old `Option` return this was Set("coreJS", "cli") or Set("core", "site"), never both.
+        assertTrue(
+          Affected.affectedModules(matrix, List("core/src/main/scala/Foo.scala")) ==
+            Set("core", "coreJS", "site", "cli"),
+          Affected.affectedModules(matrix, List("core/src/main/scalajs/Foo.scala")) == Set("coreJS", "cli"),
+        )
+      },
+      test("a non-source file still resolves through baseDir for an ordinary module") {
+        assertTrue(Affected.owningModules(matrix, "site/README.md") == Set("site"))
+      },
+    ),
   )
 end AffectedSpec

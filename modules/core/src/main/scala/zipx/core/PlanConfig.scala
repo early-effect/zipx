@@ -49,6 +49,18 @@ object JdkVersion extends Subtype[String]:
     else if input.matches(PlanText.VersionSegment) then true
     else s"invalid java version '$input': allowed characters are letters, digits and . _ - + @"
 
+/** A `setup-node` `node-version` value: `22`, `22.11.0`, `latest`, or an `lts` alias.
+  *
+  * The same character set as [[JdkVersion]] plus the slash and star an `lts` alias needs. Unlike a JDK version this
+  * never reaches a cache key, so the segment rules do not apply.
+  */
+type NodeVersion = NodeVersion.Type
+object NodeVersion extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a node version must be non-empty"
+    else if input.matches(PlanText.NodeVersionSegment) then true
+    else s"invalid node version '$input': allowed characters are letters, digits and . _ - + @ / *"
+
 /** Patterns as `inline val` Strings so `validate` can evaluate them while a consumer's build compiles, the same
   * arrangement as `zipx.workflow.Names`.
   */
@@ -61,6 +73,9 @@ object PlanText:
 
   /** [[KeySegment]] plus `+` and `@`, which version strings use. */
   inline val VersionSegment = "[A-Za-z0-9._+@-]+"
+
+  /** [[VersionSegment]] plus the slash and star of setup-node's `lts` aliases. */
+  inline val NodeVersionSegment = "[A-Za-z0-9._+@*/-]+"
 end PlanText
 
 /** What the planner needs that the module graph cannot supply: triggers, matrix axes, cache choice, action pins. Module

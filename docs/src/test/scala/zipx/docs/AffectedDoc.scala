@@ -31,17 +31,21 @@ flowchart TD
 ### From git diff to owning module
 
 The `affected` job takes the PR's changed paths (repo-root-relative, from `git diff` against the base
-ref) and maps each file to at most one module:
+ref) and maps each file to the module or modules that own it:
 
 1. **Build files force everything.** If any path ends in `.sbt` or sits under a `project/` directory
    (root or nested), the whole module set is affected. Plugins and the graph may have changed, so nothing
    is safe to skip.
-2. **Otherwise: longest `baseDir` prefix.** Each module's `baseDir` is a path prefix. A file is owned by
-   the matching module whose `baseDir` is longest (most specific). Matching is directory-aware:
-   `core/` owns `core/src/X.scala`, but not `core-lib/…` or `core-extra/…`. Nested bases win:
+2. **Otherwise: longest owned-path prefix.** A module owns its `baseDir` *and* its source directories
+   (sbt's `unmanagedSourceDirectories`, Compile and Test). A file is owned by every module whose longest
+   matching prefix is the longest match overall. Matching is directory-aware: `core/` owns
+   `core/src/X.scala`, but not `core-lib/…` or `core-extra/…`. Nested bases win:
    `mods/inner/X.scala` belongs to `mods/inner`, not `mods`.
-3. **Unowned paths seed nothing.** `README.md`, `.github/…`, and other files outside every module
-   `baseDir` are ignored (unless step 1 applies). Aggregators with empty `baseDir` never own files.
+3. **Unowned paths seed nothing.** `README.md`, `.github/…`, and other files outside every module's
+   owned paths are ignored (unless step 1 applies). Aggregators with empty `baseDir` never own files.
+
+Step 2 returns a **set**, not a single module. One file can genuinely belong to more than one module; the
+next section is the case where it always does.
 
 Those owning modules are the **seeds**. Step 3 of the chart expands them to the reverse-dependency
 closure; step 5 gates each Graph Verify job on whether its id (or `all`) appears in the published JSON.
@@ -69,6 +73,46 @@ zipxAffectedOnPush := false  // opt-in: also scope branch pushes via before-sha
           yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'all')"),
         )
       ),
+    ),
+    section("Cross-built modules (projectMatrix)")(
+      md"""
+sbt 2 has `projectMatrix` built in, and a cross-built module is where `baseDir` stops being able to answer at all.
+Each platform row is a real project with its own id (`core`, `coreJS`), but sbt bases every row at a **synthetic**
+directory:
+
+```
+core / baseDirectory     = .sbt/matrix/core
+coreJS / baseDirectory   = .sbt/matrix/coreJS
+```
+
+No source file is ever under those. A `baseDir`-only rule maps `core/src/main/scala/Foo.scala` to *no* module, so
+both rows skip and the PR is green having compiled nothing. That is why a module owns its source directories too:
+
+```
+core   / Compile / unmanagedSourceDirectories = core/src/main/{scala, scala-3, scalajvm, scalajvm-3, java, javajvm}
+coreJS / Compile / unmanagedSourceDirectories = core/src/main/{scala, scala-3, scalajs,  scalajs-3,  java, javajs}
+```
+
+Those directories also carry the platform distinction, which is what makes the answer precise rather than merely
+non-empty:
+
+| Changed path | Owning modules | Why |
+|---|---|---|
+| `core/src/main/scala/Foo.scala` | `core` **and** `coreJS` | shared: on both rows' source dirs |
+| `core/src/main/scalajs/Foo.scala` | `coreJS` | on the JS row alone |
+| `core/src/main/scalajvm/Foo.scala` | `core` | on the JVM row alone |
+| `core/README.md` | none | under no row's `baseDir` or source dirs |
+
+A shared change reaching **both** rows is the property worth stating plainly: picking one would leave half of a
+cross-built module untested behind a green check, and which half you got would depend on iteration order. Ownership
+is a set for exactly this reason.
+
+`target/` and a row's `.sbt/matrix/<id>` are excluded from the owned paths: nobody edits them, and a
+generated-source directory under `target/` would make every module affected on every commit.
+
+Nothing changes for an ordinary project. Its source dirs are all under its `baseDir`, so recording them only ever
+*adds* ownership; `baseDir` still answers for a module's non-source files (a README, a `Dockerfile`, a test fixture).
+"""
     ),
     section("Fail open, not closed")(
       md"""

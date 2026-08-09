@@ -24,6 +24,9 @@ import zipx.workflow.ActionRef
   *   `actions/setup-java` pin.
   * @param setupSbt
   *   `sbt/setup-sbt` pin.
+  * @param setupNode
+  *   `actions/setup-node` pin, emitted only for a capability that asks for a Node version
+  *   ([[Capability.withNodeVersion]]).
   * @param cache
   *   `actions/cache` pin for [[CacheBackend.LocalDir]].
   * @param uploadArtifact
@@ -48,6 +51,7 @@ final case class ActionPins(
     checkout: ActionRef = ActionPins.BootstrapCheckout,
     setupJava: ActionRef = ActionPins.BootstrapSetupJava,
     setupSbt: ActionRef = ActionPins.BootstrapSetupSbt,
+    setupNode: ActionRef = ActionPins.BootstrapSetupNode,
     cache: ActionRef = ActionPins.BootstrapCache,
     uploadArtifact: ActionRef = ActionPins.BootstrapUploadArtifact,
     downloadArtifact: ActionRef = ActionPins.BootstrapDownloadArtifact,
@@ -61,6 +65,7 @@ final case class ActionPins(
     case Field.Checkout         => checkout
     case Field.SetupJava        => setupJava
     case Field.SetupSbt         => setupSbt
+    case Field.SetupNode        => setupNode
     case Field.Cache            => cache
     case Field.UploadArtifact   => uploadArtifact
     case Field.DownloadArtifact => downloadArtifact
@@ -70,6 +75,7 @@ final case class ActionPins(
     case Field.Checkout         => copy(checkout = ref)
     case Field.SetupJava        => copy(setupJava = ref)
     case Field.SetupSbt         => copy(setupSbt = ref)
+    case Field.SetupNode        => copy(setupNode = ref)
     case Field.Cache            => copy(cache = ref)
     case Field.UploadArtifact   => copy(uploadArtifact = ref)
     case Field.DownloadArtifact => copy(downloadArtifact = ref)
@@ -115,6 +121,7 @@ object ActionPins:
     case Checkout         extends Field("checkout", "actions/checkout")
     case SetupJava        extends Field("setupJava", "actions/setup-java")
     case SetupSbt         extends Field("setupSbt", "sbt/setup-sbt")
+    case SetupNode        extends Field("setupNode", "actions/setup-node")
     case Cache            extends Field("cache", "actions/cache")
     case UploadArtifact   extends Field("uploadArtifact", "actions/upload-artifact")
     case DownloadArtifact extends Field("downloadArtifact", "actions/download-artifact")
@@ -129,6 +136,8 @@ object ActionPins:
     ActionRef("actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961")
   private[core] val BootstrapSetupSbt: ActionRef =
     ActionRef("sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf")
+  private[core] val BootstrapSetupNode: ActionRef =
+    ActionRef("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020")
   private[core] val BootstrapCache: ActionRef =
     ActionRef("actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9")
   private[core] val BootstrapUploadArtifact: ActionRef =
@@ -142,6 +151,7 @@ object ActionPins:
     Field.Checkout.key         -> "v7.0.1",
     Field.SetupJava.key        -> "v5.7.0",
     Field.SetupSbt.key         -> "v1.5.6",
+    Field.SetupNode.key        -> "v7.0.0",
     Field.Cache.key            -> "v6.1.0",
     Field.UploadArtifact.key   -> "v7.0.1",
     Field.DownloadArtifact.key -> "v8.0.1",
@@ -152,6 +162,7 @@ object ActionPins:
     BootstrapCheckout,
     BootstrapSetupJava,
     BootstrapSetupSbt,
+    BootstrapSetupNode,
     BootstrapCache,
     BootstrapUploadArtifact,
     BootstrapDownloadArtifact,
@@ -167,6 +178,7 @@ object ActionPins:
   def Checkout: ActionRef         = Defaults.checkout
   def SetupJava: ActionRef        = Defaults.setupJava
   def SetupSbt: ActionRef         = Defaults.setupSbt
+  def SetupNode: ActionRef        = Defaults.setupNode
   def Cache: ActionRef            = Defaults.cache
   def UploadArtifact: ActionRef   = Defaults.uploadArtifact
   def DownloadArtifact: ActionRef = Defaults.downloadArtifact

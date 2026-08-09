@@ -143,6 +143,44 @@ step, and a guessed key would be one more thing to rename later.
         )
       ),
     ),
+    section("`setupNode`: a typed field zipx emits only on request")(
+      md"""
+`setupNode` is a typed field, like `checkout`, because zipx writes the step itself. Unlike the others it appears in a
+workflow only when a capability asks for a Node version:
+
+```scala
+zipxCapabilities += Capability.testGraph.withNodeVersion(NodeVersion("22"))
+```
+
+Off by default, and for a Scala.js build that is usually right: sbt-scalajs downloads its own Node for `jsEnv`, so a
+plain `.jsPlatform` test suite needs nothing here. Ask for it when the version matters, which is narrower than "the
+build has JS in it": a `jsEnv` requiring a specific Node, or a step running `npm ci` for a bundler.
+
+The version is a `NodeVersion` newtype, so every form `setup-node` accepts (`22`, `22.11.0`, `latest`, `lts/jod`,
+`lts/*`) is checked while your `build.sbt` compiles, and a value that would break the YAML is a compile error rather
+than a workflow GitHub rejects.
+
+Per-capability rather than build-wide, which is the difference from `zipxJavaVersion`: a Node toolchain belongs to one
+test suite, so asking for it must not put a `setup-node` step on every publish job in the build. The step goes
+immediately after `setup-sbt`, before any cache restore or `extraSteps`, so a `jsEnv` and an `npm ci` both see it.
+""",
+      exampleValue {
+        DocsRender.job("test-schema")(Capability.testGraph.withNodeVersion(NodeVersion("22")))
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("actions/setup-node@"),
+          yaml.contains("node-version:"),
+          yaml.contains("Setup Node 22"),
+        )
+      ),
+      md"""
+Without `withNodeVersion` the same job has no `setup-node` step at all, so adopting this changes only the capability
+that asked:
+""",
+      exampleValue {
+        DocsRender.job("test-schema")(Capability.testGraph)
+      }.assert(yaml => assertTrue(!yaml.contains("setup-node"))),
+    ),
     section("A line zipx cannot read fails the build")(
       md"""
 `ActionPinFile.parse` returns an `Either`, and `zipxWorkflowGenerate` turns a `Left` into a build error naming the
@@ -269,9 +307,9 @@ Consumer repos without a pin file get those jar defaults until they add their ow
 | `zipxActionsPull` | workflow `uses:` → pin file → regenerate |
 | `zipxWorkflowGenerate` / `zipxWorkflowCheck` | write / verify `ci.yml` (and sync workflow when enabled) |
 
-Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/cache`,
-`actions/upload-artifact`, `actions/download-artifact`, `scala-steward-org/scala-steward-action`. Anything else your
-steps use goes in the `extra:` block.
+Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`,
+`actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, `scala-steward-org/scala-steward-action`.
+Anything else your steps use goes in the `extra:` block.
 """
     ),
   )
