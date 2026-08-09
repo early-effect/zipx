@@ -96,18 +96,19 @@ object Planner:
 
   /** Rejects a `needsCapabilities` cycle, [[Gate.AffectedOnly]] (an unimplemented seam: honoring it silently as
     * [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run), a per-destination field a
-    * [[TargetFanOut.SharedJob]] job cannot honor, and a gate/condition conjunction that can never be true.
+    * [[TargetFanOut.SharedJob]] job cannot honor, a gate/condition conjunction that can never be true, and a non-Graph
+    * consumer of an affected-gated publish, which would run against an artifact nobody built.
     */
-  private def validateCapabilities(capabilities: List[Capability], graph: ModuleGraph): Unit =
+  private def validateCapabilities(capabilities: List[Capability], graph: ModuleGraph, config: PlanConfig): Unit =
     capabilities.filter(_.gate == Gate.AffectedOnly) match
       case Nil => ()
       case bad =>
         sys.error(
           s"zipx: Gate.AffectedOnly is not implemented, so capabilities ${bad.map(_.name).sorted.mkString(", ")} " +
             "would silently run on every event. Affected-gating is controlled by zipxAffectedOnPR / " +
-            "zipxAffectedOnPush / zipxAffectedPublish on Graph capabilities, not by Gate. Use Gate.Always (Verify " +
-            "capabilities are affected-gated automatically, Publish ones under zipxAffectedPublish) or " +
-            "Gate.OnReleaseTag."
+            "zipxAffectedOnPush / zipxAffectedPublish / zipxAffectedDeploy on Graph capabilities, not by Gate. Use " +
+            "Gate.Always (Verify capabilities are affected-gated automatically, Publish and Deploy ones under " +
+            "zipxAffectedPublish / zipxAffectedDeploy) or Gate.OnReleaseTag."
         )
     end match
     // `ModuleGraph.cycle` rather than `make`: these are capabilities, so the error has to name them as such.
@@ -118,7 +119,58 @@ object Planner:
     capabilities.foreach(validateWorkflowCall)
     capabilities.foreach(c => validateSharedTargets(c, graph))
     capabilities.foreach(c => validateSatisfiable(c, graph))
+    validateSkipConsumers(capabilities, config)
   end validateCapabilities
+
+  /** Rejects an [[CapabilityScope.Aggregate]] or [[CapabilityScope.Layer]] capability that needs an affected-gated
+    * Graph one.
+    *
+    * The trap this closes: [[Capability.deploy]] needs [[Capability.DockerName]] by default and is Aggregate by
+    * default, so turning on [[PlanConfig.affectedPublish]] leaves the deploy *running* beside a skipped
+    * `docker-<module>`, pulling an image tag that publish never pushed. `tolerateSkips` is what makes it run, and that
+    * tolerance is right for an Aggregate job (it spans every module, so one module's skip cannot cancel the others'
+    * work), which is exactly why the combination has to be refused here instead of softened there.
+    *
+    * Three scopes, three different answers, and the difference is whether the job's command names modules:
+    *   - [[CapabilityScope.Graph]] is fine: it carries the same per-module affected expression as its producer, so the
+    *     two skip together. That is the shape this error points at.
+    *   - Aggregate and Layer join *several* modules' commands into one job, so a skipped producer leaves that job
+    *     naming a module whose artifact does not exist, with no way to drop one command from an already-joined session.
+    *   - [[CapabilityScope.Once]] runs a fixed build-wide command that names no module, so a skipped producer costs it
+    *     nothing it was going to use. An `announce` that needs `publish` is not broken by one module not publishing.
+    */
+  private def validateSkipConsumers(capabilities: List[Capability], config: PlanConfig): Unit =
+    val gatedGraphNames =
+      capabilities
+        .filter(c => c.scope == CapabilityScope.Graph && affectedGatedPhase(c.phase, config))
+        .map(_.name)
+        .toSet
+
+    // Verify is always gated, and a Verify producer is not something a later phase consumes an artifact from, so
+    // restricting to the opt-in phases keeps this from firing on every build that needs `test`.
+    val optInGatedNames =
+      capabilities
+        .filter(c => gatedGraphNames.contains(c.name) && c.phase != Phase.Verify)
+        .map(_.name)
+        .toSet
+
+    for
+      consumer <- capabilities
+      if consumer.scope == CapabilityScope.Aggregate || consumer.scope == CapabilityScope.Layer
+      producer <- consumer.needsCapabilities.filter(optInGatedNames.contains).sorted
+    do
+      val flag = capabilities.find(_.name == producer).map(_.phase) match
+        case Some(Phase.Deploy) => "zipxAffectedDeploy"
+        case _                  => "zipxAffectedPublish"
+      sys.error(
+        s"zipx: capability '${consumer.name}' is ${consumer.scope} and needs '$producer', which $flag " +
+          s"lets skip per module. One '$producer' job skipping would leave '${consumer.name}' running against an " +
+          "artifact nobody built, so this is refused rather than generated. Fixes, in order of preference: give " +
+          s"'${consumer.name}' CapabilityScope.Graph so it skips with its own '$producer' job; make its command " +
+          s"resolve a moving tag that a skipped '$producer' cannot invalidate; or turn $flag off."
+      )
+    end for
+  end validateSkipConsumers
 
   /** Rejects [[Capability.container]] or [[Capability.services]] on a [[Capability.workflowCall]] capability.
     *
@@ -203,21 +255,26 @@ object Planner:
 
   /** Whether a phase's Graph jobs may be narrowed to the affected modules.
     *
-    * [[Phase.Verify]] always may; [[Phase.Publish]] only under [[PlanConfig.affectedPublish]]; [[Phase.Deploy]] never,
-    * per ROADMAP M6, because a deploy is about a destination's desired state rather than about what a diff touched.
+    * [[Phase.Verify]] always may; [[Phase.Publish]] only under [[PlanConfig.affectedPublish]]; [[Phase.Deploy]] only
+    * under [[PlanConfig.affectedDeploy]].
     *
-    * Publish is opt-in and Verify is not, because the two failures are not symmetric: **under-verifying is silently
+    * Verify is not opt-in and the other two are, because the failures are not symmetric: **under-verifying is silently
     * unsafe** (the PR is green and the code was never tested), while **under-publishing is loudly broken** (the deploy
-    * that wants the missing artifact fails immediately). Verify's default is the safe one; Publish's saving is real but
-    * has to be asked for.
+    * that wants the missing artifact fails immediately). Verify's default is the safe one; the savings on the later
+    * phases are real but have to be asked for.
+    *
+    * Deploy's own knob rather than [[PlanConfig.affectedPublish]] widened to cover it: narrowing image pushes while
+    * still reconciling every destination on every run is a legitimate combination, and one switch would take it away.
+    * Note that only Graph scope is ever gated (see the `usesAffected` filters below), so an Aggregate deploy is
+    * unaffected by this either way.
     */
   private def affectedGatedPhase(phase: Phase, config: PlanConfig): Boolean = phase match
     case Phase.Verify  => true
     case Phase.Publish => config.affectedPublish
-    case Phase.Deploy  => false
+    case Phase.Deploy  => config.affectedDeploy
 
   def plan(graph: ModuleGraph, capabilities: List[Capability], config: PlanConfig): Workflow =
-    validateCapabilities(capabilities, graph)
+    validateCapabilities(capabilities, graph, config)
 
     // Affected-gating is per-module, so only a Graph capability can narrow anything: an Aggregate job runs one sbt
     // session over every module, and there is nothing there to skip.
@@ -225,12 +282,18 @@ object Planner:
       config.affected == AffectedMode.AffectedOnPR &&
         capabilities.exists(c => affectedGatedPhase(c.phase, config) && c.scope == CapabilityScope.Graph)
 
-    // Publish jobs run on a release tag, where Verify does not, so the `affected` job they now depend on has to run
-    // there too. It emits the `all` sentinel for a tag push already (see `affectedScript`), which is what makes a
-    // release publish everything regardless of any diff.
+    // Publish and Deploy jobs run on a release tag, where Verify does not, so the `affected` job they now depend on has
+    // to run there too. It emits the `all` sentinel for a tag push already (see `affectedScript`), which is what makes a
+    // release publish and deploy everything regardless of any diff.
+    //
+    // Both phases, not just Publish: a tag-gated Graph deploy would otherwise carry `needs: affected` and an expression
+    // reading its output on a ref where that job does not exist.
     val affectedOnTags =
-      usesAffected && affectedGatedPhase(Phase.Publish, config) &&
-        capabilities.exists(c => c.phase == Phase.Publish && c.scope == CapabilityScope.Graph)
+      usesAffected && List(Phase.Publish, Phase.Deploy).exists(phase =>
+        affectedGatedPhase(phase, config) && capabilities.exists(c =>
+          c.phase == phase && c.scope == CapabilityScope.Graph
+        )
+      )
 
     val hasVerify          = capabilities.exists(_.phase == Phase.Verify)
     val usesVerifyGate     = config.skipMergedPrPush && hasVerify

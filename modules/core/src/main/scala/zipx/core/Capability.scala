@@ -77,7 +77,8 @@ final case class StepContext(
 )
 
 /** Pipeline position, in run order. [[Verify]] jobs are affected-gated, [[Publish]] jobs only under
-  * [[PlanConfig.affectedPublish]], and [[Deploy]] jobs never. Also fixes top-to-bottom job order in the generated YAML.
+  * [[PlanConfig.affectedPublish]], and [[Deploy]] jobs only under [[PlanConfig.affectedDeploy]]. Also fixes
+  * top-to-bottom job order in the generated YAML.
   */
 enum Phase:
   case Verify, Publish, Deploy
@@ -99,14 +100,13 @@ enum Ordering:
   * deliberate and cannot run.
   *
   * [[Gate.AffectedOnly]] is a design seam, not a shipped feature: affected-gating is derived from the phase plus
-  * [[PlanConfig.affected]] and [[PlanConfig.affectedPublish]], never from `Gate`, so the planner rejects it with an
-  * explaining error rather than degrading silently to [[Gate.Always]]. A green, untested pipeline is the failure mode
-  * zipx exists to prevent.
+  * [[PlanConfig.affected]], [[PlanConfig.affectedPublish]] and [[PlanConfig.affectedDeploy]], never from `Gate`, so the
+  * planner rejects it with an explaining error rather than degrading silently to [[Gate.Always]]. A green, untested
+  * pipeline is the failure mode zipx exists to prevent.
   *
   * Which phases can be narrowed: [[Phase.Verify]] always, [[Phase.Publish]] under [[PlanConfig.affectedPublish]], and
-  * [[Phase.Deploy]] never (a deploy is about a destination's desired state, not about what a diff touched). Publish is
-  * opt-in and Verify is not, because **under-verifying is silently unsafe** while **under-publishing is loudly
-  * broken**.
+  * [[Phase.Deploy]] under [[PlanConfig.affectedDeploy]]. Verify is not opt-in and the other two are, because
+  * **under-verifying is silently unsafe** while **under-publishing is loudly broken**.
   */
 enum Gate:
   case Always, OnReleaseTag, AffectedOnly

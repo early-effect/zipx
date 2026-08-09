@@ -319,6 +319,12 @@ object ZipxPlugin extends AutoPlugin:
           "(default false; release tags always publish everything). Separate from zipxAffectedOnPR because " +
           "under-verifying is silently unsafe while under-publishing is loudly broken."
       )
+    val zipxAffectedDeploy =
+      settingKey[Boolean](
+        "Also affected-gate Graph-scope Deploy jobs, so a deploy skips exactly when the publish it consumes did " +
+          "(default false; release tags always deploy everything). Separate from zipxAffectedPublish because " +
+          "narrowing image pushes while still reconciling every destination is a legitimate combination."
+      )
     val zipxSkipMergedPrPush =
       settingKey[Boolean](
         "Skip Verify on branch pushes when the commit already belongs to a merged PR (default true)."
@@ -379,6 +385,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxAffectedOnPR             := true,
     zipxAffectedOnPush           := false,
     zipxAffectedPublish          := false,
+    zipxAffectedDeploy           := false,
     zipxSkipMergedPrPush         := true,
     zipxCacheRehydrateOnMerge    := true,
     zipxCacheRehydrateTask       := "compile",
@@ -564,6 +571,7 @@ object ZipxPlugin extends AutoPlugin:
       affected = if read(zipxAffectedOnPR, true) then AffectedMode.AffectedOnPR else AffectedMode.Always,
       affectedOnPush = read(zipxAffectedOnPush, false),
       affectedPublish = read(zipxAffectedPublish, false),
+      affectedDeploy = read(zipxAffectedDeploy, false),
       cache = read(zipxCache, CacheBackend.LocalDir),
       cacheEpoch = read(zipxCacheEpoch, CacheEpoch.GitTags()),
       pushBranches = read(zipxPushBranches, Seq("main")).toList,

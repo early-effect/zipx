@@ -135,9 +135,9 @@ object AffectedPublishSpec extends ZIOSpecDefault:
           wf.jobs.keys.filter(_.startsWith("publish-L")).forall(id => !cond(wf, id).contains("needs.affected")),
         )
       },
-      test("Deploy is never narrowed, whatever the knob says") {
-        // ROADMAP M6: a deploy is about a destination's desired state, not about what a diff touched. Narrowing it would
-        // leave an environment running an image the tag no longer describes.
+      test("Deploy is not narrowed by this knob: affectedDeploy is its own switch") {
+        // The two are deliberately separate (see AffectedDeploySpec): narrowing image pushes while still reconciling
+        // every destination on every run is a legitimate combination, and one switch would take it away.
         val deploy = Capability.deployGraph(
           participates = _.id == "serviceA",
           command = n => SbtCommand.module(n, SbtCommand("deploy")),
@@ -217,20 +217,18 @@ object AffectedPublishSpec extends ZIOSpecDefault:
           !c.contains("== 'success'"),
         )
       },
-      test("an Aggregate deploy needing a narrowed Graph docker is skip-tolerant too") {
-        val deploy = Capability.deploy(
-          participates = _.id == "serviceA",
-          command = n => SbtCommand.module(n, SbtCommand("deploy")),
-          targets = _ => List(Target(TargetName("prod"))),
-        )
-        val wf = plan(List(Capability.dockerGraph, deploy), on, dockerGraphFixture)
-        val c  = cond(wf, "deploy-prod")
+      test("an Aggregate consumer of a narrowed Verify capability is skip-tolerant") {
+        // The Aggregate-consumer-of-a-narrowed-*Publish* case is no longer generated at all: it is refused, because it
+        // would run against an artifact nobody built (see AffectedDeploySpec). Verify is the scope where an Aggregate
+        // consumer of something skippable is still legitimate, since it consumes no artifact.
+        val pub = Capability.publish.copy(needsCapabilities = List(Capability.TestName))
+        val wf  = plan(List(Capability.testGraph, pub), on)
+        val c   = cond(wf, "publish")
         assertTrue(
           c.contains("!cancelled()"),
-          // Every docker job it waits on, since an Aggregate deploy needs all of them.
-          c.contains("needs.docker-serviceA.result != 'failure'"),
-          c.contains("needs.docker-serviceB.result != 'failure'"),
-          c.contains("startsWith(github.ref, 'refs/tags/v')"),
+          // Every test job it waits on, since an Aggregate consumer needs all of them.
+          c.contains("needs.test-schema.result != 'failure'"),
+          c.contains("needs.test-api.result != 'failure'"),
         )
       },
       test("a Once capability needing a narrowed publish is skip-tolerant") {
@@ -250,18 +248,14 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("a Layer dependent gates only L0, since later waves wait on L0's own decision") {
-        val deployLayers = Capability
-          .deploy(
-            participates = _.publishes,
-            command = n => SbtCommand.module(n, SbtCommand("deploy")),
-            targets = _ => Nil,
-          )
-          .copy(scope = CapabilityScope.Layer)
-        val wf    = plan(List(Capability.dockerGraph, deployLayers), on, dockerGraphFixture)
-        val later = wf.jobs.keys.filter(id => id.startsWith("deploy-L") && id != "deploy-L0").toList
+        // Layer consuming a narrowed *Verify*: the Publish-producer spelling of this is refused outright now, for the
+        // same reason as the Aggregate one above.
+        val pubLayers = Capability.publishLayers.copy(needsCapabilities = List(Capability.TestName))
+        val wf        = plan(List(Capability.testGraph, pubLayers), on)
+        val later     = wf.jobs.keys.filter(id => id.startsWith("publish-L") && id != "publish-L0").toList
         assertTrue(
-          cond(wf, "deploy-L0").contains("!cancelled()"),
-          cond(wf, "deploy-L0").contains("needs.docker-serviceA.result != 'failure'"),
+          cond(wf, "publish-L0").contains("!cancelled()"),
+          cond(wf, "publish-L0").contains("needs.test-schema.result != 'failure'"),
           // Two more waves exist, so this is a real exclusion rather than a vacuous forall.
           later.size >= 2,
           later.forall(id => !cond(wf, id).contains("!cancelled()")),
@@ -351,7 +345,8 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("the plan renders, so none of these conditions is a workflow GitHub would reject") {
-        val deploy = Capability.deploy(
+        // Graph deploy, because an Aggregate one needing a narrowed docker is now refused outright.
+        val deploy = Capability.deployGraph(
           participates = _.id == "serviceA",
           command = n => SbtCommand.module(n, SbtCommand("deploy")),
           targets = _ => List(Target(TargetName("prod"))),
