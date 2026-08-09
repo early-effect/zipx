@@ -47,6 +47,12 @@ object ZipxPlugin extends AutoPlugin:
     type TargetFanOut = zipx.core.TargetFanOut
     val TargetFanOut = zipx.core.TargetFanOut
 
+    /** A sidecar container for a capability's jobs: `Capability.testGraph.withService("postgres",
+      * JobService("postgres:17", ports = List("5432:5432")))`.
+      */
+    type JobService = zipx.workflow.JobService
+    val JobService = zipx.workflow.JobService
+
     /** The names that become GitHub job ids, so a `build.sbt` can write one: `CapabilityName("docker-stg")`,
       * `Target(TargetName("stg"))`. Both are validated at compile time when the argument is a literal, which is the
       * usual case in a build file.

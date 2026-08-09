@@ -4,6 +4,7 @@ import neotype.Subtype
 import neotype.unwrap
 import zipx.workflow.EnvName
 import zipx.workflow.JobId
+import zipx.workflow.JobService
 import zipx.workflow.Names
 import zipx.workflow.Step
 
@@ -217,8 +218,19 @@ end Target
   *   with `when`, carries a name into diagnostics, and can be published for reuse across repos.
   * @param postSteps
   *   steps injected after the command step.
+  * @param container
+  *   runs every step of this capability's jobs inside this image, `Job.container`. The runner's own tools are then
+  *   absent, so `actions/setup-java` and `sbt/setup-sbt` install into the container rather than the host: an image with
+  *   no `tar`, `curl` or `git` fails in setup, not in the build. Prefer [[services]] plus the default runner unless the
+  *   *toolchain* is what has to differ, since zipx already pins the JDK and sbt.
+  * @param services
+  *   sidecar containers for this capability's jobs, `Job.services`. Reachable from a step at `localhost:<mapped port>`
+  *   (or at the service id, under [[container]]). GitHub starts them before the first step and gives no readiness
+  *   signal beyond a `--health-cmd` in `options`, so a test that needs one to be *ready* is often better off owning the
+  *   lifecycle itself; see the Testcontainers note in the docs.
   * @param workflowCall
-  *   when set (typically on [[CapabilityScope.Once]]), emits a reusable-workflow job instead of sbt steps.
+  *   when set (typically on [[CapabilityScope.Once]]), emits a reusable-workflow job instead of sbt steps. Rejected
+  *   together with [[container]] or [[services]], which GitHub does not accept alongside `uses:`.
   * @param condition
   *   ANDed into every job's `if`, after the [[Gate]] and affected clauses. Prefer [[withCondition]] on a built-in or
   *   pack val; the factories below take it explicitly.
@@ -240,6 +252,8 @@ final case class Capability(
     postSteps: StepContext => List[Step] = _ => Nil,
     scope: CapabilityScope = CapabilityScope.Aggregate,
     env: Map[String, EnvValue] = Map.empty,
+    container: Option[String] = None,
+    services: Map[String, JobService] = Map.empty,
     workflowCall: Option[WorkflowCall] = None,
     condition: Option[JobCondition] = None,
 ):
@@ -268,6 +282,25 @@ final case class Capability(
   /** Destinations that each get their own job, the default. The shape for deploy environments. */
   def withTargets(targets: ModuleNode => List[Target]): Capability =
     copy(targets = targets, targetFanOut = TargetFanOut.JobPerTarget)
+
+  /** Adds one sidecar container, keeping any already declared. `id` is the hostname a step reaches it at.
+    *
+    * {{{
+    * Capability.testGraph.withService("postgres", JobService("postgres:17", ports = List("5432:5432")))
+    * }}}
+    */
+  def withService(id: String, service: JobService): Capability =
+    copy(services = services + (id -> service))
+
+  /** Replaces the whole sidecar set. */
+  def withServices(services: Map[String, JobService]): Capability =
+    copy(services = services)
+
+  /** Runs every step of this capability's jobs in `image`; see [[Capability.container]] for what the runner stops
+    * providing when you do.
+    */
+  def inContainer(image: String): Capability =
+    copy(container = Some(image))
 
 end Capability
 
@@ -436,25 +469,29 @@ object Capability:
       postSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
       scope: CapabilityScope = CapabilityScope.Graph,
+      container: Option[String] = None,
+      services: Map[String, JobService] = Map.empty,
       condition: Option[JobCondition] = None,
   ): Capability =
     Capability(
-      name,
-      phase,
-      ordering,
-      gate,
-      participates,
-      command,
-      matrixed,
-      targets,
-      targetFanOut,
-      needsCapabilities,
-      permissions,
-      runsOn,
-      extraSteps,
-      postSteps,
+      name = name,
+      phase = phase,
+      ordering = ordering,
+      gate = gate,
+      participates = participates,
+      command = command,
+      matrixed = matrixed,
+      targets = targets,
+      targetFanOut = targetFanOut,
+      needsCapabilities = needsCapabilities,
+      permissions = permissions,
+      runsOn = runsOn,
+      extraSteps = extraSteps,
+      postSteps = postSteps,
       scope = scope,
       env = env,
+      container = container,
+      services = services,
       condition = condition,
     )
 
@@ -475,6 +512,8 @@ object Capability:
       env: Map[String, EnvValue] = Map.empty,
       needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
+      container: Option[String] = None,
+      services: Map[String, JobService] = Map.empty,
       condition: Option[JobCondition] = None,
   ): Capability =
     Capability(
@@ -492,6 +531,8 @@ object Capability:
       postSteps = postSteps,
       scope = CapabilityScope.Once,
       env = env,
+      container = container,
+      services = services,
       condition = condition,
     )
 end Capability

@@ -115,9 +115,30 @@ object Planner:
       .cycle(capabilities.map(c => c.name -> c.needsCapabilities).toMap)
       .foreach(involved => sys.error(s"zipx: needsCapabilities cycle among ${involved.mkString(", ")}"))
 
+    capabilities.foreach(validateWorkflowCall)
     capabilities.foreach(c => validateSharedTargets(c, graph))
     capabilities.foreach(c => validateSatisfiable(c, graph))
   end validateCapabilities
+
+  /** Rejects [[Capability.container]] or [[Capability.services]] on a [[Capability.workflowCall]] capability.
+    *
+    * A `uses:` job delegates its whole runtime to the called workflow, so GitHub rejects `container:` and `services:`
+    * beside it. `onceJob` therefore has no place to put either, and dropping them silently would leave a job with no
+    * sidecar its steps expect. The called workflow declares its own.
+    */
+  private def validateWorkflowCall(capability: Capability): Unit =
+    if capability.workflowCall.isDefined then
+      val offending =
+        List(
+          Option.when(capability.container.isDefined)("container"),
+          Option.when(capability.services.nonEmpty)("services"),
+        ).flatten
+      if offending.nonEmpty then
+        sys.error(
+          s"zipx: capability '${capability.name}' sets both workflowCall and ${offending.mkString(" and ")}, which " +
+            "GitHub rejects: a `uses:` job runs the called workflow's own jobs, so it has no runtime of its own to " +
+            "configure. Declare them in the called workflow, or drop workflowCall to run steps here."
+        )
 
   /** Rejects a [[Target.condition]] or [[Target.environment]] on a [[TargetFanOut.SharedJob]] destination.
     *
@@ -558,7 +579,8 @@ object Planner:
           needs = needs,
           `if` = cond,
           permissions = ListMap.from(capability.permissions),
-          services = cache.services,
+          container = capability.container,
+          services = mergeServices(capability, cache),
           env = mergeEnv(config.env, cache.env, capability.env, Map.empty),
           steps = stepsFor(
             capability,
@@ -613,7 +635,8 @@ object Planner:
               needs = baseNeeds,
               `if` = baseCond,
               permissions = ListMap.from(capability.permissions),
-              services = cache.services,
+              container = capability.container,
+              services = mergeServices(capability, cache),
               env = mergeEnv(config.env, cache.env, capability.env, sharedEnv(shared)),
               steps = stepsFor(
                 capability,
@@ -638,7 +661,8 @@ object Planner:
               `if` = andConditions(baseCond, JobCondition.renderOpt(target.condition)),
               environment = target.environment,
               permissions = ListMap.from(capability.permissions),
-              services = cache.services,
+              container = capability.container,
+              services = mergeServices(capability, cache),
               env = mergeEnv(config.env, cache.env, capability.env, target.env),
               steps = stepsFor(
                 capability,
@@ -694,7 +718,8 @@ object Planner:
           needs = needs,
           `if` = cond,
           permissions = ListMap.from(capability.permissions),
-          services = cache.services,
+          container = capability.container,
+          services = mergeServices(capability, cache),
           env = mergeEnv(config.env, cache.env, capability.env, Map.empty),
           steps = stepsFor(
             capability,
@@ -785,7 +810,8 @@ object Planner:
         environment = environment,
         permissions = ListMap.from(capability.permissions),
         strategy = matrix,
-        services = cache.services,
+        container = capability.container,
+        services = mergeServices(capability, cache),
         env = mergeEnv(config.env, cache.env, capability.env, targetEnv),
         steps = stepsFor(
           capability,
@@ -846,6 +872,22 @@ object Planner:
       target: Map[String, EnvValue],
   ): ListMap[String, String] =
     EnvValue.renderAll(plan) ++ cache ++ EnvValue.renderAll(capability) ++ EnvValue.renderAll(target)
+
+  /** A capability's sidecars plus the cache backend's, **cache winning** a colliding service id.
+    *
+    * Not `++` order by accident: a build cannot function without its cache sidecar, since the sbt invocation is
+    * configured to reach it, while a capability's own sidecar is something its test code connects to and can therefore
+    * report a connection failure about. Losing the cache one instead would make every job in the workflow fail on a
+    * name nobody chose deliberately.
+    *
+    * Cache-backend ids are zipx's own (`RemoteCacheProof.serviceName`), so a collision means a capability picked the
+    * same id, which the docs name.
+    */
+  private def mergeServices(
+      capability: Capability,
+      cache: CacheContribution,
+  ): ListMap[String, JobService] =
+    ListMap.from(capability.services) ++ cache.services
 
   private def andConditions(a: Option[String], b: Option[String]): Option[String] =
     (a, b) match

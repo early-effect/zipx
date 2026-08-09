@@ -220,6 +220,16 @@ Two decisions inside it, both of the "a silent wrong answer is worse than an err
 
 The shared job keeps the **same job ids** a no-target capability would produce, so a `needs:` edge onto `docker-<module>` keeps working and no dependent capability has to know which fan-out mode its dependency chose. `SharedTargetsSpec` is a suite of its own because the property under test is arithmetic rather than shape: only a counting assertion catches a change that quietly reintroduces the multiplication.
 
+**Refinement (post-M10): a capability owns its job runtime, `container` + `services`.** `Job.container` and `Job.services` existed from M5 but only the cache backend could reach them, so a suite needing a Postgres had no way to ask for one and the answer was "a separate project plus Testcontainers", which is right for some suites and heavy for the rest. `Capability.container` / `Capability.services` (with `inContainer` / `withService` / `withServices`) close that, threaded through `Capability.custom` and `.once` and merged at all **five** `Job` construction sites, which is where the risk actually lived: every site previously wrote `cache.services` verbatim, so a site left behind drops a sidecar the build asked for silently. `CapabilityRuntimeSpec` asserts each scope separately for that reason rather than trusting one representative.
+
+Three decisions, again all "an error beats a silent wrong answer":
+
+- **The cache sidecar wins a colliding service id.** Not `++` order by accident: the sbt invocation is *configured* to reach the cache sidecar, so losing it fails every job in the workflow on a name nobody chose deliberately, whereas a capability losing its own sidecar surfaces as a connection error in the test that wanted it, next to the id that caused it.
+- **`container` or `services` beside `workflowCall` is a generate-time error.** GitHub rejects both keys next to `uses:`, and the `uses:` branch has nowhere to put them, so dropping them would leave a job whose steps expect a sidecar that is not there. The message names which of the two fields offended.
+- **`inContainer` is documented as the last resort, not a peer of `withService`.** Inside a container the runner's own tooling is gone and zipx's setup steps install into the container, so an image without `tar`/`curl`/`git` fails during setup rather than during the build. Since zipx already pins the JDK and sbt, the only reason left is a toolchain that has to differ.
+
+The docs carry the boundary the API cannot: GitHub gives no readiness signal beyond a `--health-cmd` in `options`, so a suite that needs a container *ready* (rather than merely present, with retries) is better off owning the lifecycle with Testcontainers. zipx's own `remote-cache-it` is that shape and stays the recommended alternative, not a workaround.
+
 **Capability coverage: what a full CI pipeline needs, and how zipx provides it.** M6 is "done" when a `build.sbt` can generate a complete multi-environment pipeline with no external YAML config. Capability-by-capability:
 
 | CI capability | zipx mechanism | milestone |
@@ -241,8 +251,10 @@ The shared job keeps the **same job ids** a no-target capability would produce, 
 | custom / list-valued runner (`[self-hosted, linux]`) | `Capability.runsOn: Option[List[String]]` | ✅ M6d |
 | run-once build-wide gate (e.g. `scalafmtCheckAll`) | `Capability.once` (`CapabilityScope.Once`), single job; others `needsCapabilities` it | ✅ M6+ |
 | independent targets (one holds for approval, others proceed) | explicit per-target jobs are already independent | ✅ inherent |
+| a test suite needing a **service** (Postgres, Redis, Kafka) | `Capability.withService` / `withServices` → `Job.services`; or Testcontainers in a `Capability.once` suite when readiness matters | ✅ post-M10 |
+| steps in a **container** (a toolchain zipx's pinning cannot express) | `Capability.inContainer` → `Job.container` | ✅ post-M10 |
 
-Deliberately **not** modeled (equivalent-or-better by design): a container-based sbt runner: zipx uses `actions/setup-java` + `sbt/setup-sbt` for the same toolchain pinning without a container; `Job.container` remains available if a user wants it. Ad-hoc cache-warmup hacks and time-bucketed cache keys are obviated by M5's content-addressed caching + commit-stable epoch. `examples/monorepo` demonstrates the full pipeline end-to-end (fmt gate → test → ordered publish → multi-registry docker → gated multi-target deploy) generated entirely from `build.sbt` + typed lists in `project/`, no external YAML.
+Deliberately **not** modeled (equivalent-or-better by design): a container-based sbt runner as the *default*, since `actions/setup-java` + `sbt/setup-sbt` pin the same toolchain without one (`Capability.inContainer` is there for a build whose toolchain genuinely differs, and takes the setup cost knowingly). Ad-hoc cache-warmup hacks and time-bucketed cache keys are obviated by M5's content-addressed caching + commit-stable epoch. `examples/monorepo` demonstrates the full pipeline end-to-end (fmt gate → test → ordered publish → multi-registry docker → gated multi-target deploy) generated entirely from `build.sbt` + typed lists in `project/`, no external YAML.
 
 **Every acceptance-mapping capability is now implemented and proven** (unit + scripted + running example). A monorepo on the external-YAML-config pattern can migrate its whole pipeline to zipx.
 
