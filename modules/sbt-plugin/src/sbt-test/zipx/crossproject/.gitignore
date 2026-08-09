@@ -1,0 +1,4 @@
+# The fixture commits real changes, so sbt's output must stay out of the diff: `consumer/target/…` sits
+# under the consumer module's base dir and would otherwise be an "affected" module on every commit.
+target/
+.sbt/

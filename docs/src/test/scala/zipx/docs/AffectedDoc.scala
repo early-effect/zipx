@@ -12,8 +12,9 @@ object AffectedDoc extends DocSpecSuite:
   def doc = page("Affected")(
     md"""
 **Affected** answers a GitHub Actions question Graph mode can ask: which *jobs* should run for this PR's diff?
-That is different from sbt 2 incrementality inside Aggregate (see **Execution modes**). Today only **Graph Verify**
-jobs are path-gated. Publish and Deploy stay release-gated; Deploy is never affected-gated.
+That is different from sbt 2 incrementality inside Aggregate (see **Execution modes**). **Graph Verify** jobs are
+path-gated by default. **Graph Publish** jobs can be, under the separate `zipxAffectedPublish` opt-in below. Deploy
+never is.
 """,
     section("Closure flow")(
       md"""
@@ -30,17 +31,21 @@ flowchart TD
 ### From git diff to owning module
 
 The `affected` job takes the PR's changed paths (repo-root-relative, from `git diff` against the base
-ref) and maps each file to at most one module:
+ref) and maps each file to the module or modules that own it:
 
 1. **Build files force everything.** If any path ends in `.sbt` or sits under a `project/` directory
    (root or nested), the whole module set is affected. Plugins and the graph may have changed, so nothing
    is safe to skip.
-2. **Otherwise: longest `baseDir` prefix.** Each module's `baseDir` is a path prefix. A file is owned by
-   the matching module whose `baseDir` is longest (most specific). Matching is directory-aware:
-   `core/` owns `core/src/X.scala`, but not `core-lib/…` or `core-extra/…`. Nested bases win:
+2. **Otherwise: longest owned-path prefix.** A module owns its `baseDir` *and* its source directories
+   (sbt's `unmanagedSourceDirectories`, Compile and Test). A file is owned by every module whose longest
+   matching prefix is the longest match overall. Matching is directory-aware: `core/` owns
+   `core/src/X.scala`, but not `core-lib/…` or `core-extra/…`. Nested bases win:
    `mods/inner/X.scala` belongs to `mods/inner`, not `mods`.
-3. **Unowned paths seed nothing.** `README.md`, `.github/…`, and other files outside every module
-   `baseDir` are ignored (unless step 1 applies). Aggregators with empty `baseDir` never own files.
+3. **Unowned paths seed nothing.** `README.md`, `.github/…`, and other files outside every module's
+   owned paths are ignored (unless step 1 applies). Aggregators with empty `baseDir` never own files.
+
+Step 2 returns a **set**, not a single module. One file can genuinely belong to more than one module; the
+next section is the case where it always does.
 
 Those owning modules are the **seeds**. Step 3 of the chart expands them to the reverse-dependency
 closure; step 5 gates each Graph Verify job on whether its id (or `all`) appears in the published JSON.
@@ -68,6 +73,46 @@ zipxAffectedOnPush := false  // opt-in: also scope branch pushes via before-sha
           yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'all')"),
         )
       ),
+    ),
+    section("Cross-built modules (projectMatrix)")(
+      md"""
+sbt 2 has `projectMatrix` built in, and a cross-built module is where `baseDir` stops being able to answer at all.
+Each platform row is a real project with its own id (`core`, `coreJS`), but sbt bases every row at a **synthetic**
+directory:
+
+```
+core / baseDirectory     = .sbt/matrix/core
+coreJS / baseDirectory   = .sbt/matrix/coreJS
+```
+
+No source file is ever under those. A `baseDir`-only rule maps `core/src/main/scala/Foo.scala` to *no* module, so
+both rows skip and the PR is green having compiled nothing. That is why a module owns its source directories too:
+
+```
+core   / Compile / unmanagedSourceDirectories = core/src/main/{scala, scala-3, scalajvm, scalajvm-3, java, javajvm}
+coreJS / Compile / unmanagedSourceDirectories = core/src/main/{scala, scala-3, scalajs,  scalajs-3,  java, javajs}
+```
+
+Those directories also carry the platform distinction, which is what makes the answer precise rather than merely
+non-empty:
+
+| Changed path | Owning modules | Why |
+|---|---|---|
+| `core/src/main/scala/Foo.scala` | `core` **and** `coreJS` | shared: on both rows' source dirs |
+| `core/src/main/scalajs/Foo.scala` | `coreJS` | on the JS row alone |
+| `core/src/main/scalajvm/Foo.scala` | `core` | on the JVM row alone |
+| `core/README.md` | none | under no row's `baseDir` or source dirs |
+
+A shared change reaching **both** rows is the property worth stating plainly: picking one would leave half of a
+cross-built module untested behind a green check, and which half you got would depend on iteration order. Ownership
+is a set for exactly this reason.
+
+`target/` and a row's `.sbt/matrix/<id>` are excluded from the owned paths: nobody edits them, and a
+generated-source directory under `target/` would make every module affected on every commit.
+
+Nothing changes for an ordinary project. Its source dirs are all under its `baseDir`, so recording them only ever
+*adds* ownership; `baseDir` still answers for a module's non-source files (a README, a `Dockerfile`, a test fixture).
+"""
     ),
     section("Fail open, not closed")(
       md"""
@@ -102,38 +147,128 @@ A broken base ref costs runner minutes, not coverage. The `affected` job logs a 
 that run.
 """
     ),
-    section("Who is gated today")(
+    section("Who is gated")(
       md"""
 | Capability shape | Path-affected? | Why |
 |---|---|---|
-| `Capability.testGraph` (and other Graph + Verify) | Yes | Per-module jobs can skip |
-| Aggregate / Layer Verify | No | One (or few) jobs; sbt cache skips work inside |
-| Publish / docker | No (yet) | `Gate.OnReleaseTag` only; Publish affected is an open seam |
-| Deploy | Never | Environments and approvals are destination-driven |
+| `Capability.testGraph` (and other Graph + Verify) | Yes, by default | Per-module jobs can skip |
+| Graph Publish (`publishGraph`, `dockerGraph`) | Only under `zipxAffectedPublish` | See the next section: the two risks are not symmetric |
+| Aggregate / Layer, any phase | Never | One sbt session over every module: there is nothing in it to skip |
+| Deploy | Never | A deploy is about a destination's desired state, not about what a diff touched |
 
 `Gate.AffectedOnly` is a **design seam**, not a shipped gate. Affected-gating is derived from phase + scope +
-`zipxAffectedOnPR`, not from `Gate`. The planner **rejects** `Gate.AffectedOnly` at generate time so it cannot
-silently mean Always.
+`zipxAffectedOnPR` / `zipxAffectedPublish`, not from `Gate`. The planner **rejects** `Gate.AffectedOnly` at generate
+time so it cannot silently mean Always.
 """
     ),
-    section("Proving more affected value")(
+    section("Narrowing Publish (zipxAffectedPublish)")(
       md"""
-Existing machinery already path-gates any `phase = Verify` + `scope = Graph` capability. The next proof is not a
-new Gate: put expensive Verify stages on Graph (scripted, MiMa, PR-local docker builds) and measure leaf-PR skips.
+Rebuilding and pushing eight images because one module changed is the cost this setting removes. It is a **separate
+switch** from `zipxAffectedOnPR` rather than a widening of it, and that is a deliberate asymmetry:
+
+> **Under-verifying is silently unsafe. Under-publishing is loudly broken.**
+
+A Verify job that wrongly skips gives you a green PR whose code was never tested, and nothing tells you. A Publish
+job that wrongly skips gives you a deploy that fails immediately for a missing artifact. One switch for both would
+price Publish's narrowing at Verify's risk, so Verify's gating is on by default and Publish's has to be asked for:
+
+```scala
+zipxAffectedOnPR    := true   // default: Graph Verify is narrowed on PRs
+zipxAffectedPublish := true   // opt-in: Graph Publish is narrowed too
+```
+
+Three properties carry over unchanged, and each is what makes the opt-in safe rather than merely cheap:
+
+1. **A release tag publishes everything.** There is no base ref to diff a tag against, so `affected` emits `["all"]`
+   for a tag push without taking a diff at all (see the table above). The `|| contains(…, 'all')` clause in every
+   gated job is the other half. The question "affected relative to what, after a series of merges?" therefore does
+   not arise.
+2. **Fail open.** A diff that could not run emits `["all"]`, so a bad base ref publishes too much rather than too
+   little.
+3. **A skipped image never silently skips its deploy.** This is the trap the feature opens, so the planner closes it
+   (see the next section).
+
+The `affected` job itself now runs on tag pushes when a Publish capability reads it, where a Verify-only setup skips
+there. That is free: on a tag it takes no diff.
+""",
+      exampleValue {
+        given PlanConfig = config.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)
+        DocsRender.jobs("publish-schema", "publish-api")(Capability.publishGraph)
+      }.assert(yaml =>
+        assertTrue(
+          // The release gate survives the narrowing; losing it would publish off every PR.
+          yaml.contains("startsWith(github.ref, 'refs/tags/v')"),
+          yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'schema')"),
+          yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'all')"),
+          yaml.contains("needs.publish-schema.result != 'failure'"),
+        )
+      ),
+      md"""
+With the switch off (the default), the same jobs carry the release gate alone and never mention `affected`, so
+turning it on is the only thing that changes a committed `ci.yml`:
+""",
+      exampleValue {
+        given PlanConfig = config.copy(affected = AffectedMode.AffectedOnPR)
+        DocsRender.job("publish-api")(Capability.publishGraph)
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("startsWith(github.ref, 'refs/tags/v')"),
+          !yaml.contains("needs.affected"),
+        )
+      ),
+    ),
+    section("Tolerating a skipped need")(
+      md"""
+Narrowing Publish means a job can now **skip** in a phase where nothing skipped before, and that changes what its
+dependents see. GitHub's implicit `success()` treats a *skipped* need exactly like a failed one: the dependent is
+skipped too. `Capability.deploy` needs `docker` by default, so without care an affected-skipped `docker-<module>`
+would silently skip the deploy that wanted the other modules' images. That is the failure this feature exists to
+avoid, not to create.
+
+So every job that needs something narrowable gains two kinds of clause:
+
+| Clause | Purpose |
+|---|---|
+| `!cancelled()` | Makes the job reachable at all once a need can skip, by displacing the implicit `success()` |
+| `needs.<id>.result != 'failure'` | Restores the blocking that `!cancelled()` just removed, per need |
+
+`!= 'failure'` rather than `== 'success'`, because `skipped` is the answer being tolerated. Two needs are excluded
+from the guard because each already has a clause of its own: `affected` (read through its output) and `verify-gate`
+(fail-open by design, where a skipped gate means "run").
 
 ```mermaid
 flowchart TD
-  W1[Wave 1: Graph Verify proofs · scripted, MiMa, dockerLocal] --> W2[Wave 2: composable OnReleaseTag and Affected]
-  W2 --> P[Publish or docker on tag]
-  W2 --> X[Deploy stays excluded]
-  class W1 warn
-  class W2,P happy
-  class X warn
+  Aff([affected]) --> D1[docker-serviceA · in the diff]
+  Aff --> D2[docker-serviceB · skipped]
+  D1 --> Dep([deploy-prod])
+  D2 --> Dep
+  Dep --> Ok([runs · !cancelled and no need failed])
+  class Aff,D1 happy
+  class D2 warn
+  class Dep,Ok happy
 ```
 
-Partial monorepo publish on a tag is the headline Wave 2 win; until Gate can compose with release, keep Publish on
-`OnReleaseTag` alone.
-"""
+A **failed** need still blocks, which is the property worth checking after any change here: a red `fmt` job must not
+be let through by the same `!cancelled()` that lets a skipped image through.
+""",
+      exampleValue {
+        given PlanConfig = config.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)
+        DocsRender.job("deploy-prod")(
+          Capability.dockerGraph,
+          Capability.deploy(
+            participates = _.docker,
+            command = n => SbtCommand.module(n, SbtCommand("deployTask")),
+            targets = _ => List(Target(TargetName("prod"), environment = Some("production"))),
+          ),
+        )
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("!cancelled()"),
+          yaml.contains("needs.docker-service.result != 'failure'"),
+          // Deploy is never itself narrowed, whatever the switch says.
+          !yaml.contains("needs.affected.outputs.modules"),
+        )
+      ),
     ),
     section("Concurrency (cancel superseded runs)")(
       md"""

@@ -49,6 +49,18 @@ object JdkVersion extends Subtype[String]:
     else if input.matches(PlanText.VersionSegment) then true
     else s"invalid java version '$input': allowed characters are letters, digits and . _ - + @"
 
+/** A `setup-node` `node-version` value: `22`, `22.11.0`, `latest`, or an `lts` alias.
+  *
+  * The same character set as [[JdkVersion]] plus the slash and star an `lts` alias needs. Unlike a JDK version this
+  * never reaches a cache key, so the segment rules do not apply.
+  */
+type NodeVersion = NodeVersion.Type
+object NodeVersion extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a node version must be non-empty"
+    else if input.matches(PlanText.NodeVersionSegment) then true
+    else s"invalid node version '$input': allowed characters are letters, digits and . _ - + @ / *"
+
 /** Patterns as `inline val` Strings so `validate` can evaluate them while a consumer's build compiles, the same
   * arrangement as `zipx.workflow.Names`.
   */
@@ -61,6 +73,9 @@ object PlanText:
 
   /** [[KeySegment]] plus `+` and `@`, which version strings use. */
   inline val VersionSegment = "[A-Za-z0-9._+@-]+"
+
+  /** [[VersionSegment]] plus the slash and star of setup-node's `lts` aliases. */
+  inline val NodeVersionSegment = "[A-Za-z0-9._+@*/-]+"
 end PlanText
 
 /** What the planner needs that the module graph cannot supply: triggers, matrix axes, cache choice, action pins. Module
@@ -69,6 +84,13 @@ end PlanText
   * @param affectedOnPush
   *   restricts pushes as well as PRs to affected modules, by diffing against the push `before` sha. Off by default,
   *   because a bad `before` (a force-push, a branch's first push) would silently under-build. Tags always build all.
+  * @param affectedPublish
+  *   extends affected-gating to [[Phase.Publish]] jobs under [[CapabilityScope.Graph]], so one changed module does not
+  *   rebuild and push every image. A separate knob from [[affected]] rather than a widening of it, because the two
+  *   phases carry opposite risks: **under-verifying is silently unsafe** (a green PR whose code was never tested),
+  *   while **under-publishing is loudly broken** (the deploy that wants the missing artifact fails immediately). One
+  *   switch for both would price Publish's narrowing at Verify's risk. Off by default; [[Phase.Deploy]] is never
+  *   affected-gated. Fail-open carries over unchanged, and a release tag always publishes everything.
   * @param cacheEpoch
   *   how [[CacheBackend.LocalDir]] picks its commit-stable cache namespace: mid-PR commits share hits and a release tag
   *   rolls the namespace. Prefer the runtime-tag default so keys stay fresh without regenerating the workflow.
@@ -108,6 +130,7 @@ final case class PlanConfig(
     runnerOs: RunnerOs = PlanConfig.DefaultRunnerOs,
     affected: AffectedMode = AffectedMode.AffectedOnPR,
     affectedOnPush: Boolean = false,
+    affectedPublish: Boolean = false,
     cache: CacheBackend = CacheBackend.LocalDir,
     cacheEpoch: CacheEpoch = CacheEpoch.GitTags(),
     pushBranches: List[String] = List("main"),

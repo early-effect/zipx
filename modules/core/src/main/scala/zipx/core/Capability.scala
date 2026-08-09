@@ -1,7 +1,10 @@
 package zipx.core
 
 import neotype.Subtype
+import neotype.unwrap
+import zipx.workflow.EnvName
 import zipx.workflow.JobId
+import zipx.workflow.JobService
 import zipx.workflow.Names
 import zipx.workflow.Step
 
@@ -57,16 +60,24 @@ object TargetName extends Subtype[String]:
         "and contain only ASCII letters, digits, - or _"
 end TargetName
 
-/** What a capability's `extraSteps` / `postSteps` see. `target` is populated only when the capability fans out. */
+/** What a capability's `extraSteps` / `postSteps` see. `target` is populated only when the capability fans out
+  * job-per-target.
+  *
+  * @param destinations
+  *   every target this one job serves, populated only under [[TargetFanOut.SharedJob]], where `target` is `None`
+  *   instead: there is no single target such a job belongs to. Steps read it to emit one login (or one push) per
+  *   destination, and [[Target.envKey]] gives them the `env:` key each destination's values landed under.
+  */
 final case class StepContext(
     node: ModuleNode,
     target: Option[Target],
     matrixed: Boolean,
     actions: ActionPins = ActionPins.Defaults,
+    destinations: List[Target] = Nil,
 )
 
-/** Pipeline position, in run order. Only [[Phase.Verify]] jobs are affected-gated; the rest are release-gated. Also
-  * fixes top-to-bottom job order in the generated YAML.
+/** Pipeline position, in run order. [[Verify]] jobs are affected-gated, [[Publish]] jobs only under
+  * [[PlanConfig.affectedPublish]], and [[Deploy]] jobs never. Also fixes top-to-bottom job order in the generated YAML.
   */
 enum Phase:
   case Verify, Publish, Deploy
@@ -81,12 +92,21 @@ enum Phase:
 enum Ordering:
   case ParallelWithUpstream, DependencyOrdered
 
-/** When a capability's jobs may run, ANDed with [[Capability.condition]] and with affected-gating.
+/** When a capability's jobs may run, ANDed with [[Capability.condition]], [[Target.condition]] and affected-gating.
   *
-  * [[Gate.AffectedOnly]] is a design seam, not a shipped feature: affected-gating is derived from [[Phase.Verify]] plus
-  * [[PlanConfig.affected]], never from `Gate`, so the planner rejects it with an explaining error rather than degrading
-  * silently to [[Gate.Always]]. A green, untested pipeline is the failure mode zipx exists to prevent. See ROADMAP
-  * M3/M6: the Deploy case is resolved (never affected-gated), Publish is still open.
+  * Because the conjunction spans three places nobody reads together, the planner rejects a gate/condition pair it can
+  * prove never true (see `Satisfiable`): a `OnReleaseTag` gate with a `refs/heads/main` condition is a job that looks
+  * deliberate and cannot run.
+  *
+  * [[Gate.AffectedOnly]] is a design seam, not a shipped feature: affected-gating is derived from the phase plus
+  * [[PlanConfig.affected]] and [[PlanConfig.affectedPublish]], never from `Gate`, so the planner rejects it with an
+  * explaining error rather than degrading silently to [[Gate.Always]]. A green, untested pipeline is the failure mode
+  * zipx exists to prevent.
+  *
+  * Which phases can be narrowed: [[Phase.Verify]] always, [[Phase.Publish]] under [[PlanConfig.affectedPublish]], and
+  * [[Phase.Deploy]] never (a deploy is about a destination's desired state, not about what a diff touched). Publish is
+  * opt-in and Verify is not, because **under-verifying is silently unsafe** while **under-publishing is loudly
+  * broken**.
   */
 enum Gate:
   case Always, OnReleaseTag, AffectedOnly
@@ -96,32 +116,80 @@ enum Gate:
   *   - [[Aggregate]] joins module commands with `;` into one sbt session, so the fewest JVM starts. One job per stage,
   *     or one per [[Target]] for deploy.
   *   - [[Layer]] is one job per toposort wave, commands joined within a wave, waves chained by `needs`.
-  *   - [[Graph]] is one job per participating module (times matrix and targets), and the only scope affected-only PRs
-  *     can narrow.
+  *   - [[Graph]] is one job per participating module (times matrix and targets), and the only scope affected-gating can
+  *     narrow: an Aggregate job runs one sbt session over every module, so there is nothing in it to skip.
   *   - [[Once]] is a single build-wide job running a fixed command, independent of module tasks. Its job id is the
   *     capability name.
   */
 enum CapabilityScope:
   case Aggregate, Layer, Graph, Once
 
-/** A destination a capability fans out over, fully resolved at generate time: one job per (module × target) under
-  * [[CapabilityScope.Graph]], one job per distinct target name under an [[CapabilityScope.Aggregate]] deploy. Targets
-  * never merge across names, so GitHub Environments and per-destination `env` stay independent.
+/** Whether a capability's [[Target]]s each get a job, or all share one.
+  *
+  *   - [[JobPerTarget]], the default, is what a deploy wants: separate GitHub Environments, separate approvals,
+  *     separate `if:`. One job per (module × target).
+  *   - [[SharedJob]] is what a *registry* wants: sbt-native-packager's `Docker / publish` builds the image once and
+  *     then pushes every `dockerAliases` entry, so N registries is naturally one job. Job ids are unchanged from a
+  *     capability with no targets at all, and each destination's `env` lands under a [[Target.envPrefix]]-prefixed key.
+  *
+  * The distinction is a cost, not a preference: `JobPerTarget` over 6 registries and 8 images is 48 jobs each
+  * rebuilding the same image, where `SharedJob` is 8, and only the second guarantees every registry holds identical
+  * bytes (#71).
+  *
+  * `SharedJob` rejects a [[Target.condition]] and a [[Target.environment]] at generate time rather than dropping them:
+  * a job has one `if:` and binds one Environment, so a per-destination one is a request for `JobPerTarget`.
+  */
+enum TargetFanOut:
+  case JobPerTarget, SharedJob
+
+/** A destination a capability fans out over, fully resolved at generate time. Under [[TargetFanOut.JobPerTarget]]: one
+  * job per (module × target) with [[CapabilityScope.Graph]], one job per distinct target name with an
+  * [[CapabilityScope.Aggregate]] deploy. Under [[TargetFanOut.SharedJob]]: one job for all of them. Targets never merge
+  * across names, so GitHub Environments and per-destination `env` stay independent.
   *
   * @param name
-  *   the job-id suffix, unique within a capability.
+  *   the job-id suffix under [[TargetFanOut.JobPerTarget]], and the `env:`-key prefix under [[TargetFanOut.SharedJob]].
+  *   Unique within a capability.
   * @param environment
   *   the GitHub Environment to bind. GitHub enforces its own protection rules; zipx emits the binding and generates no
-  *   approval steps of its own.
+  *   approval steps of its own. Rejected under [[TargetFanOut.SharedJob]], which has one job to bind.
   * @param env
-  *   merged *after* [[Capability.env]], so a target wins on a key clash.
+  *   merged *after* [[Capability.env]], so a target wins on a key clash. Under [[TargetFanOut.SharedJob]] every key is
+  *   prefixed (see [[envKey]]) instead, since several destinations' values coexist in one job.
   */
 final case class Target(
     name: TargetName,
     environment: Option[String] = None,
     env: Map[String, EnvValue] = Map.empty,
     condition: Option[JobCondition] = None,
-)
+):
+
+  /** This target's `env:`-key prefix under [[TargetFanOut.SharedJob]]: `ZIPX_` then the name upper-cased with `-`
+    * turned into `_`, because a [[TargetName]] may contain `-` and an env name may not.
+    *
+    * The fixed `ZIPX_` is what makes [[envName]] total rather than an `Either`. Without it a target legitimately named
+    * `github` would derive `GITHUB_…`, which [[EnvName]] refuses because GitHub reserves that namespace.
+    */
+  def envPrefix: String = s"ZIPX_${name.toUpperCase.replace('-', '_')}"
+
+  /** Where `key` from this target's [[env]] lands in a [[TargetFanOut.SharedJob]] job: `ZIPX_PROD_AWS_ROLE_TO_ASSUME`
+    * for target `prod` and key `AWS_ROLE_TO_ASSUME`. A step reads it back with [[envName]], so neither side spells the
+    * prefix out.
+    */
+  def envKey(key: String): String = s"${envPrefix}_$key"
+
+  /** [[envKey]] as an [[EnvName]], for a step building an `${{ env.… }}` reference to one destination's value.
+    *
+    * Total, and `unsafeMake` only because neotype cannot see it: [[envPrefix]] is `Z`-initial and drawn from
+    * `[A-Za-z0-9_]` (a [[TargetName]]'s character set with `-` mapped to `_`), and `key` is already an `EnvName`, so
+    * the result satisfies `Ident` and cannot be `GITHUB_`-prefixed.
+    */
+  def envName(key: EnvName): EnvName = EnvName.unsafeMake(envKey(key.unwrap))
+
+  /** This target's [[env]] under [[envKey]], the block a [[TargetFanOut.SharedJob]] job merges. */
+  def prefixedEnv: Map[String, EnvValue] = env.map((k, v) => envKey(k) -> v)
+
+end Target
 
 /** A pipeline stage that runs one or more sbt invocations, shaped by [[CapabilityScope]].
   *
@@ -140,6 +208,9 @@ final case class Target(
   *   expands a Graph job over Scala versions. Aggregate and Layer are never matrixed.
   * @param targets
   *   empty means no target fan-out.
+  * @param targetFanOut
+  *   whether those targets each get a job ([[TargetFanOut.JobPerTarget]], the default) or share one
+  *   ([[TargetFanOut.SharedJob]]). Ignored when `targets` is empty.
   * @param needsCapabilities
   *   other capabilities whose jobs this one must also `needs`.
   * @param extraSteps
@@ -147,8 +218,23 @@ final case class Target(
   *   with `when`, carries a name into diagnostics, and can be published for reuse across repos.
   * @param postSteps
   *   steps injected after the command step.
+  * @param container
+  *   runs every step of this capability's jobs inside this image, `Job.container`. The runner's own tools are then
+  *   absent, so `actions/setup-java` and `sbt/setup-sbt` install into the container rather than the host: an image with
+  *   no `tar`, `curl` or `git` fails in setup, not in the build. Prefer [[services]] plus the default runner unless the
+  *   *toolchain* is what has to differ, since zipx already pins the JDK and sbt.
+  * @param services
+  *   sidecar containers for this capability's jobs, `Job.services`. Reachable from a step at `localhost:<mapped port>`
+  *   (or at the service id, under [[container]]). GitHub starts them before the first step and gives no readiness
+  *   signal beyond a `--health-cmd` in `options`, so a test that needs one to be *ready* is often better off owning the
+  *   lifecycle itself; see the Testcontainers note in the docs.
+  * @param nodeVersion
+  *   when set, an `actions/setup-node` step runs after the JDK setup, pinning Node for this capability's jobs. Off by
+  *   default because sbt-scalajs downloads its own Node for `jsEnv`, so a plain Scala.js test suite needs nothing here.
+  *   Set it when the version matters: a `jsEnv` requiring a specific Node, or a step running `npm ci` for a bundler.
   * @param workflowCall
-  *   when set (typically on [[CapabilityScope.Once]]), emits a reusable-workflow job instead of sbt steps.
+  *   when set (typically on [[CapabilityScope.Once]]), emits a reusable-workflow job instead of sbt steps. Rejected
+  *   together with [[container]] or [[services]], which GitHub does not accept alongside `uses:`.
   * @param condition
   *   ANDed into every job's `if`, after the [[Gate]] and affected clauses. Prefer [[withCondition]] on a built-in or
   *   pack val; the factories below take it explicitly.
@@ -162,6 +248,7 @@ final case class Capability(
     command: ModuleNode => SbtCommand,
     matrixed: Boolean,
     targets: ModuleNode => List[Target] = _ => Nil,
+    targetFanOut: TargetFanOut = TargetFanOut.JobPerTarget,
     needsCapabilities: List[CapabilityName] = Nil,
     permissions: Map[String, String] = Map.empty,
     runsOn: Option[List[String]] = None,
@@ -169,6 +256,9 @@ final case class Capability(
     postSteps: StepContext => List[Step] = _ => Nil,
     scope: CapabilityScope = CapabilityScope.Aggregate,
     env: Map[String, EnvValue] = Map.empty,
+    container: Option[String] = None,
+    services: Map[String, JobService] = Map.empty,
+    nodeVersion: Option[NodeVersion] = None,
     workflowCall: Option[WorkflowCall] = None,
     condition: Option[JobCondition] = None,
 ):
@@ -183,6 +273,50 @@ final case class Capability(
     */
   def andCondition(extra: JobCondition): Capability =
     copy(condition = Some(condition.fold(extra)(_ && extra)))
+
+  /** Destinations that share **one** job: [[TargetFanOut.SharedJob]] plus the targets, set together because setting
+    * either alone is the mistake. The shape for registries; see [[TargetFanOut]].
+    */
+  def withSharedTargets(targets: ModuleNode => List[Target]): Capability =
+    copy(targets = targets, targetFanOut = TargetFanOut.SharedJob)
+
+  /** The same for a target list that does not vary by module, which is the usual case for registries. */
+  def withSharedTargets(targets: List[Target]): Capability =
+    withSharedTargets(_ => targets)
+
+  /** Destinations that each get their own job, the default. The shape for deploy environments. */
+  def withTargets(targets: ModuleNode => List[Target]): Capability =
+    copy(targets = targets, targetFanOut = TargetFanOut.JobPerTarget)
+
+  /** Adds one sidecar container, keeping any already declared. `id` is the hostname a step reaches it at.
+    *
+    * {{{
+    * Capability.testGraph.withService("postgres", JobService("postgres:17", ports = List("5432:5432")))
+    * }}}
+    */
+  def withService(id: String, service: JobService): Capability =
+    copy(services = services + (id -> service))
+
+  /** Replaces the whole sidecar set. */
+  def withServices(services: Map[String, JobService]): Capability =
+    copy(services = services)
+
+  /** Runs every step of this capability's jobs in `image`; see [[Capability.container]] for what the runner stops
+    * providing when you do.
+    */
+  def inContainer(image: String): Capability =
+    copy(container = Some(image))
+
+  /** Pins Node for this capability's jobs with `actions/setup-node`; see [[Capability.nodeVersion]] for when it is
+    * needed, which is less often than a Scala.js build suggests.
+    *
+    * {{{
+    * Capability.testGraph.withNodeVersion(NodeVersion("22"))
+    * }}}
+    */
+  def withNodeVersion(version: NodeVersion): Capability =
+    copy(nodeVersion = Some(version))
+
 end Capability
 
 object Capability:
@@ -342,6 +476,7 @@ object Capability:
       gate: Gate = Gate.OnReleaseTag,
       matrixed: Boolean = false,
       targets: ModuleNode => List[Target] = _ => Nil,
+      targetFanOut: TargetFanOut = TargetFanOut.JobPerTarget,
       needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
       runsOn: Option[List[String]] = None,
@@ -349,24 +484,29 @@ object Capability:
       postSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
       scope: CapabilityScope = CapabilityScope.Graph,
+      container: Option[String] = None,
+      services: Map[String, JobService] = Map.empty,
       condition: Option[JobCondition] = None,
   ): Capability =
     Capability(
-      name,
-      phase,
-      ordering,
-      gate,
-      participates,
-      command,
-      matrixed,
-      targets,
-      needsCapabilities,
-      permissions,
-      runsOn,
-      extraSteps,
-      postSteps,
+      name = name,
+      phase = phase,
+      ordering = ordering,
+      gate = gate,
+      participates = participates,
+      command = command,
+      matrixed = matrixed,
+      targets = targets,
+      targetFanOut = targetFanOut,
+      needsCapabilities = needsCapabilities,
+      permissions = permissions,
+      runsOn = runsOn,
+      extraSteps = extraSteps,
+      postSteps = postSteps,
       scope = scope,
       env = env,
+      container = container,
+      services = services,
       condition = condition,
     )
 
@@ -387,6 +527,8 @@ object Capability:
       env: Map[String, EnvValue] = Map.empty,
       needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
+      container: Option[String] = None,
+      services: Map[String, JobService] = Map.empty,
       condition: Option[JobCondition] = None,
   ): Capability =
     Capability(
@@ -404,6 +546,8 @@ object Capability:
       postSteps = postSteps,
       scope = CapabilityScope.Once,
       env = env,
+      container = container,
+      services = services,
       condition = condition,
     )
 end Capability

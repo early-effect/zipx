@@ -1,0 +1,31 @@
+# A cross-built module's ownership (#73). Two `projectMatrix` rows share `shared/`, but sbt bases each row at a
+# synthetic `.sbt/matrix/<id>`, so `baseDir` alone maps a change under `shared/` to no module at all.
+> zipxWorkflowGenerate
+$ exists .github/workflows/ci.yml
+> assertBothRowsGetJobs
+# Real git history, so the diff genuinely succeeds and fail-open never masks a wrong answer.
+$ exec git init -q .
+$ exec git config user.email scripted@example.com
+$ exec git config user.name scripted
+$ exec git config commit.gpgsign false
+$ exec git add .
+$ exec git commit -q -m fixture
+# A shared source belongs to BOTH rows. Under the old Option-returning owningModule this was one row or the
+# other, so half a cross-built module went untested behind a green check.
+$ touch shared/src/main/scala/More.scala
+$ exec git add .
+$ exec git commit -q -m shared-change
+> zipxAffectedModules HEAD^
+$ exists target/zipx-affected.json
+> assertSharedAffectsBothRows
+# A platform-specific source belongs to one row: `scalajs` is on the JS row's source dirs alone.
+$ touch shared/src/main/scalajs/MoreJs.scala
+$ exec git add .
+$ exec git commit -q -m js-change
+> zipxAffectedModules HEAD^
+> assertJsSourceAffectsJsRowOnly
+$ touch shared/src/main/scalajvm/MoreJvm.scala
+$ exec git add .
+$ exec git commit -q -m jvm-change
+> zipxAffectedModules HEAD^
+> assertJvmSourceAffectsJvmRowOnly

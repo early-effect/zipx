@@ -25,6 +25,8 @@ You declare modules and `dependsOn` once in `build.sbt`. zipx introspects that g
 addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "<version>")
 ```
 
+The artifact is `sbt-zipx`, published for sbt 2 / Scala 3 as [`sbt-zipx_sbt2_3`](https://central.sonatype.com/artifact/rocks.earlyeffect/sbt-zipx_sbt2_3). An earlier `rocks.earlyeffect:zipx-sbt` coordinate exists on Central, abandoned at 0.0.6; it is not this plugin and gets no updates.
+
 ```
 sbt zipxWorkflowGenerate
 git add .github/workflows/ci.yml && git commit -m "ci: generate with zipx"

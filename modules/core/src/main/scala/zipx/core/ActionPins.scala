@@ -24,6 +24,9 @@ import zipx.workflow.ActionRef
   *   `actions/setup-java` pin.
   * @param setupSbt
   *   `sbt/setup-sbt` pin.
+  * @param setupNode
+  *   `actions/setup-node` pin, emitted only for a capability that asks for a Node version
+  *   ([[Capability.withNodeVersion]]).
   * @param cache
   *   `actions/cache` pin for [[CacheBackend.LocalDir]].
   * @param uploadArtifact
@@ -33,17 +36,28 @@ import zipx.workflow.ActionRef
   * @param scalaSteward
   *   `scala-steward-org/scala-steward-action` pin (opt-in [[ScalaStewardWorkflow]]).
   * @param versions
-  *   Optional semver labels (`v7.0.1`) keyed by field name for `# vX.Y.Z` comments on generated `uses:` lines.
+  *   Optional semver labels (`v7.0.1`) keyed by field name for `# vX.Y.Z` comments on generated `uses:` lines. An extra
+  *   pin's label is keyed `extra.<key>`, which no [[ActionPins.Field.key]] can collide with because a field key has no
+  *   dot in it.
+  * @param extra
+  *   Pins for actions zipx does not emit itself, keyed by a name the caller chooses. This is the field for an action a
+  *   *consumer* reaches through `extraSteps` or a published pack: `ZipxAws`'s `aws-actions/configure-aws-credentials`,
+  *   an org's internal action. A typed [[ActionPins.Field]] is for an action zipx emits, which is why it can carry a
+  *   [[ActionPins.Field.prefix]] and so be shape-checked against the action it claims to name; an extra pin has no
+  *   prefix, so [[ActionPinFile.parse]] can only check that its ref is pinned at all. That weaker check is the price of
+  *   not needing a zipx release to pin a new action.
   */
 final case class ActionPins(
     checkout: ActionRef = ActionPins.BootstrapCheckout,
     setupJava: ActionRef = ActionPins.BootstrapSetupJava,
     setupSbt: ActionRef = ActionPins.BootstrapSetupSbt,
+    setupNode: ActionRef = ActionPins.BootstrapSetupNode,
     cache: ActionRef = ActionPins.BootstrapCache,
     uploadArtifact: ActionRef = ActionPins.BootstrapUploadArtifact,
     downloadArtifact: ActionRef = ActionPins.BootstrapDownloadArtifact,
     scalaSteward: ActionRef = ActionPins.BootstrapScalaSteward,
     versions: Map[String, String] = Map.empty,
+    extra: Map[String, ActionRef] = Map.empty,
 ):
   import ActionPins.Field
 
@@ -51,6 +65,7 @@ final case class ActionPins(
     case Field.Checkout         => checkout
     case Field.SetupJava        => setupJava
     case Field.SetupSbt         => setupSbt
+    case Field.SetupNode        => setupNode
     case Field.Cache            => cache
     case Field.UploadArtifact   => uploadArtifact
     case Field.DownloadArtifact => downloadArtifact
@@ -60,6 +75,7 @@ final case class ActionPins(
     case Field.Checkout         => copy(checkout = ref)
     case Field.SetupJava        => copy(setupJava = ref)
     case Field.SetupSbt         => copy(setupSbt = ref)
+    case Field.SetupNode        => copy(setupNode = ref)
     case Field.Cache            => copy(cache = ref)
     case Field.UploadArtifact   => copy(uploadArtifact = ref)
     case Field.DownloadArtifact => copy(downloadArtifact = ref)
@@ -67,9 +83,34 @@ final case class ActionPins(
 
   def version(f: Field): Option[String] = versions.get(f.key)
 
+  /** Pins an action zipx does not emit, for a step a consumer or a pack writes.
+    *
+    * `version` is the `# vX.Y.Z` label. Passing it is worth the keystrokes: without one a Dependabot reviewer sees only
+    * a SHA, and [[ActionPinFile.annotateUses]] has nothing to stamp on the generated `uses:` line.
+    */
+  def withExtra(key: String, ref: ActionRef, version: Option[String] = None): ActionPins =
+    copy(
+      extra = extra.updated(key, ref),
+      versions = version.fold(versions - ActionPins.extraVersionKey(key))(v =>
+        versions.updated(ActionPins.extraVersionKey(key), v)
+      ),
+    )
+
+  def extraRef(key: String): Option[ActionRef] = extra.get(key)
+
+  def extraVersion(key: String): Option[String] = versions.get(ActionPins.extraVersionKey(key))
+
 end ActionPins
 
 object ActionPins:
+
+  /** The `versions` key an extra pin's label lives under. The `extra.` prefix is what keeps one namespace safe for
+    * both: a [[Field.key]] is a bare identifier, so it can never contain a dot.
+    */
+  private[core] def extraVersionKey(key: String): String = s"$ExtraPrefix.$key"
+
+  /** The pin-file block name for [[ActionPins.extra]], and the prefix of its `versions` keys. */
+  private[core] val ExtraPrefix: String = "extra"
 
   /** The pins, enumerated: one case per field of [[ActionPins]].
     *
@@ -80,6 +121,7 @@ object ActionPins:
     case Checkout         extends Field("checkout", "actions/checkout")
     case SetupJava        extends Field("setupJava", "actions/setup-java")
     case SetupSbt         extends Field("setupSbt", "sbt/setup-sbt")
+    case SetupNode        extends Field("setupNode", "actions/setup-node")
     case Cache            extends Field("cache", "actions/cache")
     case UploadArtifact   extends Field("uploadArtifact", "actions/upload-artifact")
     case DownloadArtifact extends Field("downloadArtifact", "actions/download-artifact")
@@ -94,6 +136,8 @@ object ActionPins:
     ActionRef("actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961")
   private[core] val BootstrapSetupSbt: ActionRef =
     ActionRef("sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf")
+  private[core] val BootstrapSetupNode: ActionRef =
+    ActionRef("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020")
   private[core] val BootstrapCache: ActionRef =
     ActionRef("actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9")
   private[core] val BootstrapUploadArtifact: ActionRef =
@@ -107,6 +151,7 @@ object ActionPins:
     Field.Checkout.key         -> "v7.0.1",
     Field.SetupJava.key        -> "v5.7.0",
     Field.SetupSbt.key         -> "v1.5.6",
+    Field.SetupNode.key        -> "v7.0.0",
     Field.Cache.key            -> "v6.1.0",
     Field.UploadArtifact.key   -> "v7.0.1",
     Field.DownloadArtifact.key -> "v8.0.1",
@@ -117,6 +162,7 @@ object ActionPins:
     BootstrapCheckout,
     BootstrapSetupJava,
     BootstrapSetupSbt,
+    BootstrapSetupNode,
     BootstrapCache,
     BootstrapUploadArtifact,
     BootstrapDownloadArtifact,
@@ -132,6 +178,7 @@ object ActionPins:
   def Checkout: ActionRef         = Defaults.checkout
   def SetupJava: ActionRef        = Defaults.setupJava
   def SetupSbt: ActionRef         = Defaults.setupSbt
+  def SetupNode: ActionRef        = Defaults.setupNode
   def Cache: ActionRef            = Defaults.cache
   def UploadArtifact: ActionRef   = Defaults.uploadArtifact
   def DownloadArtifact: ActionRef = Defaults.downloadArtifact

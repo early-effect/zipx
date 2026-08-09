@@ -1,7 +1,6 @@
 package zipx.core
 
 import neotype.Subtype
-import neotype.unwrap
 import zipx.workflow.ExprLiteral
 import zipx.workflow.Names
 
@@ -74,6 +73,14 @@ end ModuleId
   * @param baseDir
   *   the module's base directory relative to the build root (e.g. "core-lib"), or "" for the root project. Used to map
   *   changed files back to owning modules for affected-only CI.
+  * @param sourcePaths
+  *   the module's source directories relative to the build root, from sbt's `unmanagedSourceDirectories`. Empty (the
+  *   default) means [[baseDir]] is the whole answer, as it is for every ordinary project.
+  *
+  * A cross-built module needs these, because `baseDir` cannot answer for one: sbt's `ProjectMatrix` bases each platform
+  * row at a synthetic `.sbt/matrix/<id>`, which no source file is under, so `core/` would map to no module at all. The
+  * source dirs also carry the platform distinction, since `core/src/main/scalajs` is on the JS row alone while
+  * `core/src/main/scala` is on both.
   * @param docker
   *   whether this module publishes a docker image (has sbt-native-packager's Docker plugin enabled / opted in). Drives
   *   the docker capability's per-module jobs.
@@ -87,8 +94,17 @@ final case class ModuleNode(
     testTask: SbtCommand = ModuleNode.DefaultTestTask,
     publishTask: SbtCommand = ModuleNode.DefaultPublishTask,
     baseDir: String = "",
+    sourcePaths: List[String] = Nil,
     docker: Boolean = false,
-)
+):
+
+  /** Every path this module owns for affected-gating: [[baseDir]] and its [[sourcePaths]].
+    *
+    * A union, so recording source paths only ever *adds* ownership. `baseDir` still answers for a module's non-source
+    * files (a README, a Dockerfile, a test fixture), and `sourcePaths` reaches what lies outside it.
+    */
+  def ownedPaths: List[String] = (baseDir +: sourcePaths).distinct
+end ModuleNode
 
 object ModuleNode:
   val DefaultTestTask: SbtCommand    = SbtCommand("test")

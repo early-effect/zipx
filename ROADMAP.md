@@ -17,7 +17,7 @@ A self-describing CI plugin for Scala monorepos: a set of Scala 3 libraries plus
 | M8: `zipx-central` + dogfood Central publish | ✅ |
 | M9a: Aggregate-first + Layer + deploy-by-target | ✅ |
 | M9: Dynver-ci + publishSigned auto-detect | ⬜ |
-| M10: `zipx-aws` (on second consumer) | ⬜ |
+| M10: `zipx-aws` | ✅ |
 | M11: "Extend with Scala" docs & org rollout | ⬜ |
 
 ## Context
@@ -38,7 +38,7 @@ A common way to drive CI for a Scala monorepo is a hand-maintained external conf
 - **Caching:** an **abstraction** (`CacheBackend`): local-dir or remote selectable by config/availability.
 - **Publishing:** a **registry-agnostic abstraction**: any publish mechanism plugs in; zipx owns ordering/gating, not the command.
 - **Commit-stable cache keys:** the `actions/cache` primary key tracks a **commit-stable "cache epoch"** (`zipxCacheEpoch`, defaults to `version`) so mid-PR commits reuse the sbt action cache; integrates with the sibling `sbt-dynver-ci` plugin.
-- **Action pins:** generated `uses:` values are **commit-SHA pins** (with `# vX.Y.Z` comments). Editable source of truth is `.github/zipx/action-pins.yml` (embedded into the jar as `ActionPins.Defaults`). Consumers bump via the pin file + Dependabot / `zipxActionsPull` / `zipxDependabotSync`, or one-off `zipxActions` in `build.sbt`.
+- **Action pins:** generated `uses:` values are **commit-SHA pins** (with `# vX.Y.Z` comments). Editable source of truth is `.github/zipx/action-pins.yml` (embedded into the jar as `ActionPins.Defaults`). Consumers bump via the pin file + Dependabot / `zipxActionsPull` / `zipxDependabotSync`, or one-off `zipxActions` in `build.sbt`. Actions zipx emits get a typed `ActionPins.Field`, checked against the action the key names; an action a consumer's own steps or a pack emit goes in the pin file's `extra:` block under a caller-chosen key, so pinning a new action never waits on a zipx release.
 - **Secrets:** zipx renders secret *references* into job `env:` / steps; it never stores secret *values*. Named GitHub secrets (org- or repo-scoped) are selected in Scala; convenience packs (e.g. `zipx-central`) name the early-effect org secrets and supply GPG-import steps. Semantics stay out of core.
 - **Extension language:** people extend zipx with **actual Scala**: `Capability` values, typed `zipxTasks` / `cmd"…"`, `project/*.scala` typed config, and published meta-build libraries, not external YAML or stringly `${{ secrets.X }}` soup. That extends all the way down: a `run:` body is a `Script` built from an open `Command` trait (so a construct zipx does not model is implemented in the consumer's own build, not waited on), a `${{ … }}` value is an `Expr`, a step comes from `Step.run` / `Step.uses`, and a reusable group of steps is a named `Steps` bundle that composes with `++` and can be published. Raw escape hatches (`Script.raw`, `Expr.Raw`, `JobCondition.Raw`) stay available on purpose, because a consumer who cannot express something must not be blocked, but they are typed so they cannot break the YAML, they return `Either` where the text could, and `zipxWorkflowGenerate` warns and names the bundle that used one. Reaching for the same hatch twice is the signal to implement `Command` instead.
 
@@ -53,12 +53,13 @@ A common way to drive CI for a Scala monorepo is a hand-maintained external conf
 - **`modules/core`**: `zipx.core`. Graph model (`ModuleId`, `ModuleNode`, `ModuleGraph`), own deterministic toposort + layers + affected-closure, the `Capability` model, `CacheBackend`, `PlanConfig`, and the `Planner` (`ModuleGraph => Workflow`). Pure, sbt-free, unit-tested against a fixture mirroring the real graph. (M7 adds typed `EnvValue` / secret refs here.)
 - **`modules/sbt-plugin`**: `zipx.sbt.ZipxPlugin`. The only module touching `sbt.*`: adapts build `State`/`structure`/`buildDependencies` into a `ModuleGraph`, defines `autoImport`, wires tasks.
 - **`modules/central`**: the shipped convenience packs (see below).
+- **`modules/aws`**: `zipx.aws`. The AWS paved path: `EcrRegistry` / `EcrImage` / `ImageTag`, the OIDC login `Steps` bundle, and `ZipxAws.dockerPublish`. Depends on `core` only; holds no credentials and no account numbers.
 - **`modules/it`**: Testcontainers integration tests proving the remote cache against a real `buchgr/bazel-remote`. Deliberately **not** aggregated, so plain `sbt test` needs no Docker; CI runs `it/test` as a separate job. Does not publish.
 - **`docs`**: the Specular docs-as-tests site (`docs/src/test/scala/zipx/docs/`). Every example compiles and every rendered YAML snippet is asserted, so docs cannot drift from the generator. Test-scope only; does not publish.
 - **Convenience packs** (meta-build Scala libraries, not more plugin magic):
   - **`zipx-central`** (M8, shipped): early-effect / Maven Central org secrets, GPG import steps, `publishSigned` capability.
   - **`ZipxGitHubPackages`** (shipped, in `modules/central`): GitHub Packages publishing with the built-in `GITHUB_TOKEN`.
-  - **`zipx-aws`** (M10, planned): OIDC + ECR helpers extracted from `examples/monorepo` once a second consumer needs them.
+  - **`zipx-aws`** (M10, shipped, in `modules/aws`): OIDC role assumption, `EcrRegistry` / `EcrImage` / `ImageTag`, and `dockerPublish` / `dockerPublishAll` capabilities.
 
 ## Milestones
 
@@ -72,9 +73,9 @@ PerModule parallel **test** workflow, correct `needs` from `classpathRefs`, `Loc
 Publish capability, publish-edge contraction (nearest same-capability ancestors), release-tag gating, per-module cross-scala matrix (including a 2.13-only publisher). Publishes in true dependency order instead of a flat parallel matrix, the **headline feature**. Verified against the sample graph: `schema → {api, legacyClient} → {clientA, clientB}`.
 
 ### M3: Affected-only ✅
-A leading `affected` setup job (checkout `fetch-depth: 0`, run `zipxAffectedModules <base>`, output a JSON module array); Verify jobs gated with `if: contains(fromJson(needs.affected.outputs.modules), '<id>') || contains(..., 'all')`. On push/tag the job emits the `"all"` sentinel ⇒ full build. A `.sbt` change or anything under a `project` dir ⇒ full build; unowned files ignored. **The skipped-`needs` hazard** handled with `!cancelled()` + `needs.X.result != 'failure'` so an affected module still runs when an unaffected upstream is skipped. Pure file→module mapping (`Affected`, longest base-dir prefix) is unit-tested including pathological prefix/superstring/diamond cases; the git-diff path (`zipxAffectedModules`) verified against a scratch git repo. Controlled by `zipxAffectedOnPR` (default true).
+A leading `affected` setup job (checkout `fetch-depth: 0`, run `zipxAffectedModules <base>`, output a JSON module array); Verify jobs gated with `if: contains(fromJson(needs.affected.outputs.modules), '<id>') || contains(..., 'all')`. On push/tag the job emits the `"all"` sentinel ⇒ full build. A `.sbt` change or anything under a `project` dir ⇒ full build; unowned files ignored. **The skipped-`needs` hazard** handled with `!cancelled()` + `needs.X.result != 'failure'` so an affected module still runs when an unaffected upstream is skipped. Pure file→module mapping (`Affected`, longest prefix over a module's base dir plus its source dirs, returning a `Set` so a cross-built module's shared sources reach every platform row) is unit-tested including pathological prefix/superstring/diamond cases and a real `projectMatrix` node shape; the git-diff path (`zipxAffectedModules`) verified against a scratch git repo. Controlled by `zipxAffectedOnPR` (default true); `zipxAffectedPublish` (default false) extends the same gating to Graph Publish, see M6.
 
-**Hardening (post-M3):** a failed git diff must **fail open**. Distinguishing `None` (diff did not run) from `Some(Nil)` (diff ran, nothing changed) prevents a bad base ref from emitting `[]` and skipping every Graph Verify job while the PR reports green. The same `"all"` sentinel used for tags/first-push covers that case. Workflow `concurrency` cancels superseded PR runs but **never** cancels `refs/tags/*` (publish is not idempotent). `Gate.AffectedOnly` is rejected at generate time until Publish can opt into composable affected-gating (Deploy stays never-affected; see M6).
+**Hardening (post-M3):** a failed git diff must **fail open**. Distinguishing `None` (diff did not run) from `Some(Nil)` (diff ran, nothing changed) prevents a bad base ref from emitting `[]` and skipping every Graph Verify job while the PR reports green. The same `"all"` sentinel used for tags/first-push covers that case. Workflow `concurrency` cancels superseded PR runs but **never** cancels `refs/tags/*` (publish is not idempotent). `Gate.AffectedOnly` is rejected at generate time because affected-gating is derived from phase plus `zipxAffectedOnPR` / `zipxAffectedPublish` rather than from `Gate` (Deploy stays never-affected; see M6).
 
 ```mermaid
 flowchart TD
@@ -180,21 +181,54 @@ final case class Capability(             // gains (all defaulting to current beh
 
 **Resolved design choices:** (1) **`Phase.Deploy` is added**: Verify → Publish → Deploy; deploy is never affected-gated, sorts after publish, and uses `needsCapabilities` for its docker/publish dependency. (2) **Env injection uses the job `env:` block**: each explicit per-target job merges `target.env` into its `env:`, referenced in steps as `${{ env.KEY }}` (secret-valued entries like `${{ secrets.X }}` work as env values); no runtime matrix, so no GHA uniform-object constraint. (3) `zipx-aws` convenience module deferred until a second consumer needs it.
 
-**Open seam: affected Publish (not Deploy).** M6 closed Deploy as never affected-gated. Publish still has the original `Gate` scaladoc intent (“affected-gated publishing on a tag”): on `v*`, Graph publish/docker would run only for the affected closure since the previous tag. That needs composable gates (`OnReleaseTag ∩ Affected`), a shared `affected` setup for non-Verify Graph jobs, and a tag base-ref policy that still **fails open**. Until then the planner rejects `Gate.AffectedOnly` so it cannot silently mean Always. Near-term value proof without Gate changes: expensive Graph Verify capabilities (scripted, MiMa, PR-local docker) that already receive path gating.
+**Closed seam: affected Publish (still never Deploy), `zipxAffectedPublish`.** M6 closed Deploy as never affected-gated and left Publish open, wanting "composable gates (`OnReleaseTag ∩ Affected`)". Composition turned out to need no `Gate` change at all: the release gate and the affected clause are separate clauses of one conjunction already, so the whole feature is which *phases* the existing narrowing reaches. `Planner.affectedGatedPhase` is that decision in one place: Verify always, Publish under `PlanConfig.affectedPublish`, Deploy never.
+
+It is a **separate setting** rather than a widening of `zipxAffectedOnPR`, and the asymmetry is the reason: **under-verifying is silently unsafe** (a green PR whose code was never tested) while **under-publishing is loudly broken** (the deploy that wants the missing artifact fails immediately). One switch for both would price Publish's narrowing at Verify's risk, so Verify's default stays on and Publish's has to be asked for. Off by default also means no consumer's committed `ci.yml` moves a byte on upgrade.
+
+The three things that made it safe rather than merely cheap:
+
+- **A release tag publishes everything, for free.** There is no base ref to diff a tag against, and `affectedScript` already emits the `all` sentinel for a tag push without taking a diff. So the "affected relative to what, after a series of merges?" question never arises. The one wiring change is that the `affected` setup job must now *run* on a tag push when a Publish capability reads it (`affectedOnTags`), where a Verify-only setup excludes tags.
+- **Fail-open carries over untouched**: a diff that could not run still emits `["all"]`, which now means "publish everything" as well as "verify everything".
+- **The skipped-`needs` hazard, reopened by this and closed again.** M3 handled it for Verify; narrowing Publish reopens it one level out, because `Capability.deploy` needs `docker` by default and GitHub's implicit `success()` skips a job whose need was *skipped*. So one affected-skipped `docker-<module>` would have silently skipped the deploy that wanted the other modules' images: exactly the class of failure this feature exists to prevent. `Planner.skipTolerantClauses` emits `!cancelled()` plus a per-need `!= 'failure'` at all four job-construction sites, and `tolerateSkips` returns `None` when nothing a job needs can skip, which is what keeps every existing `if:` byte-identical. `!= 'failure'` and not `== 'success'`, since `skipped` is the answer being tolerated; `affected` and `verify-gate` are excluded from the guard because each already has a clause of its own.
+
+`AffectedPublishSpec` is a suite of its own rather than more cases in `PlannerSpec`, because the properties worth pinning are about the *interaction*: off-by-default byte-identity, the release gate surviving the narrowing, the Aggregate/Layer/Deploy exclusions, and a failed need still blocking a skip-tolerant job. `Gate.AffectedOnly` stays rejected: affected-gating is derived from phase plus the two settings, so honoring it there would be a silent Always.
 
 ```mermaid
 flowchart TB
-  subgraph wave1 [Wave 1: prove with Verify Graph]
-    S[scripted / MiMa / dockerLocal]
-    S --> AG[existing affected gating]
+  subgraph verify [Verify · on by default]
+    V[Graph Verify] --> VA[affected clause]
   end
-  subgraph wave2 [Wave 2: Gate composition]
-    G[OnReleaseTag AND Affected]
-    G --> PP[partial publish on tag]
-    G -.->|reject| D[Deploy stays excluded]
+  subgraph publish [Publish · zipxAffectedPublish]
+    P[Graph Publish] --> PA[release gate AND affected clause]
+    PA --> Dep[dependents gain !cancelled + result != failure]
   end
-  wave1 --> wave2
+  subgraph never [Never]
+    A[Aggregate / Layer · nothing to skip]
+    D[Deploy · destination-driven]
+  end
+  verify --> publish
+  class V,VA,P,PA,Dep happy
+  class A,D warn
 ```
+
+**Refinement (post-M10): `TargetFanOut`, because targets multiply jobs.** M6 gave `targets` exactly one meaning, one job each, and that is right for the thing it was designed for (a deploy environment really is a separate job with its own approval) and wrong for the thing consumers reach for it with next: registries. `Docker / publish` builds one image and pushes every `dockerAliases` entry, so 6 registries across 8 images is **48** jobs under per-target fan-out and 8 under one job, and the 48 each rebuild the same image, so nothing guarantees the registries hold identical bytes. `Capability.targetFanOut` names the two shapes, `JobPerTarget` stays the default so no existing build moves a byte, and `withSharedTargets` / `withTargets` set the mode and the list together, since setting either alone is the mistake.
+
+Two decisions inside it, both of the "a silent wrong answer is worse than an error" kind:
+
+- **A shared job's `env:` is prefixed, not merged.** Two registries both wanting `AWS_ROLE_TO_ASSUME` would otherwise keep whichever the merge saw last, and the job would push twice to one account while silently skipping the other. `Target.envKey` is `ZIPX_<TARGET>_<KEY>` and `Target.envName` reads it back, so no step spells a prefix out. The fixed `ZIPX_` anchor is what makes `envName` total: a target legitimately named `github` would otherwise derive a reserved `GITHUB_…` name that `EnvName` refuses.
+- **A per-destination `condition` or `environment` under `SharedJob` is a generate-time error.** Dropping it would push to a registry the author said to skip; applying it job-wide would skip the five that were fine. The error names the field and points at `JobPerTarget`, which is the shape that has a job each to put them on.
+
+The shared job keeps the **same job ids** a no-target capability would produce, so a `needs:` edge onto `docker-<module>` keeps working and no dependent capability has to know which fan-out mode its dependency chose. `SharedTargetsSpec` is a suite of its own because the property under test is arithmetic rather than shape: only a counting assertion catches a change that quietly reintroduces the multiplication.
+
+**Refinement (post-M10): a capability owns its job runtime, `container` + `services`.** `Job.container` and `Job.services` existed from M5 but only the cache backend could reach them, so a suite needing a Postgres had no way to ask for one and the answer was "a separate project plus Testcontainers", which is right for some suites and heavy for the rest. `Capability.container` / `Capability.services` (with `inContainer` / `withService` / `withServices`) close that, threaded through `Capability.custom` and `.once` and merged at all **five** `Job` construction sites, which is where the risk actually lived: every site previously wrote `cache.services` verbatim, so a site left behind drops a sidecar the build asked for silently. `CapabilityRuntimeSpec` asserts each scope separately for that reason rather than trusting one representative.
+
+Three decisions, again all "an error beats a silent wrong answer":
+
+- **The cache sidecar wins a colliding service id.** Not `++` order by accident: the sbt invocation is *configured* to reach the cache sidecar, so losing it fails every job in the workflow on a name nobody chose deliberately, whereas a capability losing its own sidecar surfaces as a connection error in the test that wanted it, next to the id that caused it.
+- **`container` or `services` beside `workflowCall` is a generate-time error.** GitHub rejects both keys next to `uses:`, and the `uses:` branch has nowhere to put them, so dropping them would leave a job whose steps expect a sidecar that is not there. The message names which of the two fields offended.
+- **`inContainer` is documented as the last resort, not a peer of `withService`.** Inside a container the runner's own tooling is gone and zipx's setup steps install into the container, so an image without `tar`/`curl`/`git` fails during setup rather than during the build. Since zipx already pins the JDK and sbt, the only reason left is a toolchain that has to differ.
+
+The docs carry the boundary the API cannot: GitHub gives no readiness signal beyond a `--health-cmd` in `options`, so a suite that needs a container *ready* (rather than merely present, with retries) is better off owning the lifecycle with Testcontainers. zipx's own `remote-cache-it` is that shape and stays the recommended alternative, not a workaround.
 
 **Capability coverage: what a full CI pipeline needs, and how zipx provides it.** M6 is "done" when a `build.sbt` can generate a complete multi-environment pipeline with no external YAML config. Capability-by-capability:
 
@@ -205,7 +239,8 @@ flowchart TB
 | publish gated on release | release-tag gate | ✅ M2 |
 | docker image build | `Capability.docker` (native-packager) | ✅ M4 |
 | one image → N tags / moving `latest` alias | native-packager `dockerAliases` | ✅ delegated |
-| one image → **N registries/accounts**, each with own credentials | a `docker`-named `Capability.custom` with `targets` = registries + `extraSteps` login (same-name override of the built-in); demonstrated in `examples/` (`docker-service-us`/`-eu`) | ✅ M6+ |
+| one image → **N registries/accounts**, each with own credentials | `Capability.withSharedTargets` (`TargetFanOut.SharedJob`): one job, one build, one login per destination, `dockerAliases` doing the N pushes; `ZipxAws.dockerPublishAll` is that wired up | ✅ M6+ / post-M10 |
+| N registries that need N **approvals** | `Capability.withTargets` (`TargetFanOut.JobPerTarget`, the default) with `targets` = registries; a job each, so a per-registry `environment:` has somewhere to live | ✅ M6+ |
 | deploy to staging/production targets | `Capability.deploy` + `targets` | ✅ M6 |
 | production human-in-the-loop approval | GitHub Environment name on the job | ✅ M6 |
 | per-target account/region/tier/credential config | typed `List[Target]` in the build (a typed config join) | ✅ M6 |
@@ -216,8 +251,10 @@ flowchart TB
 | custom / list-valued runner (`[self-hosted, linux]`) | `Capability.runsOn: Option[List[String]]` | ✅ M6d |
 | run-once build-wide gate (e.g. `scalafmtCheckAll`) | `Capability.once` (`CapabilityScope.Once`), single job; others `needsCapabilities` it | ✅ M6+ |
 | independent targets (one holds for approval, others proceed) | explicit per-target jobs are already independent | ✅ inherent |
+| a test suite needing a **service** (Postgres, Redis, Kafka) | `Capability.withService` / `withServices` → `Job.services`; or Testcontainers in a `Capability.once` suite when readiness matters | ✅ post-M10 |
+| steps in a **container** (a toolchain zipx's pinning cannot express) | `Capability.inContainer` → `Job.container` | ✅ post-M10 |
 
-Deliberately **not** modeled (equivalent-or-better by design): a container-based sbt runner: zipx uses `actions/setup-java` + `sbt/setup-sbt` for the same toolchain pinning without a container; `Job.container` remains available if a user wants it. Ad-hoc cache-warmup hacks and time-bucketed cache keys are obviated by M5's content-addressed caching + commit-stable epoch. `examples/monorepo` demonstrates the full pipeline end-to-end (fmt gate → test → ordered publish → multi-registry docker → gated multi-target deploy) generated entirely from `build.sbt` + typed lists in `project/`, no external YAML.
+Deliberately **not** modeled (equivalent-or-better by design): a container-based sbt runner as the *default*, since `actions/setup-java` + `sbt/setup-sbt` pin the same toolchain without one (`Capability.inContainer` is there for a build whose toolchain genuinely differs, and takes the setup cost knowingly). Ad-hoc cache-warmup hacks and time-bucketed cache keys are obviated by M5's content-addressed caching + commit-stable epoch. `examples/monorepo` demonstrates the full pipeline end-to-end (fmt gate → test → ordered publish → multi-registry docker → gated multi-target deploy) generated entirely from `build.sbt` + typed lists in `project/`, no external YAML.
 
 **Every acceptance-mapping capability is now implemented and proven** (unit + scripted + running example). A monorepo on the external-YAML-config pattern can migrate its whole pipeline to zipx.
 
@@ -349,11 +386,33 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 
 **Acceptance:** docs + scripted/unit proving pgp auto-detect and override; dynver-ci called out in README cache-epoch section.
 
-### M10: `zipx-aws` (on second consumer) ⬜
+### M10: `zipx-aws` ✅
 
-**Deferred by design** until a second real consumer would otherwise copy the OIDC + ECR block from `examples/monorepo`.
+Shipped ahead of the "second consumer" trigger, because the deferral turned out to have a cost the plan did not
+anticipate. `examples/monorepo`'s own copy of the AWS block was the source of #65: its `Registry` case class carried a
+hand-written `host` and no `region`, so the login step had no region to pass and `configure-aws-credentials` failed on
+the runner reporting a *credentials* problem. A second consumer would have copied that bug, not merely duplicated code.
 
-**When started:** extract `project/Deploy.scala`-style helpers into `zipx-aws` (role assumption step factory, registry `Target` builders) using M7 `EnvValue` / `secret"…"`. Same meta-build library pattern as `zipx-central`.
+`modules/aws` (`zipx-aws`), depending on `core` only, on the meta-build library pattern `zipx-central` established:
+
+- `EcrRegistry(accountId, region)` **derives** its host, so there is no constructor that omits the region and #65 is
+  unrepresentable rather than fixed once. `AwsAccountId` / `AwsRegion` / `EcrRepository` / `ImageTag` are neotype
+  `Subtype[String]`s on the repo's usual `inline apply` (literal, compile time) / `make` (runtime, `Either`) split.
+- `ImageTag` follows the registry's own rule. A `/` is refused rather than mangled, because `example:main-feat/x` parses
+  as a different *repository*: the image would publish where nothing deploys from and the build would stay green.
+  `ImageTag.slug` is the opt-in mangle, and `forCommit` emits the moving tags only on the default branch.
+- `ZipxAws.oidcLoginSteps` is a named `Steps` bundle passing **both** `role-to-assume` and `aws-region`, reading them
+  from the job `env:` so one bundle serves every destination. `ecrLoginSteps` adds the docker login.
+- `ZipxAws.dockerPublish` is `Capability.docker` plus `id-token: write` (and `contents: read`, since naming any
+  permission drops the default set), the env block, and the login steps.
+- The two AWS actions are **extra** pins (#69), not typed `ActionPins.Field` cases, because zipx's planner never emits
+  them: they arrive through a pack, so pinning must not wait on a zipx release. The pack carries SHA-pinned fallbacks.
+  Deliberately **not** added to the repo's own `.github/zipx/action-pins.yml`, which is embedded as the
+  `ActionPins.Defaults` classpath resource and would otherwise ship an AWS pin to every consumer.
+- `ZipxAws.dockerPublishAll` is the multi-registry shape: one job, one image, one login per destination via
+  `sharedLoginSteps`, which reads each destination's role and region through `Target.envName` rather than spelling a
+  prefix out. `registryTargets` with `withTargets` remains for separate accounts with separate approvals, and its
+  scaladoc says why that is the shape to reach for last. See the `TargetFanOut` refinement under M6.
 
 ### M11: "Extend with Scala" docs & org rollout ⬜
 
@@ -363,13 +422,14 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 - `Expr` / `EnvValue` / `secret"…"` over raw `${{ }}` strings, with every Actions name a validated newtype
 - `Steps` bundles over bare `StepContext => List[Step]` lambdas, composed with `++` and gated with `when`, including a bundle published in a shared pack and reused across repos
 - composing `Capability.custom` / `.deploy` / `.once` and same-name replace
-- published packs (`zipx-central`, later `zipx-aws`)
+- published packs (`zipx-central`, `zipx-aws`)
 
 **Org rollout:**
 1. Publish zipx `0.1.0` to Central (via M8 dogfood).
 2. Adopt zipx in 1–2 early-effect libraries (alongside `sbt-dynver-ci`).
 3. Prefer generated publish/release topology over hand-maintained `release.yml` where the build graph already knows the modules.
-4. Extract `zipx-aws` only when step 2 produces a second copy of the AWS block (triggers M10).
+4. Adopt `zipx-aws` (shipped, M10) in every AWS consumer rather than copying an OIDC + ECR block. The block that was
+   waiting to be extracted was also the one carrying #65, so a copy of it is a copy of a bug.
 
 **Design guardrails (carry forward):**
 1. Topology in zipx; semantics in Scala packs.
@@ -385,7 +445,7 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 - **Pure units (fast, no sbt):** `zipx-core` planner + `zipx-workflow` printer tested with golden output against a fixture graph, plus the shell AST and the packs. `sbt "shell/testFull; workflow/testFull; core/testFull; central/testFull"`. `zipx-shell` carries both validation paths: `PrimitivesSpec` covers every newtype's accepting cases, rejecting cases, and boundaries (each control-character range end, tab mid-line versus leading, `ExitCode` at -1/0/255/256) with generators where the rule is a character class, and `CompileTimeSpec` asserts that an invalid *literal* does not compile.
 - **Docs as tests:** `sbt docs/testFull` compiles every documented example and asserts every rendered YAML snippet, so a stale doc fails the build.
 - **Integration (Docker, not aggregated):** `sbt it/test` runs the remote-cache Testcontainers proof against a real `buchgr/bazel-remote`. `modules/it` is excluded from the root aggregate so the fast suites need no Docker; CI runs it as a parallel job.
-- **Plugin integration:** sbt `scripted` test (`modules/sbt-plugin/src/sbt-test/zipx/generate-check`) where `zipxWorkflowGenerate` then `zipxWorkflowCheck` is a clean no-op round-trip (idempotence = determinism proof).
+- **Plugin integration:** `sbt plugin/scripted`, three fixtures under `modules/sbt-plugin/src/sbt-test/zipx/`. `generate-check`: `zipxWorkflowGenerate` then `zipxWorkflowCheck` is a clean no-op round-trip (idempotence = determinism proof), plus the affected fail-open handoff. `reject-unicode-id`: a project id sbt allows and GitHub cannot name fails the build. `crossproject`: a `projectMatrix` module's shared and platform-specific sources map to the right rows (#73). Every assertion reads a file, never sbt stdout.
 - **Dogfood:** zipx generates its own `.github/workflows/ci.yml` (`workflow → core → plugin` test + publish chains) from working-tree sources via the meta-build mirror projects in `project/dogfood.sbt`. `sbt reload` proves the mirror is wired; regenerating and getting an empty `git diff` proves determinism end to end.
 
 ## Post-milestone follow-ups (all done)
@@ -395,7 +455,14 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 - **`zipxPublishOrder` task** prints the contracted publish layers (`ModuleGraph.subsetLayers(_.publishes)`), e.g. `L0: models / L1: coreLib / L2: client`.
 - **Opt-in push-time affected (`zipxAffectedOnPush`, default false).** When on, pushes also restrict to affected modules by diffing the push `before` sha, guarded against force-push / branch-create (all-zero sha → build everything). Default remains: PRs are affected-scoped, pushes/tags build all.
 - **Affected fail-open + concurrency.** Diff failure emits `["all"]` (not `[]`); workflow concurrency cancels superseded PR runs but never release tags (`zipxCancelSupersededRuns`, default true).
-- **`Gate.AffectedOnly` rejected until implemented.** Keeps the Publish-affected design seam visible; generate fails instead of silently running Always.
+- **`Gate.AffectedOnly` rejected.** Affected-gating is derived from phase plus `zipxAffectedOnPR` / `zipxAffectedPublish`, never from `Gate`, so generate fails instead of silently running Always.
+- **Opt-in affected Publish (`zipxAffectedPublish`, default false, #70).** Narrows Graph Publish jobs to the affected closure so one changed module does not rebuild and push every image. A separate switch from `zipxAffectedOnPR` because **under-verifying is silently unsafe** while **under-publishing is loudly broken**; a release tag still publishes everything (the `all` sentinel needs no diff), fail-open is unchanged, and dependents of a narrowable job gain `!cancelled()` plus a per-need `!= 'failure'` so a skipped image never silently skips its deploy. See M6.
+- **A cross-built module owns its source directories, not just its base dir (#73).** The issue expected two `crossProject` platforms to *share* a base dir, making the longest-prefix tie-break arbitrary. sbt 2's built-in `projectMatrix` is worse than that: it bases each row at a synthetic `.sbt/matrix/<id>` (`Project(childId, dotSbtMatrix / childId)`), so a change under `core/` mapped to **no** module and both rows skipped behind a green check. `ModuleNode.sourcePaths` records `unmanagedSourceDirectories` (Compile and Test, minus `target/` and `.sbt/`), and `Affected.owningModules` returns a `Set` rather than the old `Option`: `core/src/main/scala` is on both rows so it affects both, while `core/src/main/scalajs` is on the JS row alone. Verified against a live sbt 2.0.5 matrix build and pinned by a third scripted fixture (`zipx/crossproject`), whose assertions run through `target/zipx-affected.json` rather than sbt stdout.
+- **`Field.SetupNode`, a typed pin emitted only on request (#73).** `Capability.withNodeVersion(NodeVersion("22"))` adds a pinned `actions/setup-node` step straight after `setup-sbt`. Per-capability, not a build-wide setting: a Node toolchain belongs to one suite, so asking for it must not put the step on every publish job. Off by default, because sbt-scalajs downloads its own Node for `jsEnv`; it is for a `jsEnv` needing a specific version or a step running `npm ci`.
+- **`Coverage`, which cannot measure sbt 2's `test` (#74).** The alias every build writes, `coverage; compile; test; coverageAggregate`, is broken for the reason the header of this section gives: `test` is `testQuick`, so it measures whichever tests sbt felt like running, satisfies `coverageMinimum` on near-zero data, and goes green. `Coverage.once()` and `Coverage.graph()` therefore *build* the command from the module's own `zipxTestTask` via `SbtCommand.module`, substituting `testFull` where that is still the `test` default and leaving an explicit override alone; `_.testTask` opts into literal inheritance. One sbt session, because `coverage` is a session toggle. No `coverageOff` (the session ends with the job) and no `cleanFull` (`zipxVerifyClean` already owns that choice). The report uploads through the existing `uploadArtifact` pin, per module under `graph`, with `if-no-files-found: error` so a run that measured nothing is red rather than an empty upload.
+- **The example is a consumer of every one of the above (#65, #66).** `examples/monorepo` is where the two bugs were, and both are now closed by *deleting* the code that carried them rather than by patching it. Its `Registry` case class holds an `EcrRegistry` instead of a hand-written `host`, so the region is a constructor parameter and the host is derived from it; its two hand-written `configure-aws-credentials@v6` steps are gone in favour of `ZipxAws.oidcLoginSteps` and `dockerPublishAll`, which pin the action by SHA from the pin file and pass `aws-region` because there is no registry value without one. Its `dockerAliases` enumerates both registries from the same list, which is what makes the two `docker-service-<registry>` jobs one `docker` job that builds once and pushes twice. The unsatisfiable `refs/heads/main` condition on the deploy targets is gone, and the GitHub Environment approval that was always the real gate is the only one left. `consumer-verify` runs `zipxWorkflowCheck` here on every push, so none of this can rot again silently.
+- **One page for when each rule fires (#75).** The `inline apply` / `make` split is the library's central idea and it was documented only per-type, so a reader met it eight times and never once as a rule. The **Validation** page states it as one: `Foo("literal")` is checked while your build compiles, `Foo.make(runtimeValue)` returns an `Either` you carry, and passing a non-literal to the first is itself a compile error pointing at the second. It then tables the three moments: every neotype and the unrepresentable-by-construction cases (`StepBuilder`, `EcrRegistry`) at compile time; everything assembled from more than one file at `zipxWorkflowGenerate`, because no literal can see the combination; and the two things left to the runner (whether the sbt command passes, whether the secret exists). The escape hatches get their own section, since `Steps.rawWarnings` is the answer to "how do I see one being used". `zipxTestTask` being a `String` is documented here as the deliberate exception it is, with the `JsonFormat` reason from `typedCommand`'s scaladoc, and **Settings** links here from all three of its tables.
+- **An `if:` that can never be true is rejected (#66).** `Gate`, `Capability.condition` and `Target.condition` are ANDed across three files nobody reads together, so `OnReleaseTag` plus `refIs("refs/heads/main")` produced a job that looked deliberate and could never run (this repo's own example shipped it). `Satisfiable` decides a deliberately narrow subset: single-valued `github` contexts (`ref`, `event_name`, `repository`) inside a conjunction, flattening `All` and De Morgan on `Not(Any)`. `Any`, `Raw`, `vars.*`, PR labels and two negations are left alone, because an unsound rejection is worse than a missed one: a missed contradiction is the status quo, a wrong rejection is a build that cannot generate its own CI.
 
 ## Deviations from the original plan
 

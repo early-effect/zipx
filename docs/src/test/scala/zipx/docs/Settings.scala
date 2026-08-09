@@ -9,6 +9,9 @@ object Settings extends DocSpecSuite:
   def doc = page("Settings")(
     md"""
 All settings have sensible derived defaults. Write them as **bare settings** (no `ThisBuild /`).
+
+A typed setting (`WorkflowName`, `JdkVersion`, `RunnerOs`, …) checks its literal where you write it; the `String`-typed
+task settings below are checked at `zipxWorkflowGenerate` instead, for a reason worth knowing. See **Validation**.
 """,
     section("Build-level")(
       md"""
@@ -31,6 +34,7 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxReleaseTagPattern` | `String` | `v[0-9]+.[0-9]+.[0-9]+` | publish gate |
 | `zipxAffectedOnPR` | `Boolean` | `true` | affected setup when Graph Verify present |
 | `zipxAffectedOnPush` | `Boolean` | `false` | also scope pushes |
+| `zipxAffectedPublish` | `Boolean` | `false` | also narrow Graph **Publish**; opt-in because under-publishing is loudly broken while under-verifying is silently unsafe |
 | `zipxSkipMergedPrPush` | `Boolean` | `true` | skip Verify on merged-PR pushes |
 | `zipxCacheRehydrateOnMerge` | `Boolean` | `true` | LocalDir: rehydrate default-branch cache when Verify skips after merge |
 | `zipxCacheRehydrateTask` | `String` | `"compile"` | sbt command for the rehydrate job |
@@ -51,6 +55,10 @@ All settings have sensible derived defaults. Write them as **bare settings** (no
 | `zipxDocker` | `Boolean` | derived from `DockerPlugin` | build a docker image |
 | `zipxTestTask` | `String` | `"test"` | Aggregate root Verify + Graph/Layer task |
 | `zipxPublishTask` | `String` | `"publish"` | publish task |
+
+These two are `String` rather than `SbtCommand` because an opaque type in an sbt `settingKey` would need a `JsonFormat`;
+the check moves to `zipxWorkflowGenerate`, which names the setting. `zipxTasks` / `cmd"…"` take real `TaskKey`s and skip
+it. See **Validation**.
 
 By default a module is in the publish graph when it is not an aggregator, `publish / skip` is false, and
 `publishArtifact` is true. Prefer `publish / skip := true` for non-publishers; set `zipxPublish := Some(false/true)`
@@ -76,7 +84,9 @@ Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Lay
 `CapabilityName` and `TargetName` are validated wrappers, not aliases for `String`: joined with `-` they *are* the
 `jobs.<job_id>` key GitHub sees, so a space or a `/` in one used to produce a workflow that failed on push. A literal
 is checked where you write it, `CapabilityName("docker-stg")`, and the built-in names are available as
-`Capability.TestName` / `.PublishName` / `.DockerName` / `.DeployName` for `needsCapabilities`.
+`Capability.TestName` / `.PublishName` / `.DockerName` / `.DeployName` for `needsCapabilities`. What a combination of
+fields cannot be checked at a literal (`needsCapabilities` cycles, `workflowCall` beside `services`, a never-true `if:`)
+is checked at `zipxWorkflowGenerate`; see **Validation**.
 
 Job env merge: `zipxEnv` → cache
 backend → capability → target (`zipxCacheRehydrateEnv` overlays `zipxEnv` on rehydrate only). `zipxEnv` is omitted on

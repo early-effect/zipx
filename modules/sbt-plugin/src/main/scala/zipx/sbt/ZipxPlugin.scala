@@ -40,6 +40,19 @@ object ZipxPlugin extends AutoPlugin:
     type StepContext = zipx.core.StepContext
     val StepContext = zipx.core.StepContext
 
+    /** Whether a capability's targets each get a job or all share one. A build names it when it passes `targetFanOut`
+      * to `Capability.custom`; `Capability.withSharedTargets` / `withTargets` set it without naming it, which is the
+      * shorter path.
+      */
+    type TargetFanOut = zipx.core.TargetFanOut
+    val TargetFanOut = zipx.core.TargetFanOut
+
+    /** A sidecar container for a capability's jobs: `Capability.testGraph.withService("postgres",
+      * JobService("postgres:17", ports = List("5432:5432")))`.
+      */
+    type JobService = zipx.workflow.JobService
+    val JobService = zipx.workflow.JobService
+
     /** The names that become GitHub job ids, so a `build.sbt` can write one: `CapabilityName("docker-stg")`,
       * `Target(TargetName("stg"))`. Both are validated at compile time when the argument is a literal, which is the
       * usual case in a build file.
@@ -62,6 +75,12 @@ object ZipxPlugin extends AutoPlugin:
     val JdkVersion = zipx.core.JdkVersion
     type RunnerOs = zipx.core.RunnerOs
     val RunnerOs = zipx.core.RunnerOs
+
+    /** Not a settings type: a Node toolchain is per-capability,
+      * `Capability.testGraph.withNodeVersion(NodeVersion("22"))`.
+      */
+    type NodeVersion = zipx.core.NodeVersion
+    val NodeVersion = zipx.core.NodeVersion
 
     /** Exported under its own name rather than as `Command`, which is sbt's own name in a `build.sbt` (see the note at
       * the end of this object). A `Capability`'s `command` is this type, so a build that writes one literally needs it.
@@ -98,6 +117,62 @@ object ZipxPlugin extends AutoPlugin:
       def OrgSecretNames            = zipx.central.ZipxCentral.OrgSecretNames
       def gpgImportSteps            = zipx.central.ZipxCentral.gpgImportSteps
     end ZipxCentral
+
+    /** The AWS pack. The newtypes are re-exported as `type` + `val` pairs rather than hidden behind factories, because
+      * a `build.sbt` writes `EcrRegistry(AwsAccountId("111122223333"), AwsRegion("us-east-1"))` as a literal and that
+      * is exactly where the `inline apply` check earns its keep.
+      */
+    object ZipxAws:
+      type EcrRegistry = zipx.aws.EcrRegistry
+      val EcrRegistry = zipx.aws.EcrRegistry
+      type EcrImage = zipx.aws.EcrImage
+      val EcrImage = zipx.aws.EcrImage
+      type AwsAccountId = zipx.aws.AwsAccountId
+      val AwsAccountId = zipx.aws.AwsAccountId
+      type AwsRegion = zipx.aws.AwsRegion
+      val AwsRegion = zipx.aws.AwsRegion
+      type EcrRepository = zipx.aws.EcrRepository
+      val EcrRepository = zipx.aws.EcrRepository
+      type ImageTag = zipx.aws.ImageTag
+      val ImageTag = zipx.aws.ImageTag
+
+      def oidcLoginSteps: Steps                                                     = zipx.aws.ZipxAws.oidcLoginSteps
+      def ecrLoginSteps: Steps                                                      = zipx.aws.ZipxAws.ecrLoginSteps
+      def oidcPermissions                                                           = zipx.aws.ZipxAws.oidcPermissions
+      def registryEnv(registry: EcrRegistry, role: EnvValue): Map[String, EnvValue] =
+        zipx.aws.ZipxAws.registryEnv(registry, role)
+      def imageEnv(image: EcrImage, role: EnvValue): Map[String, EnvValue] =
+        zipx.aws.ZipxAws.imageEnv(image, role)
+      def registryTargets(registries: List[(TargetName, EcrRegistry, EnvValue)]): List[Target] =
+        zipx.aws.ZipxAws.registryTargets(registries)
+      def dockerPublish(
+          registry: EcrRegistry,
+          role: EnvValue,
+          name: CapabilityName = Capability.DockerName,
+          scope: CapabilityScope = CapabilityScope.Aggregate,
+          condition: Option[JobCondition] = None,
+      ): Capability =
+        zipx.aws.ZipxAws.dockerPublish(registry, role, name, scope, condition)
+      def sharedLoginSteps: Steps = zipx.aws.ZipxAws.sharedLoginSteps
+
+      /** Several registries pushed from **one** job, the shape to prefer for a multi-registry image: see
+        * `TargetFanOut`.
+        */
+      def dockerPublishAll(
+          registries: List[(TargetName, EcrRegistry, EnvValue)],
+          name: CapabilityName = Capability.DockerName,
+          scope: CapabilityScope = CapabilityScope.Aggregate,
+          condition: Option[JobCondition] = None,
+      ): Capability =
+        zipx.aws.ZipxAws.dockerPublishAll(registries, name, scope, condition)
+      def RoleEnv                             = zipx.aws.ZipxAws.RoleEnv
+      def RegionEnv                           = zipx.aws.ZipxAws.RegionEnv
+      def RegistryEnv                         = zipx.aws.ZipxAws.RegistryEnv
+      def CredentialsPinKey                   = zipx.aws.ZipxAws.CredentialsPinKey
+      def EcrLoginPinKey                      = zipx.aws.ZipxAws.EcrLoginPinKey
+      def credentialsAction(pins: ActionPins) = zipx.aws.ZipxAws.credentialsAction(pins)
+      def DefaultCredentialsAction            = zipx.aws.ZipxAws.DefaultCredentialsAction
+    end ZipxAws
 
     object ZipxDocs:
       def pages(sbtProject: String = "docs", javaVersion: Option[JdkVersion] = None): Capability =
@@ -137,6 +212,11 @@ object ZipxPlugin extends AutoPlugin:
       def DefaultName         = zipx.github.ZipxGitHubPackages.DefaultName
       def PublishFlagEnv      = zipx.github.ZipxGitHubPackages.PublishFlagEnv
     end ZipxGitHubPackages
+
+    /** scoverage, as `zipxCapabilities += Coverage.once()`. In `zipx-core` rather than a pack because the thing it
+      * guards against, sbt 2's `test` being `testQuick`, is a core concern; see [[zipx.core.Coverage]].
+      */
+    val Coverage = zipx.core.Coverage
     type Step = zipx.workflow.Step
     val Step = zipx.workflow.Step
     type Expr = zipx.workflow.Expr
@@ -233,6 +313,12 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[Boolean]("Whether Verify jobs run only for affected modules on PRs (default true).")
     val zipxAffectedOnPush =
       settingKey[Boolean]("Also restrict pushes to affected modules via the before-sha diff (default false).")
+    val zipxAffectedPublish =
+      settingKey[Boolean](
+        "Also affected-gate Graph-scope Publish jobs, so one changed module does not rebuild every image " +
+          "(default false; release tags always publish everything). Separate from zipxAffectedOnPR because " +
+          "under-verifying is silently unsafe while under-publishing is loudly broken."
+      )
     val zipxSkipMergedPrPush =
       settingKey[Boolean](
         "Skip Verify on branch pushes when the commit already belongs to a merged PR (default true)."
@@ -292,6 +378,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxWorkflowPath             := ".github/workflows/ci.yml",
     zipxAffectedOnPR             := true,
     zipxAffectedOnPush           := false,
+    zipxAffectedPublish          := false,
     zipxSkipMergedPrPush         := true,
     zipxCacheRehydrateOnMerge    := true,
     zipxCacheRehydrateTask       := "compile",
@@ -399,11 +486,7 @@ object ZipxPlugin extends AutoPlugin:
         read(crossScalaVersions, Nil) match
           case Nil      => List(read(scalaVersion, "")).filter(_.nonEmpty)
           case versions => versions.toList
-      val baseDir =
-        resolvedById
-          .get(ref.project)
-          .map(p => buildRoot.relativize(p.base.toPath).toString.replace('\\', '/'))
-          .getOrElse("")
+      val baseDir = resolvedById.get(ref.project).map(p => relativeToRoot(buildRoot, p.base)).getOrElse("")
       ModuleNode(
         // The one place a project id enters zipx, so the one place it is checked. sbt admits any id starting with a
         // `Character.isLetter`, so `café` is a legal project; GitHub job ids are ASCII, and a workflow naming that
@@ -417,6 +500,7 @@ object ZipxPlugin extends AutoPlugin:
         testTask = orFail(typedCommand("zipxTestTask", read(zipxTestTask, "test"))),
         publishTask = orFail(typedCommand("zipxPublishTask", read(zipxPublishTask, "publish"))),
         baseDir = baseDir,
+        sourcePaths = sourcePathsFor(ref, extracted, buildRoot),
         docker = read(zipxDocker, false),
       )
     }.toList
@@ -425,6 +509,37 @@ object ZipxPlugin extends AutoPlugin:
     // goes through `orFail` anyway: that is the boundary's job, and a graph is user input regardless of who checked it.
     orFail(ModuleGraph.make(nodes))
   }
+
+  /** A path relative to the build root, with forward slashes, matching what `git diff --name-only` prints. */
+  private def relativeToRoot(buildRoot: java.nio.file.Path, f: File): String =
+    buildRoot.relativize(f.toPath).toString.replace('\\', '/')
+
+  /** A project's Compile and Test source directories relative to the build root, for [[ModuleNode.sourcePaths]].
+    *
+    * Two filters: a path outside the build root (`../…`, from a source dependency elsewhere on disk) can never match a
+    * git path, and a machine-owned one (under `target`, or a `projectMatrix` row's `.sbt/matrix/<id>`) is never edited.
+    * Directories that do not exist yet are kept, so creating `src/main/scalajs` later needs no regeneration.
+    */
+  private def sourcePathsFor(
+      ref: ProjectRef,
+      extracted: Extracted,
+      buildRoot: java.nio.file.Path,
+  ): List[String] =
+    val dirs = Seq(Compile, Test).flatMap { config =>
+      extracted.getOpt(ref / config / unmanagedSourceDirectories).toList.flatten
+    }
+    dirs
+      .map(relativeToRoot(buildRoot, _))
+      .filterNot(p => p.isEmpty || p.startsWith("../") || isGeneratedPath(p))
+      .distinct
+      .sorted
+      .toList
+  end sourcePathsFor
+
+  /** sbt's output tree, or a `projectMatrix` row's synthetic base under `.sbt/`. */
+  private def isGeneratedPath(path: String): Boolean =
+    val segments = path.split('/')
+    segments.contains("target") || segments.headOption.contains(".sbt")
 
   private def rootRef(structure: sbt.internal.BuildStructure): ProjectRef =
     ProjectRef(structure.root, structure.rootProject(structure.root))
@@ -448,6 +563,7 @@ object ZipxPlugin extends AutoPlugin:
       runnerOs = read(zipxRunnerOs, PlanConfig.DefaultRunnerOs),
       affected = if read(zipxAffectedOnPR, true) then AffectedMode.AffectedOnPR else AffectedMode.Always,
       affectedOnPush = read(zipxAffectedOnPush, false),
+      affectedPublish = read(zipxAffectedPublish, false),
       cache = read(zipxCache, CacheBackend.LocalDir),
       cacheEpoch = read(zipxCacheEpoch, CacheEpoch.GitTags()),
       pushBranches = read(zipxPushBranches, Seq("main")).toList,

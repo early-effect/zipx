@@ -3,6 +3,7 @@ package zipx.docs
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
+import zipx.workflow.ActionRef
 import zio.test.*
 
 /** GitHub Action SHA pins, the pin file, Dependabot, and sync. */
@@ -82,6 +83,103 @@ If `zipxDependabotSync := true`, also commit `.github/workflows/zipx-action-pins
           yaml.exists(_.contains("setupSbt: sbt/setup-sbt@def456 # v1.9.9")),
         )
       ),
+    ),
+    section("Pins for actions zipx does not emit (`extra:`)")(
+      md"""
+The flat keys above are the actions **zipx itself** writes into a workflow, one per `ActionPins` field. An action *you*
+reach through `extraSteps`, a custom capability, or a published pack has no field, and waiting for a zipx release to
+get one would be absurd. Those go in an indented `extra:` block, keyed by whatever name you like:
+
+```yaml
+checkout: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+extra:
+  configure-aws-credentials: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d13d67 # v6.0.0
+```
+
+In Scala, `withExtra` puts one there and `extraRef` reads it back, which is how a pack writes a step whose pin the
+consumer can bump without a zipx upgrade:
+
+```scala
+zipxActions := ActionPins.Defaults.withExtra(
+  "configure-aws-credentials",
+  ActionRef("aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d13d67"),
+  Some("v6.0.0"),
+)
+```
+
+**A typed field and an extra pin are not interchangeable, and the difference is what gets checked:**
+
+| | typed field (`checkout:`) | `extra:` pin |
+|---|---|---|
+| For | an action zipx emits | an action your steps or a pack emit |
+| Key | one of a closed set; a typo is refused | any identifier you choose |
+| Ref must be pinned | yes | yes |
+| Ref must name the *right* action | yes, via the field's known prefix | **no**, there is no prefix to compare against |
+| Adding one | a zipx release | a line in your pin file |
+
+The row that matters is the fourth. `checkout: evil/malware@<sha>` is refused because `checkout:` is known to mean
+`actions/checkout`; `myaction: evil/malware@<sha>` cannot be, because `myaction` means whatever you decided. That
+weaker guarantee is the price of not needing a release, so prefer a typed field for anything zipx emits.
+
+`zipxActionsPull` bumps an extra pin whose **key already exists**, matching on the `owner/action` part of the ref. It
+never invents a key for an action it has not seen before: pinning a new action is a deliberate act by whoever wrote the
+step, and a guessed key would be one more thing to rename later.
+""",
+      exampleValue {
+        val text =
+          s"""checkout: actions/checkout@abc123 # v9.0.0
+             |extra:
+             |  configure-aws-credentials: aws-actions/configure-aws-credentials@def456 # v6.0.0
+             |""".stripMargin
+        ActionPinFile.parse(text)
+      }.assert(pins =>
+        assertTrue(
+          pins.map(_.extraRef("configure-aws-credentials")) ==
+            Right(Some(ActionRef("aws-actions/configure-aws-credentials@def456"))),
+          pins.exists(_.extraVersion("configure-aws-credentials").contains("v6.0.0")),
+          // The same file re-rendered is the same file: extra pins sort by key, so a Map's iteration order cannot
+          // produce a spurious diff on the next generate.
+          pins.map(ActionPinFile.render).flatMap(ActionPinFile.parse) == pins,
+        )
+      ),
+    ),
+    section("`setupNode`: a typed field zipx emits only on request")(
+      md"""
+`setupNode` is a typed field, like `checkout`, because zipx writes the step itself. Unlike the others it appears in a
+workflow only when a capability asks for a Node version:
+
+```scala
+zipxCapabilities += Capability.testGraph.withNodeVersion(NodeVersion("22"))
+```
+
+Off by default, and for a Scala.js build that is usually right: sbt-scalajs downloads its own Node for `jsEnv`, so a
+plain `.jsPlatform` test suite needs nothing here. Ask for it when the version matters, which is narrower than "the
+build has JS in it": a `jsEnv` requiring a specific Node, or a step running `npm ci` for a bundler.
+
+The version is a `NodeVersion` newtype, so every form `setup-node` accepts (`22`, `22.11.0`, `latest`, `lts/jod`,
+`lts/*`) is checked while your `build.sbt` compiles, and a value that would break the YAML is a compile error rather
+than a workflow GitHub rejects.
+
+Per-capability rather than build-wide, which is the difference from `zipxJavaVersion`: a Node toolchain belongs to one
+test suite, so asking for it must not put a `setup-node` step on every publish job in the build. The step goes
+immediately after `setup-sbt`, before any cache restore or `extraSteps`, so a `jsEnv` and an `npm ci` both see it.
+""",
+      exampleValue {
+        DocsRender.job("test-schema")(Capability.testGraph.withNodeVersion(NodeVersion("22")))
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("actions/setup-node@"),
+          yaml.contains("node-version:"),
+          yaml.contains("Setup Node 22"),
+        )
+      ),
+      md"""
+Without `withNodeVersion` the same job has no `setup-node` step at all, so adopting this changes only the capability
+that asked:
+""",
+      exampleValue {
+        DocsRender.job("test-schema")(Capability.testGraph)
+      }.assert(yaml => assertTrue(!yaml.contains("setup-node"))),
     ),
     section("A line zipx cannot read fails the build")(
       md"""
@@ -204,13 +302,14 @@ Consumer repos without a pin file get those jar defaults until they add their ow
 | Setting / task | Role |
 |---|---|
 | `zipxActionsPath` | pin file path (default `.github/zipx/action-pins.yml`; `""` disables) |
-| `zipxActions` | explicit `ActionPins` override (escape hatch) |
+| `zipxActions` | explicit `ActionPins` override (escape hatch); `.withExtra(key, ref)` for an action zipx does not emit |
 | `zipxDependabotSync` | also generate `zipx-action-pins-sync.yml` |
 | `zipxActionsPull` | workflow `uses:` → pin file → regenerate |
 | `zipxWorkflowGenerate` / `zipxWorkflowCheck` | write / verify `ci.yml` (and sync workflow when enabled) |
 
-Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/cache`,
-`actions/upload-artifact`, `actions/download-artifact`.
+Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`,
+`actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, `scala-steward-org/scala-steward-action`.
+Anything else your steps use goes in the `extra:` block.
 """
     ),
   )

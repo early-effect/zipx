@@ -42,11 +42,23 @@ val commonSettings = Seq(
   pomIncludeRepository := { _ => false },
 )
 
+// The version handoff for the `consumer-verify` job: examples/monorepo needs the in-dev plugin version, and CI must
+// read it from a file rather than by capturing sbt stdout (which carries log lines). Same discipline as the plugin's
+// own `zipxAffectedModules`, which writes target/zipx-affected.json for exactly this reason.
+lazy val zipxWriteVersion = taskKey[File]("Write the build version to target/zipx-version.txt for the example check")
+
 lazy val root = (project in file("."))
-  .aggregate(shell, workflow, core, central, plugin, docs)
+  .aggregate(shell, workflow, core, central, aws, plugin, docs)
   .settings(
     name           := "zipx",
     publish / skip := true,
+    // `Def.uncached` because a file write is not a valid cached-task output.
+    zipxWriteVersion := Def.uncached {
+      val out = (LocalRootProject / baseDirectory).value / ExampleCheck.VersionFile
+      IO.write(out, (ThisBuild / version).value)
+      streams.value.log.info(s"zipx version ${(ThisBuild / version).value} -> ${out.getPath}")
+      out
+    },
     // Dogfood: Aggregate Central + Pages, fork-gated so tag pushes on forks skip publish/docs.
     // (No ZipxGitHubPackages here yet: that needs dual publishTo when PUBLISH_GITHUB_PACKAGES=true.)
     zipxCapabilities ++= {
@@ -63,6 +75,18 @@ lazy val root = (project in file("."))
           gate = Gate.Always,
           needsCapabilities = Nil,
           env = Map("ZIPX_IT_DOCKER" -> EnvValue.plain("1")),
+        ),
+        // The two verifications that only a consumer can perform: `scripted` (the plugin against real sbt builds) and
+        // examples/monorepo (the published API against a build a human wrote). Neither ran in CI before, which is why
+        // the example rotted: a stale plugin pin, a missing aws-region, and an unsatisfiable deploy condition all
+        // survived on main. One job, because both need the same checkout, JDK and sbt setup, and scripted is the
+        // cheaper of the two so it fails first.
+        Capability.once(
+          name = CapabilityName("consumer-verify"),
+          command = SbtCommand("plugin/scripted"),
+          phase = Phase.Verify,
+          gate = Gate.Always,
+          postSteps = ExampleCheck.steps,
         ),
       )
     },
@@ -121,11 +145,20 @@ lazy val central = (project in file("modules/central"))
     description := "zipx capability pack for CI-only Maven Central publishing (early-effect org secrets)",
   )
 
+// AWS paved path: OIDC role assumption, ECR registries that cannot omit their region, image tag sets.
+lazy val aws = (project in file("modules/aws"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name        := "zipx-aws",
+    description := "zipx capability pack for AWS: OIDC login, ECR registries, image tags",
+  )
+
 // The sbt 2.x AutoPlugin, the only module that touches sbt.*. Publish + scripted live here;
 // the root build dogfoods via the meta-build source mirror in project/dogfood.sbt (no publishLocal).
 lazy val plugin = (project in file("modules/sbt-plugin"))
   .enablePlugins(SbtPlugin)
-  .dependsOn(core, central)
+  .dependsOn(core, central, aws)
   .settings(
     name        := "sbt-zipx",
     description := "sbt 2 AutoPlugin: the build describes its own GitHub Actions CI",
@@ -172,7 +205,7 @@ lazy val specularPreview =
 
 lazy val docs = project
   .in(file("docs"))
-  .dependsOn(core, central)
+  .dependsOn(core, central, aws)
   .enablePlugins(SpecularPlugin)
   .settings(
     name            := "zipx-docs",

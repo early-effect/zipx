@@ -5,7 +5,9 @@ package zipx.core
   * Algorithm (mirrors the well-worn sbt approach):
   *   1. If any changed file touches the build itself (a `.sbt` file or anything under the `project` dir), treat the
   *      whole build as affected: the graph or plugins may have changed, so nothing can be safely skipped.
-  *   2. Otherwise map each changed file to its owning module by **longest matching base-dir prefix**.
+  *   2. Otherwise map each changed file to its owning module(s) by **longest matching prefix** over each module's
+  *      source paths and its base dir. Plural because a cross-built module's shared sources belong to every platform
+  *      row.
   *   3. Take the reverse-dependency closure of those seed modules (a module plus everything that transitively depends
   *      on it). That is the affected set.
   *
@@ -33,7 +35,7 @@ object Affected:
   def affectedModules(graph: ModuleGraph, changedFiles: List[String]): Set[String] =
     if changedFiles.exists(isBuildFile) then graph.ids.toSet
     else
-      val seeds = changedFiles.flatMap(owningModule(graph, _)).toSet
+      val seeds = changedFiles.flatMap(owningModules(graph, _)).toSet
       graph.affectedClosure(seeds)
 
   /** The module ids the `affected` job should publish, given a diff that may have failed.
@@ -52,16 +54,29 @@ object Affected:
       case None        => AllSentinel
       case Some(files) => affectedModules(graph, files).toList.sorted
 
-  /** The module owning a file, by longest base-dir prefix. Root (baseDir "") only matches files not owned by any deeper
-    * module, and even then only if root is a real module, but since root is typically an excluded aggregator, such
-    * files effectively map to nothing. Returns None when no module's base dir prefixes the path.
+  /** Every module owning a file, by longest matching prefix over [[ModuleNode.ownedPaths]].
+    *
+    * A `Set` rather than an `Option` because a cross-built module's shared sources belong to *every* platform row:
+    * `core/src/main/scala/Foo.scala` compiles into both `core` and `coreJS`, so picking one would leave half the module
+    * untested behind a green check.
+    *
+    * Ranking by matched-prefix length is what keeps that precise: a nested project still beats its parent, and every
+    * module tied at the winning length is returned, so `core/src/main/scalajs/` resolves to the JS row alone.
+    *
+    * Root (`baseDir` "") never matches, so a file under no module maps to nothing. An empty result is not "everything":
+    * the fail-open sentinel lives in [[outputModules]].
     */
-  def owningModule(graph: ModuleGraph, path: String): Option[String] =
-    val candidates =
-      graph.nodes
-        .filter(n => n.baseDir.nonEmpty && underBase(path, n.baseDir))
-        .sortBy(-_.baseDir.length) // longest (most specific) base dir first
-    candidates.headOption.map(_.id)
+  def owningModules(graph: ModuleGraph, path: String): Set[String] =
+    val ranked = graph.nodes.flatMap { node =>
+      node.ownedPaths.filter(p => p.nonEmpty && underBase(path, p)).map(p => node.id -> p.length)
+    }
+    if ranked.isEmpty then Set.empty
+    else
+      // The longest match wins, and every module matching at that length wins together: `foo/shared/` prefixes the
+      // shared source dir of each platform equally, so neither is more specific than the other.
+      val best = ranked.map(_._2).max
+      ranked.collect { case (id, len) if len == best => id }.toSet
+  end owningModules
 
   private def underBase(path: String, base: String): Boolean =
     // Normalize so `app` and `app/` are equivalent; a trailing slash must not break exact-dir matches.

@@ -13,8 +13,10 @@ import zipx.core.{
   SbtCommand,
   StepContext,
   Target,
+  TargetFanOut,
 }
 import zipx.shell.ShText
+import zipx.workflow.JobService
 import zipx.workflow.Step
 import scala.quoted.*
 
@@ -208,27 +210,34 @@ object CapabilityTasks:
       gate: Gate = Gate.OnReleaseTag,
       matrixed: Boolean = false,
       targets: ModuleNode => List[Target] = _ => Nil,
+      targetFanOut: TargetFanOut = TargetFanOut.JobPerTarget,
       needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
       runsOn: Option[List[String]] = None,
       extraSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
+      container: Option[String] = None,
+      services: Map[String, JobService] = Map.empty,
       condition: Option[JobCondition] = None,
   ): Capability =
+    // Named arguments throughout, so a new `Capability.custom` parameter cannot silently shift the ones after it.
     Capability.custom(
-      name,
-      moduleCommand(command),
-      participates,
-      phase,
-      ordering,
-      gate,
-      matrixed,
-      targets,
-      needsCapabilities,
-      permissions,
-      runsOn,
-      extraSteps,
+      name = name,
+      command = moduleCommand(command),
+      participates = participates,
+      phase = phase,
+      ordering = ordering,
+      gate = gate,
+      matrixed = matrixed,
+      targets = targets,
+      targetFanOut = targetFanOut,
+      needsCapabilities = needsCapabilities,
+      permissions = permissions,
+      runsOn = runsOn,
+      extraSteps = extraSteps,
       env = env,
+      container = container,
+      services = services,
       condition = condition,
     )
 
@@ -244,17 +253,21 @@ object CapabilityTasks:
       extraSteps: StepContext => List[Step] = _ => Nil,
       env: Map[String, EnvValue] = Map.empty,
       needsCapabilities: List[CapabilityName] = Nil,
+      container: Option[String] = None,
+      services: Map[String, JobService] = Map.empty,
       condition: Option[JobCondition] = None,
   ): Capability =
     Capability.once(
-      name,
-      scopedLabel(command),
-      phase,
-      gate,
-      runsOn,
-      extraSteps,
+      name = name,
+      command = scopedLabel(command),
+      phase = phase,
+      gate = gate,
+      runsOn = runsOn,
+      extraSteps = extraSteps,
       env = env,
       needsCapabilities = needsCapabilities,
+      container = container,
+      services = services,
       condition = condition,
     )
 
