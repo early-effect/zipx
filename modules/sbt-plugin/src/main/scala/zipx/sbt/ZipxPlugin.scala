@@ -40,6 +40,13 @@ object ZipxPlugin extends AutoPlugin:
     type StepContext = zipx.core.StepContext
     val StepContext = zipx.core.StepContext
 
+    /** Whether a capability's targets each get a job or all share one. A build names it when it passes `targetFanOut`
+      * to `Capability.custom`; `Capability.withSharedTargets` / `withTargets` set it without naming it, which is the
+      * shorter path.
+      */
+    type TargetFanOut = zipx.core.TargetFanOut
+    val TargetFanOut = zipx.core.TargetFanOut
+
     /** The names that become GitHub job ids, so a `build.sbt` can write one: `CapabilityName("docker-stg")`,
       * `Target(TargetName("stg"))`. Both are validated at compile time when the argument is a literal, which is the
       * usual case in a build file.
@@ -134,6 +141,18 @@ object ZipxPlugin extends AutoPlugin:
           condition: Option[JobCondition] = None,
       ): Capability =
         zipx.aws.ZipxAws.dockerPublish(registry, role, name, scope, condition)
+      def sharedLoginSteps: Steps = zipx.aws.ZipxAws.sharedLoginSteps
+
+      /** Several registries pushed from **one** job, the shape to prefer for a multi-registry image: see
+        * `TargetFanOut`.
+        */
+      def dockerPublishAll(
+          registries: List[(TargetName, EcrRegistry, EnvValue)],
+          name: CapabilityName = Capability.DockerName,
+          scope: CapabilityScope = CapabilityScope.Aggregate,
+          condition: Option[JobCondition] = None,
+      ): Capability =
+        zipx.aws.ZipxAws.dockerPublishAll(registries, name, scope, condition)
       def RoleEnv                             = zipx.aws.ZipxAws.RoleEnv
       def RegionEnv                           = zipx.aws.ZipxAws.RegionEnv
       def RegistryEnv                         = zipx.aws.ZipxAws.RegistryEnv

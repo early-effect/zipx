@@ -43,8 +43,8 @@ lazy val service = project
 ```
 
 zipx detects `DockerPlugin` and emits a release-gated Aggregate `docker` job joining `…/Docker/publish` (or use
-`dockerGraph`). Multi-registry pushes are a custom capability with targets (see **Custom capabilities**). For
-PR-label stage ECR (before merge), see **Job conditions**.
+`dockerGraph`). Pushing one image to several registries stays **one** job; see *Registries are destinations, targets are
+environments* below. For PR-label stage ECR (before merge), see **Job conditions**.
 """,
       exampleValue {
         DocsRender.job("docker")(Capability.docker)
@@ -55,6 +55,86 @@ PR-label stage ECR (before merge), see **Job conditions**.
           yaml.contains("refs/tags/v"),
         )
       ),
+    ),
+    section("Registries are destinations, targets are environments")(
+      md"""
+The rule of thumb, because getting it backwards is expensive:
+
+| The destinations are | Shape | Why |
+| --- | --- | --- |
+| Registries for **one** image | `withSharedTargets` (`TargetFanOut.SharedJob`) | `Docker / publish` builds once and pushes every `dockerAliases` entry, so N registries is one job |
+| Deploy **environments** | `withTargets` (`TargetFanOut.JobPerTarget`, the default) | Each really is a separate job: its own approval, its own `environment:`, its own `if:` |
+
+`targets` multiplies jobs. That is right for the second row and wrong for the first: 6 registries across 8 images is
+**48** jobs under `JobPerTarget` and 8 under `SharedJob`, and the 48 each rebuild the same image, so nothing guarantees
+the registries hold identical bytes. One build pushed N times does guarantee it.
+
+```scala
+zipxCapabilities += Capability.docker.withSharedTargets(
+  List(
+    Target(TargetName("us"), env = Map("AWS_REGION" -> EnvValue.plain("us-east-1"), "AWS_ROLE_TO_ASSUME" -> secret"US_ROLE")),
+    Target(TargetName("eu"), env = Map("AWS_REGION" -> EnvValue.plain("eu-west-1"), "AWS_ROLE_TO_ASSUME" -> secret"EU_ROLE")),
+  )
+).copy(extraSteps = ZipxAws.sharedLoginSteps)
+```
+
+One job, one image, one login per destination. On AWS, `ZipxAws.dockerPublishAll(registries)` is that whole expression
+(see **Packs**).
+""",
+      exampleValue {
+        DocsRender.job("docker")(
+          Capability.docker.withSharedTargets(
+            List(
+              Target(
+                TargetName("us"),
+                env = Map("AWS_REGION" -> EnvValue.plain("us-east-1"), "AWS_ROLE_TO_ASSUME" -> secret"US_ROLE"),
+              ),
+              Target(
+                TargetName("eu"),
+                env = Map("AWS_REGION" -> EnvValue.plain("eu-west-1"), "AWS_ROLE_TO_ASSUME" -> secret"EU_ROLE"),
+              ),
+            )
+          )
+        )
+      }.assert(yaml =>
+        assertTrue(
+          // One `docker:` job, and both destinations' values in its env under their own prefix.
+          yaml.contains("ZIPX_US_AWS_REGION: us-east-1"),
+          yaml.contains("ZIPX_EU_AWS_REGION: eu-west-1"),
+          yaml.contains("ZIPX_US_AWS_ROLE_TO_ASSUME: ${{ secrets.US_ROLE }}"),
+          yaml.contains("service/Docker/publish"),
+          // Not `docker-us:` / `docker-eu:`: the ids are the ones the capability would have had with no targets, so a
+          // `needs:` edge onto `docker` keeps working when a registry is added.
+          !yaml.contains("docker-us:"),
+        )
+      ),
+      md"""
+### Why the env keys are prefixed
+
+Both destinations want `AWS_ROLE_TO_ASSUME`. Merging unprefixed would keep whichever one came last, and the job would
+push twice to one account while silently skipping the other, so a shared job puts each destination's `env` under
+`Target.envKey`: `ZIPX_<TARGET>_<KEY>`. `Target.envName(name)` is how a step reads it back, and the fixed `ZIPX_`
+anchor is what makes that total: a target named `github` would otherwise derive a `GITHUB_…` name, which `EnvName`
+refuses because GitHub reserves the prefix.
+
+`extraSteps` receives every destination as `StepContext.destinations` (and `StepContext.target` is `None`, since there
+is no single target a shared job belongs to), which is how one bundle emits one login per registry.
+
+### What a shared job refuses
+
+A `Target.condition` or `Target.environment` under `SharedJob` is a **generate-time error**, not a silently dropped
+field:
+
+```
+zipx: capability 'docker' target 'us' sets a condition, which one shared job cannot honor per destination.
+Use TargetFanOut.JobPerTarget (the default) when destinations need their own condition, or drop it and gate
+the whole job with Capability.condition.
+```
+
+Dropping it would push to a registry the author said to skip; applying it job-wide would skip the ones that were fine.
+Both are wrong answers arrived at quietly, so zipx declines to pick one. Per-destination approval is the second row of
+the table: that is what `JobPerTarget` is for.
+""",
     ),
     section("Aggregate-by-target deploy")(
       md"""

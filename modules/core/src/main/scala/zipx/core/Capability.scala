@@ -1,6 +1,8 @@
 package zipx.core
 
 import neotype.Subtype
+import neotype.unwrap
+import zipx.workflow.EnvName
 import zipx.workflow.JobId
 import zipx.workflow.Names
 import zipx.workflow.Step
@@ -57,12 +59,20 @@ object TargetName extends Subtype[String]:
         "and contain only ASCII letters, digits, - or _"
 end TargetName
 
-/** What a capability's `extraSteps` / `postSteps` see. `target` is populated only when the capability fans out. */
+/** What a capability's `extraSteps` / `postSteps` see. `target` is populated only when the capability fans out
+  * job-per-target.
+  *
+  * @param destinations
+  *   every target this one job serves, populated only under [[TargetFanOut.SharedJob]], where `target` is `None`
+  *   instead: there is no single target such a job belongs to. Steps read it to emit one login (or one push) per
+  *   destination, and [[Target.envKey]] gives them the `env:` key each destination's values landed under.
+  */
 final case class StepContext(
     node: ModuleNode,
     target: Option[Target],
     matrixed: Boolean,
     actions: ActionPins = ActionPins.Defaults,
+    destinations: List[Target] = Nil,
 )
 
 /** Pipeline position, in run order. [[Verify]] jobs are affected-gated, [[Publish]] jobs only under
@@ -113,24 +123,72 @@ enum Gate:
 enum CapabilityScope:
   case Aggregate, Layer, Graph, Once
 
-/** A destination a capability fans out over, fully resolved at generate time: one job per (module × target) under
-  * [[CapabilityScope.Graph]], one job per distinct target name under an [[CapabilityScope.Aggregate]] deploy. Targets
-  * never merge across names, so GitHub Environments and per-destination `env` stay independent.
+/** Whether a capability's [[Target]]s each get a job, or all share one.
+  *
+  *   - [[JobPerTarget]], the default, is what a deploy wants: separate GitHub Environments, separate approvals,
+  *     separate `if:`. One job per (module × target).
+  *   - [[SharedJob]] is what a *registry* wants: sbt-native-packager's `Docker / publish` builds the image once and
+  *     then pushes every `dockerAliases` entry, so N registries is naturally one job. Job ids are unchanged from a
+  *     capability with no targets at all, and each destination's `env` lands under a [[Target.envPrefix]]-prefixed key.
+  *
+  * The distinction is a cost, not a preference: `JobPerTarget` over 6 registries and 8 images is 48 jobs each
+  * rebuilding the same image, where `SharedJob` is 8, and only the second guarantees every registry holds identical
+  * bytes (#71).
+  *
+  * `SharedJob` rejects a [[Target.condition]] and a [[Target.environment]] at generate time rather than dropping them:
+  * a job has one `if:` and binds one Environment, so a per-destination one is a request for `JobPerTarget`.
+  */
+enum TargetFanOut:
+  case JobPerTarget, SharedJob
+
+/** A destination a capability fans out over, fully resolved at generate time. Under [[TargetFanOut.JobPerTarget]]: one
+  * job per (module × target) with [[CapabilityScope.Graph]], one job per distinct target name with an
+  * [[CapabilityScope.Aggregate]] deploy. Under [[TargetFanOut.SharedJob]]: one job for all of them. Targets never merge
+  * across names, so GitHub Environments and per-destination `env` stay independent.
   *
   * @param name
-  *   the job-id suffix, unique within a capability.
+  *   the job-id suffix under [[TargetFanOut.JobPerTarget]], and the `env:`-key prefix under [[TargetFanOut.SharedJob]].
+  *   Unique within a capability.
   * @param environment
   *   the GitHub Environment to bind. GitHub enforces its own protection rules; zipx emits the binding and generates no
-  *   approval steps of its own.
+  *   approval steps of its own. Rejected under [[TargetFanOut.SharedJob]], which has one job to bind.
   * @param env
-  *   merged *after* [[Capability.env]], so a target wins on a key clash.
+  *   merged *after* [[Capability.env]], so a target wins on a key clash. Under [[TargetFanOut.SharedJob]] every key is
+  *   prefixed (see [[envKey]]) instead, since several destinations' values coexist in one job.
   */
 final case class Target(
     name: TargetName,
     environment: Option[String] = None,
     env: Map[String, EnvValue] = Map.empty,
     condition: Option[JobCondition] = None,
-)
+):
+
+  /** This target's `env:`-key prefix under [[TargetFanOut.SharedJob]]: `ZIPX_` then the name upper-cased with `-`
+    * turned into `_`, because a [[TargetName]] may contain `-` and an env name may not.
+    *
+    * The fixed `ZIPX_` is what makes [[envName]] total rather than an `Either`. Without it a target legitimately named
+    * `github` would derive `GITHUB_…`, which [[EnvName]] refuses because GitHub reserves that namespace.
+    */
+  def envPrefix: String = s"ZIPX_${name.toUpperCase.replace('-', '_')}"
+
+  /** Where `key` from this target's [[env]] lands in a [[TargetFanOut.SharedJob]] job: `ZIPX_PROD_AWS_ROLE_TO_ASSUME`
+    * for target `prod` and key `AWS_ROLE_TO_ASSUME`. A step reads it back with [[envName]], so neither side spells the
+    * prefix out.
+    */
+  def envKey(key: String): String = s"${envPrefix}_$key"
+
+  /** [[envKey]] as an [[EnvName]], for a step building an `${{ env.… }}` reference to one destination's value.
+    *
+    * Total, and `unsafeMake` only because neotype cannot see it: [[envPrefix]] is `Z`-initial and drawn from
+    * `[A-Za-z0-9_]` (a [[TargetName]]'s character set with `-` mapped to `_`), and `key` is already an `EnvName`, so
+    * the result satisfies `Ident` and cannot be `GITHUB_`-prefixed.
+    */
+  def envName(key: EnvName): EnvName = EnvName.unsafeMake(envKey(key.unwrap))
+
+  /** This target's [[env]] under [[envKey]], the block a [[TargetFanOut.SharedJob]] job merges. */
+  def prefixedEnv: Map[String, EnvValue] = env.map((k, v) => envKey(k) -> v)
+
+end Target
 
 /** A pipeline stage that runs one or more sbt invocations, shaped by [[CapabilityScope]].
   *
@@ -149,6 +207,9 @@ final case class Target(
   *   expands a Graph job over Scala versions. Aggregate and Layer are never matrixed.
   * @param targets
   *   empty means no target fan-out.
+  * @param targetFanOut
+  *   whether those targets each get a job ([[TargetFanOut.JobPerTarget]], the default) or share one
+  *   ([[TargetFanOut.SharedJob]]). Ignored when `targets` is empty.
   * @param needsCapabilities
   *   other capabilities whose jobs this one must also `needs`.
   * @param extraSteps
@@ -171,6 +232,7 @@ final case class Capability(
     command: ModuleNode => SbtCommand,
     matrixed: Boolean,
     targets: ModuleNode => List[Target] = _ => Nil,
+    targetFanOut: TargetFanOut = TargetFanOut.JobPerTarget,
     needsCapabilities: List[CapabilityName] = Nil,
     permissions: Map[String, String] = Map.empty,
     runsOn: Option[List[String]] = None,
@@ -192,6 +254,21 @@ final case class Capability(
     */
   def andCondition(extra: JobCondition): Capability =
     copy(condition = Some(condition.fold(extra)(_ && extra)))
+
+  /** Destinations that share **one** job: [[TargetFanOut.SharedJob]] plus the targets, set together because setting
+    * either alone is the mistake. The shape for registries; see [[TargetFanOut]].
+    */
+  def withSharedTargets(targets: ModuleNode => List[Target]): Capability =
+    copy(targets = targets, targetFanOut = TargetFanOut.SharedJob)
+
+  /** The same for a target list that does not vary by module, which is the usual case for registries. */
+  def withSharedTargets(targets: List[Target]): Capability =
+    withSharedTargets(_ => targets)
+
+  /** Destinations that each get their own job, the default. The shape for deploy environments. */
+  def withTargets(targets: ModuleNode => List[Target]): Capability =
+    copy(targets = targets, targetFanOut = TargetFanOut.JobPerTarget)
+
 end Capability
 
 object Capability:
@@ -351,6 +428,7 @@ object Capability:
       gate: Gate = Gate.OnReleaseTag,
       matrixed: Boolean = false,
       targets: ModuleNode => List[Target] = _ => Nil,
+      targetFanOut: TargetFanOut = TargetFanOut.JobPerTarget,
       needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
       runsOn: Option[List[String]] = None,
@@ -369,6 +447,7 @@ object Capability:
       command,
       matrixed,
       targets,
+      targetFanOut,
       needsCapabilities,
       permissions,
       runsOn,

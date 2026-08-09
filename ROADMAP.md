@@ -59,7 +59,7 @@ A common way to drive CI for a Scala monorepo is a hand-maintained external conf
 - **Convenience packs** (meta-build Scala libraries, not more plugin magic):
   - **`zipx-central`** (M8, shipped): early-effect / Maven Central org secrets, GPG import steps, `publishSigned` capability.
   - **`ZipxGitHubPackages`** (shipped, in `modules/central`): GitHub Packages publishing with the built-in `GITHUB_TOKEN`.
-  - **`zipx-aws`** (M10, shipped, in `modules/aws`): OIDC role assumption, `EcrRegistry` / `EcrImage` / `ImageTag`, and a `dockerPublish` capability.
+  - **`zipx-aws`** (M10, shipped, in `modules/aws`): OIDC role assumption, `EcrRegistry` / `EcrImage` / `ImageTag`, and `dockerPublish` / `dockerPublishAll` capabilities.
 
 ## Milestones
 
@@ -211,6 +211,15 @@ flowchart TB
   class A,D warn
 ```
 
+**Refinement (post-M10): `TargetFanOut`, because targets multiply jobs.** M6 gave `targets` exactly one meaning, one job each, and that is right for the thing it was designed for (a deploy environment really is a separate job with its own approval) and wrong for the thing consumers reach for it with next: registries. `Docker / publish` builds one image and pushes every `dockerAliases` entry, so 6 registries across 8 images is **48** jobs under per-target fan-out and 8 under one job, and the 48 each rebuild the same image, so nothing guarantees the registries hold identical bytes. `Capability.targetFanOut` names the two shapes, `JobPerTarget` stays the default so no existing build moves a byte, and `withSharedTargets` / `withTargets` set the mode and the list together, since setting either alone is the mistake.
+
+Two decisions inside it, both of the "a silent wrong answer is worse than an error" kind:
+
+- **A shared job's `env:` is prefixed, not merged.** Two registries both wanting `AWS_ROLE_TO_ASSUME` would otherwise keep whichever the merge saw last, and the job would push twice to one account while silently skipping the other. `Target.envKey` is `ZIPX_<TARGET>_<KEY>` and `Target.envName` reads it back, so no step spells a prefix out. The fixed `ZIPX_` anchor is what makes `envName` total: a target legitimately named `github` would otherwise derive a reserved `GITHUB_…` name that `EnvName` refuses.
+- **A per-destination `condition` or `environment` under `SharedJob` is a generate-time error.** Dropping it would push to a registry the author said to skip; applying it job-wide would skip the five that were fine. The error names the field and points at `JobPerTarget`, which is the shape that has a job each to put them on.
+
+The shared job keeps the **same job ids** a no-target capability would produce, so a `needs:` edge onto `docker-<module>` keeps working and no dependent capability has to know which fan-out mode its dependency chose. `SharedTargetsSpec` is a suite of its own because the property under test is arithmetic rather than shape: only a counting assertion catches a change that quietly reintroduces the multiplication.
+
 **Capability coverage: what a full CI pipeline needs, and how zipx provides it.** M6 is "done" when a `build.sbt` can generate a complete multi-environment pipeline with no external YAML config. Capability-by-capability:
 
 | CI capability | zipx mechanism | milestone |
@@ -220,7 +229,8 @@ flowchart TB
 | publish gated on release | release-tag gate | ✅ M2 |
 | docker image build | `Capability.docker` (native-packager) | ✅ M4 |
 | one image → N tags / moving `latest` alias | native-packager `dockerAliases` | ✅ delegated |
-| one image → **N registries/accounts**, each with own credentials | a `docker`-named `Capability.custom` with `targets` = registries + `extraSteps` login (same-name override of the built-in); demonstrated in `examples/` (`docker-service-us`/`-eu`) | ✅ M6+ |
+| one image → **N registries/accounts**, each with own credentials | `Capability.withSharedTargets` (`TargetFanOut.SharedJob`): one job, one build, one login per destination, `dockerAliases` doing the N pushes; `ZipxAws.dockerPublishAll` is that wired up | ✅ M6+ / post-M10 |
+| N registries that need N **approvals** | `Capability.withTargets` (`TargetFanOut.JobPerTarget`, the default) with `targets` = registries; a job each, so a per-registry `environment:` has somewhere to live | ✅ M6+ |
 | deploy to staging/production targets | `Capability.deploy` + `targets` | ✅ M6 |
 | production human-in-the-loop approval | GitHub Environment name on the job | ✅ M6 |
 | per-target account/region/tier/credential config | typed `List[Target]` in the build (a typed config join) | ✅ M6 |
@@ -387,9 +397,10 @@ the runner reporting a *credentials* problem. A second consumer would have copie
   them: they arrive through a pack, so pinning must not wait on a zipx release. The pack carries SHA-pinned fallbacks.
   Deliberately **not** added to the repo's own `.github/zipx/action-pins.yml`, which is embedded as the
   `ActionPins.Defaults` classpath resource and would otherwise ship an AWS pin to every consumer.
-- `registryTargets` exists for separate accounts with separate approvals, and its scaladoc says it is the wrong shape
-  for the ordinary multi-registry push: `Docker / publish` pushes every `dockerAliases` entry from one build, so a
-  target per registry costs N*M jobs each rebuilding the same image.
+- `ZipxAws.dockerPublishAll` is the multi-registry shape: one job, one image, one login per destination via
+  `sharedLoginSteps`, which reads each destination's role and region through `Target.envName` rather than spelling a
+  prefix out. `registryTargets` with `withTargets` remains for separate accounts with separate approvals, and its
+  scaladoc says why that is the shape to reach for last. See the `TargetFanOut` refinement under M6.
 
 ### M11: "Extend with Scala" docs & org rollout ⬜
 

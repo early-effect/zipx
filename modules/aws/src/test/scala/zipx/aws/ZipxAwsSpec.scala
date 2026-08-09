@@ -128,7 +128,7 @@ object ZipxAwsSpec extends ZIOSpecDefault:
             (TargetName("eu"), second, secret"EU_ROLE"),
           )
         )
-        val fannedOut = ZipxAws.dockerPublish(registry, role).copy(targets = _ => targets)
+        val fannedOut = ZipxAws.dockerPublish(registry, role).withTargets(_ => targets)
         val wf        = Planner.plan(graph, List(fannedOut), config)
         assertTrue(
           wf.jobs.contains("docker-us"),
@@ -140,5 +140,77 @@ object ZipxAwsSpec extends ZIOSpecDefault:
         )
       },
     ),
+    suite("dockerPublishAll pushes several registries from one build (#71)")(
+      test("one job, not one per registry: 6 registries stay 1 job with 6 logins") {
+        val wf  = Planner.plan(graph, List(ZipxAws.dockerPublishAll(sixRegistries)), config)
+        val job = wf.jobs("docker")
+        assertTrue(
+          wf.jobs.keys.count(_.startsWith("docker")) == 1,
+          job.steps.count(_.name.exists(_.startsWith("Assume AWS role (OIDC,"))) == 6,
+          // One build. Two `Docker/publish` invocations would defeat the point of the shape.
+          job.steps.count(_.run.exists(_.contains("Docker/publish"))) == 1,
+        )
+      },
+      test("each login reads its own destination's role and region, never a shared unprefixed key") {
+        val job    = Planner.plan(graph, List(ZipxAws.dockerPublishAll(sixRegistries)), config).jobs("docker")
+        val logins = job.steps.filter(_.name.exists(_.startsWith("Assume AWS role (OIDC,")))
+        val us     = logins.find(_.name.contains("Assume AWS role (OIDC, us)")).get
+        assertTrue(
+          us.`with`.get("role-to-assume").contains("${{ env.ZIPX_US_AWS_ROLE_TO_ASSUME }}"),
+          us.`with`.get("aws-region").contains("${{ env.ZIPX_US_AWS_REGION }}"),
+          // Every login points at a *distinct* pair, which is what the prefix buys.
+          logins.flatMap(_.`with`.get("role-to-assume")).distinct.size == 6,
+          logins.forall(s => !s.`with`.get("aws-region").contains("${{ env.AWS_REGION }}")),
+        )
+      },
+      test("every registry's host, region and role is in the job env under its own prefix") {
+        val env = Planner.plan(graph, List(ZipxAws.dockerPublishAll(sixRegistries)), config).jobs("docker").env
+        assertTrue(
+          env.get("ZIPX_EU_AWS_REGION").contains("eu-west-1"),
+          env.get("ZIPX_EU_AWS_ECR_REGISTRY").contains("444455556666.dkr.ecr.eu-west-1.amazonaws.com"),
+          env.get("ZIPX_US_AWS_ECR_REGISTRY").contains("111122223333.dkr.ecr.us-east-1.amazonaws.com"),
+          env.get("ZIPX_US_AWS_ROLE_TO_ASSUME").contains("${{ secrets.US_ROLE }}"),
+        )
+      },
+      test("OIDC permissions and the release gate are unchanged from the single-registry factory") {
+        val job = Planner.plan(graph, List(ZipxAws.dockerPublishAll(sixRegistries)), config).jobs("docker")
+        assertTrue(
+          job.permissions.get("id-token").contains("write"),
+          job.permissions.get("contents").contains("read"),
+          job.`if`.exists(_.contains("refs/tags/v")),
+        )
+      },
+      test("the bundle is named and raw-fragment free, like every other bundle this pack ships") {
+        assertTrue(
+          ZipxAws.sharedLoginSteps.name == "aws-oidc-login-per-destination",
+          ZipxAws.sharedLoginSteps.rawFragments.isEmpty,
+          // With no destinations it emits nothing rather than one credential-less login.
+          ZipxAws.sharedLoginSteps(stepContext()).isEmpty,
+        )
+      },
+      test("Graph scope is one job per module still, with the logins inside each") {
+        val graphed = ZipxAws.dockerPublishAll(sixRegistries, scope = CapabilityScope.Graph)
+        val wf      = Planner.plan(graph, List(graphed), config)
+        assertTrue(
+          wf.jobs.keys.filter(_.startsWith("docker")).toList == List("docker-serviceA"),
+          wf.jobs("docker-serviceA").steps.count(_.name.exists(_.startsWith("Assume AWS role (OIDC,"))) == 6,
+        )
+      },
+    ),
   )
+
+  /** Six registries across two accounts, the shape #71 describes: one assume-role per destination, one image. */
+  private val sixRegistries: List[(TargetName, EcrRegistry, EnvValue)] =
+    val us = EcrRegistry(AwsAccountId("111122223333"), AwsRegion("us-east-1"))
+    val eu = EcrRegistry(AwsAccountId("444455556666"), AwsRegion("eu-west-1"))
+    List(
+      (TargetName("us"), us, secret"US_ROLE"),
+      (TargetName("eu"), eu, secret"EU_ROLE"),
+      (TargetName("apac"), EcrRegistry(AwsAccountId("777788889999"), AwsRegion("ap-southeast-2")), secret"APAC_ROLE"),
+      (TargetName("gov"), EcrRegistry(AwsAccountId("222233334444"), AwsRegion("us-gov-west-1")), secret"GOV_ROLE"),
+      (TargetName("dev"), EcrRegistry(AwsAccountId("555566667777"), AwsRegion("us-east-2")), secret"DEV_ROLE"),
+      (TargetName("mirror"), EcrRegistry(AwsAccountId("888899990000"), AwsRegion("eu-central-1")), secret"MIRROR_ROLE"),
+    )
+  end sixRegistries
+
 end ZipxAwsSpec

@@ -32,7 +32,7 @@ object Planner:
     capability.scope match
       case CapabilityScope.Once      => List(capability.name.asJobId)
       case CapabilityScope.Aggregate =>
-        distinctTargets(capability, graph) match
+        distinctFannedTargets(capability, graph) match
           case Nil     => List(capability.name.asJobId)
           case targets => targets.map(t => aggregateTargetJobId(capability, t))
       case CapabilityScope.Layer =>
@@ -46,9 +46,32 @@ object Planner:
           .sorted
 
   private def jobIdsForGraph(capability: Capability, node: ModuleNode): List[JobId] =
-    capability.targets(node) match
+    fannedTargets(capability, node) match
       case Nil     => List(jobId(capability, node.id))
       case targets => targets.sortBy(_.name).map(t => jobId(capability, node.id, t))
+
+  /** The targets that produce a job of their own, so `Nil` for a [[TargetFanOut.SharedJob]] capability: its
+    * destinations share the job a capability with no targets would have had, and so its job ids too. That is what keeps
+    * a `needsCapabilities` edge onto it correct without every caller knowing about fan-out.
+    */
+  private def fannedTargets(capability: Capability, node: ModuleNode): List[Target] =
+    capability.targetFanOut match
+      case TargetFanOut.JobPerTarget => capability.targets(node)
+      case TargetFanOut.SharedJob    => Nil
+
+  /** Every destination one [[TargetFanOut.SharedJob]] job serves, `Nil` under [[TargetFanOut.JobPerTarget]]. The
+    * complement of [[fannedTargets]]: exactly one of the two is non-empty for a capability with targets.
+    */
+  private def sharedTargets(capability: Capability, node: ModuleNode): List[Target] =
+    capability.targetFanOut match
+      case TargetFanOut.JobPerTarget => Nil
+      case TargetFanOut.SharedJob    => capability.targets(node).sortBy(_.name)
+
+  /** [[distinctTargets]] restricted to the targets that get a job of their own; see [[fannedTargets]]. */
+  private def distinctFannedTargets(capability: Capability, graph: ModuleGraph): List[Target] =
+    capability.targetFanOut match
+      case TargetFanOut.JobPerTarget => distinctTargets(capability, graph)
+      case TargetFanOut.SharedJob    => Nil
 
   /** Deduplicated by name, first-seen winning, so two modules naming `prod` differently do not produce two `prod` jobs.
     */
@@ -72,8 +95,8 @@ object Planner:
     SbtCommand.join(nodes.map(capability.command))
 
   /** Rejects a `needsCapabilities` cycle, [[Gate.AffectedOnly]] (an unimplemented seam: honoring it silently as
-    * [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run), and a gate/condition
-    * conjunction that can never be true.
+    * [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run), a per-destination field a
+    * [[TargetFanOut.SharedJob]] job cannot honor, and a gate/condition conjunction that can never be true.
     */
   private def validateCapabilities(capabilities: List[Capability], graph: ModuleGraph): Unit =
     capabilities.filter(_.gate == Gate.AffectedOnly) match
@@ -92,8 +115,32 @@ object Planner:
       .cycle(capabilities.map(c => c.name -> c.needsCapabilities).toMap)
       .foreach(involved => sys.error(s"zipx: needsCapabilities cycle among ${involved.mkString(", ")}"))
 
+    capabilities.foreach(c => validateSharedTargets(c, graph))
     capabilities.foreach(c => validateSatisfiable(c, graph))
   end validateCapabilities
+
+  /** Rejects a [[Target.condition]] or [[Target.environment]] on a [[TargetFanOut.SharedJob]] destination.
+    *
+    * One job has one `if:` and binds one Environment, so there is no honest way to apply a per-destination one:
+    * dropping it would push to a registry the author said to skip, and applying it to the whole job would skip the
+    * destinations that were fine. Either is a silent wrong answer, so this is an error naming both fields and the
+    * alternative.
+    */
+  private def validateSharedTargets(capability: Capability, graph: ModuleGraph): Unit =
+    if capability.targetFanOut == TargetFanOut.SharedJob then
+      val targets = graph.nodes.filter(capability.participates).flatMap(capability.targets).distinctBy(_.name)
+      def refuse(target: Target, field: String): Nothing =
+        sys.error(
+          s"zipx: capability '${capability.name}' target '${target.name}' sets $field, which one shared job cannot " +
+            "honor per destination. Use TargetFanOut.JobPerTarget (the default) when destinations need their own " +
+            s"$field, or drop it and gate the whole job with Capability.condition."
+        )
+      targets.foreach { target =>
+        if target.condition.isDefined then refuse(target, "a condition")
+        if target.environment.isDefined then refuse(target, "an environment")
+      }
+    end if
+  end validateSharedTargets
 
   /** Rejects a job whose `if:` the planner would render never-true, per [[Satisfiable]].
     *
@@ -550,7 +597,14 @@ object Planner:
         applyVerifyGate(crossNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
       val baseCond = andConditions(gatedCond, JobCondition.renderOpt(capability.condition))
 
-      distinctTargets(capability, graph) match
+      // Shared destinations reach the one job through `destinations` and a prefixed `env:` block; there is no
+      // second job for them to land in. `distinctTargets` rather than the per-node list, since an Aggregate job
+      // already spans every participating module.
+      val shared = capability.targetFanOut match
+        case TargetFanOut.JobPerTarget => Nil
+        case TargetFanOut.SharedJob    => distinctTargets(capability, graph)
+
+      distinctFannedTargets(capability, graph) match
         case Nil =>
           List(
             capability.name.asJobId -> Job(
@@ -560,7 +614,7 @@ object Planner:
               `if` = baseCond,
               permissions = ListMap.from(capability.permissions),
               services = cache.services,
-              env = mergeEnv(config.env, cache.env, capability.env, Map.empty),
+              env = mergeEnv(config.env, cache.env, capability.env, sharedEnv(shared)),
               steps = stepsFor(
                 capability,
                 nodes.head,
@@ -570,6 +624,7 @@ object Planner:
                 cache,
                 commandOverride = joinCommands(capability, nodes),
                 jobSuffix = capability.name.asJobId,
+                destinations = shared,
               ),
             )
           )
@@ -720,6 +775,7 @@ object Planner:
         cond: Option[String],
         environment: Option[String],
         targetEnv: Map[String, EnvValue],
+        destinations: List[Target] = Nil,
     ): (JobId, Job) =
       id -> Job(
         name = Some(displayName),
@@ -740,12 +796,26 @@ object Planner:
           cache,
           commandOverride = None,
           jobSuffix = id,
+          destinations = destinations,
         ),
       )
 
-    capability.targets(node) match
+    fannedTargets(capability, node) match
       case Nil =>
-        List(baseJob(jobId(capability, node.id), s"${capability.name} ${node.id}", None, cond, None, Map.empty))
+        // Shared destinations, if any, ride along in this one job: `sharedTargets` is `Nil` unless the capability
+        // asked for `TargetFanOut.SharedJob`, in which case `fannedTargets` above is what is empty.
+        val shared = sharedTargets(capability, node)
+        List(
+          baseJob(
+            jobId(capability, node.id),
+            s"${capability.name} ${node.id}",
+            None,
+            cond,
+            None,
+            sharedEnv(shared),
+            destinations = shared,
+          )
+        )
       case targets =>
         targets.sortBy(_.name).map { target =>
           baseJob(
@@ -759,6 +829,15 @@ object Planner:
         }
     end match
   end graphJobsFor
+
+  /** Every shared destination's `env` under its own prefix, so several accounts' values coexist in one job.
+    *
+    * Prefixing rather than merging is what makes the shape safe: two registries both wanting `AWS_ROLE_TO_ASSUME` would
+    * otherwise silently keep whichever `++` saw last, and the job would push twice to one account. A step reads a value
+    * back with [[Target.envKey]], so neither side writes the prefix out.
+    */
+  private def sharedEnv(destinations: List[Target]): Map[String, EnvValue] =
+    destinations.flatMap(_.prefixedEnv).toMap
 
   private def mergeEnv(
       plan: Map[String, EnvValue],
@@ -897,6 +976,7 @@ object Planner:
       cache: CacheContribution,
       commandOverride: Option[SbtCommand],
       jobSuffix: JobId,
+      destinations: List[Target] = Nil,
   ): List[Step] =
     val command     = commandOverride.getOrElse(capability.command(node))
     val onMatrixLeg = if hasMatrix then underMatrixScala else identity[SbtCommand]
@@ -905,13 +985,11 @@ object Planner:
       else Step.run(Script(onMatrixLeg(command).render)).named(capability.name).build
     val cacheSteps =
       if cache.steps.isEmpty then localDirCacheSteps(config, jobSuffix) else cache.steps
+    val ctx = StepContext(node, target, hasMatrix, config.actions, destinations)
     List(
       Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
-    ) ++ jdkAndSbtSteps(config) ++ cacheSteps ++ capability.extraSteps(
-      StepContext(node, target, hasMatrix, config.actions)
-    ) ++ List(commandStep) ++ capability.postSteps(
-      StepContext(node, target, hasMatrix, config.actions)
-    )
+    ) ++ jdkAndSbtSteps(config) ++ cacheSteps ++ capability.extraSteps(ctx) ++ List(commandStep) ++
+      capability.postSteps(ctx)
   end stepsFor
 
   /** A static [[VerifyClean]] prefix when one is set, otherwise a runtime `cleanFull` decided by

@@ -148,13 +148,40 @@ object ZipxAws:
     * For the ordinary multi-registry image push this is the **wrong** shape, and the cost is multiplicative: N
     * registries times M modules is N*M jobs, each rebuilding the same image. `Docker / publish` pushes every
     * `dockerAliases` entry from one build, so one job with [[EcrImage.taggedAll]] over several registries is both
-    * cheaper and what actually guarantees the registries hold identical bytes.
+    * cheaper and what actually guarantees the registries hold identical bytes. Pass these to
+    * [[zipx.core.Capability.withSharedTargets]] and use [[sharedLoginSteps]] to get that shape.
     *
     * `name` is a [[zipx.core.TargetName]], so it is validated where it is written: it becomes part of a `jobs.<job_id>`
-    * key.
+    * key under `JobPerTarget`, and the `env:`-key prefix under `SharedJob`.
     */
   def registryTargets(registries: List[(TargetName, EcrRegistry, EnvValue)]): List[Target] =
     registries.map((name, registry, role) => Target(name = name, env = registryEnv(registry, role)))
+
+  /** [[oidcLoginSteps]] once **per destination**, for a [[zipx.core.TargetFanOut.SharedJob]] capability: one build, N
+    * logins, N pushes.
+    *
+    * Each step reads its own destination's role and region, since a shared job's `env:` holds every destination's
+    * values under [[zipx.core.Target.envName]] keys. Nothing here spells a prefix out: the same method that put a value
+    * in the job's `env:` is the one that reads it back.
+    *
+    * Ordering matters and is why this is `buildingWith` rather than a fold of `oidcLoginSteps`: the last
+    * `configure-aws-credentials` in a job wins the ambient credentials, so a build pushing to several accounts from one
+    * job needs `dockerAliases` plus a registry-scoped credential helper (`amazon-ecr-login` writes one entry per
+    * registry it is run against), not one ambient role. See the docs page for the two shapes.
+    */
+  val sharedLoginSteps: Steps = Steps.buildingWith("aws-oidc-login-per-destination") { ctx =>
+    ctx.destinations.map { target =>
+      Step
+        .usesRef(credentialsAction(ctx.actions))
+        .named(s"Assume AWS role (OIDC, ${target.name})")
+        .withInputs(
+          ListMap(
+            "role-to-assume" -> Expr.Env(target.envName(Role)).render,
+            "aws-region"     -> Expr.Env(target.envName(Region)).render,
+          )
+        )
+    }
+  }
 
   /** A docker publish capability that logs in by OIDC before pushing, with `id-token: write` already declared.
     *
@@ -180,5 +207,36 @@ object ZipxAws:
       condition = condition,
     )
   end dockerPublish
+
+  /** [[dockerPublish]] over **several** registries in one job: one image build, one login per destination, one push per
+    * `dockerAliases` entry.
+    *
+    * This is the shape #71 asked for, and the reason it is a factory rather than a documented recipe is the arithmetic:
+    * 6 registries × 8 images is 48 jobs under `JobPerTarget` and 8 here, and only this shape can guarantee the
+    * registries hold identical bytes, since there is one build to push.
+    *
+    * The build's `dockerAliases` is what enumerates the destinations on the sbt side; this sets up the credentials for
+    * each. `EcrImage.taggedAll` builds that alias list from the same [[EcrRegistry]] values, so the two sides cannot
+    * drift.
+    */
+  def dockerPublishAll(
+      registries: List[(TargetName, EcrRegistry, EnvValue)],
+      name: CapabilityName = Capability.DockerName,
+      scope: CapabilityScope = CapabilityScope.Aggregate,
+      condition: Option[JobCondition] = None,
+  ): Capability =
+    val base = scope match
+      case CapabilityScope.Layer => Capability.dockerLayers
+      case CapabilityScope.Graph => Capability.dockerGraph
+      case _                     => Capability.docker
+    base
+      .copy(
+        name = name,
+        permissions = oidcPermissions,
+        extraSteps = sharedLoginSteps,
+        condition = condition,
+      )
+      .withSharedTargets(registryTargets(registries))
+  end dockerPublishAll
 
 end ZipxAws

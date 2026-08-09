@@ -165,15 +165,50 @@ still works.
 | Just the role, for a non-ECR job | `ZipxAws.oidcLoginSteps` + `ZipxAws.oidcPermissions` + `ZipxAws.registryEnv` |
 | A `docker login` too (pushing with the CLI, not through sbt) | `ZipxAws.ecrLoginSteps` |
 | One repository rather than a whole account in `AWS_ECR_REGISTRY` | `ZipxAws.imageEnv(registry.image(EcrRepository("team/svc")), role)` |
-| Separate accounts with separate approvals | `ZipxAws.registryTargets(…)` as the capability's `targets` |
+| Several registries for one image | `ZipxAws.dockerPublishAll(registries)` |
+| Separate accounts with separate **approvals** | `ZipxAws.registryTargets(…)` via `withTargets` |
 
 The bundle reads its role and region from the job's `env:`, which is what lets one bundle serve every destination: a
 per-target `env` block changes which account the same steps log into.
 
-`registryTargets` is the shape to reach for **last**. `Docker / publish` pushes every `dockerAliases` entry from one
-build, so N registries want one job, not N: a target per registry costs N*M jobs for M modules, each rebuilding the same
-image, and stops guaranteeing the registries hold identical bytes. Use targets when the destinations genuinely differ in
-who approves them.
+Those last two rows are the same list of registries and two different shapes, so pick by asking whether the destinations
+need separate *approval*:
+
+```scala
+// One job: one image built once, one login per registry, one push per dockerAliases entry.
+zipxCapabilities += ZipxAws.dockerPublishAll(
+  List(
+    (TargetName("us"), EcrRegistry(AwsAccountId("111122223333"), AwsRegion("us-east-1")), secret"US_ROLE"),
+    (TargetName("eu"), EcrRegistry(AwsAccountId("444455556666"), AwsRegion("eu-west-1")), secret"EU_ROLE"),
+  )
+)
+```
+""",
+      exampleValue {
+        DocsRender.job("docker")(
+          ZipxAws.dockerPublishAll(
+            List(
+              (TargetName("us"), registry, secret"US_ROLE"),
+              (TargetName("eu"), EcrRegistry(AwsAccountId("444455556666"), AwsRegion("eu-west-1")), secret"EU_ROLE"),
+            )
+          )
+        )
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("Assume AWS role (OIDC, us)"),
+          yaml.contains("Assume AWS role (OIDC, eu)"),
+          yaml.contains("role-to-assume: ${{ env.ZIPX_EU_AWS_ROLE_TO_ASSUME }}"),
+          yaml.contains("aws-region: ${{ env.ZIPX_EU_AWS_REGION }}"),
+          yaml.contains("ZIPX_US_AWS_ROLE_TO_ASSUME: ${{ secrets.US_ROLE }}"),
+        )
+      ),
+      md"""
+`registryTargets` with `withTargets` is the shape to reach for **last**, and the cost of reaching for it by mistake is
+multiplicative: `Docker / publish` pushes every `dockerAliases` entry from one build, so a target per registry costs N*M
+jobs for M modules, each rebuilding the same image, and stops guaranteeing the registries hold identical bytes. Point
+`dockerAliases` at every registry (`EcrImage.taggedAll` builds that list from the same `EcrRegistry` values, so the two
+sides cannot drift) and let `dockerPublishAll` set up the credentials for each. See **Docker and deploy** for the
+general rule and what a shared job refuses.
 """,
       exampleValue {
         val targets = ZipxAws.registryTargets(
@@ -183,7 +218,7 @@ who approves them.
           )
         )
         DocsRender.jobs("docker-us", "docker-eu")(
-          ZipxAws.dockerPublish(registry, secret"DEPLOY_ROLE").copy(targets = _ => targets)
+          ZipxAws.dockerPublish(registry, secret"DEPLOY_ROLE").withTargets(_ => targets)
         )
       }.assert(yaml =>
         assertTrue(
