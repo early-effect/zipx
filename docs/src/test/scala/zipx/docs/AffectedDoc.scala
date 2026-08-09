@@ -13,8 +13,8 @@ object AffectedDoc extends DocSpecSuite:
     md"""
 **Affected** answers a GitHub Actions question Graph mode can ask: which *jobs* should run for this PR's diff?
 That is different from sbt 2 incrementality inside Aggregate (see **Execution modes**). **Graph Verify** jobs are
-path-gated by default. **Graph Publish** jobs can be, under the separate `zipxAffectedPublish` opt-in below. Deploy
-never is.
+path-gated by default. **Graph Publish** and **Graph Deploy** jobs can be, under the separate `zipxAffectedPublish`
+and `zipxAffectedDeploy` opt-ins below. Aggregate and Layer jobs never are.
 """,
     section("Closure flow")(
       md"""
@@ -153,12 +153,12 @@ that run.
 |---|---|---|
 | `Capability.testGraph` (and other Graph + Verify) | Yes, by default | Per-module jobs can skip |
 | Graph Publish (`publishGraph`, `dockerGraph`) | Only under `zipxAffectedPublish` | See the next section: the two risks are not symmetric |
+| Graph Deploy (`deployGraph`) | Only under `zipxAffectedDeploy` | So a deploy skips exactly when the publish it consumes did |
 | Aggregate / Layer, any phase | Never | One sbt session over every module: there is nothing in it to skip |
-| Deploy | Never | A deploy is about a destination's desired state, not about what a diff touched |
 
 `Gate.AffectedOnly` is a **design seam**, not a shipped gate. Affected-gating is derived from phase + scope +
-`zipxAffectedOnPR` / `zipxAffectedPublish`, not from `Gate`. The planner **rejects** `Gate.AffectedOnly` at generate
-time so it cannot silently mean Always.
+`zipxAffectedOnPR` / `zipxAffectedPublish` / `zipxAffectedDeploy`, not from `Gate`. The planner **rejects**
+`Gate.AffectedOnly` at generate time so it cannot silently mean Always.
 """
     ),
     section("Narrowing Publish (zipxAffectedPublish)")(
@@ -221,11 +221,7 @@ turning it on is the only thing that changes a committed `ci.yml`:
       md"""
 Narrowing Publish means a job can now **skip** in a phase where nothing skipped before, and that changes what its
 dependents see. GitHub's implicit `success()` treats a *skipped* need exactly like a failed one: the dependent is
-skipped too. `Capability.deploy` needs `docker` by default, so without care an affected-skipped `docker-<module>`
-would silently skip the deploy that wanted the other modules' images. That is the failure this feature exists to
-avoid, not to create.
-
-So every job that needs something narrowable gains two kinds of clause:
+skipped too. So every job that needs something narrowable gains two kinds of clause:
 
 | Clause | Purpose |
 |---|---|
@@ -238,35 +234,112 @@ from the guard because each already has a clause of its own: `affected` (read th
 
 ```mermaid
 flowchart TD
-  Aff([affected]) --> D1[docker-serviceA · in the diff]
-  Aff --> D2[docker-serviceB · skipped]
-  D1 --> Dep([deploy-prod])
-  D2 --> Dep
-  Dep --> Ok([runs · !cancelled and no need failed])
-  class Aff,D1 happy
-  class D2 warn
-  class Dep,Ok happy
+  Aff([affected]) --> P1[publish-schema · in the diff]
+  Aff --> P2[publish-api · skipped]
+  P1 --> Ann([announce · a Once job])
+  P2 --> Ann
+  Ann --> Ok([runs · !cancelled and no need failed])
+  class Aff,P1 happy
+  class P2 warn
+  class Ann,Ok happy
 ```
 
 A **failed** need still blocks, which is the property worth checking after any change here: a red `fmt` job must not
-be let through by the same `!cancelled()` that lets a skipped image through.
+be let through by the same `!cancelled()` that lets a skipped publish through.
 """,
       exampleValue {
         given PlanConfig = config.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)
-        DocsRender.job("deploy-prod")(
-          Capability.dockerGraph,
-          Capability.deploy(
-            participates = _.docker,
-            command = n => SbtCommand.module(n, SbtCommand("deployTask")),
-            targets = _ => List(Target(TargetName("prod"), environment = Some("production"))),
+        DocsRender.job("announce")(
+          Capability.publishGraph,
+          Capability.once(
+            CapabilityName("announce"),
+            SbtCommand("announce"),
+            phase = Phase.Deploy,
+            gate = Gate.OnReleaseTag,
+            needsCapabilities = List(Capability.PublishName),
           ),
         )
       }.assert(yaml =>
         assertTrue(
           yaml.contains("!cancelled()"),
+          yaml.contains("needs.publish-schema.result != 'failure'"),
+          yaml.contains("needs.publish-api.result != 'failure'"),
+        )
+      ),
+      md"""
+### The one shape that is refused instead of tolerated
+
+Tolerance is right for a job whose command does not name the skipped module: a build-wide `announce` loses nothing
+when one module did not publish. It is **wrong** for a job that names it.
+
+`Capability.deploy` is exactly that, and it is `Aggregate` by default while needing `docker`. Under
+`zipxAffectedPublish` alone, an affected-skipped `docker-<module>` would leave the deploy **running** and pulling an
+image tag that run never pushed: a 404 on `main`, from a `ci.yml` in which nothing looks wrong. There is no way to
+drop one module's command from an already-joined sbt session at generate time, so the planner refuses the
+combination rather than generating it:
+
+```text
+zipx: capability 'deploy' is Aggregate and needs 'docker', which zipxAffectedPublish lets skip per module. One
+'docker' job skipping would leave 'deploy' running against an artifact nobody built, so this is refused rather than
+generated. Fixes, in order of preference: give 'deploy' CapabilityScope.Graph so it skips with its own 'docker' job;
+make its command resolve a moving tag that a skipped 'docker' cannot invalidate; or turn zipxAffectedPublish off.
+```
+""",
+    ),
+    section("Narrowing Deploy (zipxAffectedDeploy)")(
+      md"""
+The first fix the error above recommends is the one to reach for, and `zipxAffectedDeploy` is what makes it hold: a
+`Graph` deploy carries the **same** per-module affected expression as its own `docker-<module>` job, so the two skip
+together. `deploy-<module>-prod` runs exactly when `docker-<module>` did.
+
+Its own switch rather than a widening of `zipxAffectedPublish`, because narrowing image pushes while still
+reconciling every destination on every run is a legitimate combination, and one switch would take it away:
+
+```scala
+zipxAffectedPublish := true   // one changed module, one image pushed
+zipxAffectedDeploy  := true   // and one destination reconciled, not all of them
+```
+
+```mermaid
+flowchart TD
+  Aff([affected · serviceA only]) --> D1[docker-serviceA]
+  Aff --> D2[docker-serviceB · skipped]
+  D1 --> Dep1([deploy-serviceA-prod])
+  D2 --> Dep2([deploy-serviceB-prod · skipped])
+  class Aff,D1,Dep1 happy
+  class D2,Dep2 warn
+```
+
+Off by default: a deploy that does not run leaves a destination on its previous version, which is correct only when
+that module's artifacts really are unchanged. The cost of `Graph` over `Aggregate` is job count, one per (module ×
+target), and with it one approval per module per environment.
+
+Both safety properties carry over. A **release tag deploys everything**: the `affected` job is forced onto tag
+pushes when a Deploy capability reads it, and there it emits `["all"]` without taking a diff. And an unusable diff
+**fails open** to `["all"]` the same way.
+""",
+      exampleValue {
+        given PlanConfig =
+          config.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true, affectedDeploy = true)
+        DocsRender.job("deploy-service-prod")(
+          Capability.dockerGraph,
+          Capability.deployGraph(
+            participates = _.docker,
+            command = n => SbtCommand.module(n, SbtCommand("deployTask")),
+            targets = _ => List(Target(TargetName("prod"), environment = Some("production"))),
+            gate = Gate.Always,
+            condition = Some(JobCondition.refIs("refs/heads/main")),
+          ),
+        )
+      }.assert(yaml =>
+        assertTrue(
+          // Its own module's clause, which is what puts it in lockstep with docker-service.
+          yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'service')"),
+          yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'all')"),
+          // And neither the branch condition nor the Environment approval was displaced by the narrowing.
+          yaml.contains("github.ref == 'refs/heads/main'"),
+          yaml.contains("environment: production"),
           yaml.contains("needs.docker-service.result != 'failure'"),
-          // Deploy is never itself narrowed, whatever the switch says.
-          !yaml.contains("needs.affected.outputs.modules"),
         )
       ),
     ),

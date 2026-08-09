@@ -89,8 +89,19 @@ end PlanText
   *   rebuild and push every image. A separate knob from [[affected]] rather than a widening of it, because the two
   *   phases carry opposite risks: **under-verifying is silently unsafe** (a green PR whose code was never tested),
   *   while **under-publishing is loudly broken** (the deploy that wants the missing artifact fails immediately). One
-  *   switch for both would price Publish's narrowing at Verify's risk. Off by default; [[Phase.Deploy]] is never
-  *   affected-gated. Fail-open carries over unchanged, and a release tag always publishes everything.
+  *   switch for both would price Publish's narrowing at Verify's risk. Off by default. Fail-open carries over
+  *   unchanged, and a release tag always publishes everything.
+  * @param affectedDeploy
+  *   extends affected-gating to [[Phase.Deploy]] jobs under [[CapabilityScope.Graph]], so a deploy skips exactly when
+  *   the publish it consumes skipped. Its own knob rather than a widening of [[affectedPublish]], because narrowing
+  *   image pushes while still reconciling every destination on every run is a legitimate combination, and one switch
+  *   would take it away. Off by default: a deploy that does not run leaves a destination on its previous version, which
+  *   is correct only when that module's artifacts really are unchanged.
+  *
+  * An [[CapabilityScope.Aggregate]] or [[CapabilityScope.Layer]] deploy is never gated by this and cannot be: its one
+  * job spans every participating module, so there is no per-module decision available. Such a deploy paired with an
+  * affected-gated Graph publish is therefore rejected outright rather than gated (see `Planner.validateCapabilities`),
+  * because it would run alongside a skipped publish and reference an artifact nobody built.
   * @param cacheEpoch
   *   how [[CacheBackend.LocalDir]] picks its commit-stable cache namespace: mid-PR commits share hits and a release tag
   *   rolls the namespace. Prefer the runtime-tag default so keys stay fresh without regenerating the workflow.
@@ -131,6 +142,7 @@ final case class PlanConfig(
     affected: AffectedMode = AffectedMode.AffectedOnPR,
     affectedOnPush: Boolean = false,
     affectedPublish: Boolean = false,
+    affectedDeploy: Boolean = false,
     cache: CacheBackend = CacheBackend.LocalDir,
     cacheEpoch: CacheEpoch = CacheEpoch.GitTags(),
     pushBranches: List[String] = List("main"),
