@@ -47,6 +47,22 @@ object ActionPinFileSpec extends ZIOSpecDefault:
         withRefs.copy(versions = keys.zip(vs).toMap)
       }
 
+  /** The same, plus extra pins, which have their own `extra.<key>` version labels and their own render block. Keys are
+    * drawn from a fixed set rather than generated, so the property tests below say something about *sorting* the keys
+    * (which `render` must do, a `Map` having no order) rather than about which characters a key may contain.
+    */
+  private val extraKeyPool: List[String] = List("configure-aws-credentials", "org-action", "zz-last", "aa-first")
+
+  private val gPinsWithExtra: Gen[Any, ActionPins] =
+    for
+      base    <- gPins
+      include <- Gen.listOfN(extraKeyPool.length)(Gen.boolean)
+      shas    <- Gen.listOfN(extraKeyPool.length)(gSha)
+      labels  <- Gen.option(Gen.listOfN(extraKeyPool.length)(gVersion))
+    yield extraKeyPool.zip(shas).zipWithIndex.foldLeft(base) { case (pins, ((key, sha), idx)) =>
+      if include(idx) then pins.withExtra(key, ref(s"acme/$key@$sha"), labels.map(_(idx))) else pins
+    }
+
   private val gField: Gen[Any, ActionPins.Field] = Gen.elements(ActionPins.Field.values.toList*)
 
   private val gIdentStart: Gen[Any, Char] = Gen.elements((('A' to 'Z') ++ ('a' to 'z') :+ '_')*)
@@ -229,6 +245,89 @@ object ActionPinFileSpec extends ZIOSpecDefault:
         check(gField, gSha) { (field, sha) =>
           assertTrue(ActionRef.make(s"${field.prefix}@$sha").isRight)
         }
+      },
+    ),
+    suite("extra pins")(
+      test("round-trip an extra pin, its label, and the sorted render order") {
+        check(gPinsWithExtra) { pins =>
+          val rendered  = ActionPinFile.render(pins)
+          val extraKeys = rendered.linesIterator
+            .dropWhile(_ != s"${ActionPins.ExtraPrefix}:")
+            .drop(1)
+            .map(_.trim.takeWhile(_ != ':'))
+            .toList
+          assertTrue(
+            ActionPinFile.parse(rendered) == Right(pins),
+            extraKeys == pins.extra.keys.toList.sorted,
+          )
+        }
+      },
+      test("an extra pin is refused when unpinned, the one check a keyless pin can get") {
+        val text = s"${ActionPins.ExtraPrefix}:\n  aws: aws-actions/configure-aws-credentials\n"
+        assertTrue(
+          ActionPinFile.parse(text).isLeft,
+          ActionPinFile.parse(text).swap.exists(_.contains("@ref")),
+          ActionPinFile.parse(text).swap.exists(_.contains(s"${ActionPinFile.DefaultPath}:2:")),
+        )
+      },
+      test("an extra key may name any action, since there is no prefix to check it against") {
+        // The documented weakening: `aws: totally/unrelated@sha` is legal where `checkout: totally/unrelated@sha`
+        // is not. Worth asserting so the asymmetry is deliberate rather than an oversight.
+        val text = s"${ActionPins.ExtraPrefix}:\n  aws: totally/unrelated@abc123\n"
+        assertTrue(
+          ActionPinFile.parse(text).map(_.extraRef("aws")) == Right(Some(ActionRef("totally/unrelated@abc123")))
+        )
+      },
+      test("indentation only means something inside an open extra: block") {
+        val stray = "  aws: acme/thing@abc123\n"
+        assertTrue(
+          ActionPinFile.parse(stray).isLeft,
+          ActionPinFile.parse(stray).swap.exists(_.contains(ActionPins.ExtraPrefix)),
+        )
+      },
+      test("a top-level pin after the block closes it, so a mid-file extra: does not swallow the rest") {
+        val text = s"${ActionPins.ExtraPrefix}:\n  aws: acme/thing@abc123\ncheckout: actions/checkout@dead\n"
+        val pins = ActionPinFile.parse(text)
+        assertTrue(
+          pins.map(_.extraRef("aws")) == Right(Some(ActionRef("acme/thing@abc123"))),
+          pins.map(_.checkout) == Right(ActionRef("actions/checkout@dead")),
+        )
+      },
+      test("an unknown top-level key's message names the extra: block as the escape hatch") {
+        val error = ActionPinFile.parse("configureAws: acme/thing@abc123").swap.toOption.getOrElse("")
+        assertTrue(error.contains(s"${ActionPins.ExtraPrefix}:"))
+      },
+      test("withExtra replaces a label, and dropping the label drops the stamp rather than keeping a stale one") {
+        val pins    = ActionPins().withExtra("aws", ActionRef("acme/thing@abc123"), Some("v6.0.0"))
+        val relabel = pins.withExtra("aws", ActionRef("acme/thing@dead"), Some("v7.0.0"))
+        val nolabel = pins.withExtra("aws", ActionRef("acme/thing@dead"))
+        assertTrue(
+          pins.extraVersion("aws") == Some("v6.0.0"),
+          relabel.extraVersion("aws") == Some("v7.0.0"),
+          nolabel.extraVersion("aws").isEmpty,
+        )
+      },
+      test("annotateUses stamps an extra pin's version onto its uses: line") {
+        val pins = ActionPins().withExtra("aws", ActionRef("acme/thing@abc123"), Some("v6.1.2"))
+        val once = ActionPinFile.annotateUses("      - uses: acme/thing@abc123\n", pins)
+        assertTrue(
+          once.contains("uses: acme/thing@abc123 # v6.1.2"),
+          ActionPinFile.annotateUses(once, pins) == once,
+        )
+      },
+      test("pullFromWorkflow bumps an extra pin whose key already exists, and invents no new one") {
+        val base = ActionPins.Defaults.withExtra("aws", ActionRef("acme/thing@abc123"), Some("v6.0.0"))
+        val yaml =
+          """      - uses: acme/thing@cafebabe # v6.1.0
+            |      - uses: nobody/knows@deadbeef # v1.0.0
+            |""".stripMargin
+        val pulled = ActionPinFile.pullFromWorkflow(yaml, base)
+        assertTrue(
+          pulled.map(_.extraRef("aws")) == Right(Some(ActionRef("acme/thing@cafebabe"))),
+          pulled.exists(_.extraVersion("aws").contains("v6.1.0")),
+          // No key exists for it, so guessing one would be worse than leaving it to whoever wrote the step.
+          pulled.exists(_.extra.keySet == Set("aws")),
+        )
       },
     ),
     suite("pullFromWorkflow")(

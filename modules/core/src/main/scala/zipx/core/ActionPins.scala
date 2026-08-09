@@ -33,7 +33,16 @@ import zipx.workflow.ActionRef
   * @param scalaSteward
   *   `scala-steward-org/scala-steward-action` pin (opt-in [[ScalaStewardWorkflow]]).
   * @param versions
-  *   Optional semver labels (`v7.0.1`) keyed by field name for `# vX.Y.Z` comments on generated `uses:` lines.
+  *   Optional semver labels (`v7.0.1`) keyed by field name for `# vX.Y.Z` comments on generated `uses:` lines. An extra
+  *   pin's label is keyed `extra.<key>`, which no [[ActionPins.Field.key]] can collide with because a field key has no
+  *   dot in it.
+  * @param extra
+  *   Pins for actions zipx does not emit itself, keyed by a name the caller chooses. This is the field for an action a
+  *   *consumer* reaches through `extraSteps` or a published pack: `ZipxAws`'s `aws-actions/configure-aws-credentials`,
+  *   an org's internal action. A typed [[ActionPins.Field]] is for an action zipx emits, which is why it can carry a
+  *   [[ActionPins.Field.prefix]] and so be shape-checked against the action it claims to name; an extra pin has no
+  *   prefix, so [[ActionPinFile.parse]] can only check that its ref is pinned at all. That weaker check is the price of
+  *   not needing a zipx release to pin a new action.
   */
 final case class ActionPins(
     checkout: ActionRef = ActionPins.BootstrapCheckout,
@@ -44,6 +53,7 @@ final case class ActionPins(
     downloadArtifact: ActionRef = ActionPins.BootstrapDownloadArtifact,
     scalaSteward: ActionRef = ActionPins.BootstrapScalaSteward,
     versions: Map[String, String] = Map.empty,
+    extra: Map[String, ActionRef] = Map.empty,
 ):
   import ActionPins.Field
 
@@ -67,9 +77,34 @@ final case class ActionPins(
 
   def version(f: Field): Option[String] = versions.get(f.key)
 
+  /** Pins an action zipx does not emit, for a step a consumer or a pack writes.
+    *
+    * `version` is the `# vX.Y.Z` label. Passing it is worth the keystrokes: without one a Dependabot reviewer sees only
+    * a SHA, and [[ActionPinFile.annotateUses]] has nothing to stamp on the generated `uses:` line.
+    */
+  def withExtra(key: String, ref: ActionRef, version: Option[String] = None): ActionPins =
+    copy(
+      extra = extra.updated(key, ref),
+      versions = version.fold(versions - ActionPins.extraVersionKey(key))(v =>
+        versions.updated(ActionPins.extraVersionKey(key), v)
+      ),
+    )
+
+  def extraRef(key: String): Option[ActionRef] = extra.get(key)
+
+  def extraVersion(key: String): Option[String] = versions.get(ActionPins.extraVersionKey(key))
+
 end ActionPins
 
 object ActionPins:
+
+  /** The `versions` key an extra pin's label lives under. The `extra.` prefix is what keeps one namespace safe for
+    * both: a [[Field.key]] is a bare identifier, so it can never contain a dot.
+    */
+  private[core] def extraVersionKey(key: String): String = s"$ExtraPrefix.$key"
+
+  /** The pin-file block name for [[ActionPins.extra]], and the prefix of its `versions` keys. */
+  private[core] val ExtraPrefix: String = "extra"
 
   /** The pins, enumerated: one case per field of [[ActionPins]].
     *
