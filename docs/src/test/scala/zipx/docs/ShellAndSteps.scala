@@ -22,9 +22,9 @@ Four layers, each usable on its own:
 
 ```mermaid
 flowchart TD
-  Shell[zipx-shell · Script / Command / Word / ShTest] --> Steps2[Step.run]
+  Shell[zipx-shell · Script, Command, Word, ShTest] --> Steps2[Step.run]
   Expr2[Expr · GitHub Actions expressions] --> Steps2
-  Steps2[StepBuilder · Step.run / Step.uses] --> Bundle[Steps bundle · named, composable]
+  Steps2[StepBuilder · Step.run, Step.uses] --> Bundle[Steps bundle · named, composable]
   Bundle --> Fields([extraSteps · postSteps · zipxCacheRehydrateExtraSteps])
   class Fields warn
   class Shell,Expr2,Steps2,Bundle happy
