@@ -212,6 +212,11 @@ object ZipxPlugin extends AutoPlugin:
       def DefaultName         = zipx.github.ZipxGitHubPackages.DefaultName
       def PublishFlagEnv      = zipx.github.ZipxGitHubPackages.PublishFlagEnv
     end ZipxGitHubPackages
+
+    /** scoverage, as `zipxCapabilities += Coverage.once()`. In `zipx-core` rather than a pack because the thing it
+      * guards against, sbt 2's `test` being `testQuick`, is a core concern; see [[zipx.core.Coverage]].
+      */
+    val Coverage = zipx.core.Coverage
     type Step = zipx.workflow.Step
     val Step = zipx.workflow.Step
     type Expr = zipx.workflow.Expr
