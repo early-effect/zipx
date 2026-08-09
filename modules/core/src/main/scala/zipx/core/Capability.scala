@@ -81,7 +81,11 @@ enum Phase:
 enum Ordering:
   case ParallelWithUpstream, DependencyOrdered
 
-/** When a capability's jobs may run, ANDed with [[Capability.condition]] and with affected-gating.
+/** When a capability's jobs may run, ANDed with [[Capability.condition]], [[Target.condition]] and affected-gating.
+  *
+  * Because the conjunction spans three places nobody reads together, the planner rejects a gate/condition pair it can
+  * prove never true (see `Satisfiable`): a `OnReleaseTag` gate with a `refs/heads/main` condition is a job that looks
+  * deliberate and cannot run.
   *
   * [[Gate.AffectedOnly]] is a design seam, not a shipped feature: affected-gating is derived from [[Phase.Verify]] plus
   * [[PlanConfig.affected]], never from `Gate`, so the planner rejects it with an explaining error rather than degrading

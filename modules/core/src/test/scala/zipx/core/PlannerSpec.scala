@@ -27,6 +27,14 @@ object PlannerSpec extends ZIOSpecDefault:
     targets = _ => targets,
     scope = CapabilityScope.Graph,
   )
+
+  /** The prod target's extra filter is a `vars` check rather than the `refIs("refs/heads/main")` this fixture used to
+    * carry: these capabilities are gated `OnReleaseTag`, so a branch-ref requirement on top made the job's `if:` never
+    * true, and the planner now refuses to generate that (#66). A `vars` check is the realistic shape anyway, and being
+    * outside the decidable subset it still exercises the ANDing.
+    */
+  private val prodOnly: JobCondition = JobCondition.varNonEmpty("DEPLOY_PROD_ENABLED")
+
   private val stagingProd = List(
     Target(
       TargetName("staging"),
@@ -36,7 +44,7 @@ object PlannerSpec extends ZIOSpecDefault:
       TargetName("prod"),
       environment = Some("production"),
       env = Map("DEPLOY_ROLE" -> secret"PROD_ROLE", "TIER" -> EnvValue.plain("prod")),
-      condition = Some(JobCondition.refIs("refs/heads/main")),
+      condition = Some(prodOnly),
     ),
   )
 
@@ -70,6 +78,129 @@ object PlannerSpec extends ZIOSpecDefault:
         err.getMessage.contains("zipxAffectedOnPR"),
       )
     },
+    suite("an if: that can never be true is rejected")(
+      // #66: `examples/monorepo` shipped `deploy-prod` gated on a release tag *and* on `refs/heads/main`. Both halves
+      // read as deliberate; only their conjunction is wrong, and it lived in two different files.
+      test("a tag gate plus a branch-ref condition, naming the capability and both clauses") {
+        val cap = Capability.publish.copy(
+          gate = Gate.OnReleaseTag,
+          condition = Some(JobCondition.refIs("refs/heads/main")),
+        )
+        val err = scala.util.Try(Planner.plan(sampleGraph, List(cap), config)).failed.get.getMessage
+        assertTrue(
+          err.contains("can never run"),
+          err.contains("publish"),
+          err.contains("refs/tags/v"),
+          err.contains("refs/heads/main"),
+        )
+      },
+      test("a tag gate plus a branch-ref condition on a *target*, which is where the real one was") {
+        val cap = deployCap(
+          List(Target(TargetName("prod"), condition = Some(JobCondition.refIs("refs/heads/main"))))
+        )
+        val err = scala.util.Try(Planner.plan(sampleGraph, List(cap), config)).failed.get.getMessage
+        assertTrue(err.contains("target 'prod'"), err.contains("refs/heads/main"))
+      },
+      test("a tag gate plus a non-comparable ref prefix") {
+        val cap = Capability.publish.copy(
+          gate = Gate.OnReleaseTag,
+          condition = Some(JobCondition.refStartsWith("refs/heads/")),
+        )
+        assertTrue(scala.util.Try(Planner.plan(sampleGraph, List(cap), config)).isFailure)
+      },
+      test("two different values of one single-valued context, however deeply nested in the conjunction") {
+        val cap = Capability.publish.copy(condition =
+          Some(
+            JobCondition.and(
+              JobCondition.eventIs("push"),
+              JobCondition.and(JobCondition.repositoryIs("a/b"), JobCondition.eventIs("pull_request")),
+            )
+          )
+        )
+        val err = scala.util.Try(Planner.plan(sampleGraph, List(cap), config)).failed.get.getMessage
+        assertTrue(err.contains("event_name"), err.contains("one value per run"))
+      },
+      test("a condition that both requires and negates the same claim") {
+        val cap = Capability.publish.copy(condition =
+          Some(JobCondition.and(JobCondition.eventIs("push"), JobCondition.not(JobCondition.eventIs("push"))))
+        )
+        assertTrue(scala.util.Try(Planner.plan(sampleGraph, List(cap), config)).isFailure)
+      },
+      test("a tag gate plus !refStartsWith of a shorter prefix, which excludes every ref the gate allows") {
+        val cap = Capability.publish.copy(
+          gate = Gate.OnReleaseTag,
+          condition = Some(JobCondition.not(JobCondition.refStartsWith("refs/tags/"))),
+        )
+        assertTrue(scala.util.Try(Planner.plan(sampleGraph, List(cap), config)).isFailure)
+      },
+    ),
+    suite("but only the decidable subset is rejected")(
+      // An unsound rejection is worse than a missed one: a missed contradiction is the status quo, a wrong rejection is
+      // a build that cannot generate its CI and no way to argue. Each of these must keep planning.
+      test("a disjunction, where one branch satisfies the gate") {
+        val cap = Capability.publish.copy(
+          gate = Gate.OnReleaseTag,
+          condition = Some(JobCondition.or(JobCondition.refIs("refs/heads/main"), JobCondition.onReleaseTag)),
+        )
+        assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs.nonEmpty)
+      },
+      test("a Raw condition, whose meaning zipx does not know") {
+        val cap = Capability.publish.copy(
+          gate = Gate.OnReleaseTag,
+          condition = Some(JobCondition.raw("github.ref == 'refs/heads/main'")),
+        )
+        assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs.nonEmpty)
+      },
+      test("compatible ref prefixes, where one extends the other") {
+        val cap = Capability.publish.copy(
+          gate = Gate.OnReleaseTag,
+          condition = Some(JobCondition.refStartsWith("refs/tags/")),
+        )
+        assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs.nonEmpty)
+      },
+      test("a ref that does satisfy the tag gate") {
+        val cap = Capability.publish.copy(
+          gate = Gate.OnReleaseTag,
+          condition = Some(JobCondition.refIs("refs/tags/v1.2.3")),
+        )
+        assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs.nonEmpty)
+      },
+      test("two exclusions, which always leave a third value") {
+        val cap = Capability.publish.copy(condition =
+          Some(
+            JobCondition.and(
+              JobCondition.not(JobCondition.eventIs("push")),
+              JobCondition.not(JobCondition.eventIs("pull_request")),
+            )
+          )
+        )
+        assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs.nonEmpty)
+      },
+      test("claims about different contexts, which are not comparable at all") {
+        val cap = Capability.publish.copy(condition =
+          Some(JobCondition.and(JobCondition.eventIs("push"), JobCondition.repositoryIs("early-effect/zipx")))
+        )
+        assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs.nonEmpty)
+      },
+      test("an exclusion of one exact ref under a required prefix, which leaves every other ref") {
+        val cap = Capability.publish.copy(
+          gate = Gate.OnReleaseTag,
+          condition = Some(JobCondition.not(JobCondition.refIs("refs/tags/v0.0.1"))),
+        )
+        assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs.nonEmpty)
+      },
+      test("a target condition on a capability whose gate allows any ref") {
+        val cap = deployCap(List(Target(TargetName("prod"), condition = Some(JobCondition.refIs("refs/heads/main")))))
+          .copy(gate = Gate.Always)
+        assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs.nonEmpty)
+      },
+      test("a target whose module does not participate, so the job never exists") {
+        val cap = deployCap(
+          List(Target(TargetName("prod"), condition = Some(JobCondition.refIs("refs/heads/main"))))
+        ).copy(participates = _ => false)
+        assertTrue(Planner.plan(sampleGraph, List(cap), config).jobs.forall(!_._1.startsWith("deploy")))
+      },
+    ),
     test("the supported gates still plan cleanly") {
       assertTrue(
         Planner.plan(sampleGraph, List(Capability.publish.copy(gate = Gate.Always)), config).jobs.nonEmpty,
@@ -461,7 +592,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val cond = wf.jobs("deploy-serviceA-prod").`if`.getOrElse("")
       assertTrue(
         cond.contains("startsWith(github.ref, 'refs/tags/v')"),
-        cond.contains("github.ref == 'refs/heads/main'"),
+        cond.contains(prodOnly.render),
         cond.contains("&&"),
       )
     },
@@ -972,7 +1103,7 @@ object PlannerSpec extends ZIOSpecDefault:
           .last
           .run
           .exists(r => r.contains("serviceA/promote") && r.contains("clientA/promote") && r.contains(";")),
-        wf.jobs("deploy-prod").`if`.exists(_.contains("refs/heads/main")),
+        wf.jobs("deploy-prod").`if`.exists(_.contains(prodOnly.render)),
       )
     },
     test("Layer test emits one job per toposort wave chained by needs") {

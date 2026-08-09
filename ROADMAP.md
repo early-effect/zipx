@@ -396,6 +396,7 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 - **Opt-in push-time affected (`zipxAffectedOnPush`, default false).** When on, pushes also restrict to affected modules by diffing the push `before` sha, guarded against force-push / branch-create (all-zero sha → build everything). Default remains: PRs are affected-scoped, pushes/tags build all.
 - **Affected fail-open + concurrency.** Diff failure emits `["all"]` (not `[]`); workflow concurrency cancels superseded PR runs but never release tags (`zipxCancelSupersededRuns`, default true).
 - **`Gate.AffectedOnly` rejected until implemented.** Keeps the Publish-affected design seam visible; generate fails instead of silently running Always.
+- **An `if:` that can never be true is rejected (#66).** `Gate`, `Capability.condition` and `Target.condition` are ANDed across three files nobody reads together, so `OnReleaseTag` plus `refIs("refs/heads/main")` produced a job that looked deliberate and could never run (this repo's own example shipped it). `Satisfiable` decides a deliberately narrow subset: single-valued `github` contexts (`ref`, `event_name`, `repository`) inside a conjunction, flattening `All` and De Morgan on `Not(Any)`. `Any`, `Raw`, `vars.*`, PR labels and two negations are left alone, because an unsound rejection is worse than a missed one: a missed contradiction is the status quo, a wrong rejection is a build that cannot generate its own CI.
 
 ## Deviations from the original plan
 

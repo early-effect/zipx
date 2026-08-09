@@ -71,10 +71,11 @@ object Planner:
   private def joinCommands(capability: Capability, nodes: List[ModuleNode]): Option[SbtCommand] =
     SbtCommand.join(nodes.map(capability.command))
 
-  /** Rejects a `needsCapabilities` cycle, and [[Gate.AffectedOnly]], which is an unimplemented seam: honoring it
-    * silently as [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run.
+  /** Rejects a `needsCapabilities` cycle, [[Gate.AffectedOnly]] (an unimplemented seam: honoring it silently as
+    * [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run), and a gate/condition
+    * conjunction that can never be true.
     */
-  private def validateCapabilities(capabilities: List[Capability]): Unit =
+  private def validateCapabilities(capabilities: List[Capability], graph: ModuleGraph): Unit =
     capabilities.filter(_.gate == Gate.AffectedOnly) match
       case Nil => ()
       case bad =>
@@ -88,7 +89,41 @@ object Planner:
     ModuleGraph
       .cycle(capabilities.map(c => c.name -> c.needsCapabilities).toMap)
       .foreach(involved => sys.error(s"zipx: needsCapabilities cycle among ${involved.mkString(", ")}"))
+
+    capabilities.foreach(c => validateSatisfiable(c, graph))
   end validateCapabilities
+
+  /** Rejects a job whose `if:` the planner would render never-true, per [[Satisfiable]].
+    *
+    * Checked per (capability, target) rather than per capability, because the gate, the capability condition and the
+    * target condition come from three different files and only their conjunction is wrong. That is precisely how
+    * `examples/monorepo` shipped a `deploy-prod` job gated on `refs/tags/v*` *and* `refs/heads/main`.
+    *
+    * Targets are collected over the graph's nodes, since `Capability.targets` is a function of a node.
+    */
+  private def validateSatisfiable(capability: Capability, graph: ModuleGraph): Unit =
+    val gate = Option.when(capability.gate == Gate.OnReleaseTag)(
+      Satisfiable.Clause("Gate.OnReleaseTag", JobCondition.onReleaseTag)
+    )
+    val own = capability.condition.map(Satisfiable.Clause(s"capability '${capability.name}' condition", _))
+
+    def refuse(where: String, problem: String): Nothing =
+      sys.error(s"zipx: $where can never run: $problem")
+
+    Satisfiable
+      .contradiction(gate.toList ++ own.toList)
+      .foreach(problem => refuse(s"capability '${capability.name}'", problem))
+
+    val targets = graph.nodes.filter(capability.participates).flatMap(capability.targets).distinctBy(_.name)
+    targets.foreach { target =>
+      target.condition.foreach { condition =>
+        val clause = Satisfiable.Clause(s"target '${target.name}' condition", condition)
+        Satisfiable
+          .contradiction(gate.toList ++ own.toList :+ clause)
+          .foreach(problem => refuse(s"capability '${capability.name}' target '${target.name}'", problem))
+      }
+    }
+  end validateSatisfiable
 
   // The three jobs zipx invents. `JobId` is a subtype of `String`, so one val serves both roles these had to be split
   // for before: the operand of `Expr.JobOutput` / `Expr.JobResult`, which take a validated value, and the `jobs` key.
@@ -97,7 +132,7 @@ object Planner:
   val cacheRehydrateJobId: JobId = JobId("cache-rehydrate")
 
   def plan(graph: ModuleGraph, capabilities: List[Capability], config: PlanConfig): Workflow =
-    validateCapabilities(capabilities)
+    validateCapabilities(capabilities, graph)
 
     // Affected-gating is per-module, so only a Graph Verify capability can narrow anything.
     val usesAffected =

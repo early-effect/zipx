@@ -75,13 +75,17 @@ zipxCapabilities += zipxTasks.deploy(
       TargetName("prod"),
       environment = Some("production"),
       env = Map("TIER" -> EnvValue.plain("prod"), "DEPLOY_ROLE" -> secret"PROD_ROLE"),
-      condition = Some(JobCondition.refIs("refs/heads/main")),
+      condition = Some(JobCondition.varNonEmpty("DEPLOY_PROD_ENABLED")),
     ),
   ),
   needsCapabilities = List(Capability.DockerName),
   permissions = Map("id-token" -> "write", "contents" -> "read"),
 )
 ```
+
+Note what the prod condition is **not**: `refIs("refs/heads/main")`. `Capability.deploy` gates `OnReleaseTag`, the two are
+ANDed, and no ref is both a `v*` tag and `refs/heads/main`, so zipx refuses to generate that pair outright (see
+[[JobConditions]]). Pass `gate = Gate.Always` if deploy-from-main is what you want.
 """,
       exampleValue {
         val targets = List(
@@ -90,7 +94,7 @@ zipxCapabilities += zipxTasks.deploy(
             TargetName("prod"),
             environment = Some("production"),
             env = Map("TIER" -> EnvValue.plain("prod"), "DEPLOY_ROLE" -> secret"PROD_ROLE"),
-            condition = Some(JobCondition.refIs("refs/heads/main")),
+            condition = Some(JobCondition.varNonEmpty("DEPLOY_PROD_ENABLED")),
           ),
         )
         DocsRender.jobs("deploy-staging", "deploy-prod")(
@@ -107,7 +111,7 @@ zipxCapabilities += zipxTasks.deploy(
           yaml.contains("deploy-prod:"),
           yaml.contains("environment: production"),
           yaml.contains("DEPLOY_ROLE: ${{ secrets.PROD_ROLE }}"),
-          yaml.contains("github.ref == 'refs/heads/main'"),
+          yaml.contains("vars.DEPLOY_PROD_ENABLED != ''"),
         )
       ),
       md"""

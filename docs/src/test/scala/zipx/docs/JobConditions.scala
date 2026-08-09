@@ -99,6 +99,63 @@ Capability.dockerGraph.copy(
         )
       ),
     ),
+    section("A conjunction that can never be true is refused")(
+      md"""
+The footgun above is worth catching, and where zipx *can* prove the conjunction is never true, it refuses to generate
+the workflow rather than emitting a job that silently never runs:
+
+```scala
+// Fails `zipxWorkflowGenerate`: no ref both starts with `refs/tags/v` and equals `refs/heads/main`
+Capability.publish.copy(
+  gate = Gate.OnReleaseTag,
+  condition = Some(JobCondition.refIs("refs/heads/main")),
+)
+```
+
+The error names the capability (and the target, when the clause is on one), quotes both rendered clauses, and says
+which fact makes them incompatible. That is deliberate: the gate typically comes from a pack, the condition from
+`build.sbt`, and the target condition from a `project/*.scala` list, so nobody reading one file sees the conjunction.
+`examples/monorepo` shipped exactly this bug: a `deploy-prod` job gated on a release tag *and* on `refs/heads/main`.
+
+**What is checked** is a small decidable subset over the single-valued `github` contexts, inside a conjunction:
+
+| Shape | Why it is refused |
+|---|---|
+| `refIs(a)` with `refIs(b)`, `a != b` | `github.ref` holds one value per run |
+| `eventIs` / `repositoryIs` likewise | same, per context |
+| `refIs(r)` with `refStartsWith(p)`, `r` not under `p` | that ref does not start with that prefix |
+| `refStartsWith(p)` with `refStartsWith(q)`, neither a prefix of the other | no ref starts with both |
+| a clause and its own negation | one negates the other |
+
+**What is not checked**, and passes in silence: anything under `||` (`Any`), `Raw`, `varNonEmpty`, `hasPrLabel`, and two
+*negated* claims (excluding two values always leaves a third). `Gate.OnReleaseTag` with `hasPrLabel` is therefore still
+a footgun zipx cannot catch, which is why the section above exists.
+
+The subset is narrow on purpose. **An unsound rejection is worse than a missed one:** a missed contradiction is the
+status quo, while a wrong rejection is a build that cannot generate its own CI and no way for the author to argue with
+it. Nesting does not help it escape, though: `All` and `!(a || b)` are flattened first, so a contradiction buried in a
+nested conjunction is still found.
+""",
+      exampleValue {
+        val contradiction = Capability.deploy(
+          participates = _.id == "service",
+          command = n => SbtCommand.module(n, SbtCommand("promote")),
+          targets = _ => List(Target(TargetName("prod"), condition = Some(JobCondition.refIs("refs/heads/main")))),
+          needsCapabilities = Nil,
+          gate = Gate.OnReleaseTag,
+        )
+        scala.util
+          .Try(DocsRender.plan(contradiction))
+          .fold(_.getMessage, _ => "planned (no error)")
+      }.assert(error =>
+        assertTrue(
+          error.contains("can never run"),
+          error.contains("target 'prod'"),
+          error.contains("refs/tags/v"),
+          error.contains("refs/heads/main"),
+        )
+      ),
+    ),
     section("Fork / upstream publish gate")(
       md"""
 ```scala
