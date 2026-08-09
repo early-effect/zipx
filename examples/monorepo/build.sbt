@@ -30,16 +30,13 @@ lazy val client = project
   .dependsOn(coreLib)
   .settings(crossScalaVersions := Seq(scala2, scala3))
 
-// A service: not a Maven library, but a docker image. Enabling DockerPlugin is the ONLY signal
-// zipx needs: it auto-detects the docker capability and generates a `docker-service` publish job
-// running `service/Docker/publish`. The image is described here in the build, not in a Dockerfile.
 // A deploy-time promote task that re-tags the image with a tier-scoped moving tag. It reads the TIER env var that
 // zipx injects from the deploy target, proving a user sbt task can consume per-target config (Gap 2).
 val promote = taskKey[Unit]("Re-tag the image with a tier-scoped moving tag, using the injected TIER env var.")
 
 // A service: not a Maven library, but a docker image. Enabling DockerPlugin is the ONLY signal
-// zipx needs: it auto-detects the docker capability and generates a `docker-service` publish job
-// running `service/Docker/publish`. The image is described here in the build, not in a Dockerfile.
+// zipx needs: it auto-detects the docker capability and generates a `docker` publish job running
+// `service/Docker/publish`. The image is described here in the build, not in a Dockerfile.
 lazy val service = (project in file("service"))
   .dependsOn(coreLib)
   .enablePlugins(JavaAppPackaging, DockerPlugin)
@@ -51,6 +48,17 @@ lazy val service = (project in file("service"))
     Docker / packageName := "example-service",
     dockerExposedPorts   := Seq(8080),
     dockerUpdateLatest   := true,
+    // One build, every destination. `Docker / publish` builds the image once and pushes each of these, which is what
+    // lets the multi-registry capability below be a single job. The registry hosts are *derived* from the account id
+    // and region (project/Deploy.scala), so they cannot drift from the region the login step passes.
+    dockerAliases := {
+      val base   = dockerAlias.value
+      val latest = dockerUpdateLatest.value
+      Registry.all.flatMap { r =>
+        val tagged = base.withRegistryHost(Some(r.registry.host))
+        if (latest) List(tagged, tagged.withTag(Some("latest"))) else List(tagged)
+      }
+    },
     // In CI, the deploy job's `env:` block (from the target) sets TIER before sbt cold-starts, so this fresh JVM
     // reads it. (Locally, a long-lived sbt server predating the env may show the default, a dev-only artifact.)
     promote := {
@@ -66,7 +74,8 @@ lazy val root = (project in file("."))
 
 // Format gate, then Layer-mode test/publish (dependency-ordered waves, few sbt sessions).
 // Deploy stays Aggregate-by-target (one job per staging/prod; modules batched). Multi-registry
-// docker below remains Graph (per registry target).
+// docker below is a single Aggregate job: the registries are destinations of one image build, not
+// separate environments.
 // `Fmt` is named once and referred to twice: a capability name is a validated `CapabilityName` (it becomes the
 // `jobs.fmt` key), so naming the val is also how the dependent capability avoids repeating the literal.
 val Fmt = CapabilityName("fmt")
@@ -77,40 +86,15 @@ zipxCapabilities ++= Seq(
 )
 
 // Multi-registry image publish (Gap 1). Overrides the built-in single-target `docker` capability (same name ⇒
-// replace) to push the service image to N registries, each with its own credentials, the same targets+extraSteps
-// machinery deploy uses. Registries are a typed Scala list (project/Deploy.scala). The command uses the `cmd"…"`
-// interpolator with the real config-scoped `Docker / publish` key → `<module>/Docker/publish`. (cmd also carries
-// command syntax around a key when you need it, e.g. `cmd"+ ${publish}"` or `cmd"++${scalaV}; ${publish}"`.)
-zipxCapabilities += Capability
-  .custom(
-    name = Capability.DockerName,
-    command = cmd"${Docker / publish}",
-    participates = _.docker,
-    phase = Phase.Publish,
-    targets = _ =>
-      Registry.all.map(r =>
-        Target(
-          name = r.name,
-          env = Map(
-            "REGISTRY"    -> EnvValue.plain(r.host),
-            "DEPLOY_ROLE" -> r.roleSecret,
-          ),
-        )
-      ),
-    permissions = Map("id-token" -> "write", "contents" -> "read"),
-  )
-  .copy(
-    // `Expr.env` rather than the string `"${{ env.DEPLOY_ROLE }}"`: the name is validated at compile time, so a typo is
-    // a build error here instead of an empty input on the runner.
-    extraSteps = _ =>
-      List(
-        Step
-          .uses("aws-actions/configure-aws-credentials@v6")
-          .named("Login to registry")
-          .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
-          .build
-      )
-  )
+// replace) to push the service image to N registries, each with its own credentials.
+//
+// **One** job, not one per registry: `Docker / publish` builds the image once and pushes every `dockerAliases` entry
+// (enumerated above from the same `Registry.all`), so a job per registry would rebuild the same image N times and stop
+// guaranteeing the registries hold identical bytes. `ZipxAws.dockerPublishAll` is that shape: shared targets, one OIDC
+// login per destination, `id-token: write` already declared. Registries stay a typed Scala list
+// (project/Deploy.scala), and each login step passes both `role-to-assume` and the registry's own `aws-region`, which
+// is not omittable because `EcrRegistry` has no constructor without a region.
+zipxCapabilities += ZipxAws.dockerPublishAll(Registry.destinations)
 
 // --- Deploy: staging + production, with production behind a GitHub Environment approval gate. ---
 //
@@ -128,26 +112,21 @@ zipxCapabilities += zipxTasks
         Target(
           name = e.name,
           environment = e.ghEnvironment,
+          // The env keys the OIDC login bundle reads, named by the pack rather than spelled here, so the step and the
+          // block cannot disagree about a name. `TIER` is this build's own, read by the `promote` task above.
           env = Map(
-            "AWS_REGION"  -> EnvValue.plain(e.region),
-            "DEPLOY_ROLE" -> e.roleSecret,
-            "TIER"        -> EnvValue.plain(e.tier),
+            ZipxAws.RegionEnv -> EnvValue.plain(e.region),
+            ZipxAws.RoleEnv   -> e.roleSecret,
+            "TIER"            -> EnvValue.plain(e.tier),
           ),
-          condition = Some(JobCondition.refIs("refs/heads/main")),
         )
       ),
     needsCapabilities = List(Capability.DockerName), // deploy waits on the (multi-registry) image publish
-    permissions = Map("id-token" -> "write", "contents" -> "read"), // OIDC
+    permissions = ZipxAws.oidcPermissions, // OIDC: id-token write, contents read
   )
   .copy(
-    // The extension seam: assume the cloud role (from the target's env) before running the deploy command.
-    extraSteps = _ =>
-      List(
-        Step
-          .uses("aws-actions/configure-aws-credentials@v6")
-          .named("Configure AWS credentials")
-          .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
-          .withInput("aws-region", Expr.env("AWS_REGION"))
-          .build
-      )
+    // The extension seam: assume the cloud role (from the target's env) before running the deploy command. A named
+    // `Steps` bundle from zipx-aws rather than a hand-written step, so the action is SHA-pinned from the pin file and
+    // `aws-region` is not something this build can forget to pass.
+    extraSteps = ZipxAws.oidcLoginSteps
   )

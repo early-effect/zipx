@@ -7,6 +7,9 @@ name: CI
     tags:
       - v[0-9]+.[0-9]+.[0-9]+
   pull_request: null
+concurrency:
+  group: CI-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
   verify-gate:
     name: verify-gate
@@ -32,6 +35,67 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ github.token }}
+  cache-rehydrate:
+    name: cache-rehydrate
+    runs-on: ubuntu-latest
+    needs:
+      - verify-gate
+    if: needs.verify-gate.result == 'success' && needs.verify-gate.outputs.run == 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
+      - name: Setup JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
+        with:
+          disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Cache sbt
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.sbt
+            ~/.cache/sbt
+            ~/.cache/coursier
+            target
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-cache-rehydrate
+          restore-keys: |
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
+            ubuntu-latest-jdk21-sbt-
+      - name: cache-rehydrate
+        run: sbt 'compile'
   test-L0:
     name: test L0
     runs-on: ubuntu-latest
@@ -43,6 +107,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -51,6 +116,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -59,14 +150,21 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-test-L0
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-test-L0
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
       - name: test
-        run: sbt 'models/test'
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; models/test'
+          else
+            sbt 'models/test'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
   test-L1:
     name: test L1
     runs-on: ubuntu-latest
@@ -77,6 +175,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -85,6 +184,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -93,14 +218,21 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-test-L1
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-test-L1
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
       - name: test
-        run: sbt 'coreLib/test'
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; coreLib/test'
+          else
+            sbt 'coreLib/test'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
   test-L2:
     name: test L2
     runs-on: ubuntu-latest
@@ -111,6 +243,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -119,6 +252,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -127,14 +286,21 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-test-L2
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-test-L2
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
       - name: test
-        run: sbt 'client/test; service/test'
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; client/test; service/test'
+          else
+            sbt 'client/test; service/test'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
   fmt:
     name: fmt
     runs-on: ubuntu-latest
@@ -145,6 +311,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -153,6 +320,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -161,14 +354,21 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-fmt
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-fmt
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
       - name: fmt
-        run: sbt 'scalafmtCheckAll'
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; scalafmtCheckAll'
+          else
+            sbt 'scalafmtCheckAll'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
   publish-L0:
     name: publish L0
     runs-on: ubuntu-latest
@@ -177,6 +377,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -185,6 +386,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -193,11 +420,11 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-publish-L0
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-publish-L0
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
       - name: publish
         run: sbt '+models/publish'
@@ -211,6 +438,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -219,6 +447,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -227,11 +481,11 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-publish-L1
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-publish-L1
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
       - name: publish
         run: sbt '+coreLib/publish'
@@ -245,6 +499,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -253,6 +508,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -261,28 +542,33 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-publish-L2
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-publish-L2
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
       - name: publish
         run: sbt '+client/publish'
-  docker-service-eu:
-    name: docker service (eu)
+  docker:
+    name: docker
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       id-token: write
       contents: read
     env:
-      DEPLOY_ROLE: ${{ secrets.EU_REGISTRY_ROLE }}
-      REGISTRY: "222.dkr.ecr.eu-west-1.amazonaws.com"
+      ZIPX_EU_AWS_ECR_REGISTRY: "444455556666.dkr.ecr.eu-west-1.amazonaws.com"
+      ZIPX_EU_AWS_REGION: eu-west-1
+      ZIPX_EU_AWS_ROLE_TO_ASSUME: ${{ secrets.EU_REGISTRY_ROLE }}
+      ZIPX_US_AWS_ECR_REGISTRY: "111122223333.dkr.ecr.us-east-1.amazonaws.com"
+      ZIPX_US_AWS_REGION: us-east-1
+      ZIPX_US_AWS_ROLE_TO_ASSUME: ${{ secrets.US_REGISTRY_ROLE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -291,6 +577,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -299,79 +611,43 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-docker-service-eu
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-docker
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
-      - name: Login to registry
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Assume AWS role (OIDC, eu)
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ env.DEPLOY_ROLE }}
-      - name: docker
-        run: sbt 'service/Docker/publish'
-  docker-service-us:
-    name: docker service (us)
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      DEPLOY_ROLE: ${{ secrets.US_REGISTRY_ROLE }}
-      REGISTRY: "111.dkr.ecr.us-east-1.amazonaws.com"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+          role-to-assume: ${{ env.ZIPX_EU_AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.ZIPX_EU_AWS_REGION }}
+      - name: Assume AWS role (OIDC, us)
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          fetch-depth: "0"
-      - name: Setup JDK 21
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-        with:
-          distribution: temurin
-          java-version: "21"
-      - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
-        with:
-          disk-cache: "false"
-      - name: Cache sbt
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.sbt
-            ~/.cache/sbt
-            ~/.cache/coursier
-            target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-docker-service-us
-          restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
-            ubuntu-latest-jdk21-sbt-
-      - name: Login to registry
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          role-to-assume: ${{ env.ZIPX_US_AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.ZIPX_US_AWS_REGION }}
       - name: docker
         run: sbt 'service/Docker/publish'
   deploy-prod:
     name: deploy (prod)
     runs-on: ubuntu-latest
     needs:
-      - docker-service-eu
-      - docker-service-us
-    if: (startsWith(github.ref, 'refs/tags/v')) && (github.ref == 'refs/heads/main')
+      - docker
+    if: startsWith(github.ref, 'refs/tags/v')
     environment: production
     permissions:
       id-token: write
       contents: read
     env:
       AWS_REGION: us-east-1
-      DEPLOY_ROLE: ${{ secrets.PROD_DEPLOY_ROLE }}
+      AWS_ROLE_TO_ASSUME: ${{ secrets.PROD_DEPLOY_ROLE }}
       TIER: prod
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -380,6 +656,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -388,16 +690,16 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-deploy-prod
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-deploy-prod
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Assume AWS role (OIDC)
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
       - name: deploy
         run: sbt 'service/promote'
@@ -405,20 +707,20 @@ jobs:
     name: deploy (staging)
     runs-on: ubuntu-latest
     needs:
-      - docker-service-eu
-      - docker-service-us
-    if: (startsWith(github.ref, 'refs/tags/v')) && (github.ref == 'refs/heads/main')
+      - docker
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       id-token: write
       contents: read
     env:
       AWS_REGION: us-west-2
-      DEPLOY_ROLE: ${{ secrets.STAGING_DEPLOY_ROLE }}
+      AWS_ROLE_TO_ASSUME: ${{ secrets.STAGING_DEPLOY_ROLE }}
       TIER: staging
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: "0"
+          fetch-tags: "true"
       - name: Setup JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
@@ -427,6 +729,32 @@ jobs:
       - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
+      - name: Resolve cache epoch
+        id: cache-epoch
+        run: |
+          set -euo pipefail
+          tag_match='v*'
+          if git remote get-url origin >/dev/null 2>&1; then
+            remote_count=$(git ls-remote --tags --refs origin "$tag_match" 2>/dev/null | wc -l | tr -d ' ')
+            local_count=$(git tag -l "$tag_match" | wc -l | tr -d ' ')
+            if [ "$remote_count" -gt 0 ] && [ "$local_count" -lt "$remote_count" ]; then
+              echo "::warning title=zipx cache epoch::Local tags ($local_count) fewer than origin ($remote_count). Epoch may be stale; checkout must use fetch-depth: 0 and fetch-tags: true."
+            fi
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            epoch="$release"
+          elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
+            release="${tag#v}"
+            epoch="${release}-ci"
+          else
+            echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
+            release="0.0.0"
+            epoch="0.0.0"
+          fi
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
       - name: Cache sbt
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -435,16 +763,16 @@ jobs:
             ~/.cache/sbt
             ~/.cache/coursier
             target
-          key: ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-deploy-staging
+          key: ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-deploy-staging
           restore-keys: |
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-${{ github.run_id }}-
-            ubuntu-latest-jdk21-sbt-1.4.2-ci-
-            ubuntu-latest-jdk21-sbt-1.4.2-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-
+            ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk21-sbt-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+      - name: Assume AWS role (OIDC)
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ env.DEPLOY_ROLE }}
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
       - name: deploy
         run: sbt 'service/promote'
