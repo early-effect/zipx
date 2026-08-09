@@ -99,6 +99,50 @@ object ZipxPlugin extends AutoPlugin:
       def gpgImportSteps            = zipx.central.ZipxCentral.gpgImportSteps
     end ZipxCentral
 
+    /** The AWS pack. The newtypes are re-exported as `type` + `val` pairs rather than hidden behind factories, because
+      * a `build.sbt` writes `EcrRegistry(AwsAccountId("111122223333"), AwsRegion("us-east-1"))` as a literal and that
+      * is exactly where the `inline apply` check earns its keep.
+      */
+    object ZipxAws:
+      type EcrRegistry = zipx.aws.EcrRegistry
+      val EcrRegistry = zipx.aws.EcrRegistry
+      type EcrImage = zipx.aws.EcrImage
+      val EcrImage = zipx.aws.EcrImage
+      type AwsAccountId = zipx.aws.AwsAccountId
+      val AwsAccountId = zipx.aws.AwsAccountId
+      type AwsRegion = zipx.aws.AwsRegion
+      val AwsRegion = zipx.aws.AwsRegion
+      type EcrRepository = zipx.aws.EcrRepository
+      val EcrRepository = zipx.aws.EcrRepository
+      type ImageTag = zipx.aws.ImageTag
+      val ImageTag = zipx.aws.ImageTag
+
+      def oidcLoginSteps: Steps                                                     = zipx.aws.ZipxAws.oidcLoginSteps
+      def ecrLoginSteps: Steps                                                      = zipx.aws.ZipxAws.ecrLoginSteps
+      def oidcPermissions                                                           = zipx.aws.ZipxAws.oidcPermissions
+      def registryEnv(registry: EcrRegistry, role: EnvValue): Map[String, EnvValue] =
+        zipx.aws.ZipxAws.registryEnv(registry, role)
+      def imageEnv(image: EcrImage, role: EnvValue): Map[String, EnvValue] =
+        zipx.aws.ZipxAws.imageEnv(image, role)
+      def registryTargets(registries: List[(TargetName, EcrRegistry, EnvValue)]): List[Target] =
+        zipx.aws.ZipxAws.registryTargets(registries)
+      def dockerPublish(
+          registry: EcrRegistry,
+          role: EnvValue,
+          name: CapabilityName = Capability.DockerName,
+          scope: CapabilityScope = CapabilityScope.Aggregate,
+          condition: Option[JobCondition] = None,
+      ): Capability =
+        zipx.aws.ZipxAws.dockerPublish(registry, role, name, scope, condition)
+      def RoleEnv                             = zipx.aws.ZipxAws.RoleEnv
+      def RegionEnv                           = zipx.aws.ZipxAws.RegionEnv
+      def RegistryEnv                         = zipx.aws.ZipxAws.RegistryEnv
+      def CredentialsPinKey                   = zipx.aws.ZipxAws.CredentialsPinKey
+      def EcrLoginPinKey                      = zipx.aws.ZipxAws.EcrLoginPinKey
+      def credentialsAction(pins: ActionPins) = zipx.aws.ZipxAws.credentialsAction(pins)
+      def DefaultCredentialsAction            = zipx.aws.ZipxAws.DefaultCredentialsAction
+    end ZipxAws
+
     object ZipxDocs:
       def pages(sbtProject: String = "docs", javaVersion: Option[JdkVersion] = None): Capability =
         zipx.specular.ZipxDocs.pages(sbtProject, javaVersion)

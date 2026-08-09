@@ -1,4 +1,4 @@
-// Meta-build source mirror of shell → workflow → core → central → plugin.
+// Meta-build source mirror of shell → workflow → core → (central, aws) → plugin.
 // Compiles modules/*/src/main/scala into project/meta-* targets (no publishLocal for root dogfood).
 // After changing those sources: reload. Shared deps: project/Dependencies.scala
 // (on this classpath via project/project/build.sbt unmanagedSources).
@@ -58,10 +58,21 @@ lazy val metaCentral = project
   )
   .settings(Dogfood.mirrorMainScala("central"))
 
+lazy val metaAws = project
+  .in(file("meta-aws"))
+  .dependsOn(metaCore)
+  .settings(
+    name           := "meta-zipx-aws",
+    publish / skip := true,
+    scalacOptions ++= Dependencies.commonScalacOptions,
+    libraryDependencies ++= Dependencies.zioDeps,
+  )
+  .settings(Dogfood.mirrorMainScala("aws"))
+
 lazy val metaPlugin = project
   .in(file("meta-plugin"))
   .enablePlugins(SbtPlugin)
-  .dependsOn(metaCore, metaCentral)
+  .dependsOn(metaCore, metaCentral, metaAws)
   .settings(
     name           := "meta-sbt-zipx",
     publish / skip := true,

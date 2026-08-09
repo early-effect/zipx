@@ -48,7 +48,7 @@ val commonSettings = Seq(
 lazy val zipxWriteVersion = taskKey[File]("Write the build version to target/zipx-version.txt for the example check")
 
 lazy val root = (project in file("."))
-  .aggregate(shell, workflow, core, central, plugin, docs)
+  .aggregate(shell, workflow, core, central, aws, plugin, docs)
   .settings(
     name           := "zipx",
     publish / skip := true,
@@ -145,11 +145,20 @@ lazy val central = (project in file("modules/central"))
     description := "zipx capability pack for CI-only Maven Central publishing (early-effect org secrets)",
   )
 
+// AWS paved path: OIDC role assumption, ECR registries that cannot omit their region, image tag sets.
+lazy val aws = (project in file("modules/aws"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name        := "zipx-aws",
+    description := "zipx capability pack for AWS: OIDC login, ECR registries, image tags",
+  )
+
 // The sbt 2.x AutoPlugin, the only module that touches sbt.*. Publish + scripted live here;
 // the root build dogfoods via the meta-build source mirror in project/dogfood.sbt (no publishLocal).
 lazy val plugin = (project in file("modules/sbt-plugin"))
   .enablePlugins(SbtPlugin)
-  .dependsOn(core, central)
+  .dependsOn(core, central, aws)
   .settings(
     name        := "sbt-zipx",
     description := "sbt 2 AutoPlugin: the build describes its own GitHub Actions CI",
@@ -196,7 +205,7 @@ lazy val specularPreview =
 
 lazy val docs = project
   .in(file("docs"))
-  .dependsOn(core, central)
+  .dependsOn(core, central, aws)
   .enablePlugins(SpecularPlugin)
   .settings(
     name            := "zipx-docs",

@@ -17,7 +17,7 @@ A self-describing CI plugin for Scala monorepos: a set of Scala 3 libraries plus
 | M8: `zipx-central` + dogfood Central publish | ✅ |
 | M9a: Aggregate-first + Layer + deploy-by-target | ✅ |
 | M9: Dynver-ci + publishSigned auto-detect | ⬜ |
-| M10: `zipx-aws` (on second consumer) | ⬜ |
+| M10: `zipx-aws` | ✅ |
 | M11: "Extend with Scala" docs & org rollout | ⬜ |
 
 ## Context
@@ -53,12 +53,13 @@ A common way to drive CI for a Scala monorepo is a hand-maintained external conf
 - **`modules/core`**: `zipx.core`. Graph model (`ModuleId`, `ModuleNode`, `ModuleGraph`), own deterministic toposort + layers + affected-closure, the `Capability` model, `CacheBackend`, `PlanConfig`, and the `Planner` (`ModuleGraph => Workflow`). Pure, sbt-free, unit-tested against a fixture mirroring the real graph. (M7 adds typed `EnvValue` / secret refs here.)
 - **`modules/sbt-plugin`**: `zipx.sbt.ZipxPlugin`. The only module touching `sbt.*`: adapts build `State`/`structure`/`buildDependencies` into a `ModuleGraph`, defines `autoImport`, wires tasks.
 - **`modules/central`**: the shipped convenience packs (see below).
+- **`modules/aws`**: `zipx.aws`. The AWS paved path: `EcrRegistry` / `EcrImage` / `ImageTag`, the OIDC login `Steps` bundle, and `ZipxAws.dockerPublish`. Depends on `core` only; holds no credentials and no account numbers.
 - **`modules/it`**: Testcontainers integration tests proving the remote cache against a real `buchgr/bazel-remote`. Deliberately **not** aggregated, so plain `sbt test` needs no Docker; CI runs `it/test` as a separate job. Does not publish.
 - **`docs`**: the Specular docs-as-tests site (`docs/src/test/scala/zipx/docs/`). Every example compiles and every rendered YAML snippet is asserted, so docs cannot drift from the generator. Test-scope only; does not publish.
 - **Convenience packs** (meta-build Scala libraries, not more plugin magic):
   - **`zipx-central`** (M8, shipped): early-effect / Maven Central org secrets, GPG import steps, `publishSigned` capability.
   - **`ZipxGitHubPackages`** (shipped, in `modules/central`): GitHub Packages publishing with the built-in `GITHUB_TOKEN`.
-  - **`zipx-aws`** (M10, planned): OIDC + ECR helpers extracted from `examples/monorepo` once a second consumer needs them.
+  - **`zipx-aws`** (M10, shipped, in `modules/aws`): OIDC role assumption, `EcrRegistry` / `EcrImage` / `ImageTag`, and a `dockerPublish` capability.
 
 ## Milestones
 
@@ -349,11 +350,32 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 
 **Acceptance:** docs + scripted/unit proving pgp auto-detect and override; dynver-ci called out in README cache-epoch section.
 
-### M10: `zipx-aws` (on second consumer) ⬜
+### M10: `zipx-aws` ✅
 
-**Deferred by design** until a second real consumer would otherwise copy the OIDC + ECR block from `examples/monorepo`.
+Shipped ahead of the "second consumer" trigger, because the deferral turned out to have a cost the plan did not
+anticipate. `examples/monorepo`'s own copy of the AWS block was the source of #65: its `Registry` case class carried a
+hand-written `host` and no `region`, so the login step had no region to pass and `configure-aws-credentials` failed on
+the runner reporting a *credentials* problem. A second consumer would have copied that bug, not merely duplicated code.
 
-**When started:** extract `project/Deploy.scala`-style helpers into `zipx-aws` (role assumption step factory, registry `Target` builders) using M7 `EnvValue` / `secret"…"`. Same meta-build library pattern as `zipx-central`.
+`modules/aws` (`zipx-aws`), depending on `core` only, on the meta-build library pattern `zipx-central` established:
+
+- `EcrRegistry(accountId, region)` **derives** its host, so there is no constructor that omits the region and #65 is
+  unrepresentable rather than fixed once. `AwsAccountId` / `AwsRegion` / `EcrRepository` / `ImageTag` are neotype
+  `Subtype[String]`s on the repo's usual `inline apply` (literal, compile time) / `make` (runtime, `Either`) split.
+- `ImageTag` follows the registry's own rule. A `/` is refused rather than mangled, because `example:main-feat/x` parses
+  as a different *repository*: the image would publish where nothing deploys from and the build would stay green.
+  `ImageTag.slug` is the opt-in mangle, and `forCommit` emits the moving tags only on the default branch.
+- `ZipxAws.oidcLoginSteps` is a named `Steps` bundle passing **both** `role-to-assume` and `aws-region`, reading them
+  from the job `env:` so one bundle serves every destination. `ecrLoginSteps` adds the docker login.
+- `ZipxAws.dockerPublish` is `Capability.docker` plus `id-token: write` (and `contents: read`, since naming any
+  permission drops the default set), the env block, and the login steps.
+- The two AWS actions are **extra** pins (#69), not typed `ActionPins.Field` cases, because zipx's planner never emits
+  them: they arrive through a pack, so pinning must not wait on a zipx release. The pack carries SHA-pinned fallbacks.
+  Deliberately **not** added to the repo's own `.github/zipx/action-pins.yml`, which is embedded as the
+  `ActionPins.Defaults` classpath resource and would otherwise ship an AWS pin to every consumer.
+- `registryTargets` exists for separate accounts with separate approvals, and its scaladoc says it is the wrong shape
+  for the ordinary multi-registry push: `Docker / publish` pushes every `dockerAliases` entry from one build, so a
+  target per registry costs N*M jobs each rebuilding the same image.
 
 ### M11: "Extend with Scala" docs & org rollout ⬜
 
@@ -363,13 +385,14 @@ Work that shipped after M9a while M9/M10/M11 stayed open. Each item has code and
 - `Expr` / `EnvValue` / `secret"…"` over raw `${{ }}` strings, with every Actions name a validated newtype
 - `Steps` bundles over bare `StepContext => List[Step]` lambdas, composed with `++` and gated with `when`, including a bundle published in a shared pack and reused across repos
 - composing `Capability.custom` / `.deploy` / `.once` and same-name replace
-- published packs (`zipx-central`, later `zipx-aws`)
+- published packs (`zipx-central`, `zipx-aws`)
 
 **Org rollout:**
 1. Publish zipx `0.1.0` to Central (via M8 dogfood).
 2. Adopt zipx in 1–2 early-effect libraries (alongside `sbt-dynver-ci`).
 3. Prefer generated publish/release topology over hand-maintained `release.yml` where the build graph already knows the modules.
-4. Extract `zipx-aws` only when step 2 produces a second copy of the AWS block (triggers M10).
+4. Adopt `zipx-aws` (shipped, M10) in every AWS consumer rather than copying an OIDC + ECR block. The block that was
+   waiting to be extracted was also the one carrying #65, so a copy of it is a copy of a bug.
 
 **Design guardrails (carry forward):**
 1. Topology in zipx; semantics in Scala packs.

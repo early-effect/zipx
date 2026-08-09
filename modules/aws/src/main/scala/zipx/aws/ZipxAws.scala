@@ -1,0 +1,184 @@
+package zipx.aws
+
+import neotype.unwrap
+import zipx.core.*
+import zipx.workflow.{ActionRef, EnvName, Expr, Step}
+
+import scala.collection.immutable.ListMap
+
+/** AWS paved path for zipx: OIDC role assumption, ECR registries whose region cannot be forgotten, and the tag set an
+  * image is pushed under.
+  *
+  * This pack holds no AWS credentials and no account numbers of its own. A role is an [[zipx.core.EnvValue]], so the
+  * secret *name* is checked where it is written and the value stays in GitHub; an account id and a region are the
+  * consumer's, passed as validated literals.
+  *
+  * {{{
+  * val registry = EcrRegistry(AwsAccountId("111122223333"), AwsRegion("us-east-1"))
+  *
+  * zipxCapabilities += Capability.docker.copy(
+  *   permissions = ZipxAws.oidcPermissions,
+  *   env         = ZipxAws.registryEnv(registry, secret"DEPLOY_ROLE"),
+  *   extraSteps  = ZipxAws.oidcLoginSteps,
+  * )
+  * }}}
+  *
+  * The login bundle reads its role and region from the job's `env:`, which is what makes one bundle serve every
+  * destination: a per-target `env` block ([[zipx.core.Target.env]]) changes which account the same steps log into.
+  */
+object ZipxAws:
+
+  /** The `env:` key the login step reads the role ARN from. */
+  val Role: EnvName = EnvName("AWS_ROLE_TO_ASSUME")
+
+  /** The `env:` key the login step reads the region from. Named as the AWS CLI names it, so a `run:` step in the same
+    * job picks it up with no extra wiring.
+    */
+  val Region: EnvName = EnvName("AWS_REGION")
+
+  /** The `env:` key holding `<host>/<repository>`, for a build whose `dockerRepository` reads it. */
+  val Registry: EnvName = EnvName("AWS_ECR_REGISTRY")
+
+  // The same three as plain keys, since an `env:` map is keyed by `String`. Named `*Env` because that is what a
+  // `build.sbt` writing its own env block reaches for.
+  val RoleEnv: String     = Role.unwrap
+  val RegionEnv: String   = Region.unwrap
+  val RegistryEnv: String = Registry.unwrap
+
+  /** OIDC needs `id-token: write`; `contents: read` is what the checkout still needs once permissions are declared
+    * explicitly, since naming any permission drops the default set.
+    */
+  val oidcPermissions: Map[String, String] = Map("id-token" -> "write", "contents" -> "read")
+
+  /** The [[zipx.core.ActionPins.extra]] key this pack's action is pinned under.
+    *
+    * An extra pin rather than a typed `ActionPins.Field` because zipx's own planner never emits this step: it arrives
+    * through a pack, so pinning it must not require a zipx release. The cost is stated in `ActionPins`: an extra pin's
+    * ref is checked for being pinned, not for naming this particular action.
+    */
+  val CredentialsPinKey: String = "configureAwsCredentials"
+
+  /** Used when the consumer's pin file has no [[CredentialsPinKey]] entry. A literal, so its shape is checked while
+    * this file compiles, and a SHA rather than `@v6` so the fallback is not itself an unpinned action.
+    *
+    * Add the pin to `.github/zipx/action-pins.yml` to take ownership of the version:
+    *
+    * {{{
+    * extra:
+    *   configureAwsCredentials: aws-actions/configure-aws-credentials@<sha> # v6.2.3
+    * }}}
+    */
+  val DefaultCredentialsAction: ActionRef =
+    ActionRef("aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c")
+
+  /** The pin to use for the login step: the consumer's [[CredentialsPinKey]] pin when present, else
+    * [[DefaultCredentialsAction]].
+    */
+  def credentialsAction(pins: ActionPins): ActionRef =
+    pins.extraRef(CredentialsPinKey).getOrElse(DefaultCredentialsAction)
+
+  /** `.github/zipx/action-pins.yml` with this pack's action pinned, for a build that sets `zipxActions` directly rather
+    * than committing the entry.
+    */
+  def withCredentialsPin(pins: ActionPins, ref: ActionRef, version: Option[String] = None): ActionPins =
+    pins.withExtra(CredentialsPinKey, ref, version)
+
+  /** Assumes an AWS role by OIDC, passing **both** `role-to-assume` and `aws-region`.
+    *
+    * Both, always. `aws-region` is required by `configure-aws-credentials`, and omitting it is #65: the action fails on
+    * the runner reporting a credentials problem, which sends the reader looking at the role and the trust policy rather
+    * than at the missing input. Because the region reaches this bundle through [[RegionEnv]] and an [[EcrRegistry]]
+    * cannot be built without one, there is no path here that produces a step with no region.
+    *
+    * A named [[zipx.core.Steps]] rather than a lambda, so it composes with `++`, gates with `when`, and names itself in
+    * the generate-time raw-fragment warning.
+    */
+  val oidcLoginSteps: Steps = Steps.one("aws-oidc-login") { ctx =>
+    Step
+      .usesRef(credentialsAction(ctx.actions))
+      .named("Assume AWS role (OIDC)")
+      .withInputs(
+        ListMap(
+          "role-to-assume" -> Expr.Env(Role).render,
+          "aws-region"     -> Expr.Env(Region).render,
+        )
+      )
+      .build
+  }
+
+  /** The pin key and fallback for `aws-actions/amazon-ecr-login`, on the same terms as [[CredentialsPinKey]]. */
+  val EcrLoginPinKey: String = "amazonEcrLogin"
+
+  val DefaultEcrLoginAction: ActionRef =
+    ActionRef("aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64")
+
+  def ecrLoginAction(pins: ActionPins): ActionRef =
+    pins.extraRef(EcrLoginPinKey).getOrElse(DefaultEcrLoginAction)
+
+  /** [[oidcLoginSteps]] followed by an ECR docker login, for a build that pushes with the `docker` CLI rather than
+    * through sbt-native-packager's own credential handling.
+    */
+  val ecrLoginSteps: Steps = oidcLoginSteps ++ Steps.one("aws-ecr-login") { ctx =>
+    Step.usesRef(ecrLoginAction(ctx.actions)).named("Log in to ECR").build
+  }
+
+  /** The `env:` a job needs for [[oidcLoginSteps]]: the role, and the region the registry already carries.
+    *
+    * `role` is an [[zipx.core.EnvValue]] rather than a `String`, so `secret"DEPLOY_ROLE"` is checked where it is
+    * written and a name assembled at runtime has to go through `EnvValue.secretMake`.
+    */
+  def registryEnv(registry: EcrRegistry, role: EnvValue): Map[String, EnvValue] = Map(
+    RoleEnv     -> role,
+    RegionEnv   -> EnvValue.plain(registry.region),
+    RegistryEnv -> EnvValue.plain(registry.host),
+  )
+
+  /** The same, for a job whose registry is one repository rather than a whole account: [[RegistryEnv]] carries
+    * `<host>/<repository>`.
+    */
+  def imageEnv(image: EcrImage, role: EnvValue): Map[String, EnvValue] = Map(
+    RoleEnv     -> role,
+    RegionEnv   -> EnvValue.plain(image.registry.region),
+    RegistryEnv -> EnvValue.plain(image.uri),
+  )
+
+  /** One [[zipx.core.Target]] per registry, for a capability that really does want a job each: separate accounts with
+    * separate approvals, say.
+    *
+    * For the ordinary multi-registry image push this is the **wrong** shape, and the cost is multiplicative: N
+    * registries times M modules is N*M jobs, each rebuilding the same image. `Docker / publish` pushes every
+    * `dockerAliases` entry from one build, so one job with [[EcrImage.taggedAll]] over several registries is both
+    * cheaper and what actually guarantees the registries hold identical bytes.
+    *
+    * `name` is a [[zipx.core.TargetName]], so it is validated where it is written: it becomes part of a `jobs.<job_id>`
+    * key.
+    */
+  def registryTargets(registries: List[(TargetName, EcrRegistry, EnvValue)]): List[Target] =
+    registries.map((name, registry, role) => Target(name = name, env = registryEnv(registry, role)))
+
+  /** A docker publish capability that logs in by OIDC before pushing, with `id-token: write` already declared.
+    *
+    * One job for the whole push, which is the shape to prefer: point the build's `dockerAliases` at every registry and
+    * let one `Docker / publish` push them all.
+    */
+  def dockerPublish(
+      registry: EcrRegistry,
+      role: EnvValue,
+      name: CapabilityName = Capability.DockerName,
+      scope: CapabilityScope = CapabilityScope.Aggregate,
+      condition: Option[JobCondition] = None,
+  ): Capability =
+    val base = scope match
+      case CapabilityScope.Layer => Capability.dockerLayers
+      case CapabilityScope.Graph => Capability.dockerGraph
+      case _                     => Capability.docker
+    base.copy(
+      name = name,
+      permissions = oidcPermissions,
+      env = registryEnv(registry, role),
+      extraSteps = oidcLoginSteps,
+      condition = condition,
+    )
+  end dockerPublish
+
+end ZipxAws
