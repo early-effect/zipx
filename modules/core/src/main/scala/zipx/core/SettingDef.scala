@@ -26,14 +26,56 @@ object TypeLabel extends Subtype[String]:
     val pretty = TypeLabel.shorten(raw)
     '{ TypeLabel.unsafeMake(${ Expr(pretty) }) }
 
-  /** Drop noisy package prefixes so docs show `Map[CapabilityName, MatrixCollapse]`, not FQNs. */
+  /** Drop noisy package / neotype packaging so docs show `WorkflowName`, not `PlanConfig$package.WorkflowName.Type`.
+    *
+    * Leaving `$` in a type label also breaks Specular/markdown math (`$…$`), which is what garbled the Default column
+    * on the Settings page.
+    */
   private[core] def shorten(shown: String): String =
-    shown
+    val stripped = shown
+      .replaceAll("""\w+\$package\.""", "")
+      .replaceAll("""\.Type\b""", "")
       .replace("scala.collection.immutable.", "")
       .replace("scala.collection.", "")
       .replace("scala.", "")
+      .replace("java.lang.", "")
       .replace("zipx.core.", "")
       .replace("zipx.workflow.", "")
+    functionArrow(stripped)
+  end shorten
+
+  /** `Function1[A, B]` → `A => B` for the docs type column. */
+  private def functionArrow(shown: String): String =
+    val Prefix = "Function1["
+    val idx    = shown.indexOf(Prefix)
+    if idx < 0 then shown
+    else
+      val innerStart = idx + Prefix.length
+      splitFunctionArgs(shown, innerStart) match
+        case None                       => shown
+        case Some((a, b, endExclusive)) =>
+          val pretty = s"${a.trim} => ${b.trim}"
+          functionArrow(shown.substring(0, idx) + pretty + shown.substring(endExclusive))
+  end functionArrow
+
+  /** Split `Function1[` args at the top-level comma; returns (left, right, index after closing `]`). */
+  private def splitFunctionArgs(shown: String, from: Int): Option[(String, String, Int)] =
+    var depth = 0
+    var comma = -1
+    var i     = from
+    while i < shown.length do
+      shown.charAt(i) match
+        case '['               => depth += 1
+        case ']' if depth == 0 =>
+          if comma < 0 then return None
+          return Some((shown.substring(from, comma), shown.substring(comma + 1, i), i + 1))
+        case ']'                            => depth -= 1
+        case ',' if depth == 0 && comma < 0 => comma = i
+        case _                              => ()
+      i += 1
+    end while
+    None
+  end splitFunctionArgs
 end TypeLabel
 
 /** Purpose / `settingKey` description prose shared by the plugin and docs. */

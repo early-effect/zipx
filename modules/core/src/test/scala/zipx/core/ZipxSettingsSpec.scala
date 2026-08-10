@@ -54,5 +54,29 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
           case _                          => false,
       )
     },
+    suite("TypeLabel.shorten")(
+      test("strips neotype $package / .Type and java.lang so markdown math stays intact") {
+        assertTrue(
+          TypeLabel.shorten("PlanConfig$package.WorkflowName.Type") == "WorkflowName",
+          TypeLabel.shorten("java.lang.String") == "String",
+          TypeLabel.shorten(
+            "scala.collection.immutable.Map[Capability$package.CapabilityName, zipx.core.MatrixCollapse]"
+          ) == "Map[CapabilityName, MatrixCollapse]",
+          TypeLabel.shorten(
+            "Function1[zipx.core.StepContext, scala.collection.immutable.List[zipx.workflow.Step]]"
+          ) == "StepContext => List[Step]",
+        )
+      },
+      test("catalog type labels are docs-friendly (no $package, java.lang, or Function1)") {
+        val labels = ZipxSettings.all.map(d => d.typeLabel: String)
+        assertTrue(
+          labels.forall(l => !l.contains("$") && !l.contains("java.lang") && !l.contains("Function1")),
+          labels.contains("WorkflowName"),
+          labels.contains("String"),
+          labels.contains("Map[CapabilityName, MatrixCollapse]"),
+          labels.exists(_.contains("=>")),
+        )
+      },
+    ),
   )
 end ZipxSettingsSpec
