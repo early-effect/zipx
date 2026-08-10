@@ -30,8 +30,8 @@ enum EnvValue:
 
   def render: String = textOrExpr.fold(identity, _.render)
 
-  /** `None` for [[Plain]], whose text is not an expression and can hold more than a [[zipx.workflow.Expr.Lit]] can.
-    * Named `asExpr` rather than `expr` because the [[EnvValue.Expr]] case already has a field of that name.
+  /** `None` for [[EnvValue.Plain]], whose text is not an expression and can hold more than a [[zipx.workflow.Expr.Lit]]
+    * can. Named `asExpr` rather than `expr` because the [[EnvValue.Expr]] case already has a field of that name.
     */
   def asExpr: Option[GhaExpr] = textOrExpr.toOption
 

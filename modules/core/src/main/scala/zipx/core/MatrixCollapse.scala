@@ -2,25 +2,27 @@ package zipx.core
 
 /** How a capability's sibling fan-out is folded into a GitHub Actions `strategy.matrix` for a quieter workflow graph.
   *
-  *   - [[Off]]: today's emission (one job per Graph module, one Aggregate/Layer job per target).
-  *   - [[Strict]]: collapse only when legs are independent and isomorphic; otherwise generate fails.
-  *   - [[Coarse]]: collapse even when that drops Graph same-capability `needs` (GHA cannot express per-leg needs);
-  *     still errors on non-isomorphic templates.
+  *   - [[MatrixCollapse.Off]]: today's emission (one job per Graph module, one Aggregate/Layer job per target).
+  *   - [[MatrixCollapse.Strict]]: collapse only when legs are independent and isomorphic; otherwise generate fails.
+  *   - [[MatrixCollapse.Coarse]]: collapse even when that drops Graph same-capability `needs` (GHA cannot express
+  *     per-leg needs); still errors on non-isomorphic templates.
   *
-  * Resolution is cascading: [[Capability.matrixCollapse]] wins over [[PlanConfig.matrixCollapse]], else [[Off]].
+  * Resolution is cascading: [[Capability.matrixCollapse]] wins over [[PlanConfig.matrixCollapse]], else
+  * [[MatrixCollapse.Off]].
   */
 enum MatrixCollapse:
   case Off, Strict, Coarse
 
 object MatrixCollapse:
 
-  /** Capability override, then plan allowlist, else [[Off]]. */
+  /** Capability override, then plan allowlist, else [[MatrixCollapse.Off]]. */
   def effective(capability: Capability, config: PlanConfig): MatrixCollapse =
     capability.matrixCollapse
       .orElse(config.matrixCollapse.get(capability.name))
       .getOrElse(Off)
 
-  /** Generate-time notes for [[Coarse]] Graph collapses that drop same-capability inter-module `needs`. */
+  /** Generate-time notes for [[MatrixCollapse.Coarse]] Graph collapses that drop same-capability inter-module `needs`.
+    */
   def warnings(capabilities: List[Capability], graph: ModuleGraph, config: PlanConfig): List[String] =
     capabilities.flatMap { c =>
       effective(c, config) match

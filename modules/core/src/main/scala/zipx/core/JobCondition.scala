@@ -21,7 +21,7 @@ enum JobCondition:
   /** `first` plus `rest` rather than one list, so `All(Nil)` is unconstructible rather than rejected at render time. */
   case All(first: JobCondition, rest: List[JobCondition])
 
-  /** Non-empty by the same construction as [[All]]. */
+  /** Non-empty by the same construction as [[JobCondition.All]]. */
   case Any(first: JobCondition, rest: List[JobCondition])
   case Not(inner: JobCondition)
 
@@ -41,8 +41,9 @@ enum JobCondition:
   /** This condition as a structural [[zipx.workflow.Expr]] rather than one opaque [[zipx.workflow.Expr.Raw]], so that
     * operator jointing has a single definition, in `Expr`.
     *
-    * Every clause of an [[All]] or [[Any]] is wrapped in [[zipx.workflow.Expr.Group]]: a `JobCondition` composes
-    * conditions of unknown shape, where `Expr`'s own `&&` joins operands bare and leaves grouping to the author.
+    * Every clause of an [[JobCondition.All]] or [[JobCondition.Any]] is wrapped in [[zipx.workflow.Expr.Group]]: a
+    * `JobCondition` composes conditions of unknown shape, where `Expr`'s own `&&` joins operands bare and leaves
+    * grouping to the author.
     */
   def expr: Expr = this match
     case RepositoryIs(repo)    => Expr.Github(JobCondition.RepositoryPath) === Expr.Quoted(repo)

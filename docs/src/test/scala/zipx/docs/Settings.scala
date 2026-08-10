@@ -2,8 +2,9 @@ package zipx.docs
 
 import specular.*
 import specular.ziotest.DocSpecSuite
+import zipx.core.*
 
-/** Settings and tasks reference. */
+/** Settings and tasks reference (tables generated from [[ZipxSettings]]). */
 object Settings extends DocSpecSuite:
 
   def doc = page("Settings")(
@@ -15,51 +16,17 @@ task settings below are checked at `zipxWorkflowGenerate` instead, for a reason 
 """,
     section("Build-level")(
       md"""
-| Setting | Type | Default | Purpose |
-|---|---|---|---|
-| `zipxCapabilities` | `Seq[Capability]` | `Seq.empty` | custom capabilities (same name replaces built-in) |
-| `zipxWorkflowName` | `WorkflowName` | `"CI"` | workflow `name:` |
-| `zipxWorkflowPath` | `String` | `.github/workflows/ci.yml` | output path |
-| `zipxJavaVersion` | `JdkVersion` | `"21"` | JDK for setup-java and cache key |
-| `zipxRunnerOs` | `RunnerOs` | `"ubuntu-latest"` | default runner |
-| `zipxScalaMatrix` | `Boolean` | `true` | per-module Scala matrix (**Graph** test only) |
-| `zipxMatrixCollapse` | `Map[CapabilityName, MatrixCollapse]` | empty | per-capability MatrixCollapse defaults (**Off** / **Strict** / **Coarse**); `Capability.withMatrixCollapse` overrides. See **Matrix collapse**. |
-| `zipxActions` | `ActionPins` | jar defaults | one-off `uses:` override (**prefer pin file**; see **Action pins**) |
-| `zipxActionsPath` | `String` | `.github/zipx/action-pins.yml` | pin file path (`""` disables file loading) |
-| `zipxDependabotSync` | `Boolean` | `false` | also generate `.github/workflows/zipx-action-pins-sync.yml` |
-| `zipxScalaSteward` | `Boolean` | `false` | also generate `.github/workflows/zipx-scala-steward.yml` |
-| `zipxWorkflowDispatch` | `Boolean` | `false` | emit `on.workflow_dispatch` |
-| `zipxCache` | `CacheBackend` | `LocalDir` | cache strategy |
-| `zipxCacheEpoch` | `CacheEpoch` | `GitTags()` | LocalDir epoch strategy (runtime tags by default) |
-| `zipxPushBranches` | `Seq[String]` | `Seq("main")` | push triggers |
-| `zipxReleaseTagPattern` | `String` | `v[0-9]+.[0-9]+.[0-9]+` | publish gate |
-| `zipxAffectedOnPR` | `Boolean` | `true` | affected setup when Graph Verify present |
-| `zipxAffectedOnPush` | `Boolean` | `false` | also scope pushes |
-| `zipxAffectedPublish` | `Boolean` | `false` | also narrow Graph **Publish**; opt-in because under-publishing is loudly broken while under-verifying is silently unsafe |
-| `zipxSkipMergedPrPush` | `Boolean` | `true` | skip Verify on merged-PR pushes |
-| `zipxCacheRehydrateOnMerge` | `Boolean` | `true` | LocalDir: rehydrate default-branch cache when Verify skips after merge |
-| `zipxCacheRehydrateTask` | `String` | `"compile"` | sbt command for the rehydrate job |
-| `zipxCacheRehydrateExtraSteps` | `StepContext => List[Step]` | empty | opt-in steps on rehydrate (after cache, before task) |
-| `zipxCacheRehydrateEnv` | `Map[String, EnvValue]` | empty | rehydrate-only env overlay (wins over `zipxEnv`) |
-| `zipxEnv` | `Map[String, EnvValue]` | empty | build-wide job env (normal jobs; not workflow_call callers) |
-| `zipxCancelSupersededRuns` | `Boolean` | `true` | workflow concurrency; never cancel release tags |
-| `zipxVerifyClean` | `VerifyClean` | `None` | optional clean before Verify commands |
-| `zipxVerifyCleanLabel` | `Option[String]` | `Some("clean")` | PR label that prepends `cleanFull` when verifyClean is None |
+${SettingDef.settingsTable(ZipxSettings.buildLevel)}
 """
     ),
     section("Per-project")(
       md"""
-| Setting | Type | Default | Purpose |
-|---|---|---|---|
-| `zipxCiRelevant` | `Boolean` | `true` (false for aggregators) | include in test participation |
-| `zipxPublish` | `Option[Boolean]` | derived from `publish / skip` (+ `publishArtifact`) | force publish on/off |
-| `zipxDocker` | `Boolean` | derived from `DockerPlugin` | build a docker image |
-| `zipxTestTask` | `String` | `"test"` | Aggregate root Verify + Graph/Layer task |
-| `zipxPublishTask` | `String` | `"publish"` | publish task |
+${SettingDef.settingsTable(ZipxSettings.projectLevel)}
 
-These two are `String` rather than `SbtCommand` because an opaque type in an sbt `settingKey` would need a `JsonFormat`;
-the check moves to `zipxWorkflowGenerate`, which names the setting. `zipxTasks` / `cmd"…"` take real `TaskKey`s and skip
-it. See **Validation**.
+The catalog types these as `SbtCommand` (same as `ModuleNode` / `PlanConfig`). The plugin still exposes
+`settingKey[String]` because an opaque type there would need a `JsonFormat`; the check moves to
+`zipxWorkflowGenerate`, which names the setting. `zipxTasks` / `cmd"…"` take real `TaskKey`s and skip it. See
+**Validation**.
 
 By default a module is in the publish graph when it is not an aggregator, `publish / skip` is false, and
 `publishArtifact` is true. Prefer `publish / skip := true` for non-publishers; set `zipxPublish := Some(false/true)`
@@ -97,14 +64,7 @@ stage ECR, multi-publish, docs on dispatch).
     ),
     section("Tasks")(
       md"""
-| Task | Purpose |
-|---|---|
-| `zipxWorkflowGenerate` | write the workflow YAML (and companion workflows when enabled) |
-| `zipxWorkflowCheck` | fail if committed YAML is stale (includes companions when enabled) |
-| `zipxActionsPull` | pull `uses:` SHAs from the workflow into the pin file, then regenerate |
-| `zipxGraph` | print modules, edges, flags, layers |
-| `zipxPublishOrder` | print contracted publish waves |
-| `zipxAffectedModules <base-ref>` | print affected modules (used by the `affected` job) |
+${SettingDef.tasksTable(ZipxSettings.tasks)}
 """
     ),
     section("Action pins")(

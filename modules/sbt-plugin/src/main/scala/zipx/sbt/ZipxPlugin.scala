@@ -249,128 +249,50 @@ object ZipxPlugin extends AutoPlugin:
     val zipxTasks = zipx.sbt.CapabilityTasks
     export zipx.sbt.CapabilityTasks.cmd
 
-    val zipxCapabilities =
-      settingKey[Seq[Capability]]("CI capabilities (default: test, publish, docker?). Append custom ones here.")
-    val zipxCache =
-      settingKey[CacheBackend]("Cache backend: LocalDir (default), BazelRemoteSidecar, or ManagedRemote.")
-    val zipxWorkflowName = settingKey[WorkflowName]("Name of the generated GitHub Actions workflow.")
-    val zipxWorkflowPath =
-      settingKey[String]("Workflow file path relative to the build root (default .github/workflows/ci.yml).")
-    val zipxJavaVersion    = settingKey[JdkVersion]("JDK major version for the CI matrix and cache key.")
-    val zipxRunnerOs       = settingKey[RunnerOs]("GitHub Actions runner label (default ubuntu-latest).")
-    val zipxScalaMatrix    = settingKey[Boolean]("Expand a per-module Scala matrix over crossScalaVersions.")
-    val zipxMatrixCollapse =
-      settingKey[Map[CapabilityName, MatrixCollapse]](
-        "Per-capability MatrixCollapse defaults (Off / Strict / Coarse). Capability.withMatrixCollapse overrides. Empty = Off."
-      )
-    val zipxCacheEpoch =
-      settingKey[CacheEpoch](
-        "LocalDir cache epoch strategy (default CacheEpoch.GitTags). Use CacheEpoch.Fixed(version.value) to bake at generate time."
-      )
-    val zipxPushBranches      = settingKey[Seq[String]]("Branches whose pushes trigger CI.")
-    val zipxReleaseTagPattern = settingKey[String]("Tag glob that gates publishing.")
-    val zipxActions           =
-      settingKey[ActionPins](
-        "Hash-pinned GitHub Actions (checkout, setup-java, setup-sbt, cache). Override for one-offs; prefer the pin file."
-      )
-    val zipxActionsPath =
-      settingKey[String](
-        "Path to the action-pins YAML relative to the build root (default .github/zipx/action-pins.yml). Empty disables file loading."
-      )
-    val zipxDependabotSync =
-      settingKey[Boolean](
-        "When true, also generate .github/workflows/zipx-action-pins-sync.yml to sync Dependabot SHA bumps into the pin file."
-      )
-    val zipxScalaSteward =
-      settingKey[Boolean](
-        "When true, also generate .github/workflows/zipx-scala-steward.yml (weekly Scala Steward via GITHUB_TOKEN)."
-      )
-    val zipxStewardGrouping =
-      settingKey[Seq[StewardGroup]](
-        "Scala Steward pullRequests.grouping written to .github/.scala-steward.conf so updates land in a few PRs " +
-          "instead of one each (default ScalaStewardConfig.Defaults). Empty disables the config file. " +
-          "Set it here, not in the repo's .scala-steward.conf: this list is matched first and ends in a catch-all."
-      )
-    val zipxWorkflowDispatch =
-      settingKey[Boolean]("Emit on.workflow_dispatch so the workflow can be run manually (default false).")
-
-    // Per-project configuration (all default-derived; override only for edge cases).
-    val zipxCiRelevant = settingKey[Boolean]("Whether this module participates in the CI test fan-out.")
-    val zipxPublish    =
-      settingKey[Option[Boolean]]("Force publish on/off; None (default) derives it from publish/skip.")
-    val zipxTestTask = settingKey[String](
-      "sbt task for Verify: Aggregate root command and Graph/Layer per-module task (default 'test')."
-    )
-    val zipxPublishTask = settingKey[String]("sbt task used to publish this module (default 'publish').")
-    val zipxDocker      =
-      settingKey[Boolean]("Whether this module publishes a docker image via Docker/publish (default false).")
-    val zipxVerifyClean = settingKey[VerifyClean](
-      "Optional clean/cleanFull prepended to every Verify sbt command (default None)."
-    )
-    val zipxVerifyCleanLabel =
-      settingKey[Option[String]](
-        "When zipxVerifyClean is None, prepend cleanFull on PRs that have this label (default Some(\"clean\")). " +
-          "None disables. One-off cache bust."
-      )
-
-    val zipxAffectedOnPR =
-      settingKey[Boolean]("Whether Verify jobs run only for affected modules on PRs (default true).")
-    val zipxAffectedOnPush =
-      settingKey[Boolean]("Also restrict pushes to affected modules via the before-sha diff (default false).")
-    val zipxAffectedPublish =
-      settingKey[Boolean](
-        "Also affected-gate Graph-scope Publish jobs, so one changed module does not rebuild every image " +
-          "(default false; release tags always publish everything). Separate from zipxAffectedOnPR because " +
-          "under-verifying is silently unsafe while under-publishing is loudly broken."
-      )
-    val zipxAffectedDeploy =
-      settingKey[Boolean](
-        "Also affected-gate Graph-scope Deploy jobs, so a deploy skips exactly when the publish it consumes did " +
-          "(default false; release tags always deploy everything). Separate from zipxAffectedPublish because " +
-          "narrowing image pushes while still reconciling every destination is a legitimate combination."
-      )
-    val zipxSkipMergedPrPush =
-      settingKey[Boolean](
-        "Skip Verify on branch pushes when the commit already belongs to a merged PR (default true)."
-      )
-    val zipxCacheRehydrateOnMerge =
-      settingKey[Boolean](
-        "On merged-PR pushes (when skipMergedPrPush skips Verify), run a minimal LocalDir cache-rehydrate job " +
-          "so the default branch gets an actions/cache save for later PRs (default true; inert for remote caches)."
-      )
-    val zipxCacheRehydrateTask =
-      settingKey[String](
-        "sbt command for the cache-rehydrate job (default compile). Not full Verify."
-      )
+    // Descriptions come from [[ZipxSettings]] (sbt macros require settingKey/taskKey/inputKey on the val RHS).
+    val zipxCapabilities      = settingKey[Seq[Capability]](ZipxSettings.capabilities.description)
+    val zipxCache             = settingKey[CacheBackend](ZipxSettings.cache.description)
+    val zipxWorkflowName      = settingKey[WorkflowName](ZipxSettings.workflowName.description)
+    val zipxWorkflowPath      = settingKey[String](ZipxSettings.workflowPath.description)
+    val zipxJavaVersion       = settingKey[JdkVersion](ZipxSettings.javaVersion.description)
+    val zipxRunnerOs          = settingKey[RunnerOs](ZipxSettings.runnerOs.description)
+    val zipxScalaMatrix       = settingKey[Boolean](ZipxSettings.scalaMatrix.description)
+    val zipxMatrixCollapse    = settingKey[Map[CapabilityName, MatrixCollapse]](ZipxSettings.matrixCollapse.description)
+    val zipxCacheEpoch        = settingKey[CacheEpoch](ZipxSettings.cacheEpoch.description)
+    val zipxPushBranches      = settingKey[Seq[String]](ZipxSettings.pushBranches.description)
+    val zipxReleaseTagPattern = settingKey[String](ZipxSettings.releaseTagPattern.description)
+    val zipxActions           = settingKey[ActionPins](ZipxSettings.actions.description)
+    val zipxActionsPath       = settingKey[String](ZipxSettings.actionsPath.description)
+    val zipxDependabotSync    = settingKey[Boolean](ZipxSettings.dependabotSync.description)
+    val zipxScalaSteward      = settingKey[Boolean](ZipxSettings.scalaSteward.description)
+    val zipxStewardGrouping   = settingKey[Seq[StewardGroup]](ZipxSettings.stewardGrouping.description)
+    val zipxWorkflowDispatch  = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
+    val zipxCiRelevant        = settingKey[Boolean](ZipxSettings.ciRelevant.description)
+    val zipxPublish           = settingKey[Option[Boolean]](ZipxSettings.publish.description)
+    val zipxTestTask          = settingKey[String](ZipxSettings.testTask.description)
+    val zipxPublishTask       = settingKey[String](ZipxSettings.publishTask.description)
+    val zipxDocker            = settingKey[Boolean](ZipxSettings.docker.description)
+    val zipxVerifyClean       = settingKey[VerifyClean](ZipxSettings.verifyClean.description)
+    val zipxVerifyCleanLabel  = settingKey[Option[String]](ZipxSettings.verifyCleanLabel.description)
+    val zipxAffectedOnPR      = settingKey[Boolean](ZipxSettings.affectedOnPR.description)
+    val zipxAffectedOnPush    = settingKey[Boolean](ZipxSettings.affectedOnPush.description)
+    val zipxAffectedPublish   = settingKey[Boolean](ZipxSettings.affectedPublish.description)
+    val zipxAffectedDeploy    = settingKey[Boolean](ZipxSettings.affectedDeploy.description)
+    val zipxSkipMergedPrPush  = settingKey[Boolean](ZipxSettings.skipMergedPrPush.description)
+    val zipxCacheRehydrateOnMerge    = settingKey[Boolean](ZipxSettings.cacheRehydrateOnMerge.description)
+    val zipxCacheRehydrateTask       = settingKey[String](ZipxSettings.cacheRehydrateTask.description)
     val zipxCacheRehydrateExtraSteps =
-      settingKey[StepContext => List[Step]](
-        "Optional steps on cache-rehydrate after LocalDir restore and before the rehydrate task (default empty). " +
-          "Not copied from Verify capabilities."
-      )
-    val zipxCacheRehydrateEnv =
-      settingKey[Map[String, EnvValue]](
-        "Optional env for the cache-rehydrate job only (default empty). Overlay on zipxEnv."
-      )
-    val zipxEnv =
-      settingKey[Map[String, EnvValue]](
-        "Build-wide job env for normal generated jobs (default empty). Capability/target env overlay this. Omitted on workflow_call callers."
-      )
-    val zipxCancelSupersededRuns =
-      settingKey[Boolean](
-        "Emit workflow concurrency so a new push cancels an in-flight run on the same ref (default true). " +
-          "Release-tag runs are never cancelled."
-      )
+      settingKey[StepContext => List[Step]](ZipxSettings.cacheRehydrateExtraSteps.description)
+    val zipxCacheRehydrateEnv    = settingKey[Map[String, EnvValue]](ZipxSettings.cacheRehydrateEnv.description)
+    val zipxEnv                  = settingKey[Map[String, EnvValue]](ZipxSettings.env.description)
+    val zipxCancelSupersededRuns = settingKey[Boolean](ZipxSettings.cancelSupersededRuns.description)
 
-    // Tasks.
-    val zipxGraph            = taskKey[Unit]("Print the resolved module graph and topological layers.")
-    val zipxPublishOrder     = taskKey[Unit]("Print the dependency-ordered publish layers (contracted publish chain).")
-    val zipxWorkflowGenerate = taskKey[Unit]("Generate the GitHub Actions workflow YAML from the build graph.")
-    val zipxWorkflowCheck    = taskKey[Unit]("Verify the checked-in workflow matches what the build would generate.")
-    val zipxActionsPull      = taskKey[Unit](
-      "Pull uses: SHA pins from the generated workflow into the action-pins file, then regenerate."
-    )
-    val zipxAffectedModules =
-      inputKey[Unit]("Print, as a JSON array, the modules affected by changes since the given git base ref.")
+    val zipxGraph            = taskKey[Unit](ZipxSettings.graph.description)
+    val zipxPublishOrder     = taskKey[Unit](ZipxSettings.publishOrder.description)
+    val zipxWorkflowGenerate = taskKey[Unit](ZipxSettings.workflowGenerate.description)
+    val zipxWorkflowCheck    = taskKey[Unit](ZipxSettings.workflowCheck.description)
+    val zipxActionsPull      = taskKey[Unit](ZipxSettings.actionsPull.description)
+    val zipxAffectedModules  = inputKey[Unit](ZipxSettings.affectedModules.description)
   end autoImport
 
   import autoImport.*

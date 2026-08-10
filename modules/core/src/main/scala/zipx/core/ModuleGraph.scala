@@ -13,8 +13,8 @@ import zipx.workflow.Names
   * A module id is spliced into two positions with different rules, and satisfies both. It becomes part of a
   * `jobs.<job_id>` key, and it appears single-quoted inside an expression as the `'api'` of
   * `contains(fromJson(…), 'api')`. GitHub's id rule is the tighter of the two: its character set is a strict subset of
-  * the expression-literal set, so checking the id rule establishes both at once and [[asExprLiteral]] needs no second
-  * validation. That subset claim is not taken on faith; `ModuleIdSpec` checks it over both character positions.
+  * the expression-literal set, so checking the id rule establishes both at once and [[ModuleId.asExprLiteral]] needs no
+  * second validation. That subset claim is not taken on faith; `ModuleIdSpec` checks it over both character positions.
   *
   * A `Subtype` rather than a `Newtype`, so `ModuleId <: String`. Reading an id needs no ceremony: `_.id == "service"`
   * in a `build.sbt`, `s"${node.id}/test"` in a command, and `Map[String, ModuleNode]` all keep working. Only
@@ -41,9 +41,10 @@ object ModuleId extends Subtype[String]:
   extension (id: ModuleId)
     /** The id as an expression literal, for the `'api'` of `contains(fromJson(…), 'api')`.
       *
-      * `unsafeMake` because [[Names.ActionsId]]'s character set is a strict subset of [[Names.ExprLiteral]]'s in both
-      * the first and subsequent positions, so this conversion is total. That is the property that lets the planner's
-      * affected gate be built rather than validated, and it is checked exhaustively in `ModuleIdSpec`.
+      * `unsafeMake` because [[zipx.workflow.Names.ActionsId]]'s character set is a strict subset of
+      * [[zipx.workflow.Names.ExprLiteral]]'s in both the first and subsequent positions, so this conversion is total.
+      * That is the property that lets the planner's affected gate be built rather than validated, and it is checked
+      * exhaustively in `ModuleIdSpec`.
       */
     def asExprLiteral: ExprLiteral = ExprLiteral.unsafeMake(id)
 end ModuleId
