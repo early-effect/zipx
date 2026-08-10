@@ -1036,7 +1036,11 @@ object Planner:
       val skipTolerant = dependsOnSkippable(capability, affectedGatedNames)
       val releaseGate  =
         Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
+      // Job-level `if` cannot use `matrix.*` (GitHub rejects the workflow). Skip the whole job when
+      // affected found nothing; per-leg membership is enforced on each step below.
       val affectedGate =
+        Option.when(gatedOnAffected)(affectedModulesNonEmpty.unwrapped)
+      val stepAffectedGate =
         Option.when(gatedOnAffected)(
           Expr.group(affectedContainsMatrixModule || affectedContainsAll).unwrapped
         )
@@ -1057,7 +1061,19 @@ object Planner:
         else sharedEnv(shared)
       val envBinding =
         Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("target").render)
-      val axes = matrixMap.keySet
+      val axes  = matrixMap.keySet
+      val steps = stepsFor(
+        capability,
+        nodes.head,
+        targets.headOption,
+        config,
+        hasMatrix = true,
+        cache,
+        commandOverride = commandOverride,
+        jobSuffix = capability.name.asJobId,
+        destinations = shared,
+        matrixAxes = axes,
+      ).map(andStepIf(_, stepAffectedGate))
 
       List(
         capability.name.asJobId -> Job(
@@ -1071,18 +1087,7 @@ object Planner:
           container = capability.container,
           services = mergeServices(capability, cache),
           env = mergeEnv(config.env, cache.env, capability.env, targetEnv),
-          steps = stepsFor(
-            capability,
-            nodes.head,
-            targets.headOption,
-            config,
-            hasMatrix = true,
-            cache,
-            commandOverride = commandOverride,
-            jobSuffix = capability.name.asJobId,
-            destinations = shared,
-            matrixAxes = axes,
-          ),
+          steps = steps,
         )
       )
     end if
@@ -1324,12 +1329,30 @@ object Planner:
     */
   private val affectedContainsAll: Expr = affectedContains(ExprLiteral("all"))
 
-  /** Affected membership for a Graph matrix-collapsed job: `contains(..., matrix.module)`. */
+  /** Job-level skip when affected found no modules. Legal in `jobs.<id>.if` (no `matrix` context).
+    *
+    * Right-hand side is [[Expr.lit]] rather than [[Expr.quoted]]: `'[]'` is not a valid [[ExprLiteral]] character set.
+    */
+  private val affectedModulesNonEmpty: Expr =
+    Expr.JobOutput(affectedJobId, OutputName("modules")) !== Expr.lit("'[]'")
+
+  /** Per-leg affected membership for a Graph matrix-collapsed job. Must live on **step** `if`, not job `if`: GitHub
+    * forbids `matrix` in `jobs.<job_id>.if` (workflow fails validation with 0 jobs).
+    */
   private val affectedContainsMatrixModule: Expr =
     Expr.contains(
       Expr.fromJson(Expr.JobOutput(affectedJobId, OutputName("modules"))),
       Expr.matrix("module"),
     )
+
+  /** AND a condition onto a step's existing `if`, or set it when absent. */
+  private def andStepIf(step: Step, cond: Option[String]): Step =
+    cond match
+      case None    => step
+      case Some(c) =>
+        step.copy(`if` = step.`if` match
+          case Some(existing) => Some(s"($existing) && ($c)")
+          case None           => Some(c))
 
   /** [[Expr.lit]] over text built here from validated parts: a [[WorkflowName]], a [[RunnerOs]], a [[JdkVersion]], a
     * job id, and the punctuation joining them. Every one of those forbids the control characters [[ShText]] rejects,

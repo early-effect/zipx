@@ -1,5 +1,7 @@
 package zipx.core
 
+import zipx.core.Rendered.yaml
+import zipx.workflow.Render
 import zio.test.*
 
 /** Matrix-collapse: cascade resolution, Strict/Coarse eligibility, Aggregate/Layer target matrices. */
@@ -167,12 +169,78 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
       },
     ),
     suite("affected")(
-      test("Graph collapse gates on matrix.module") {
+      test("job-level if does not reference matrix (illegal in jobs.<id>.if)") {
         val cfg  = baseConfig.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)
         val wf   = Planner.plan(independentDocker, List(imageCap()), cfg)
-        val `if` = wf.jobs("image").`if`.getOrElse("")
-        assertTrue(`if`.contains("matrix.module"), `if`.contains("affected"))
-      }
+        val job  = wf.jobs("image")
+        val `if` = job.`if`.getOrElse("")
+        assertTrue(
+          !`if`.contains("matrix."),
+          `if`.contains("needs.affected.outputs.modules != '[]'"),
+          job.needs.contains("affected"),
+        )
+      },
+      test("step-level if gates each leg on matrix.module or all") {
+        val cfg   = baseConfig.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)
+        val wf    = Planner.plan(independentDocker, List(imageCap()), cfg)
+        val steps = wf.jobs("image").steps
+        val gate  =
+          "(contains(fromJson(needs.affected.outputs.modules), matrix.module) || " +
+            "contains(fromJson(needs.affected.outputs.modules), 'all'))"
+        assertTrue(
+          steps.nonEmpty,
+          steps.forall(_.`if`.contains(gate)),
+        )
+      },
+      test("Coarse + affected keeps job if matrix-free and steps gated") {
+        val cfg = baseConfig.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)
+        val wf  = Planner.plan(
+          orderedDocker,
+          List(Capability.dockerGraph.withMatrixCollapse(MatrixCollapse.Coarse)),
+          cfg,
+        )
+        val job = wf.jobs("docker")
+        assertTrue(
+          !job.`if`.exists(_.contains("matrix.")),
+          job.`if`.exists(_.contains("needs.affected.outputs.modules != '[]'")),
+          job.steps.forall(_.`if`.exists(_.contains("matrix.module"))),
+        )
+      },
+      test("without affected publish, collapsed job has no affected step gate") {
+        val cfg = baseConfig.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = false)
+        val wf  = Planner.plan(independentDocker, List(imageCap()), cfg)
+        val job = wf.jobs("image")
+        assertTrue(
+          !job.needs.contains("affected"),
+          job.steps.forall(s => !s.`if`.exists(_.contains("affected"))),
+          !job.`if`.exists(_.contains("affected")),
+        )
+      },
+      test("Off collapse still uses job-level contains(module id), not matrix") {
+        val cfg = baseConfig.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)
+        val wf  = Planner.plan(independentDocker, List(imageCap(Some(MatrixCollapse.Off))), cfg)
+        val api = wf.jobs("image-api")
+        assertTrue(
+          api.`if`.exists(_.contains("contains(fromJson(needs.affected.outputs.modules), 'api')")),
+          !api.`if`.exists(_.contains("matrix.")),
+          api.steps.forall(s => !s.`if`.exists(_.contains("matrix.module"))),
+        )
+      },
+      test("rendered YAML never puts matrix in a collapsed job if") {
+        check(Gen.elements(MatrixCollapse.Strict, MatrixCollapse.Coarse)) { mode =>
+          val cfg  = baseConfig.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)
+          val wf   = Planner.plan(independentDocker, List(imageCap(Some(mode))), cfg)
+          val job  = wf.jobs("image")
+          val yaml = Render.renderJob("image", job).yaml
+          // Job-level `if:` line must not mention matrix; step `if:` may.
+          val jobIfLine = yaml.linesIterator.find(_.trim.startsWith("if:")).getOrElse("")
+          assertTrue(
+            !jobIfLine.contains("matrix."),
+            jobIfLine.contains("needs.affected.outputs.modules != '[]'"),
+            yaml.contains("matrix.module"),
+          )
+        }
+      },
     ),
     suite("Aggregate / Layer target collapse")(
       test("Aggregate Strict folds targets into one matrix job") {
