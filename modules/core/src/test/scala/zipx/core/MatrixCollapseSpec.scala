@@ -98,7 +98,7 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
         val job = wf.jobs("image")
         assertTrue(
           wf.jobs.keys.filter(_.startsWith("image")).toList == List("image"),
-          job.strategy.exists(_.matrix.get("module").contains(List("api", "web", "batch"))),
+          job.strategy.exists(_.matrix.get("module").contains(List("api", "batch", "web"))),
           job.steps.exists(_.run.exists(_.contains("${{ matrix.module }}/Docker/publishLocal"))),
         )
       },
