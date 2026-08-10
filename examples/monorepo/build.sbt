@@ -90,8 +90,8 @@ zipxCapabilities ++= Seq(
 //
 // **One** job, not one per registry: `Docker / publish` builds the image once and pushes every `dockerAliases` entry
 // (enumerated above from the same `Registry.all`), so a job per registry would rebuild the same image N times and stop
-// guaranteeing the registries hold identical bytes. `ZipxAws.dockerPublishAll` is that shape: shared targets, one OIDC
-// login per destination, `id-token: write` already declared. Registries stay a typed Scala list
+// guaranteeing the registries hold identical bytes. `ZipxAws.dockerPublishAll` is that shape: shared targets, OIDC
+// then ECR docker login per destination, `id-token: write` already declared. Registries stay a typed Scala list
 // (project/Deploy.scala), and each login step passes both `role-to-assume` and the registry's own `aws-region`, which
 // is not omittable because `EcrRegistry` has no constructor without a region.
 zipxCapabilities += ZipxAws.dockerPublishAll(Registry.destinations)
@@ -122,7 +122,7 @@ zipxCapabilities += zipxTasks
         )
       ),
     needsCapabilities = List(Capability.DockerName), // deploy waits on the (multi-registry) image publish
-    permissions = ZipxAws.oidcPermissions, // OIDC: id-token write, contents read
+    permissions = ZipxAws.oidcPermissions,           // OIDC: id-token write, contents read
   )
   .copy(
     // The extension seam: assume the cloud role (from the target's env) before running the deploy command. A named

@@ -121,4 +121,18 @@ object ScalaStewardConfig:
   private def quote(value: String): String =
     "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+  /** True when repo-root Steward config text sets a live `pullRequests.grouping` key.
+    *
+    * That block is unreachable under zipx's two-file model (generated grouping is merged first and ends in a
+    * catch-all). Strips `#` line comments; missing / blank input is not a hit.
+    */
+  def repoRootGroupingIsDead(text: String): Boolean =
+    text.linesIterator
+      .map(_.replaceAll("""#.*$""", ""))
+      .exists(line => """(?i)\bpullRequests\s*\.\s*grouping\b""".r.findFirstIn(line).isDefined)
+
+  val RepoRootGroupingWarning: String =
+    "repo-root .scala-steward.conf sets pullRequests.grouping, which is unreachable under zipx's generated " +
+      "repo-config (first-match-wins, catch-all last). Set zipxStewardGrouping in the build instead."
+
 end ScalaStewardConfig

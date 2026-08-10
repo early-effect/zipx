@@ -68,8 +68,9 @@ Two things worth knowing, because neither is guessable:
 1. **Set grouping here, not in `.scala-steward.conf`.** The generated config reaches Steward through the action's
    `repo-config` input, which is its *global* config channel and is merged **ahead** of the repo's own
    `.scala-steward.conf`. Since the default list ends in a `{ group = "*" }` catch-all, a `pullRequests.grouping`
-   block in the repo file would never be reached. Everything else (`updates.ignore`, `updates.retracted`, ...) still
-   belongs in the repo file and merges normally.
+   block in the repo file would never be reached. `zipxWorkflowGenerate` / `zipxWorkflowCheck` **warn** when the root
+   file still sets that key. Everything else (`updates.ignore`, `updates.retracted`, ...) still belongs in the repo
+   file and merges normally.
 2. **The generated workflow gains a checkout step.** The action reads `repo-config` off the runner filesystem, not
    out of Steward's own clone, and it does not check anything out itself. Worse, it *silently* ignores a missing file
    at the default path. So `.github/.scala-steward.conf` is checked out by the workflow, and `zipxWorkflowCheck`

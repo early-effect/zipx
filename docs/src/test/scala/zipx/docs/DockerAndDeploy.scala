@@ -78,8 +78,8 @@ zipxCapabilities += Capability.docker.withSharedTargets(
 ).copy(extraSteps = ZipxAws.sharedLoginSteps)
 ```
 
-One job, one image, one login per destination. On AWS, `ZipxAws.dockerPublishAll(registries)` is that whole expression
-(see **Packs**).
+One job, one image, OIDC then ECR login per destination. On AWS, `ZipxAws.dockerPublishAll(registries)` is that whole
+expression (see **Packs**).
 """,
       exampleValue {
         DocsRender.job("docker")(

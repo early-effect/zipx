@@ -13,7 +13,7 @@ object CustomCapabilities extends DocSpecSuite:
   def doc = page("Custom capabilities")(
     md"""
 `zipxCapabilities` is append-able: any sbt task becomes a CI stage. Beyond the built-ins you mainly use
-`Capability.once` / `Capability.custom`, or the typed `zipxTasks` / `cmd` helpers from the plugin.
+`Capability.once` / `Capability.steps` / `Capability.custom`, or the typed `zipxTasks` / `cmd` helpers from the plugin.
 """,
     section("Once gates")(
       md"""
@@ -42,6 +42,42 @@ zipxCapabilities += Capability.test.copy(needsCapabilities = List(Fmt))
           yaml.contains("scalafmtCheckAll"),
           yaml.contains("test:"),
           yaml.contains("- fmt"),
+        )
+      ),
+    ),
+    section("Action-only jobs")(
+      md"""
+When the job should run **GitHub Actions only** (no sbt), use `Capability.steps`. It is the same Once topology as
+`Capability.once` (permissions, `needsCapabilities`, gate, condition), but skips JDK / sbt / cache setup and emits no
+command step:
+
+```scala
+val Notify = CapabilityName("notify")
+zipxCapabilities += Capability.steps(
+  name = Notify,
+  steps = _ => List(Step(name = Some("Ping"), run = Some("curl -X POST $$HOOK"))),
+  needsCapabilities = List(Capability.PublishName),
+  permissions = Map("contents" -> "read"),
+)
+```
+""",
+      exampleValue {
+        val notify = CapabilityName("notify")
+        DocsRender.jobs("notify")(
+          Capability.steps(
+            name = notify,
+            steps = _ => List(Step(name = Some("Ping"), run = Some("echo hi"))),
+            needsCapabilities = List(Capability.PublishName),
+          ),
+          Capability.publish,
+        )
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("notify:"),
+          yaml.contains("Ping"),
+          yaml.contains("- publish"),
+          !yaml.contains("actions/setup-java"),
+          !yaml.contains("sbt/setup-sbt"),
         )
       ),
     ),

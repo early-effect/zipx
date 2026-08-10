@@ -163,7 +163,7 @@ still works.
 | You want | Reach for |
 | --- | --- |
 | Just the role, for a non-ECR job | `ZipxAws.oidcLoginSteps` + `ZipxAws.oidcPermissions` + `ZipxAws.registryEnv` |
-| A `docker login` too (pushing with the CLI, not through sbt) | `ZipxAws.ecrLoginSteps` |
+| OIDC plus ECR docker login (including `Docker / publish`) | `ZipxAws.ecrLoginSteps` |
 | One repository rather than a whole account in `AWS_ECR_REGISTRY` | `ZipxAws.imageEnv(registry.image(EcrRepository("team/svc")), role)` |
 | Several registries for one image | `ZipxAws.dockerPublishAll(registries)` |
 | Separate accounts with separate **approvals** | `ZipxAws.registryTargets(…)` via `withTargets` |
@@ -197,9 +197,13 @@ zipxCapabilities += ZipxAws.dockerPublishAll(
         assertTrue(
           yaml.contains("Assume AWS role (OIDC, us)"),
           yaml.contains("Assume AWS role (OIDC, eu)"),
+          yaml.contains("Log in to ECR (us)"),
+          yaml.contains("Log in to ECR (eu)"),
           yaml.contains("role-to-assume: ${{ env.ZIPX_EU_AWS_ROLE_TO_ASSUME }}"),
           yaml.contains("aws-region: ${{ env.ZIPX_EU_AWS_REGION }}"),
+          yaml.contains("registries: ${{ env.ZIPX_US_AWS_ACCOUNT_ID }}"),
           yaml.contains("ZIPX_US_AWS_ROLE_TO_ASSUME: ${{ secrets.US_ROLE }}"),
+          yaml.contains("ZIPX_US_AWS_ACCOUNT_ID:"),
         )
       ),
       md"""

@@ -22,7 +22,7 @@ object PlannerSpec extends ZIOSpecDefault:
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
     participates = _.id == "serviceA",
-    command = n => SbtCommand.module(n, SbtCommand("deploy")),
+    command = n => Some(SbtCommand.module(n, SbtCommand("deploy"))),
     matrixed = false,
     targets = _ => targets,
     scope = CapabilityScope.Graph,
@@ -650,7 +650,7 @@ object PlannerSpec extends ZIOSpecDefault:
         Ordering.DependencyOrdered,
         Gate.Always,
         _ => true,
-        _ => SbtCommand("a"),
+        _ => Some(SbtCommand("a")),
         false,
         needsCapabilities = List(CapabilityName("b")),
       )
@@ -660,7 +660,7 @@ object PlannerSpec extends ZIOSpecDefault:
         Ordering.DependencyOrdered,
         Gate.Always,
         _ => true,
-        _ => SbtCommand("b"),
+        _ => Some(SbtCommand("b")),
         false,
         needsCapabilities = List(CapabilityName("a")),
       )
@@ -1249,9 +1249,9 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("PlanConfig.env is omitted on workflow_call caller jobs") {
       val docs = Capability
-        .once(
+        .steps(
           name = CapabilityName("docs"),
-          command = SbtCommand("true"),
+          steps = _ => Nil,
           phase = Phase.Publish,
           gate = Gate.OnReleaseTag,
         )
@@ -1361,9 +1361,9 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("Once workflowCall job also gets capability condition") {
       val cap = Capability
-        .once(
+        .steps(
           name = CapabilityName("docs"),
-          command = SbtCommand("true"),
+          steps = _ => Nil,
           phase = Phase.Publish,
           gate = Gate.OnReleaseTag,
         )
@@ -1452,7 +1452,7 @@ object PlannerSpec extends ZIOSpecDefault:
         ordering = Ordering.DependencyOrdered,
         gate = Gate.Always,
         participates = _ => false,
-        command = n => SbtCommand.module(n, SbtCommand("nobody")),
+        command = n => Some(SbtCommand.module(n, SbtCommand("nobody"))),
         matrixed = false,
         targets = _ => Nil,
         scope = CapabilityScope.Graph,

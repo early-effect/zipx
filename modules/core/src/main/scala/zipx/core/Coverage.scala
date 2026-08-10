@@ -120,7 +120,7 @@ object Coverage:
       ordering = Ordering.ParallelWithUpstream,
       gate = gate,
       participates = participates,
-      command = n => session(Enable, SbtCommand.module(n, task(n)), SbtCommand.module(n, Report)),
+      command = n => Some(session(Enable, SbtCommand.module(n, task(n)), SbtCommand.module(n, Report))),
       matrixed = false,
       postSteps = if uploadReport then uploadModuleReportSteps() else Steps.empty,
       scope = CapabilityScope.Graph,
