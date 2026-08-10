@@ -88,6 +88,9 @@ your graph.
 - **Graph**: when CI itself needs per-module or per-destination isolation: multi-environment deploys, independent
   approvals/logs/status, per-module Scala matrices, or path-based affected gating at the job level. See
   [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo).
+
+When Graph (or Aggregate/Layer target fan-out) is right but the Actions **UI** is too noisy, see **Matrix collapse**:
+same job parallelism, one expandable matrix node. That is a presentation opt-in, not a fourth execution mode.
 """
     ),
     section("API cheat sheet")(

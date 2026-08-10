@@ -1,7 +1,7 @@
 package zipx.core
 
 /** The cross-published monorepo graph shared by the core tests: a diamond over `api`, one 2.13-only publisher, and
-  * non-publishing services and workers.
+  * non-publishing services and batch modules.
   */
 object Fixtures:
 
@@ -41,8 +41,8 @@ object Fixtures:
         testTask = SbtCommand("testFull"),
       ),
       ModuleNode(ModuleId("serviceD"), dependsOn = List("core", "api"), crossScalaVersions = List(scala3)),
-      ModuleNode(ModuleId("workerA"), dependsOn = List("core"), crossScalaVersions = List(scala3)),
-      ModuleNode(ModuleId("workerB"), dependsOn = List("core"), crossScalaVersions = List(scala3)),
+      ModuleNode(ModuleId("batchA"), dependsOn = List("core"), crossScalaVersions = List(scala3)),
+      ModuleNode(ModuleId("batchB"), dependsOn = List("core"), crossScalaVersions = List(scala3)),
     )
   )
 end Fixtures

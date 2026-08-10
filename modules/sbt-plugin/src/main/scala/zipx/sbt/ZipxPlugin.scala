@@ -256,10 +256,14 @@ object ZipxPlugin extends AutoPlugin:
     val zipxWorkflowName = settingKey[WorkflowName]("Name of the generated GitHub Actions workflow.")
     val zipxWorkflowPath =
       settingKey[String]("Workflow file path relative to the build root (default .github/workflows/ci.yml).")
-    val zipxJavaVersion = settingKey[JdkVersion]("JDK major version for the CI matrix and cache key.")
-    val zipxRunnerOs    = settingKey[RunnerOs]("GitHub Actions runner label (default ubuntu-latest).")
-    val zipxScalaMatrix = settingKey[Boolean]("Expand a per-module Scala matrix over crossScalaVersions.")
-    val zipxCacheEpoch  =
+    val zipxJavaVersion    = settingKey[JdkVersion]("JDK major version for the CI matrix and cache key.")
+    val zipxRunnerOs       = settingKey[RunnerOs]("GitHub Actions runner label (default ubuntu-latest).")
+    val zipxScalaMatrix    = settingKey[Boolean]("Expand a per-module Scala matrix over crossScalaVersions.")
+    val zipxMatrixCollapse =
+      settingKey[Map[CapabilityName, MatrixCollapse]](
+        "Per-capability MatrixCollapse defaults (Off / Strict / Coarse). Capability.withMatrixCollapse overrides. Empty = Off."
+      )
+    val zipxCacheEpoch =
       settingKey[CacheEpoch](
         "LocalDir cache epoch strategy (default CacheEpoch.GitTags). Use CacheEpoch.Fixed(version.value) to bake at generate time."
       )
@@ -379,6 +383,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxJavaVersion              := PlanConfig.DefaultJdkVersion,
     zipxRunnerOs                 := PlanConfig.DefaultRunnerOs,
     zipxScalaMatrix              := true,
+    zipxMatrixCollapse           := Map.empty,
     zipxPushBranches             := Seq("main"),
     zipxReleaseTagPattern        := "v[0-9]+.[0-9]+.[0-9]+",
     zipxWorkflowPath             := ".github/workflows/ci.yml",
@@ -566,6 +571,7 @@ object ZipxPlugin extends AutoPlugin:
     PlanConfig(
       workflowName = read(zipxWorkflowName, PlanConfig.DefaultWorkflowName),
       scalaMatrix = read(zipxScalaMatrix, true),
+      matrixCollapse = read(zipxMatrixCollapse, Map.empty),
       javaVersion = read(zipxJavaVersion, PlanConfig.DefaultJdkVersion),
       runnerOs = read(zipxRunnerOs, PlanConfig.DefaultRunnerOs),
       affected = if read(zipxAffectedOnPR, true) then AffectedMode.AffectedOnPR else AffectedMode.Always,
@@ -668,6 +674,7 @@ object ZipxPlugin extends AutoPlugin:
     val verifyTask   = orFail(typedCommand("zipxTestTask", readBuildSetting(extracted, zipxTestTask, "test")))
     val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
     Steps.rawWarnings(capabilities, cfg).foreach(w => log.warn(s"zipx: $w"))
+    MatrixCollapse.warnings(capabilities, graph, cfg).foreach(w => log.warn(s"zipx: $w"))
   }
 
   private def writeSyncWorkflowIfEnabled: Def.Initialize[Task[Unit]] = Def.task {

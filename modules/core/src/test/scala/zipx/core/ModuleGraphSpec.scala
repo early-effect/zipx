@@ -14,7 +14,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
         idx("api") < idx("clientA"),
         idx("api") < idx("clientB"),
         idx("schema") < idx("legacyClient"),
-        idx("core") < idx("workerA"),
+        idx("core") < idx("batchA"),
         order.toSet == sampleGraph.ids.toSet,
       )
     },
@@ -43,7 +43,7 @@ object ModuleGraphSpec extends ZIOSpecDefault:
         affected.contains("clientB"),
         affected.contains("legacyClient"),
         !affected.contains("core"),
-        !affected.contains("workerA"),
+        !affected.contains("batchA"),
       )
     },
     test("affected closure of a leaf is just itself") {
@@ -156,12 +156,12 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       val g = GraphFixture(
         List(
           ModuleNode(ModuleId("root"), publishes = true),
-          ModuleNode(ModuleId("midA"), dependsOn = List("root")),
-          ModuleNode(ModuleId("midB"), dependsOn = List("root")),
-          ModuleNode(ModuleId("leaf"), dependsOn = List("midA", "midB"), publishes = true),
+          ModuleNode(ModuleId("cedarA"), dependsOn = List("root")),
+          ModuleNode(ModuleId("cedarB"), dependsOn = List("root")),
+          ModuleNode(ModuleId("spruce"), dependsOn = List("cedarA", "cedarB"), publishes = true),
         )
       )
-      assertTrue(g.subsetLayers(_.publishes) == List(List("root"), List("leaf")))
+      assertTrue(g.subsetLayers(_.publishes) == List(List("root"), List("spruce")))
     },
   )
 end ModuleGraphSpec
