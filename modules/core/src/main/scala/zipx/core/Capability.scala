@@ -264,6 +264,10 @@ final case class Capability(
     nodeVersion: Option[NodeVersion] = None,
     workflowCall: Option[WorkflowCall] = None,
     condition: Option[JobCondition] = None,
+    /** When set, overrides [[PlanConfig.matrixCollapse]] for this capability (including explicit
+      * [[MatrixCollapse.Off]]). `None` inherits from the plan allowlist, else Off.
+      */
+    matrixCollapse: Option[MatrixCollapse] = None,
 ):
   def withCondition(condition: JobCondition): Capability =
     copy(condition = Some(condition))
@@ -276,6 +280,10 @@ final case class Capability(
     */
   def andCondition(extra: JobCondition): Capability =
     copy(condition = Some(condition.fold(extra)(_ && extra)))
+
+  /** Opt into (or veto) matrix-collapse for this capability; see [[MatrixCollapse]]. */
+  def withMatrixCollapse(mode: MatrixCollapse): Capability =
+    copy(matrixCollapse = Some(mode))
 
   /** Destinations that share **one** job: [[TargetFanOut.SharedJob]] plus the targets, set together because setting
     * either alone is the mistake. The shape for registries; see [[TargetFanOut]].

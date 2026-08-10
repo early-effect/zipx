@@ -19,16 +19,16 @@ object LayerTargetsSpec extends ZIOSpecDefault:
   /** Three docker waves so within-target `needs` chaining is observable (sample services alone sit in one wave). */
   private val dockerGraph = GraphFixture(
     List(
-      ModuleNode(ModuleId("base"), docker = true, crossScalaVersions = List(Fixtures.scala3)),
+      ModuleNode(ModuleId("maple"), docker = true, crossScalaVersions = List(Fixtures.scala3)),
       ModuleNode(
-        ModuleId("mid"),
-        dependsOn = List("base"),
+        ModuleId("cedar"),
+        dependsOn = List("maple"),
         docker = true,
         crossScalaVersions = List(Fixtures.scala3),
       ),
       ModuleNode(
-        ModuleId("leaf"),
-        dependsOn = List("mid"),
+        ModuleId("spruce"),
+        dependsOn = List("cedar"),
         docker = true,
         crossScalaVersions = List(Fixtures.scala3),
       ),

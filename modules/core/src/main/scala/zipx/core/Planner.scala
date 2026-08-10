@@ -31,29 +31,41 @@ object Planner:
   def layerTargetJobId(capability: Capability, layerIndex: Int, target: Target): JobId =
     capability.name.jobId(s"L$layerIndex", target.name)
 
-  /** Every job id a capability produces, which is how one capability's `needs` names another's jobs. */
-  def allJobIds(capability: Capability, graph: ModuleGraph): List[JobId] =
+  /** Every job id a capability produces, which is how one capability's `needs` names another's jobs.
+    *
+    * When [[MatrixCollapse.effective]] is not [[MatrixCollapse.Off]], returns the collapsed job id(s) the emitter will
+    * produce (eligibility failures still abort [[plan]] before dependents are wired).
+    */
+  def allJobIds(capability: Capability, graph: ModuleGraph, config: PlanConfig = PlanConfig()): List[JobId] =
+    val mode = MatrixCollapse.effective(capability, config)
     capability.scope match
       case CapabilityScope.Once      => List(capability.name.asJobId)
       case CapabilityScope.Aggregate =>
         distinctFannedTargets(capability, graph) match
-          case Nil     => List(capability.name.asJobId)
-          case targets => targets.map(t => aggregateTargetJobId(capability, t))
+          case Nil                             => List(capability.name.asJobId)
+          case _ if mode != MatrixCollapse.Off => List(capability.name.asJobId)
+          case targets                         => targets.map(t => aggregateTargetJobId(capability, t))
       case CapabilityScope.Layer =>
         val layers = graph.subsetLayers(capability.participates)
         distinctFannedTargets(capability, graph) match
-          case Nil     => layers.indices.map(i => layerJobId(capability, i)).toList
-          case targets =>
+          case Nil                             => layers.indices.map(i => layerJobId(capability, i)).toList
+          case _ if mode != MatrixCollapse.Off => layers.indices.map(i => layerJobId(capability, i)).toList
+          case targets                         =>
             (for
               i <- layers.indices
               t <- targets
             yield layerTargetJobId(capability, i, t)).toList
       case CapabilityScope.Graph =>
-        graph.nodes
-          .filter(capability.participates)
-          .flatMap(node => jobIdsForGraph(capability, node))
-          .distinct
-          .sorted
+        mode match
+          case MatrixCollapse.Off =>
+            graph.nodes
+              .filter(capability.participates)
+              .flatMap(node => jobIdsForGraph(capability, node))
+              .distinct
+              .sorted
+          case _ => List(capability.name.asJobId)
+    end match
+  end allJobIds
 
   private def jobIdsForGraph(capability: Capability, node: ModuleNode): List[JobId] =
     fannedTargets(capability, node) match
@@ -329,20 +341,27 @@ object Planner:
     val topoOrder      = graph.topologicalSort
     val orderedCaps    = capabilities.zipWithIndex.sortBy((c, i) => (c.phase.ordinal, i)).map(_._1)
     val capabilityJobs =
-      orderedCaps.flatMap {
-        case c if c.scope == CapabilityScope.Once =>
-          List(onceJob(c, graph, config, byName, usesVerifyGate, affectedGatedNames))
-        case c if c.scope == CapabilityScope.Aggregate =>
-          aggregateJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames)
-        case c if c.scope == CapabilityScope.Layer =>
-          layerJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames)
-        case c =>
-          for
-            moduleId <- topoOrder
-            node     <- graph.get(moduleId).toList
-            if c.participates(node)
-            job <- graphJobsFor(c, node, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames)
-          yield job
+      orderedCaps.flatMap { c =>
+        val mode = MatrixCollapse.effective(c, config)
+        c.scope match
+          case CapabilityScope.Once =>
+            List(onceJob(c, graph, config, byName, usesVerifyGate, affectedGatedNames))
+          case CapabilityScope.Aggregate =>
+            aggregateJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames, mode)
+          case CapabilityScope.Layer =>
+            layerJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames, mode)
+          case CapabilityScope.Graph =>
+            mode match
+              case MatrixCollapse.Off =>
+                for
+                  moduleId <- topoOrder
+                  node     <- graph.get(moduleId).toList
+                  if c.participates(node)
+                  job <- graphJobsFor(c, node, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames)
+                yield job
+              case collapse =>
+                graphMatrixJobs(c, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames, collapse)
+        end match
       }
 
     val leading =
@@ -615,11 +634,12 @@ object Planner:
       capability: Capability,
       graph: ModuleGraph,
       byName: Map[CapabilityName, Capability],
+      config: PlanConfig,
   ): List[JobId] =
     (for
       capName <- capability.needsCapabilities
       dep     <- byName.get(capName).toList
-      id      <- allJobIds(dep, graph)
+      id      <- allJobIds(dep, graph, config)
     yield id).distinct.sorted
 
   private def onceJob(
@@ -631,7 +651,7 @@ object Planner:
       affectedGatedNames: Set[CapabilityName],
   ): (JobId, Job) =
     val releaseCond   = Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
-    val crossNeeds    = crossCapabilityNeeds(capability, graph, byName)
+    val crossNeeds    = crossCapabilityNeeds(capability, graph, byName, config)
     val tolerance     = tolerateSkips(capability, crossNeeds, affectedGatedNames)
     val (needs, base) =
       applyVerifyGate(crossNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
@@ -682,11 +702,12 @@ object Planner:
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
       affectedGatedNames: Set[CapabilityName],
+      mode: MatrixCollapse,
   ): List[(JobId, Job)] =
     val nodes = participants(capability, graph)
     if nodes.isEmpty then Nil
     else
-      val crossNeeds  = crossCapabilityNeeds(capability, graph, byName)
+      val crossNeeds  = crossCapabilityNeeds(capability, graph, byName, config)
       val joined      = joinCommands(capability, nodes)
       val cache       = cacheForCommand(config, joined.isDefined)
       val runner      = capability.runsOn.getOrElse(List(config.runnerOs))
@@ -697,9 +718,6 @@ object Planner:
         applyVerifyGate(crossNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
       val baseCond = andConditions(gatedCond, JobCondition.renderOpt(capability.condition))
 
-      // Shared destinations reach the one job through `destinations` and a prefixed `env:` block; there is no
-      // second job for them to land in. `distinctTargets` rather than the per-node list, since an Aggregate job
-      // already spans every participating module.
       val shared = capability.targetFanOut match
         case TargetFanOut.JobPerTarget => Nil
         case TargetFanOut.SharedJob    => distinctTargets(capability, graph)
@@ -726,6 +744,39 @@ object Planner:
                 commandOverride = joined,
                 jobSuffix = capability.name.asJobId,
                 destinations = shared,
+              ),
+            )
+          )
+        case targets if mode != MatrixCollapse.Off =>
+          MatrixCollapse
+            .targetsAllowSimpleMatrix(targets)
+            .left
+            .foreach(err => sys.error(s"zipx: capability '${capability.name}': $err"))
+          val sharedCond = targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
+          val envBinding =
+            Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("target").render)
+          List(
+            capability.name.asJobId -> Job(
+              name = Some(capability.name),
+              runsOn = runner,
+              needs = baseNeeds,
+              `if` = andConditions(baseCond, sharedCond),
+              environment = envBinding,
+              permissions = ListMap.from(capability.permissions),
+              strategy = Some(Strategy(matrix = ListMap("target" -> targets.map(_.name: String)))),
+              container = capability.container,
+              services = mergeServices(capability, cache),
+              env = mergeEnv(config.env, cache.env, capability.env, MatrixCollapse.collapsedTargetEnv(targets)),
+              steps = stepsFor(
+                capability,
+                nodes.head,
+                targets.headOption,
+                config,
+                hasMatrix = true,
+                cache,
+                commandOverride = joined,
+                jobSuffix = capability.name.asJobId,
+                matrixAxes = Set("target"),
               ),
             )
           )
@@ -765,21 +816,25 @@ object Planner:
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
       affectedGatedNames: Set[CapabilityName],
+      mode: MatrixCollapse,
   ): List[(JobId, Job)] =
     val layers = graph.subsetLayers(capability.participates)
     if layers.isEmpty then Nil
     else
-      val crossNeeds  = crossCapabilityNeeds(capability, graph, byName)
+      val crossNeeds  = crossCapabilityNeeds(capability, graph, byName, config)
       val runner      = capability.runsOn.getOrElse(List(config.runnerOs))
       val releaseCond =
         Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
-      // Only L0 names the cross needs, so only L0 has a skip to tolerate; later waves wait on L0, whose own `if:`
-      // already resolved it.
       val tolerance = tolerateSkips(capability, crossNeeds, affectedGatedNames)
       val shared    = capability.targetFanOut match
         case TargetFanOut.JobPerTarget => Nil
         case TargetFanOut.SharedJob    => distinctTargets(capability, graph)
       val fanned = distinctFannedTargets(capability, graph)
+      if mode != MatrixCollapse.Off && fanned.nonEmpty then
+        MatrixCollapse
+          .targetsAllowSimpleMatrix(fanned)
+          .left
+          .foreach(err => sys.error(s"zipx: capability '${capability.name}': $err"))
 
       layers.zipWithIndex.flatMap { (layerIds, i) =>
         val firstWave  = i == 0
@@ -796,6 +851,8 @@ object Planner:
             targetEnv: Map[String, EnvValue],
             destinations: List[Target],
             prev: List[JobId],
+            strategy: Option[Strategy] = None,
+            matrixAxes: Set[String] = Set.empty,
         ): (JobId, Job) =
           val layerNeeds =
             (prev ++ (if firstWave then crossNeeds else Nil)).distinct.sorted
@@ -812,6 +869,7 @@ object Planner:
             `if` = ifCond,
             environment = environment,
             permissions = ListMap.from(capability.permissions),
+            strategy = strategy,
             container = capability.container,
             services = mergeServices(capability, cache),
             env = mergeEnv(config.env, cache.env, capability.env, targetEnv),
@@ -820,11 +878,12 @@ object Planner:
               layerNodes.head,
               target,
               config,
-              hasMatrix = false,
+              hasMatrix = strategy.isDefined,
               cache,
               commandOverride = joined,
               jobSuffix = id,
               destinations = destinations,
+              matrixAxes = matrixAxes,
             ),
           )
         end waveJob
@@ -842,6 +901,25 @@ object Planner:
                 sharedEnv(shared),
                 shared,
                 prev,
+              )
+            )
+          case targets if mode != MatrixCollapse.Off =>
+            val prev       = if firstWave then Nil else List(layerJobId(capability, i - 1))
+            val sharedCond = targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
+            val envBinding =
+              Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("target").render)
+            List(
+              waveJob(
+                layerJobId(capability, i),
+                s"${capability.name} L$i",
+                targets.headOption,
+                sharedCond,
+                envBinding,
+                MatrixCollapse.collapsedTargetEnv(targets),
+                Nil,
+                prev,
+                strategy = Some(Strategy(matrix = ListMap("target" -> targets.map(_.name: String)))),
+                matrixAxes = Set("target"),
               )
             )
           case targets =>
@@ -862,6 +940,153 @@ object Planner:
       }
     end if
   end layerJobs
+
+  /** One Graph job with `strategy.matrix` over modules (and optionally targets under Coarse). */
+  private def graphMatrixJobs(
+      capability: Capability,
+      graph: ModuleGraph,
+      config: PlanConfig,
+      usesAffected: Boolean,
+      byName: Map[CapabilityName, Capability],
+      usesVerifyGate: Boolean,
+      affectedGatedNames: Set[CapabilityName],
+      mode: MatrixCollapse,
+  ): List[(JobId, Job)] =
+    val nodes = participants(capability, graph)
+    if nodes.isEmpty then Nil
+    else
+      val fannedSample = fannedTargets(capability, nodes.head)
+      val foldTargets  = fannedSample.nonEmpty
+      if foldTargets && mode == MatrixCollapse.Strict then
+        sys.error(
+          s"zipx: capability '${capability.name}' is MatrixCollapse.Strict with JobPerTarget fan-out; " +
+            "Strict collapses the module axis only when targets are empty or SharedJob. Use Coarse for " +
+            "module × target, or SharedJob / no targets for Strict."
+        )
+      if foldTargets then
+        val targetSets = nodes.map(n => capability.targets(n).map(_.name).sorted)
+        if targetSets.distinct.sizeIs > 1 then
+          sys.error(
+            s"zipx: capability '${capability.name}': participating modules have divergent target sets; " +
+              "refuse matrix collapse"
+          )
+        MatrixCollapse
+          .targetsAllowSimpleMatrix(distinctTargets(capability, graph))
+          .left
+          .foreach(err => sys.error(s"zipx: capability '${capability.name}': $err"))
+      end if
+
+      if mode == MatrixCollapse.Strict && MatrixCollapse.hasSameCapInterModuleNeeds(capability, nodes, graph) then
+        sys.error(
+          s"zipx: capability '${capability.name}' is MatrixCollapse.Strict but participating modules have " +
+            "same-capability inter-module needs. Use Coarse to drop those needs, or leave collapse Off."
+        )
+
+      val matrixCommands = nodes.map { n =>
+        capability.command(n) match
+          case None      => None
+          case Some(cmd) =>
+            Some(
+              MatrixCollapse
+                .underMatrixModule(n, cmd)
+                .fold(err => sys.error(s"zipx: capability '${capability.name}': $err"), identity)
+            )
+      }
+      val commandOverride =
+        matrixCommands.distinct match
+          case List(one) => one
+          case other     =>
+            sys.error(
+              s"zipx: capability '${capability.name}': module commands are not isomorphic under matrix.module " +
+                s"(${other.flatten.map(_.text).mkString(" vs ")})"
+            )
+
+      val scalaVersions = nodes.map(_.crossScalaVersions).distinct
+      val scalaAxis     =
+        if capability.matrixed && config.scalaMatrix then
+          scalaVersions match
+            case List(versions) if versions.sizeIs > 1 => Some(versions)
+            case List(_)                               => None
+            case _                                     =>
+              sys.error(
+                s"zipx: capability '${capability.name}': participants have differing crossScalaVersions; " +
+                  "refuse matrix collapse with scalaMatrix"
+              )
+        else None
+
+      val moduleNames                              = nodes.map(_.id: String)
+      val targets                                  = if foldTargets then distinctTargets(capability, graph) else Nil
+      val matrixMap: ListMap[String, List[String]] =
+        ListMap("module" -> moduleNames) ++
+          (if targets.nonEmpty then ListMap("target" -> targets.map(_.name: String)) else ListMap.empty) ++
+          scalaAxis.fold(ListMap.empty[String, List[String]])(v => ListMap("scala" -> v))
+
+      val crossNeeds =
+        for
+          capName <- capability.needsCapabilities
+          dep     <- byName.get(capName).toList
+          id      <- allJobIds(dep, graph, config)
+        yield id
+
+      val gatedOnAffected = usesAffected && affectedGatedPhase(capability.phase, config)
+      val rawNeeds        =
+        (crossNeeds ++ (if gatedOnAffected then List(affectedJobId) else Nil)).distinct.sorted
+      val cache        = cacheForCommand(config, commandOverride.isDefined)
+      val guardedNeeds = rawNeeds.filterNot(id => id == affectedJobId || id == verifyGateJobId)
+      val skipTolerant = dependsOnSkippable(capability, affectedGatedNames)
+      val releaseGate  =
+        Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
+      val affectedGate =
+        Option.when(gatedOnAffected)(
+          Expr.group(affectedContainsMatrixModule || affectedContainsAll).unwrapped
+        )
+      val tolerance =
+        if gatedOnAffected || skipTolerant then skipTolerantClauses(guardedNeeds) else Nil
+      val clauses        = tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ tolerance.drop(1)
+      val baseCond       = if clauses.isEmpty then None else Some(clauses.mkString(" && "))
+      val (needs, gated) =
+        if gatedOnAffected then applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate = false)
+        else applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
+      val targetCond =
+        targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
+      val cond      = andConditions(andConditions(gated, JobCondition.renderOpt(capability.condition)), targetCond)
+      val runner    = capability.runsOn.getOrElse(List(config.runnerOs))
+      val shared    = sharedTargets(capability, nodes.head)
+      val targetEnv =
+        if targets.nonEmpty then MatrixCollapse.collapsedTargetEnv(targets)
+        else sharedEnv(shared)
+      val envBinding =
+        Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("target").render)
+      val axes = matrixMap.keySet
+
+      List(
+        capability.name.asJobId -> Job(
+          name = Some(capability.name),
+          runsOn = runner,
+          needs = needs,
+          `if` = cond,
+          environment = envBinding,
+          permissions = ListMap.from(capability.permissions),
+          strategy = Some(Strategy(matrix = matrixMap)),
+          container = capability.container,
+          services = mergeServices(capability, cache),
+          env = mergeEnv(config.env, cache.env, capability.env, targetEnv),
+          steps = stepsFor(
+            capability,
+            nodes.head,
+            targets.headOption,
+            config,
+            hasMatrix = true,
+            cache,
+            commandOverride = commandOverride,
+            jobSuffix = capability.name.asJobId,
+            destinations = shared,
+            matrixAxes = axes,
+          ),
+        )
+      )
+    end if
+  end graphMatrixJobs
 
   private def graphJobsFor(
       capability: Capability,
@@ -892,8 +1117,10 @@ object Planner:
         id      <-
           dep.scope match
             case CapabilityScope.Graph =>
-              if dep.participates(node) then jobIdsForGraph(dep, node) else Nil
-            case _ => allJobIds(dep, graph)
+              if MatrixCollapse.effective(dep, config) != MatrixCollapse.Off then allJobIds(dep, graph, config)
+              else if dep.participates(node) then jobIdsForGraph(dep, node)
+              else Nil
+            case _ => allJobIds(dep, graph, config)
       yield id
 
     val gatedOnAffected = usesAffected && affectedGatedPhase(capability.phase, config)
@@ -1097,6 +1324,13 @@ object Planner:
     */
   private val affectedContainsAll: Expr = affectedContains(ExprLiteral("all"))
 
+  /** Affected membership for a Graph matrix-collapsed job: `contains(..., matrix.module)`. */
+  private val affectedContainsMatrixModule: Expr =
+    Expr.contains(
+      Expr.fromJson(Expr.JobOutput(affectedJobId, OutputName("modules"))),
+      Expr.matrix("module"),
+    )
+
   /** [[Expr.lit]] over text built here from validated parts: a [[WorkflowName]], a [[RunnerOs]], a [[JdkVersion]], a
     * job id, and the punctuation joining them. Every one of those forbids the control characters [[ShText]] rejects,
     * which is what makes this total.
@@ -1156,6 +1390,7 @@ object Planner:
       commandOverride: Option[SbtCommand],
       jobSuffix: JobId,
       destinations: List[Target] = Nil,
+      matrixAxes: Set[String] = Set.empty,
   ): List[Step] =
     val command  = commandOverride.orElse(capability.command(node))
     val ctx      = StepContext(node, target, hasMatrix, config.actions, destinations)
@@ -1165,7 +1400,10 @@ object Planner:
       case None =>
         checkout ++ capability.extraSteps(ctx) ++ capability.postSteps(ctx)
       case Some(cmd) =>
-        val onMatrixLeg = if hasMatrix then underMatrixScala else identity[SbtCommand]
+        val onMatrixLeg =
+          if matrixAxes.contains("scala") || (hasMatrix && matrixAxes.isEmpty && capability.matrixed) then
+            underMatrixScala
+          else identity[SbtCommand]
         val commandStep =
           if capability.phase == Phase.Verify then verifyCommandStep(capability.name, onMatrixLeg, cmd, config)
           else Step.run(Script(onMatrixLeg(cmd).render)).named(capability.name).build

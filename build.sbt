@@ -48,7 +48,7 @@ val commonSettings = Seq(
 lazy val zipxWriteVersion = taskKey[File]("Write the build version to target/zipx-version.txt for the example check")
 
 lazy val root = (project in file("."))
-  .aggregate(shell, workflow, core, central, aws, plugin, docs)
+  .aggregate(shell, workflow, core, central, aws, plugin, docs, docsJS)
   .settings(
     name           := "zipx",
     publish / skip := true,
@@ -203,6 +203,30 @@ lazy val it = project
 lazy val specularPreview =
   taskKey[Unit]("Build specularSite then serve with sbt-reload (prefer alias: docsPreview)")
 
+/** Scala.js docs client: remounts `.interactive` ascent / mermoid examples after SSR. */
+lazy val docsJS = project
+  .in(file("docs-js"))
+  .enablePlugins(ScalaJSPlugin)
+  .settings(
+    name           := "zipx-docsJS",
+    publish / skip := true,
+    scalacOptions ++= commonScalacOptions :+ "-language:implicitConversions",
+    scalaJSUseMainModuleInitializer := true,
+    scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
+    Compile / mainClass := Some("zipx.docs.ClientMain"),
+    Compile / unmanagedSourceDirectories += (LocalProject("docs") / baseDirectory).value / "shared" / "scala",
+    libraryDependencies ++= Seq(
+      // sbt 2 + ScalaJSPlugin: `%%` already appends `_sjs1` (no `%%%`).
+      // specular-site is JVM-only; the client needs core + mermoid + ascent-js.
+      "rocks.earlyeffect" %% "specular-core"    % specularVersion,
+      "rocks.earlyeffect" %% "specular-mermoid" % specularVersion,
+      "rocks.earlyeffect" %% "ascent-js"        % ascentVersion,
+      "rocks.earlyeffect" %% "ascent-css"       % ascentVersion,
+      "dev.zio"           %% "zio"              % zioVersion,
+      "dev.zio"           %% "zio-test"         % zioVersion,
+    ),
+  )
+
 lazy val docs = project
   .in(file("docs"))
   .dependsOn(core, central, aws)
@@ -211,12 +235,16 @@ lazy val docs = project
     name            := "zipx-docs",
     publish / skip  := true,
     publishArtifact := false, // also honored; prefer publish/skip for opt-out
-    scalacOptions ++= commonScalacOptions,
+    scalacOptions ++= commonScalacOptions :+ "-language:implicitConversions",
+    Test / unmanagedSourceDirectories += baseDirectory.value / "shared" / "scala",
     libraryDependencies ++= Seq(
       "rocks.earlyeffect" %% "specular-core"           % specularVersion % Test,
       "rocks.earlyeffect" %% "specular-zio-test"       % specularVersion % Test,
       "rocks.earlyeffect" %% "specular-site"           % specularVersion % Test,
+      "rocks.earlyeffect" %% "specular-mermoid"        % specularVersion % Test,
       "rocks.earlyeffect" %% "early-effect-docs-theme" % specularVersion % Test,
+      "rocks.earlyeffect" %% "ascent-core"             % ascentVersion   % Test,
+      "rocks.earlyeffect" %% "ascent-html"             % ascentVersion   % Test,
     ) ++ zioDeps,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     Test / mainClass       := Some("specular.site.DocsServe"),
@@ -237,6 +265,18 @@ lazy val docs = project
     specularMetaProject   := Some(LocalProject("plugin")),
     specularArtifactKind  := "plugin",
     specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
+    specularJsLink := Def.uncached {
+      (docsJS / Compile / fastLinkJS).value
+      val outDir = (docsJS / Compile / fastLinkJSOutput).value
+      val mainJs = outDir / "main.js"
+      if !mainJs.exists then
+        sys.error(
+          s"Expected $mainJs after fastLinkJS; directory contains: " +
+            Option(outDir.list).toSeq.flatten.mkString(", ")
+        )
+      val marker = (ThisBuild / baseDirectory).value / "target" / "specular-client-js.path"
+      IO.write(marker, mainJs.getAbsolutePath)
+    },
     // Docs-only (workflow_dispatch) builds are dynver `-ci`; don't advertise that as a Central coord.
     // Empty string → Specular uses build version (clean v* tags).
     specularDisplayVersion := {

@@ -302,10 +302,10 @@ zipxAffectedDeploy  := true   // and one destination reconciled, not all of them
 
 ```mermaid
 flowchart TD
-  Aff([affected · serviceA only]) --> D1[docker-serviceA]
-  Aff --> D2[docker-serviceB · skipped]
-  D1 --> Dep1([deploy-serviceA-prod])
-  D2 --> Dep2([deploy-serviceB-prod · skipped])
+  Aff([affected · api only]) --> D1[docker-api]
+  Aff --> D2[docker-web · skipped]
+  D1 --> Dep1([deploy-api-prod])
+  D2 --> Dep2([deploy-web-prod · skipped])
   class Aff,D1,Dep1 happy
   class D2,Dep2 warn
 ```

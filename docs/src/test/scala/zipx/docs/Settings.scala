@@ -23,6 +23,7 @@ task settings below are checked at `zipxWorkflowGenerate` instead, for a reason 
 | `zipxJavaVersion` | `JdkVersion` | `"21"` | JDK for setup-java and cache key |
 | `zipxRunnerOs` | `RunnerOs` | `"ubuntu-latest"` | default runner |
 | `zipxScalaMatrix` | `Boolean` | `true` | per-module Scala matrix (**Graph** test only) |
+| `zipxMatrixCollapse` | `Map[CapabilityName, MatrixCollapse]` | empty | per-capability MatrixCollapse defaults (**Off** / **Strict** / **Coarse**); `Capability.withMatrixCollapse` overrides. See **Matrix collapse**. |
 | `zipxActions` | `ActionPins` | jar defaults | one-off `uses:` override (**prefer pin file**; see **Action pins**) |
 | `zipxActionsPath` | `String` | `.github/zipx/action-pins.yml` | pin file path (`""` disables file loading) |
 | `zipxDependabotSync` | `Boolean` | `false` | also generate `.github/workflows/zipx-action-pins-sync.yml` |

@@ -133,6 +133,9 @@ end PlanText
   * @param cancelSupersededRuns
   *   emits workflow-level `concurrency` keyed on ref, so pushing again to a PR cancels the running build. Release-tag
   *   runs are never cancelled: the group folds in the ref, and a half-cancelled publish is worse than a wasted runner.
+  * @param matrixCollapse
+  *   per-capability defaults for [[MatrixCollapse]]; capability [[Capability.matrixCollapse]] overrides these. Empty
+  *   means Off everywhere unless a capability opts in.
   */
 final case class PlanConfig(
     workflowName: WorkflowName = PlanConfig.DefaultWorkflowName,
@@ -158,6 +161,7 @@ final case class PlanConfig(
     verifyClean: VerifyClean = VerifyClean.None,
     verifyCleanLabel: Option[ExprLiteral] = Some(PlanConfig.DefaultVerifyCleanLabel),
     cancelSupersededRuns: Boolean = true,
+    matrixCollapse: Map[CapabilityName, MatrixCollapse] = Map.empty,
 )
 
 object PlanConfig:
