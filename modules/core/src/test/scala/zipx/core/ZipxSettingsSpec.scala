@@ -1,0 +1,58 @@
+package zipx.core
+
+import zio.test.*
+
+object ZipxSettingsSpec extends ZIOSpecDefault:
+
+  def spec = suite("ZipxSettings")(
+    test("catalog names are unique") {
+      assertTrue(ZipxSettings.names.size == ZipxSettings.all.size)
+    },
+    test("catalog covers keys that previously drifted from the Settings docs") {
+      assertTrue(
+        ZipxSettings.names.contains("zipxAffectedDeploy"),
+        ZipxSettings.names.contains("zipxStewardGrouping"),
+        ZipxSettings.names.contains("zipxMatrixCollapse"),
+      )
+    },
+    test("build / project / task partitions cover every entry exactly once") {
+      val partitioned = ZipxSettings.buildLevel ++ ZipxSettings.projectLevel ++ ZipxSettings.tasks
+      assertTrue(
+        partitioned.map(_.name: String).toSet == ZipxSettings.names,
+        partitioned.size == ZipxSettings.all.size,
+      )
+    },
+    test("typed defaults keep a value; derived defaults are docs-only summaries") {
+      val (values, derived) = ZipxSettings.all.partitionMap {
+        case d if d.kind == SettingKind.Setting =>
+          d.default match
+            case SettingDefault.Value(_, _) => Left(d.name: String)
+            case SettingDefault.Derived(_)  => Right(d.name: String)
+        case d => Right(d.name: String) // tasks / inputs use Derived("—")
+      }
+      assertTrue(
+        values.contains("zipxCapabilities"),
+        values.contains("zipxCacheRehydrateTask"),
+        derived.contains("zipxPublish"),
+        derived.contains("zipxDocker"),
+        derived.contains("zipxCiRelevant"),
+        derived.contains("zipxWorkflowGenerate"),
+      )
+    },
+    test("SbtCommand settings document the shared defaults") {
+      assertTrue(
+        ZipxSettings.cacheRehydrateTask.default match
+          case SettingDefault.Value(v, _) => v == PlanConfig.DefaultCacheRehydrateTask
+          case _                          => false
+        ,
+        ZipxSettings.testTask.default match
+          case SettingDefault.Value(v, _) => v == ModuleNode.DefaultTestTask
+          case _                          => false
+        ,
+        ZipxSettings.publishTask.default match
+          case SettingDefault.Value(v, _) => v == ModuleNode.DefaultPublishTask
+          case _                          => false,
+      )
+    },
+  )
+end ZipxSettingsSpec

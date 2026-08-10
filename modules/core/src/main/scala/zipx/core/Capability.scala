@@ -31,16 +31,17 @@ object CapabilityName extends Subtype[String]:
   extension (name: CapabilityName)
     /** This name as a job id in its own right, which is what a [[CapabilityScope.Once]] capability's job is called.
       *
-      * Total, and `unsafeMake` only because neotype cannot see it: [[JobId]] validates the same two things this type
-      * does, [[Names.ActionsId]] and non-empty. That is not a coincidence, it is *why* a capability name is
-      * constrained.
+      * Total, and `unsafeMake` only because neotype cannot see it: [[zipx.workflow.JobId]] validates the same two
+      * things this type does, [[zipx.workflow.Names.ActionsId]] and non-empty. That is not a coincidence, it is *why* a
+      * capability name is constrained.
       */
     def asJobId: JobId = JobId.unsafeMake(name)
 
     /** This name joined with the segments that distinguish one of its jobs from another, `-` between each.
       *
-      * Also total: `-` is in [[Names.ActionsId]]'s trailing character set, and every caller passes segments drawn from
-      * it, a [[ModuleId]], a [[TargetName]] or `L<index>`. Restricted to this module so that stays true by inspection.
+      * Also total: `-` is in [[zipx.workflow.Names.ActionsId]]'s trailing character set, and every caller passes
+      * segments drawn from it, a [[ModuleId]], a [[TargetName]] or `L<index>`. Restricted to this module so that stays
+      * true by inspection.
       */
     private[core] def jobId(rest: String*): JobId = JobId.unsafeMake((name +: rest).mkString("-"))
   end extension
@@ -76,8 +77,8 @@ final case class StepContext(
     destinations: List[Target] = Nil,
 )
 
-/** Pipeline position, in run order. [[Verify]] jobs are affected-gated, [[Publish]] jobs only under
-  * [[PlanConfig.affectedPublish]], and [[Deploy]] jobs only under [[PlanConfig.affectedDeploy]]. Also fixes
+/** Pipeline position, in run order. [[Phase.Verify]] jobs are affected-gated, [[Phase.Publish]] jobs only under
+  * [[PlanConfig.affectedPublish]], and [[Phase.Deploy]] jobs only under [[PlanConfig.affectedDeploy]]. Also fixes
   * top-to-bottom job order in the generated YAML.
   */
 enum Phase:
@@ -85,9 +86,9 @@ enum Phase:
 
 /** How a capability's per-module ([[CapabilityScope.Graph]]) jobs are wired to each other.
   *
-  *   - [[ParallelWithUpstream]] needs the same-capability jobs of a module's *direct* upstreams, so everything runs as
-  *     parallel as the dependency graph allows.
-  *   - [[DependencyOrdered]] needs the nearest *participating* ancestors, contracting away non-participating
+  *   - [[Ordering.ParallelWithUpstream]] needs the same-capability jobs of a module's *direct* upstreams, so everything
+  *     runs as parallel as the dependency graph allows.
+  *   - [[Ordering.DependencyOrdered]] needs the nearest *participating* ancestors, contracting away non-participating
   *     intermediates, which is what makes artifacts publish in true dependency order.
   */
 enum Ordering:
@@ -113,24 +114,26 @@ enum Gate:
 
 /** How a capability turns participating modules into jobs, the main CI-cost lever.
   *
-  *   - [[Aggregate]] joins module commands with `;` into one sbt session, so the fewest JVM starts. One job per stage,
-  *     or one per [[Target]] for deploy.
-  *   - [[Layer]] is one job per toposort wave, commands joined within a wave, waves chained by `needs`.
-  *   - [[Graph]] is one job per participating module (times matrix and targets), and the only scope affected-gating can
-  *     narrow: an Aggregate job runs one sbt session over every module, so there is nothing in it to skip.
-  *   - [[Once]] is a single build-wide job, independent of module tasks. Its job id is the capability name. The command
-  *     may be absent ([[Capability.steps]]), in which case the job is action-only.
+  *   - [[CapabilityScope.Aggregate]] joins module commands with `;` into one sbt session, so the fewest JVM starts. One
+  *     job per stage, or one per [[Target]] for deploy.
+  *   - [[CapabilityScope.Layer]] is one job per toposort wave, commands joined within a wave, waves chained by `needs`.
+  *   - [[CapabilityScope.Graph]] is one job per participating module (times matrix and targets), and the only scope
+  *     affected-gating can narrow: an Aggregate job runs one sbt session over every module, so there is nothing in it
+  *     to skip.
+  *   - [[CapabilityScope.Once]] is a single build-wide job, independent of module tasks. Its job id is the capability
+  *     name. The command may be absent ([[Capability.steps]]), in which case the job is action-only.
   */
 enum CapabilityScope:
   case Aggregate, Layer, Graph, Once
 
 /** Whether a capability's [[Target]]s each get a job, or all share one.
   *
-  *   - [[JobPerTarget]], the default, is what a deploy wants: separate GitHub Environments, separate approvals,
-  *     separate `if:`. One job per (module × target).
-  *   - [[SharedJob]] is what a *registry* wants: sbt-native-packager's `Docker / publish` builds the image once and
-  *     then pushes every `dockerAliases` entry, so N registries is naturally one job. Job ids are unchanged from a
-  *     capability with no targets at all, and each destination's `env` lands under a [[Target.envPrefix]]-prefixed key.
+  *   - [[TargetFanOut.JobPerTarget]], the default, is what a deploy wants: separate GitHub Environments, separate
+  *     approvals, separate `if:`. One job per (module × target).
+  *   - [[TargetFanOut.SharedJob]] is what a *registry* wants: sbt-native-packager's `Docker / publish` builds the image
+  *     once and then pushes every `dockerAliases` entry, so N registries is naturally one job. Job ids are unchanged
+  *     from a capability with no targets at all, and each destination's `env` lands under a
+  *     [[Target.envPrefix]]-prefixed key.
   *
   * The distinction is a cost, not a preference: `JobPerTarget` over 6 registries and 8 images is 48 jobs each
   * rebuilding the same image, where `SharedJob` is 8, and only the second guarantees every registry holds identical
@@ -169,7 +172,7 @@ final case class Target(
     * turned into `_`, because a [[TargetName]] may contain `-` and an env name may not.
     *
     * The fixed `ZIPX_` is what makes [[envName]] total rather than an `Either`. Without it a target legitimately named
-    * `github` would derive `GITHUB_…`, which [[EnvName]] refuses because GitHub reserves that namespace.
+    * `github` would derive `GITHUB_…`, which [[zipx.workflow.EnvName]] refuses because GitHub reserves that namespace.
     */
   def envPrefix: String = s"ZIPX_${name.toUpperCase.replace('-', '_')}"
 
@@ -179,7 +182,8 @@ final case class Target(
     */
   def envKey(key: String): String = s"${envPrefix}_$key"
 
-  /** [[envKey]] as an [[EnvName]], for a step building an `${{ env.… }}` reference to one destination's value.
+  /** [[envKey]] as an [[zipx.workflow.EnvName]], for a step building an `${{ env.… }}` reference to one destination's
+    * value.
     *
     * Total, and `unsafeMake` only because neotype cannot see it: [[envPrefix]] is `Z`-initial and drawn from
     * `[A-Za-z0-9_]` (a [[TargetName]]'s character set with `-` mapped to `_`), and `key` is already an `EnvName`, so

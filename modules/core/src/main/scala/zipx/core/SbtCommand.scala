@@ -9,11 +9,11 @@ import zipx.workflow.Expr
 
 /** An sbt command a job runs, and whether zipx built its structure or a caller supplied it.
   *
-  * Two cases rather than one, for the same reason [[zipx.shell.Command]] has a `Raw` case: the text rules hold either
-  * way, so both are safe to render, but *provenance* is what the generate-time warning needs. A command zipx assembled
-  * from a module id and a task cannot be misspelled; command text zipx was handed can be, and a typo in `api/tets` is a
-  * failing CI job rather than a compile error. [[rawFragments]] is how that reaches [[zipx.core.Steps.rawWarnings]],
-  * and [[zipx.shell.Command.Raw]] is the model it follows.
+  * Two cases rather than one, for the same reason [[zipx.shell.Command]] has a [[zipx.shell.Raw]] case: the text rules
+  * hold either way, so both are safe to render, but *provenance* is what the generate-time warning needs. A command
+  * zipx assembled from a module id and a task cannot be misspelled; command text zipx was handed can be, and a typo in
+  * `api/tets` is a failing CI job rather than a compile error. [[rawFragments]] is how that reaches
+  * [[zipx.core.Steps.rawWarnings]], and [[zipx.shell.Raw]] is the model it follows.
   */
 enum SbtCommand:
 
