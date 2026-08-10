@@ -118,8 +118,8 @@ enum Gate:
   *   - [[Layer]] is one job per toposort wave, commands joined within a wave, waves chained by `needs`.
   *   - [[Graph]] is one job per participating module (times matrix and targets), and the only scope affected-gating can
   *     narrow: an Aggregate job runs one sbt session over every module, so there is nothing in it to skip.
-  *   - [[Once]] is a single build-wide job running a fixed command, independent of module tasks. Its job id is the
-  *     capability name.
+  *   - [[Once]] is a single build-wide job, independent of module tasks. Its job id is the capability name. The command
+  *     may be absent ([[Capability.steps]]), in which case the job is action-only.
   */
 enum CapabilityScope:
   case Aggregate, Layer, Graph, Once
@@ -143,9 +143,10 @@ enum TargetFanOut:
   case JobPerTarget, SharedJob
 
 /** A destination a capability fans out over, fully resolved at generate time. Under [[TargetFanOut.JobPerTarget]]: one
-  * job per (module × target) with [[CapabilityScope.Graph]], one job per distinct target name with an
-  * [[CapabilityScope.Aggregate]] deploy. Under [[TargetFanOut.SharedJob]]: one job for all of them. Targets never merge
-  * across names, so GitHub Environments and per-destination `env` stay independent.
+  * job per (module × target) with [[CapabilityScope.Graph]], one job per distinct target name with
+  * [[CapabilityScope.Aggregate]], and one job per (toposort wave × target) with [[CapabilityScope.Layer]]. Under
+  * [[TargetFanOut.SharedJob]]: destinations share each Aggregate/Layer/Graph job. Targets never merge across names, so
+  * GitHub Environments and per-destination `env` stay independent.
   *
   * @param name
   *   the job-id suffix under [[TargetFanOut.JobPerTarget]], and the `env:`-key prefix under [[TargetFanOut.SharedJob]].
@@ -191,7 +192,8 @@ final case class Target(
 
 end Target
 
-/** A pipeline stage that runs one or more sbt invocations, shaped by [[CapabilityScope]].
+/** A pipeline stage shaped by [[CapabilityScope]]: usually one or more sbt invocations, or action-only steps when
+  * [[command]] is empty.
   *
   * This is what keeps zipx registry- and tool-agnostic: test, library publish and docker publish are all `Capability`
   * values, and any sbt task becomes a stage. The planner derives `needs`, matrix and gating from the graph and scope.
@@ -203,7 +205,8 @@ end Target
   * @param command
   *   the sbt command for one participating module, as an [[SbtCommand]] rather than a `String`: the combinators on its
   *   companion build the `<module>/<task>` and `+<module>/<task>` shapes, and `SbtCommand.unchecked` takes command text
-  *   zipx did not build. Aggregate and Layer join these with `;`.
+  *   zipx did not build. Aggregate and Layer join these with `;`. `None` means an action-only job: checkout plus
+  *   [[extraSteps]] / [[postSteps]], with no JDK, sbt, cache, or command step.
   * @param matrixed
   *   expands a Graph job over Scala versions. Aggregate and Layer are never matrixed.
   * @param targets
@@ -245,7 +248,7 @@ final case class Capability(
     ordering: Ordering,
     gate: Gate,
     participates: ModuleNode => Boolean,
-    command: ModuleNode => SbtCommand,
+    command: ModuleNode => Option[SbtCommand],
     matrixed: Boolean,
     targets: ModuleNode => List[Target] = _ => Nil,
     targetFanOut: TargetFanOut = TargetFanOut.JobPerTarget,
@@ -339,7 +342,7 @@ object Capability:
     ordering = Ordering.ParallelWithUpstream,
     gate = Gate.Always,
     participates = _.ciRelevant,
-    command = n => SbtCommand.module(n, n.testTask),
+    command = n => Some(SbtCommand.module(n, n.testTask)),
     matrixed = matrixed,
     scope = scope,
   )
@@ -350,7 +353,7 @@ object Capability:
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
     participates = _.publishes,
-    command = n => SbtCommand.crossModule(n, n.publishTask),
+    command = n => Some(SbtCommand.crossModule(n, n.publishTask)),
     matrixed = false,
     scope = scope,
   )
@@ -361,7 +364,7 @@ object Capability:
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
     participates = _.docker,
-    command = n => SbtCommand.module(n, dockerPublish),
+    command = n => Some(SbtCommand.module(n, dockerPublish)),
     matrixed = false,
     scope = scope,
   )
@@ -454,7 +457,7 @@ object Capability:
       ordering = Ordering.DependencyOrdered,
       gate = gate,
       participates = participates,
-      command = command,
+      command = n => Some(command(n)),
       matrixed = false,
       targets = targets,
       needsCapabilities = needsCapabilities,
@@ -494,7 +497,7 @@ object Capability:
       ordering = ordering,
       gate = gate,
       participates = participates,
-      command = command,
+      command = n => Some(command(n)),
       matrixed = matrixed,
       targets = targets,
       targetFanOut = targetFanOut,
@@ -514,7 +517,8 @@ object Capability:
     * `needsCapabilities` works in both directions: others name this capability to depend on it, and naming them here
     * makes this job wait on every one of their jobs.
     *
-    * For a reusable-workflow call with no local steps, `.copy` in a [[Capability.workflowCall]]; see `ZipxDocs`.
+    * For a reusable-workflow call with no local steps, use [[steps]] (or `.copy(command = _ => None)` plus a
+    * [[Capability.workflowCall]]); see `ZipxDocs`.
     */
   def once(
       name: CapabilityName,
@@ -537,12 +541,49 @@ object Capability:
       ordering = Ordering.ParallelWithUpstream,
       gate = gate,
       participates = _ => true,
-      command = _ => command,
+      command = _ => Some(command),
       matrixed = false,
       needsCapabilities = needsCapabilities,
       permissions = permissions,
       runsOn = runsOn,
       extraSteps = extraSteps,
+      postSteps = postSteps,
+      scope = CapabilityScope.Once,
+      env = env,
+      container = container,
+      services = services,
+      condition = condition,
+    )
+
+  /** A single build-wide action-only job: checkout plus the given steps, with no sbt command and no JDK / sbt / cache
+    * toolchain. Same topology knobs as [[once]].
+    */
+  def steps(
+      name: CapabilityName,
+      steps: StepContext => List[Step],
+      phase: Phase = Phase.Verify,
+      gate: Gate = Gate.Always,
+      runsOn: Option[List[String]] = None,
+      postSteps: StepContext => List[Step] = _ => Nil,
+      env: Map[String, EnvValue] = Map.empty,
+      needsCapabilities: List[CapabilityName] = Nil,
+      permissions: Map[String, String] = Map.empty,
+      container: Option[String] = None,
+      services: Map[String, JobService] = Map.empty,
+      condition: Option[JobCondition] = None,
+  ): Capability =
+    Capability(
+      name = name,
+      phase = phase,
+      ordering = Ordering.ParallelWithUpstream,
+      gate = gate,
+      participates = _ => true,
+      command = _ => None,
+      matrixed = false,
+      needsCapabilities = needsCapabilities,
+      permissions = permissions,
+      runsOn = runsOn,
+      extraSteps = steps,
       postSteps = postSteps,
       scope = CapabilityScope.Once,
       env = env,

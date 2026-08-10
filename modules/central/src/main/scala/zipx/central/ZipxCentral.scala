@@ -105,7 +105,7 @@ object ZipxCentral:
   /** Pair with [[releaseOnce]]: this publishes per module, that merges the staging trees and releases once. */
   val publishSigned: Capability =
     Capability.publishGraph.copy(
-      command = n => SbtCommand.crossModule(n, SbtCommand("publishSigned")),
+      command = n => Some(SbtCommand.crossModule(n, SbtCommand("publishSigned"))),
       env = signingEnv,
       extraSteps = gpgImportSteps,
       postSteps = uploadStagingSteps,

@@ -27,6 +27,10 @@ object Planner:
   def layerJobId(capability: Capability, layerIndex: Int): JobId =
     capability.name.jobId(s"L$layerIndex")
 
+  /** One Layer job per toposort wave and target under [[TargetFanOut.JobPerTarget]]. */
+  def layerTargetJobId(capability: Capability, layerIndex: Int, target: Target): JobId =
+    capability.name.jobId(s"L$layerIndex", target.name)
+
   /** Every job id a capability produces, which is how one capability's `needs` names another's jobs. */
   def allJobIds(capability: Capability, graph: ModuleGraph): List[JobId] =
     capability.scope match
@@ -37,7 +41,13 @@ object Planner:
           case targets => targets.map(t => aggregateTargetJobId(capability, t))
       case CapabilityScope.Layer =>
         val layers = graph.subsetLayers(capability.participates)
-        layers.indices.map(i => layerJobId(capability, i)).toList
+        distinctFannedTargets(capability, graph) match
+          case Nil     => layers.indices.map(i => layerJobId(capability, i)).toList
+          case targets =>
+            (for
+              i <- layers.indices
+              t <- targets
+            yield layerTargetJobId(capability, i, t)).toList
       case CapabilityScope.Graph =>
         graph.nodes
           .filter(capability.participates)
@@ -88,11 +98,15 @@ object Planner:
   private def participants(capability: Capability, graph: ModuleGraph): List[ModuleNode] =
     graph.topologicalSort.flatMap(graph.get).filter(capability.participates)
 
-  /** One sbt session per job, the point of the Aggregate and Layer scopes. `None` only for no participating nodes,
-    * which both callers have already excluded, and `joinCommands` is called with the nodes they kept.
+  /** One sbt session per job, the point of the Aggregate and Layer scopes. `None` when there are no commands to join
+    * (no participating nodes, or every node's command is action-only).
     */
   private def joinCommands(capability: Capability, nodes: List[ModuleNode]): Option[SbtCommand] =
-    SbtCommand.join(nodes.map(capability.command))
+    SbtCommand.join(nodes.flatMap(n => capability.command(n).toList))
+
+  /** Cache sidecar / env only when the job will run sbt; action-only jobs get an empty contribution. */
+  private def cacheForCommand(config: PlanConfig, hasCommand: Boolean): CacheContribution =
+    if hasCommand then cacheContribution(config) else CacheContribution()
 
   /** Rejects a `needsCapabilities` cycle, [[Gate.AffectedOnly]] (an unimplemented seam: honoring it silently as
     * [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run), a per-destination field a
@@ -635,7 +649,7 @@ object Planner:
           `with` = ListMap.from(call.withInputs),
         )
       case None =>
-        val cache = cacheContribution(config)
+        val cache = cacheForCommand(config, capability.command(syntheticNode).isDefined)
         capability.name.asJobId -> Job(
           name = Some(capability.name),
           runsOn = capability.runsOn.getOrElse(List(config.runnerOs)),
@@ -673,7 +687,8 @@ object Planner:
     if nodes.isEmpty then Nil
     else
       val crossNeeds  = crossCapabilityNeeds(capability, graph, byName)
-      val cache       = cacheContribution(config)
+      val joined      = joinCommands(capability, nodes)
+      val cache       = cacheForCommand(config, joined.isDefined)
       val runner      = capability.runsOn.getOrElse(List(config.runnerOs))
       val releaseCond =
         Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
@@ -708,7 +723,7 @@ object Planner:
                 config,
                 hasMatrix = false,
                 cache,
-                commandOverride = joinCommands(capability, nodes),
+                commandOverride = joined,
                 jobSuffix = capability.name.asJobId,
                 destinations = shared,
               ),
@@ -734,7 +749,7 @@ object Planner:
                 config,
                 hasMatrix = false,
                 cache,
-                commandOverride = joinCommands(capability, nodes),
+                commandOverride = joined,
                 jobSuffix = id,
               ),
             )
@@ -755,46 +770,95 @@ object Planner:
     if layers.isEmpty then Nil
     else
       val crossNeeds  = crossCapabilityNeeds(capability, graph, byName)
-      val cache       = cacheContribution(config)
       val runner      = capability.runsOn.getOrElse(List(config.runnerOs))
       val releaseCond =
         Option.when(capability.gate == Gate.OnReleaseTag)(JobCondition.onReleaseTag.render)
       // Only L0 names the cross needs, so only L0 has a skip to tolerate; later waves wait on L0, whose own `if:`
       // already resolved it.
       val tolerance = tolerateSkips(capability, crossNeeds, affectedGatedNames)
+      val shared    = capability.targetFanOut match
+        case TargetFanOut.JobPerTarget => Nil
+        case TargetFanOut.SharedJob    => distinctTargets(capability, graph)
+      val fanned = distinctFannedTargets(capability, graph)
 
-      layers.zipWithIndex.map { (layerIds, i) =>
-        val id            = layerJobId(capability, i)
-        val firstWave     = i == 0
-        val prevNeed      = if firstWave then Nil else List(layerJobId(capability, i - 1))
-        val layerNeeds    = (prevNeed ++ crossNeeds).distinct.sorted
-        val (needs, base) =
-          // Later waves already wait on L0, so gating them again would be redundant.
-          if firstWave then
-            applyVerifyGate(layerNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
-          else (layerNeeds, releaseCond)
-        val cond       = andConditions(base, JobCondition.renderOpt(capability.condition))
+      layers.zipWithIndex.flatMap { (layerIds, i) =>
+        val firstWave  = i == 0
         val layerNodes = layerIds.flatMap(graph.get)
-        id -> Job(
-          name = Some(s"${capability.name} L$i"),
-          runsOn = runner,
-          needs = needs,
-          `if` = cond,
-          permissions = ListMap.from(capability.permissions),
-          container = capability.container,
-          services = mergeServices(capability, cache),
-          env = mergeEnv(config.env, cache.env, capability.env, Map.empty),
-          steps = stepsFor(
-            capability,
-            layerNodes.head,
-            None,
-            config,
-            hasMatrix = false,
-            cache,
-            commandOverride = joinCommands(capability, layerNodes),
-            jobSuffix = id,
-          ),
-        )
+        val joined     = joinCommands(capability, layerNodes)
+        val cache      = cacheForCommand(config, joined.isDefined)
+
+        def waveJob(
+            id: JobId,
+            display: String,
+            target: Option[Target],
+            targetCond: Option[String],
+            environment: Option[String],
+            targetEnv: Map[String, EnvValue],
+            destinations: List[Target],
+            prev: List[JobId],
+        ): (JobId, Job) =
+          val layerNeeds =
+            (prev ++ (if firstWave then crossNeeds else Nil)).distinct.sorted
+          val (needs, base) =
+            if firstWave then
+              applyVerifyGate(layerNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
+            else (layerNeeds, releaseCond)
+          val ifCond =
+            andConditions(base, andConditions(JobCondition.renderOpt(capability.condition), targetCond))
+          id -> Job(
+            name = Some(display),
+            runsOn = runner,
+            needs = needs,
+            `if` = ifCond,
+            environment = environment,
+            permissions = ListMap.from(capability.permissions),
+            container = capability.container,
+            services = mergeServices(capability, cache),
+            env = mergeEnv(config.env, cache.env, capability.env, targetEnv),
+            steps = stepsFor(
+              capability,
+              layerNodes.head,
+              target,
+              config,
+              hasMatrix = false,
+              cache,
+              commandOverride = joined,
+              jobSuffix = id,
+              destinations = destinations,
+            ),
+          )
+        end waveJob
+
+        fanned match
+          case Nil =>
+            val prev = if firstWave then Nil else List(layerJobId(capability, i - 1))
+            List(
+              waveJob(
+                layerJobId(capability, i),
+                s"${capability.name} L$i",
+                None,
+                None,
+                None,
+                sharedEnv(shared),
+                shared,
+                prev,
+              )
+            )
+          case targets =>
+            targets.map { t =>
+              val prev = if firstWave then Nil else List(layerTargetJobId(capability, i - 1, t))
+              waveJob(
+                layerTargetJobId(capability, i, t),
+                s"${capability.name} L$i (${t.name})",
+                Some(t),
+                JobCondition.renderOpt(t.condition),
+                t.environment,
+                t.env,
+                Nil,
+                prev,
+              )
+            }
+        end match
       }
     end if
   end layerJobs
@@ -841,7 +905,7 @@ object Planner:
         Some(Strategy(matrix = ListMap("scala" -> node.crossScalaVersions)))
       else None
 
-    val cache = cacheContribution(config)
+    val cache = cacheForCommand(config, capability.command(node).isDefined)
     // Every need except the two jobs with a clause of their own: `affected` is read through its *output*, and
     // `verify-gate` through `applyVerifyGate`. That includes `crossNeeds`, so a failed `fmt` still blocks the tests
     // whose `!cancelled()` would otherwise let them through.
@@ -1093,19 +1157,24 @@ object Planner:
       jobSuffix: JobId,
       destinations: List[Target] = Nil,
   ): List[Step] =
-    val command     = commandOverride.getOrElse(capability.command(node))
-    val onMatrixLeg = if hasMatrix then underMatrixScala else identity[SbtCommand]
-    val commandStep =
-      if capability.phase == Phase.Verify then verifyCommandStep(capability.name, onMatrixLeg, command, config)
-      else Step.run(Script(onMatrixLeg(command).render)).named(capability.name).build
-    val cacheSteps =
-      if cache.steps.isEmpty then localDirCacheSteps(config, jobSuffix) else cache.steps
-    val ctx = StepContext(node, target, hasMatrix, config.actions, destinations)
-    List(
-      Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
-    ) ++ jdkAndSbtSteps(config, capability.nodeVersion) ++ cacheSteps ++ capability.extraSteps(ctx) ++
-      List(commandStep) ++
-      capability.postSteps(ctx)
+    val command  = commandOverride.orElse(capability.command(node))
+    val ctx      = StepContext(node, target, hasMatrix, config.actions, destinations)
+    val checkout =
+      List(Step(uses = Some(config.actions.checkout), `with` = checkoutWith))
+    command match
+      case None =>
+        checkout ++ capability.extraSteps(ctx) ++ capability.postSteps(ctx)
+      case Some(cmd) =>
+        val onMatrixLeg = if hasMatrix then underMatrixScala else identity[SbtCommand]
+        val commandStep =
+          if capability.phase == Phase.Verify then verifyCommandStep(capability.name, onMatrixLeg, cmd, config)
+          else Step.run(Script(onMatrixLeg(cmd).render)).named(capability.name).build
+        val cacheSteps =
+          if cache.steps.isEmpty then localDirCacheSteps(config, jobSuffix) else cache.steps
+        checkout ++ jdkAndSbtSteps(config, capability.nodeVersion) ++ cacheSteps ++ capability.extraSteps(ctx) ++
+          List(commandStep) ++
+          capability.postSteps(ctx)
+    end match
   end stepsFor
 
   /** A static [[VerifyClean]] prefix when one is set, otherwise a runtime `cleanFull` decided by

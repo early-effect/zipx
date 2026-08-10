@@ -38,26 +38,37 @@ object ZipxAwsSpec extends ZIOSpecDefault:
           step.name.contains("Assume AWS role (OIDC)"),
         )
       },
-      test("registryEnv supplies exactly the keys the login step reads, plus the registry host") {
+      test("registryEnv supplies the keys login and ECR login read, plus the registry host") {
         val env = ZipxAws.registryEnv(registry, role)
         assertTrue(
           env.get(ZipxAws.RoleEnv).map(_.render).contains("${{ secrets.DEPLOY_ROLE }}"),
           env.get(ZipxAws.RegionEnv).map(_.render).contains("us-east-1"),
           env.get(ZipxAws.RegistryEnv).map(_.render).contains("111122223333.dkr.ecr.us-east-1.amazonaws.com"),
+          env.get(ZipxAws.AccountEnv).map(_.render).contains("111122223333"),
         )
       },
       test("imageEnv carries <host>/<repository> instead of the bare host") {
         val env = ZipxAws.imageEnv(registry.image(EcrRepository("team/example")), role)
         assertTrue(
           env.get(ZipxAws.RegistryEnv).map(_.render) ==
-            Some("111122223333.dkr.ecr.us-east-1.amazonaws.com/team/example")
+            Some("111122223333.dkr.ecr.us-east-1.amazonaws.com/team/example"),
+          env.get(ZipxAws.AccountEnv).map(_.render).contains("111122223333"),
+        )
+      },
+      test("ecrLoginSteps passes registries from the account-id env") {
+        val steps = ZipxAws.ecrLoginSteps(stepContext())
+        val ecr   = steps.find(_.name.contains("Log in to ECR")).get
+        assertTrue(
+          ZipxAws.ecrLoginSteps.name == "aws-oidc-login+aws-ecr-login",
+          ecr.`with`.get("registries").contains("${{ env.AWS_ACCOUNT_ID }}"),
+          ecr.uses.contains(ZipxAws.DefaultEcrLoginAction),
         )
       },
       test("the bundle is a named Steps with no raw escape hatch to warn about") {
         assertTrue(
           ZipxAws.oidcLoginSteps.name == "aws-oidc-login",
           ZipxAws.oidcLoginSteps.rawFragments.isEmpty,
-          ZipxAws.ecrLoginSteps.name == "aws-oidc-login+aws-ecr-login",
+          ZipxAws.ecrLoginSteps.rawFragments.isEmpty,
         )
       },
     ),
@@ -102,7 +113,7 @@ object ZipxAwsSpec extends ZIOSpecDefault:
       },
     ),
     suite("dockerPublish")(
-      test("one job for the whole push, with OIDC permissions and the login step already wired") {
+      test("one job for the whole push, with OIDC permissions and OIDC then ECR login wired") {
         val wf  = Planner.plan(graph, List(ZipxAws.dockerPublish(registry, role)), config)
         val job = wf.jobs("docker")
         assertTrue(
@@ -110,15 +121,20 @@ object ZipxAwsSpec extends ZIOSpecDefault:
           job.permissions.get("id-token").contains("write"),
           job.permissions.get("contents").contains("read"),
           job.env.get("AWS_REGION").contains("us-east-1"),
+          job.env.get("AWS_ACCOUNT_ID").contains("111122223333"),
           job.steps.exists(_.name.contains("Assume AWS role (OIDC)")),
+          job.steps.exists(s =>
+            s.name.contains("Log in to ECR") && s.`with`.get("registries").contains("${{ env.AWS_ACCOUNT_ID }}")
+          ),
           job.`if`.exists(_.contains("refs/tags/v")),
         )
       },
-      test("the login step precedes the publish command, since credentials must exist first") {
+      test("OIDC and ECR login precede the publish command") {
         val steps = Planner.plan(graph, List(ZipxAws.dockerPublish(registry, role)), config).jobs("docker").steps
-        val login = steps.indexWhere(_.name.exists(_.contains("Assume AWS role")))
+        val oidc  = steps.indexWhere(_.name.exists(_.contains("Assume AWS role")))
+        val ecr   = steps.indexWhere(_.name.exists(_.contains("Log in to ECR")))
         val push  = steps.indexWhere(_.run.exists(_.contains("Docker/publish")))
-        assertTrue(login >= 0, push > login)
+        assertTrue(oidc >= 0, ecr > oidc, push > ecr)
       },
       test("registryTargets fans out one job per registry, for the case that really wants that") {
         val second  = EcrRegistry(AwsAccountId("444455556666"), AwsRegion("eu-west-1"))
@@ -133,42 +149,47 @@ object ZipxAwsSpec extends ZIOSpecDefault:
         assertTrue(
           wf.jobs.contains("docker-us"),
           wf.jobs.contains("docker-eu"),
-          // Each destination logs into its own account with its own role, from the same one bundle.
           wf.jobs("docker-eu").env.get("AWS_REGION").contains("eu-west-1"),
+          wf.jobs("docker-eu").env.get("AWS_ACCOUNT_ID").contains("444455556666"),
           wf.jobs("docker-eu").env.get("AWS_ROLE_TO_ASSUME").contains("${{ secrets.EU_ROLE }}"),
           wf.jobs("docker-us").env.get("AWS_ROLE_TO_ASSUME").contains("${{ secrets.US_ROLE }}"),
         )
       },
     ),
     suite("dockerPublishAll pushes several registries from one build (#71)")(
-      test("one job, not one per registry: 6 registries stay 1 job with 6 logins") {
+      test("one job, not one per registry: 6 registries stay 1 job with 6 OIDC and 6 ECR logins") {
         val wf  = Planner.plan(graph, List(ZipxAws.dockerPublishAll(sixRegistries)), config)
         val job = wf.jobs("docker")
         assertTrue(
           wf.jobs.keys.count(_.startsWith("docker")) == 1,
           job.steps.count(_.name.exists(_.startsWith("Assume AWS role (OIDC,"))) == 6,
-          // One build. Two `Docker/publish` invocations would defeat the point of the shape.
+          job.steps.count(_.name.exists(_.startsWith("Log in to ECR ("))) == 6,
           job.steps.count(_.run.exists(_.contains("Docker/publish"))) == 1,
         )
       },
-      test("each login reads its own destination's role and region, never a shared unprefixed key") {
+      test("each OIDC/ECR pair reads its own destination's role, region, and account id") {
         val job    = Planner.plan(graph, List(ZipxAws.dockerPublishAll(sixRegistries)), config).jobs("docker")
         val logins = job.steps.filter(_.name.exists(_.startsWith("Assume AWS role (OIDC,")))
+        val ecrs   = job.steps.filter(_.name.exists(_.startsWith("Log in to ECR (")))
         val us     = logins.find(_.name.contains("Assume AWS role (OIDC, us)")).get
+        val usEcr  = ecrs.find(_.name.contains("Log in to ECR (us)")).get
         assertTrue(
           us.`with`.get("role-to-assume").contains("${{ env.ZIPX_US_AWS_ROLE_TO_ASSUME }}"),
           us.`with`.get("aws-region").contains("${{ env.ZIPX_US_AWS_REGION }}"),
-          // Every login points at a *distinct* pair, which is what the prefix buys.
+          usEcr.`with`.get("registries").contains("${{ env.ZIPX_US_AWS_ACCOUNT_ID }}"),
           logins.flatMap(_.`with`.get("role-to-assume")).distinct.size == 6,
+          ecrs.flatMap(_.`with`.get("registries")).distinct.size == 6,
           logins.forall(s => !s.`with`.get("aws-region").contains("${{ env.AWS_REGION }}")),
         )
       },
-      test("every registry's host, region and role is in the job env under its own prefix") {
+      test("every registry's host, region, role, and account id is in the job env under its own prefix") {
         val env = Planner.plan(graph, List(ZipxAws.dockerPublishAll(sixRegistries)), config).jobs("docker").env
         assertTrue(
           env.get("ZIPX_EU_AWS_REGION").contains("eu-west-1"),
           env.get("ZIPX_EU_AWS_ECR_REGISTRY").contains("444455556666.dkr.ecr.eu-west-1.amazonaws.com"),
+          env.get("ZIPX_EU_AWS_ACCOUNT_ID").contains("444455556666"),
           env.get("ZIPX_US_AWS_ECR_REGISTRY").contains("111122223333.dkr.ecr.us-east-1.amazonaws.com"),
+          env.get("ZIPX_US_AWS_ACCOUNT_ID").contains("111122223333"),
           env.get("ZIPX_US_AWS_ROLE_TO_ASSUME").contains("${{ secrets.US_ROLE }}"),
         )
       },
@@ -182,9 +203,8 @@ object ZipxAwsSpec extends ZIOSpecDefault:
       },
       test("the bundle is named and raw-fragment free, like every other bundle this pack ships") {
         assertTrue(
-          ZipxAws.sharedLoginSteps.name == "aws-oidc-login-per-destination",
+          ZipxAws.sharedLoginSteps.name == "aws-ecr-login-per-destination",
           ZipxAws.sharedLoginSteps.rawFragments.isEmpty,
-          // With no destinations it emits nothing rather than one credential-less login.
           ZipxAws.sharedLoginSteps(stepContext()).isEmpty,
         )
       },
@@ -194,6 +214,7 @@ object ZipxAwsSpec extends ZIOSpecDefault:
         assertTrue(
           wf.jobs.keys.filter(_.startsWith("docker")).toList == List("docker-serviceA"),
           wf.jobs("docker-serviceA").steps.count(_.name.exists(_.startsWith("Assume AWS role (OIDC,"))) == 6,
+          wf.jobs("docker-serviceA").steps.count(_.name.exists(_.startsWith("Log in to ECR ("))) == 6,
         )
       },
     ),

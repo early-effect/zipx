@@ -39,11 +39,15 @@ object ZipxAws:
   /** The `env:` key holding `<host>/<repository>`, for a build whose `dockerRepository` reads it. */
   val Registry: EnvName = EnvName("AWS_ECR_REGISTRY")
 
-  // The same three as plain keys, since an `env:` map is keyed by `String`. Named `*Env` because that is what a
+  /** The `env:` key holding the 12-digit account id `amazon-ecr-login` needs as `registries:`. */
+  val Account: EnvName = EnvName("AWS_ACCOUNT_ID")
+
+  // The same keys as plain strings, since an `env:` map is keyed by `String`. Named `*Env` because that is what a
   // `build.sbt` writing its own env block reaches for.
   val RoleEnv: String     = Role.unwrap
   val RegionEnv: String   = Region.unwrap
   val RegistryEnv: String = Registry.unwrap
+  val AccountEnv: String  = Account.unwrap
 
   /** OIDC needs `id-token: write`; `contents: read` is what the checkout still needs once permissions are declared
     * explicitly, since naming any permission drops the default set.
@@ -115,14 +119,21 @@ object ZipxAws:
   def ecrLoginAction(pins: ActionPins): ActionRef =
     pins.extraRef(EcrLoginPinKey).getOrElse(DefaultEcrLoginAction)
 
-  /** [[oidcLoginSteps]] followed by an ECR docker login, for a build that pushes with the `docker` CLI rather than
-    * through sbt-native-packager's own credential handling.
+  /** [[oidcLoginSteps]] followed by an ECR docker login. Required for any push that uses the docker CLI, including
+    * sbt-native-packager's `Docker / publish`.
+    *
+    * `registries:` is the account id from [[AccountEnv]], so multi-account shared jobs accumulate one credential entry
+    * per host rather than relying on whichever role was assumed last.
     */
   val ecrLoginSteps: Steps = oidcLoginSteps ++ Steps.one("aws-ecr-login") { ctx =>
-    Step.usesRef(ecrLoginAction(ctx.actions)).named("Log in to ECR").build
+    Step
+      .usesRef(ecrLoginAction(ctx.actions))
+      .named("Log in to ECR")
+      .withInputs(ListMap("registries" -> Expr.Env(Account).render))
+      .build
   }
 
-  /** The `env:` a job needs for [[oidcLoginSteps]]: the role, and the region the registry already carries.
+  /** The `env:` a job needs for [[ecrLoginSteps]]: role, region, registry host, and account id for `registries:`.
     *
     * `role` is an [[zipx.core.EnvValue]] rather than a `String`, so `secret"DEPLOY_ROLE"` is checked where it is
     * written and a name assembled at runtime has to go through `EnvValue.secretMake`.
@@ -131,6 +142,7 @@ object ZipxAws:
     RoleEnv     -> role,
     RegionEnv   -> EnvValue.plain(registry.region),
     RegistryEnv -> EnvValue.plain(registry.host),
+    AccountEnv  -> EnvValue.plain(registry.accountId),
   )
 
   /** The same, for a job whose registry is one repository rather than a whole account: [[RegistryEnv]] carries
@@ -140,6 +152,7 @@ object ZipxAws:
     RoleEnv     -> role,
     RegionEnv   -> EnvValue.plain(image.registry.region),
     RegistryEnv -> EnvValue.plain(image.uri),
+    AccountEnv  -> EnvValue.plain(image.registry.accountId),
   )
 
   /** One [[zipx.core.Target]] per registry, for a capability that really does want a job each: separate accounts with
@@ -157,33 +170,35 @@ object ZipxAws:
   def registryTargets(registries: List[(TargetName, EcrRegistry, EnvValue)]): List[Target] =
     registries.map((name, registry, role) => Target(name = name, env = registryEnv(registry, role)))
 
-  /** [[oidcLoginSteps]] once **per destination**, for a [[zipx.core.TargetFanOut.SharedJob]] capability: one build, N
-    * logins, N pushes.
+  /** OIDC assume-role then ECR docker login, once **per destination**, for a [[zipx.core.TargetFanOut.SharedJob]]
+    * capability: one build, N credential entries, N pushes.
     *
-    * Each step reads its own destination's role and region, since a shared job's `env:` holds every destination's
-    * values under [[zipx.core.Target.envName]] keys. Nothing here spells a prefix out: the same method that put a value
-    * in the job's `env:` is the one that reads it back.
-    *
-    * Ordering matters and is why this is `buildingWith` rather than a fold of `oidcLoginSteps`: the last
-    * `configure-aws-credentials` in a job wins the ambient credentials, so a build pushing to several accounts from one
-    * job needs `dockerAliases` plus a registry-scoped credential helper (`amazon-ecr-login` writes one entry per
-    * registry it is run against), not one ambient role. See the docs page for the two shapes.
+    * Each pair reads its own destination's role, region, and account id under [[zipx.core.Target.envName]] keys. The
+    * last `configure-aws-credentials` wins ambient AWS credentials; `amazon-ecr-login` with that destination's account
+    * id is what accumulates a `~/.docker/config.json` entry per registry host.
     */
-  val sharedLoginSteps: Steps = Steps.buildingWith("aws-oidc-login-per-destination") { ctx =>
-    ctx.destinations.map { target =>
-      Step
-        .usesRef(credentialsAction(ctx.actions))
-        .named(s"Assume AWS role (OIDC, ${target.name})")
-        .withInputs(
-          ListMap(
-            "role-to-assume" -> Expr.Env(target.envName(Role)).render,
-            "aws-region"     -> Expr.Env(target.envName(Region)).render,
-          )
-        )
+  val sharedLoginSteps: Steps = Steps.buildingWith("aws-ecr-login-per-destination") { ctx =>
+    ctx.destinations.flatMap { target =>
+      List(
+        Step
+          .usesRef(credentialsAction(ctx.actions))
+          .named(s"Assume AWS role (OIDC, ${target.name})")
+          .withInputs(
+            ListMap(
+              "role-to-assume" -> Expr.Env(target.envName(Role)).render,
+              "aws-region"     -> Expr.Env(target.envName(Region)).render,
+            )
+          ),
+        Step
+          .usesRef(ecrLoginAction(ctx.actions))
+          .named(s"Log in to ECR (${target.name})")
+          .withInputs(ListMap("registries" -> Expr.Env(target.envName(Account)).render)),
+      )
     }
   }
 
-  /** A docker publish capability that logs in by OIDC before pushing, with `id-token: write` already declared.
+  /** A docker publish capability that assumes a role and logs into ECR before pushing, with `id-token: write` already
+    * declared.
     *
     * One job for the whole push, which is the shape to prefer: point the build's `dockerAliases` at every registry and
     * let one `Docker / publish` push them all.
@@ -203,13 +218,13 @@ object ZipxAws:
       name = name,
       permissions = oidcPermissions,
       env = registryEnv(registry, role),
-      extraSteps = oidcLoginSteps,
+      extraSteps = ecrLoginSteps,
       condition = condition,
     )
   end dockerPublish
 
-  /** [[dockerPublish]] over **several** registries in one job: one image build, one login per destination, one push per
-    * `dockerAliases` entry.
+  /** [[dockerPublish]] over **several** registries in one job: one image build, OIDC then ECR login per destination,
+    * one push per `dockerAliases` entry.
     *
     * This is the shape #71 asked for, and the reason it is a factory rather than a documented recipe is the arithmetic:
     * 6 registries × 8 images is 48 jobs under `JobPerTarget` and 8 here, and only this shape can guarantee the

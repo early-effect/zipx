@@ -26,7 +26,7 @@ compile/test work that sbt (and the restored/remote cache) can already skip.
 | Mode | Test / publish / docker | Deploy | Best for |
 |---|---|---|---|
 | **Aggregate** (default) | 1 per stage (Verify = root `sbt test`) | **1 per Target** (modules batched) | Most repos, including multi-service monorepos: one stage, still incremental |
-| **Layer** | 1 per toposort wave | Same as Aggregate-by-target | Ordered waves without N JVMs |
+| **Layer** | 1 per toposort wave | **1 per wave × Target** (Aggregate-by-target per wave) | Ordered waves without N JVMs; per-env approval without Graph's module×target cost |
 | **Graph** | 1 per module (± matrix / targets) | 1 per module × Target | Per-module / multi-env boundaries; path gating; matrices |
 """,
     section("Two kinds of affected")(

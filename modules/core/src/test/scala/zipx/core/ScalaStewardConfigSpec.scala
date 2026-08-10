@@ -63,5 +63,37 @@ object ScalaStewardConfigSpec extends ZIOSpecDefault:
         fails(ScalaStewardConfig.render(List(StewardGroup(name = "a", filter = List(StewardFilter()))))),
       )
     },
+    suite("repo-root pullRequests.grouping is unreachable")(
+      test("a live grouping key is detected") {
+        assertTrue(
+          ScalaStewardConfig.repoRootGroupingIsDead(
+            """updates.ignore = []
+              |pullRequests.grouping = [
+              |  { name = "all", filter = [{ group = "*" }] }
+              |]
+              |""".stripMargin
+          )
+        )
+      },
+      test("a commented-out grouping key is not a hit") {
+        assertTrue(
+          !ScalaStewardConfig.repoRootGroupingIsDead(
+            """# pullRequests.grouping = []
+              |updates.ignore = []
+              |""".stripMargin
+          )
+        )
+      },
+      test("ignore/retract-only configs are clean") {
+        assertTrue(
+          !ScalaStewardConfig.repoRootGroupingIsDead(
+            """updates.ignore = [ { organization = "dev.zio" } ]
+              |updates.retracted = []
+              |""".stripMargin
+          ),
+          !ScalaStewardConfig.repoRootGroupingIsDead(""),
+        )
+      },
+    ),
   )
 end ScalaStewardConfigSpec

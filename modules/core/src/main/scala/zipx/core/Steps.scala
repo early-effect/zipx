@@ -106,9 +106,10 @@ object Steps:
 
   /** The same reporting for [[SbtCommand.Unchecked]]: command text zipx was handed rather than built.
     *
-    * A `command` is a `ModuleNode => SbtCommand`, so reaching its fragments needs a node. `probeNode` is enough because
-    * provenance does not depend on the module: a combinator threads `Unchecked` through whatever node it is given, so
-    * one application answers the question for all of them. The id it carries is what the fragment shows.
+    * A `command` is a `ModuleNode => Option[SbtCommand]`, so reaching its fragments needs a node. `probeNode` is enough
+    * because provenance does not depend on the module: a combinator threads `Unchecked` through whatever node it is
+    * given, so one application answers the question for all of them. The id it carries is what the fragment shows.
+    * Action-only capabilities (`None`) contribute no fragments.
     *
     * The exception is a command built from a *node's own* field, `n.testTask`, where the probe reports its default
     * rather than a real module's. That costs nothing today, because every route into those fields (`zipxTestTask`,
@@ -116,7 +117,10 @@ object Steps:
     */
   private def commandWarnings(capabilities: List[Capability], config: PlanConfig): List[String] =
     val capabilityFragments = capabilities.flatMap { c =>
-      c.command(probeNode).rawFragments.map(f => s"capability '${c.name}' uses an unchecked sbt command: $f")
+      c.command(probeNode)
+        .toList
+        .flatMap(_.rawFragments)
+        .map(f => s"capability '${c.name}' uses an unchecked sbt command: $f")
     }
     val rehydrateFragments =
       config.cacheRehydrateTask.rawFragments.map(f => s"cacheRehydrateTask is an unchecked sbt command: $f")

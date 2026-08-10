@@ -708,6 +708,7 @@ object ZipxPlugin extends AutoPlugin:
       val log        = streams.value.log
       val maybeConf  = stewardGrouping(extracted)
       val configPath = maybeConf.map(_ => ScalaStewardWorkflow.DefaultConfigPath)
+      warnDeadRepoRootStewardGrouping(root, log)
       maybeConf.foreach { conf =>
         val confFile = root / ScalaStewardWorkflow.DefaultConfigPath
         IO.write(confFile, conf)
@@ -718,6 +719,11 @@ object ZipxPlugin extends AutoPlugin:
       log.info(s"zipx wrote ${stewardFile.getPath}")
     end if
   }
+
+  private def warnDeadRepoRootStewardGrouping(root: File, log: Logger): Unit =
+    val repoConf = root / ".scala-steward.conf"
+    if repoConf.exists && ScalaStewardConfig.repoRootGroupingIsDead(IO.read(repoConf)) then
+      log.warn(s"zipx: ${ScalaStewardConfig.RepoRootGroupingWarning}")
 
   private def actionsPullTask: Def.Initialize[Task[Unit]] = Def.task {
     val log       = streams.value.log
@@ -820,6 +826,7 @@ object ZipxPlugin extends AutoPlugin:
       val cfg         = planConfig.value
       val maybeConf   = stewardGrouping(extracted)
       val configPath  = maybeConf.map(_ => ScalaStewardWorkflow.DefaultConfigPath)
+      warnDeadRepoRootStewardGrouping(root, streams.value.log)
       // Checked before the workflow itself: the Steward action ignores a missing config at the default path silently,
       // so this drift check is the only thing that catches it.
       maybeConf.foreach { expectedConf =>

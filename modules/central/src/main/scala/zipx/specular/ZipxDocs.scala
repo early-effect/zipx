@@ -43,9 +43,9 @@ object ZipxDocs:
     val inputs =
       Map("sbt-project" -> sbtProject) ++ javaVersion.map(v => "java-version" -> (v: String)).toMap
     Capability
-      .once(
+      .steps(
         name = DocsName,
-        command = SbtCommand("true"), // unused: workflowCall replaces local steps
+        steps = _ => Nil,
         phase = Phase.Deploy,
         gate = Gate.Always,
         permissions = pagesPermissions,
