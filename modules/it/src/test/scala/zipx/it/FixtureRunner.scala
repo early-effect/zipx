@@ -86,12 +86,87 @@ object FixtureRunner:
 
     // Foreground server: thin client reuses a background server across fixtures and breaks isolation.
     val cmd     = Seq("sbt", "--server", "--batch", s"-Dsbt.boot.directory=$bootDir", script)
+    logSbtSpawnDiagnostics(fixtureDir, home, env.toMap, cmd)
     val started = System.nanoTime()
     val code    =
-      Process(cmd, fixtureDir.toFile, env.toSeq*).!(logger)
+      try Process(cmd, fixtureDir.toFile, env.toSeq*).!(logger)
+      catch
+        case e: java.io.IOException =>
+          val diag = sbtSpawnDiagnostics(fixtureDir, home, env.toMap, cmd)
+          throw new java.io.IOException(s"${e.getMessage}\n--- zipx IT sbt spawn diagnostics ---\n$diag", e)
     val elapsed = (System.nanoTime() - started).nanos.toMillis
     RunResult(code, log.toString, elapsed)
   end runSbt
+
+  /** Pre-spawn / on-failure dump for CI: PATH, which(sbt), file checks under toolcache. Temporary while diagnosing
+    * setup-sbt@v1.5.7 / sbt 2.0.6 ENOENT on child `sbt`.
+    */
+  private def logSbtSpawnDiagnostics(
+      fixtureDir: Path,
+      home: Path,
+      env: Map[String, String],
+      cmd: Seq[String],
+  ): Unit =
+    val diag = sbtSpawnDiagnostics(fixtureDir, home, env, cmd)
+    System.err.println(s"--- zipx IT sbt spawn diagnostics ---\n$diag")
+
+  private def sbtSpawnDiagnostics(
+      fixtureDir: Path,
+      home: Path,
+      env: Map[String, String],
+      cmd: Seq[String],
+  ): String =
+    val path        = env.getOrElse("PATH", "<missing>")
+    val pathEntries = path.split(java.io.File.pathSeparatorChar).toList
+    val whichSbt =
+      Try(Process(Seq("which", "sbt"), null: java.io.File, "PATH" -> path).!!.trim)
+        .getOrElse("<which failed>")
+    val whichSbtParent =
+      Try(Process(Seq("which", "sbt")).!!.trim).getOrElse("<which failed in parent env>")
+    val sbtOnPath = pathEntries
+      .map(dir => Path.of(dir, "sbt"))
+      .find(p => Files.isRegularFile(p) || Files.isSymbolicLink(p))
+    val sbtFileInfo = sbtOnPath
+      .map { p =>
+        val abs  = p.toAbsolutePath
+        val exec = Files.isExecutable(abs)
+        val size = Try(Files.size(abs)).getOrElse(-1L)
+        val head =
+          Try(Files.readString(abs).linesIterator.take(3).mkString(" | ")).getOrElse("<unreadable>")
+        s"$abs exists=${Files.exists(abs)} executable=$exec size=$size head=[$head]"
+      }
+      .getOrElse("<no sbt file on PATH entries>")
+    val toolcache = Path.of("/opt/hostedtoolcache/sbt")
+    val toolcacheListing =
+      if Files.isDirectory(toolcache) then
+        Try {
+          val stream = Files.list(toolcache)
+          try stream.toArray.map(_.asInstanceOf[Path].getFileName.toString).mkString(", ")
+          finally stream.close()
+        }.getOrElse("<list failed>")
+      else "<no /opt/hostedtoolcache/sbt>"
+    val toolcacheSbt206 = Path.of("/opt/hostedtoolcache/sbt/2.0.6/sbt/bin/sbt")
+    val toolcacheSbt204 = Path.of("/opt/hostedtoolcache/sbt/2.0.4/sbt/bin/sbt")
+    def fileCheck(p: Path): String =
+      s"$p exists=${Files.exists(p)} exec=${Try(Files.isExecutable(p)).getOrElse(false)}"
+    List(
+      s"cwd=$fixtureDir",
+      s"home=$home",
+      s"cmd=${cmd.mkString(" ")}",
+      s"parent which sbt=$whichSbtParent",
+      s"child-env which sbt=$whichSbt",
+      s"sbt on PATH search=$sbtFileInfo",
+      s"PATH length=${path.length} entries=${pathEntries.size}",
+      s"PATH=$path",
+      s"HOME=${env.getOrElse("HOME", "<missing>")}",
+      s"JAVA_HOME=${env.getOrElse("JAVA_HOME", "<missing>")}",
+      s"sys.env PATH present=${sys.env.contains("PATH")}",
+      s"sys.env keys=${sys.env.keys.toList.sorted.mkString(",")}",
+      s"toolcache versions=[$toolcacheListing]",
+      s"toolcache 2.0.6: ${fileCheck(toolcacheSbt206)}",
+      s"toolcache 2.0.4: ${fileCheck(toolcacheSbt204)}",
+    ).mkString("\n")
+  end sbtSpawnDiagnostics
 
   /** Drop project outputs + sbt action cache; keep boot/coursier (shared tooling) intact. */
   def wipeLocalCaches(fixtureDir: Path, home: Path): Unit =
