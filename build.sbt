@@ -40,6 +40,8 @@ val commonSettings = Seq(
   testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
   publishMavenStyle    := true,
   pomIncludeRepository := { _ => false },
+  // ZIOSpecDefault suites are discovered as mains; tests don't use mainClass. Suppress the warning.
+  Test / mainClass := None,
 )
 
 // The version handoff for Aggregate test post-steps: examples/monorepo needs the in-dev plugin version, and CI must
@@ -125,9 +127,7 @@ lazy val core = (project in file("modules/core"))
     // Docker image; host setup-sbt PATH is irrelevant. Docker is required when these tests run.
     // Leave Testcontainers Ryuk enabled (do not set TESTCONTAINERS_RYUK_DISABLED): cleans up containers
     // after aborted runs locally and is fine on GHA.
-    libraryDependencies ++= testcontainersDeps ++ Seq(
-      "org.slf4j" % "slf4j-nop" % "2.0.18" % Test
-    ),
+    libraryDependencies ++= testcontainersDeps,
   )
 
 // Early-effect / Maven Central paved path (typed secrets + GPG import + publishSigned + sonaRelease).
@@ -162,7 +162,13 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     // Bundle the remote-cache transport so consumers need one addSbtPlugin line. RemoteCachePlugin triggers on
     // AllRequirements but is a no-op until Global/remoteCache is set (which zipx does only from the CI env).
     addSbtPlugin(remoteCachePlugin),
-    scriptedLaunchOpts ++= Seq("-Xmx1024m", s"-Dplugin.version=${version.value}"),
+    // JVM args for the sbt subprocess that runs scripted tests: suppress Unsafe/JNA warnings.
+    scriptedLaunchOpts ++= Seq(
+      "-Xmx1024m",
+      "--add-opens=java.base/sun.misc=ALL-UNNAMED",
+      "--enable-native-access=ALL-UNNAMED",
+      s"-Dplugin.version=${version.value}",
+    ),
     scriptedBufferLog := false,
   )
 

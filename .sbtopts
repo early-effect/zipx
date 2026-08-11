@@ -1,0 +1,6 @@
+# JVM options for sbt to suppress warnings from transitive dependencies we cannot fix:
+# - sun.misc.Unsafe::objectFieldOffset called by scala.runtime.LazyVals$ (sbt-launch)
+# - java.lang.System::load called by com.sun.jna.Native (JNA used by sbt)
+
+-J--add-opens=java.base/sun.misc=ALL-UNNAMED
+-J--enable-native-access=ALL-UNNAMED

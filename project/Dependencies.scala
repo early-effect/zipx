@@ -20,6 +20,8 @@ object Dependencies:
     "-deprecation",
     "-feature",
     "-Wunused:all",
+    // Suppress "Option -classpath was updated" noise from sbt's incremental compilation wiring.
+    "-Xlint:-classpath",
   )
 
   val zioDeps: Seq[ModuleID] = Seq(
@@ -52,7 +54,9 @@ object Dependencies:
   val testcontainersVersion = "2.0.5"
 
   val testcontainersDeps: Seq[ModuleID] = Seq(
-    "org.testcontainers" % "testcontainers" % testcontainersVersion % Test
+    "org.testcontainers" % "testcontainers" % testcontainersVersion % Test,
+    // SLF4J binding so testcontainers logs to console instead of NOP.
+    "org.slf4j"          % "slf4j-simple"   % "2.0.18"              % Test,
   )
 
 end Dependencies
