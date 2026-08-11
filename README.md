@@ -32,7 +32,7 @@ sbt zipxWorkflowGenerate
 git add .github/workflows/ci.yml && git commit -m "ci: generate with zipx"
 ```
 
-Defaults are Aggregate: one root `test` job and one publish job (plus docker when any module enables `DockerPlugin`). Write bare settings in `build.sbt` (no `ThisBuild /`); e.g. `zipxTestTask := "testFull"` applies to every module and any module can override it.
+Defaults are Aggregate: one root `testFull` job (sbt 2's full suite, not `testQuick`) and one publish job (plus docker when any module enables `DockerPlugin`). Write bare settings in `build.sbt` (no `ThisBuild /`); e.g. `zipxTestTask := zipxTasks.of(testFull)` is the plugin default and any module can override it.
 
 ### Action pins (optional)
 
@@ -66,7 +66,7 @@ What's covered:
 - Overview, **Why zipx**, and **From Bazel** (strategy vs second graphs / acceleration layers)
 - Quick start and self-checking
 - **Execution modes** (Aggregate / Layer / Graph)
-- Built-in **capabilities** and **custom capabilities** (`once`, `custom`, `zipxTasks`, `cmd`)
+- Built-in **capabilities**, **custom capabilities**, and **composing sbt commands** (`zipxTasks`, `thenOnce`, `ZipxCentral.release`)
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate `test` via Testcontainers)
 - **Action pins** (pin file, Dependabot, `zipxActionsPull`, sync workflow)

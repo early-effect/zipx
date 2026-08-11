@@ -89,13 +89,24 @@ object ZipxCentral:
   }
 
   /** Named `publish`, so it replaces the built-in capability rather than adding a second one.
-    * [[zipx.core.CapabilityScope.Once]] rather than an Aggregate join, so the root command runs once instead of once
-    * per publishing module.
+    *
+    * Aggregate: every publishing module's `publishSigned` (dependency order), then `sonaRelease` once. Wire-form for
+    * unit tests and docs; the sbt plugin's `ZipxCentral.release` rebuilds the same shape from real keys.
     */
   val release: Capability =
+    Capability.publish
+      .runningEachCross(SbtCommand.unsafeTask("publishSigned"))
+      .thenOnce(SbtCommand.unsafeCommand("sonaRelease"))
+      .withEnv(signingEnv)
+      .withExtraSteps(gpgImportSteps)
+
+  /** Root Once form: `publishSigned; sonaRelease` as one fixed command. Use when the root `.aggregate` is exactly the
+    * publish set; prefer [[release]] for projectMatrix / skipped rows. Plugin rebuilds from real keys.
+    */
+  val releaseRoot: Capability =
     Capability.once(
       name = Capability.PublishName,
-      command = SbtCommand("publishSigned; sonaRelease"),
+      command = SbtCommand.session(SbtCommand.unsafeTask("publishSigned"), SbtCommand.unsafeCommand("sonaRelease")),
       phase = Phase.Publish,
       gate = Gate.OnReleaseTag,
       env = signingEnv,
@@ -104,17 +115,16 @@ object ZipxCentral:
 
   /** Pair with [[releaseOnce]]: this publishes per module, that merges the staging trees and releases once. */
   val publishSigned: Capability =
-    Capability.publishGraph.copy(
-      command = n => Some(SbtCommand.crossModule(n, SbtCommand("publishSigned"))),
-      env = signingEnv,
-      extraSteps = gpgImportSteps,
-      postSteps = uploadStagingSteps,
-    )
+    Capability.publishGraph
+      .runningEachCross(SbtCommand.unsafeTask("publishSigned"))
+      .withEnv(signingEnv)
+      .withExtraSteps(gpgImportSteps)
+      .withPostSteps(uploadStagingSteps)
 
   val releaseOnce: Capability =
     Capability.once(
       name = CapabilityName("central-release"),
-      command = SbtCommand("sonaRelease"),
+      command = SbtCommand.unsafeCommand("sonaRelease"),
       phase = Phase.Publish,
       gate = Gate.OnReleaseTag,
       needsCapabilities = List(Capability.PublishName),

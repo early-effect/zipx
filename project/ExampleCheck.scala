@@ -1,3 +1,5 @@
+package zipx
+
 import zipx.core.*
 import zipx.shell.{Assign, Exec, Script, Word}
 import zipx.workflow.Step
@@ -5,9 +7,9 @@ import zipx.workflow.Step
 /** Post-steps on Aggregate `test`: publish the in-dev plugin locally, then prove `examples/monorepo` still generates
   * the YAML committed beside it.
   *
-  * Runs after the job command (`test; plugin/scripted`), so unit/IT and scripted fail first. A named [[zipx.core.Steps]]
-  * bundle rather than a bare lambda, so escape-hatch use reaches `zipxWorkflowGenerate`'s warning (see
-  * `Steps.rawWarnings`).
+  * Runs after the job command (`test; plugin/scripted`), so unit/IT and scripted fail first. A named
+  * [[zipx.core.Steps]] bundle rather than a bare lambda, so escape-hatch use reaches `zipxWorkflowGenerate`'s warning
+  * (see `Steps.rawWarnings`).
   *
   * Lives in the meta-build because it is dogfood wiring for *this* repo, not published API. A consumer wanting the same
   * shape writes the same thing in its own `project/`.
@@ -36,7 +38,11 @@ object ExampleCheck:
     */
   private val publishLocalSteps: Steps = Steps.built("publish-local")(
     Step
-      .run(Script.strict(SbtCommand("publishLocal; zipxWriteVersion").render))
+      .run(
+        Script.strict(
+          SbtCommand.session(SbtCommand.unsafeTask("publishLocal"), SbtCommand.unsafeTask("zipxWriteVersion")).render
+        )
+      )
       .named("Publish zipx locally")
   )
 

@@ -3,8 +3,8 @@ scalaVersion := "3.8.4"
 version      := "1.0.0-ci"
 // Keep Fixed so scripted asserts stay on a literal epoch (default is now GitTags at runtime).
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
-// A build-wide default test task; `client` overrides it back to plain `test` below to prove per-module override.
-zipxTestTask := "testFull"
+// A build-wide default is now testFull from the plugin; client overrides back to plain `test`.
+zipxTestTask := zipxTasks.of(testFull)
 
 // A small cross-published monorepo: a models lib, an api that depends on it, and a client
 // that depends on api, plus a non-publishing service.
@@ -19,7 +19,7 @@ lazy val client = project
   .dependsOn(api)
   .settings(
     crossScalaVersions := Seq("2.13.16", "3.8.4"),
-    zipxTestTask       := "test", // overrides the build-wide `testFull`
+    zipxTestTask       := zipxTasks.of(test), // overrides the build-wide `testFull`
   )
 
 lazy val service = project
@@ -69,12 +69,13 @@ zipxCapabilities += Capability.custom(
 // Graph modes exercise affected / matrix / per-module needs (scripted asserts those shapes).
 zipxCapabilities ++= Seq(
   Capability.testGraph,
-  Capability.publishGraph.copy(
-    env = Map(
-      "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
-      "SONATYPE_USERNAME" -> Secret("SONATYPE_USERNAME"),
-    )
-  ),
+  Capability.publishGraph
+    .withEnv(
+      Map(
+        "PGP_PASSPHRASE"    -> secret"PGP_PASSPHRASE",
+        "SONATYPE_USERNAME" -> Secret("SONATYPE_USERNAME"),
+      )
+    ),
 )
 
 // Assertions run inside the scripted test.

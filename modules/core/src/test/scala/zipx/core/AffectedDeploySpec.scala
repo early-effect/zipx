@@ -57,7 +57,7 @@ object AffectedDeploySpec extends ZIOSpecDefault:
   ) =
     Capability.deployGraph(
       participates = _.docker,
-      command = n => SbtCommand.module(n, SbtCommand("promote")),
+      command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
       targets = _ => List(Target(TargetName("prod"), environment = Some("production"))),
       needsCapabilities = needs,
       gate = gate,
@@ -67,7 +67,7 @@ object AffectedDeploySpec extends ZIOSpecDefault:
   private def deployAggregate(needs: List[CapabilityName] = List(Capability.DockerName)) =
     Capability.deploy(
       participates = _.docker,
-      command = n => SbtCommand.module(n, SbtCommand("promote")),
+      command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
       targets = _ => List(Target(TargetName("prod"))),
       needsCapabilities = needs,
     )
@@ -175,7 +175,7 @@ object AffectedDeploySpec extends ZIOSpecDefault:
       test("one job per (module x target), each with its own clause and Environment") {
         val twoTargets = Capability.deployGraph(
           participates = _.docker,
-          command = n => SbtCommand.module(n, SbtCommand("promote")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
           targets = _ =>
             List(
               Target(TargetName("stg"), environment = Some("STG_AWS_BATCH_WORKER")),
@@ -319,7 +319,7 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         // An `announce` that needs `publish` is not broken by one module not publishing, so it keeps the tolerance.
         val announce = Capability.once(
           CapabilityName("announce"),
-          SbtCommand("announce"),
+          SbtCommand.unsafeTask("announce"),
           phase = Phase.Deploy,
           gate = Gate.OnReleaseTag,
           needsCapabilities = List(Capability.DockerName),

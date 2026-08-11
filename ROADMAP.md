@@ -18,6 +18,7 @@ Live behavior is documented in Specular (`docs/`), not here. Git history records
 | M0–M8, M9a, M10 (skeleton through zipx-aws, Aggregate/Layer/Graph, typed DSL, Central) | done |
 | M9: Dynver-ci + publishSigned auto-detect | not started |
 | M11: "Extend with Scala" docs & org rollout | not started |
+| M12: Typed SbtCommand (keys in plugin, wire form in core) | in progress |
 
 ## Decisions locked
 
@@ -28,6 +29,7 @@ Live behavior is documented in Specular (`docs/`), not here. Git history records
 - **Secrets:** zipx renders secret *references*; packs name org secrets. Values never enter the plugin.
 - **Extension language:** Scala (`Capability`, `Steps`, `Expr`, packs), not external YAML soup. Raw escape hatches stay typed and generate-time warned.
 - **Refuse rather than drop:** a field the planner cannot honor fails generate with an explaining error.
+- **sbt owns its API:** core holds `SbtCommand` wire form only; the plugin builds commands from real `TaskKey` / `Command` values (`zipxTasks.of`, `ZipxCentral.release` from `publishSigned` + `sonaRelease`).
 
 ## Central design principle
 
@@ -47,6 +49,14 @@ env injection, target fan-out, cache wiring. Semantics live in Scala packs on th
 - First-class guide: typed config, `zipxTasks`, `Expr` / secrets, `Steps`, packs (`zipx-central`, `zipx-aws`).
 - Org: publish `0.1.0`, adopt in early-effect libraries, prefer generated topology over hand-maintained release YAML,
   adopt `zipx-aws` instead of copied OIDC/ECR blocks.
+
+### M12: Typed SbtCommand
+
+- **Done / landing:** step wire form in core; `CommandSource` + `runningEach` / `thenOnce`; plugin `zipxTasks.of` /
+  project-axis honouring; `zipxTestTask` as `SbtCommand` defaulting to `testFull`; plugin `ZipxCentral.release` from
+  real `publishSigned` + `sonaRelease`; `zipxCheckCommandNames`; Specular **Composing sbt commands** page.
+- **Still open:** move Coverage / VerifyClean / docker command construction fully onto plugin keys where those plugins
+  are on the classpath; consumer migrations (mechanoid / saferis / marklit) after release.
 
 ### Design guardrails
 

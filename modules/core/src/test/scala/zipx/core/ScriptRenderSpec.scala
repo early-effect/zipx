@@ -145,7 +145,7 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       assertTrue(
         verifyStep(PlanConfig(verifyCleanLabel = None)).run.contains("sbt 'test'"),
         verifyStep(PlanConfig(verifyClean = VerifyClean.CleanFull)).run.contains("sbt 'cleanFull; test'"),
-        matrixed.run.contains("sbt '++${{ matrix.scala }} schema/test'"),
+        matrixed.run.contains("sbt '++${{ matrix.scala }}; schema/test'"),
       )
     },
     test("a verify-clean label containing a quote is not a value that can reach a plan") {

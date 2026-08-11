@@ -7,6 +7,7 @@ import zipx.core.{
   EnvValue,
   Gate,
   JobCondition,
+  ModuleId,
   ModuleNode,
   Ordering,
   Phase,
@@ -46,23 +47,120 @@ object CapabilityTasks:
       case sbt.Select(configKey) => configKey.name.capitalize + "/"
       case _                     => "" // This / Zero, no explicit config axis
 
-  /** The CLI suffix for a key on a module, as text: `<label>` or `<Config>/<label>`. */
+  /** The CLI suffix for a key on a module, as text: `<label>` or `<Config>/<label>` (no project axis). */
   private def scopedLabelText(key: Scoped): String = s"${configPrefix(key)}${label(key)}"
 
-  /** The same suffix as a command.
-    *
-    * `unsafeMake` because an sbt key cannot produce text [[zipx.core.SbtCommand]] rejects: `AttributeKey` requires a
-    * label starting with a lowercase letter and stores it camelCased, and a config name is a Scala identifier, so
-    * neither can be empty or carry a newline or a control character. Validating here would mean an `Either` in every
-    * signature below to report a case that cannot arise.
-    */
-  private def scopedLabel(key: Scoped): SbtCommand = SbtCommand.unsafeMake(scopedLabelText(key))
+  /** Honour the project axis: an explicit `core / publish` stays scoped to `core`, not re-prefixed by zipx. */
+  private def projectTaskScope(key: Scoped): zipx.core.TaskScope =
+    key.scope.project match
+      case This | Zero => zipx.core.TaskScope.Unscoped
+      case Select(ref) =>
+        ref match
+          case LocalProject(id) =>
+            zipx.core.TaskScope.Module(ModuleId.make(id).fold(err => sys.error(s"zipx: $err"), identity))
+          case ProjectRef(_, id) =>
+            zipx.core.TaskScope.Module(ModuleId.make(id).fold(err => sys.error(s"zipx: $err"), identity))
+          case ThisProject | LocalRootProject | _: RootProject =>
+            sys.error(
+              s"zipx: key '${scopedLabelText(key)}' uses a project axis (${ref.getClass.getSimpleName}) with no " +
+                "stable id until the build resolves; name the project value (e.g. core / publish) or leave the axis off"
+            )
+          case ThisBuild | _: BuildRef =>
+            sys.error(
+              s"zipx: key '${scopedLabelText(key)}' uses a build-level project axis; that is not a project a command " +
+                "runs in. Use a project-scoped key or leave the axis off."
+            )
+          case other =>
+            sys.error(s"zipx: unsupported project axis ${other.getClass.getSimpleName} on '${scopedLabelText(key)}'")
+      case axis =>
+        sys.error(s"zipx: unsupported project ScopeAxis ${axis.getClass.getSimpleName} on '${scopedLabelText(key)}'")
+
+  /** Key as an unscoped-or-explicitly-scoped Task step (config axis in the label). */
+  private def scopedLabel(key: Scoped): SbtCommand =
+    SbtCommand.fromSteps(
+      List(
+        zipx.core.SbtStep.Task(
+          zipx.core.SbtCommandText.unsafeMake(scopedLabelText(key)),
+          projectTaskScope(key),
+          cross = false,
+        )
+      )
+    )
 
   /** A per-module command from a task key: `<moduleId>/[<Config>/]<label>` (e.g. `service/Docker/publish`). */
   def moduleCommand(key: Scoped): ModuleNode => SbtCommand = n => SbtCommand.module(n, scopedLabel(key))
 
   /** A per-module command that cross-publishes when the module is cross-built (a single `+<id>/…` leg). */
   def crossModuleCommand(key: Scoped): ModuleNode => SbtCommand = n => SbtCommand.crossModule(n, scopedLabel(key))
+
+  /** A key the sbt CLI can run. SettingKeys are rejected: `sbt 'someSetting'` only prints. */
+  type RunnableKey = TaskKey[?] | InputKey[?]
+  type SessionPart = RunnableKey | sbt.Command | SbtCommand | Seq[SbtCommand]
+
+  /** Render a runnable key to an [[SbtCommand]] (honours project + config axes). */
+  def of(key: RunnableKey): SbtCommand = key match
+    case k: Scoped => scopedLabel(k)
+
+  /** A declared sbt [[sbt.Command]] by its registered name. */
+  def of(command: sbt.Command): SbtCommand =
+    command.nameOption match
+      case Some(name) => SbtCommand.unsafeCommand(name)
+      case None       =>
+        sys.error("zipx: sbt.Command has no nameOption; use zipxTasks.of(taskKey) or SbtCommand.raw")
+
+  /** Join keys and commands into one session, in order. */
+  def session(first: SessionPart, rest: SessionPart*): SbtCommand =
+    def parts(p: SessionPart): List[SbtCommand] = p match
+      case c: SbtCommand  => List(c)
+      case c: sbt.Command => List(of(c))
+      case s: Seq[?]      => s.toList.collect { case c: SbtCommand => c }
+      case k: Scoped      => List(of(k.asInstanceOf[RunnableKey]))
+    val all = parts(first) ++ rest.toList.flatMap(parts)
+    all match
+      case h :: t => SbtCommand.session(h, t*)
+      case Nil    => sys.error("zipx: session requires at least one command")
+  end session
+
+  /** One command per project ref running `task` (e.g. `matrix.projectRefs` from sbt-projectmatrix). */
+  def rows(refs: Seq[ProjectRef], task: RunnableKey): List[SbtCommand] =
+    refs.toList.map { ref =>
+      val id = ModuleId.make(ref.project).fold(e => sys.error(s"zipx: $e"), identity)
+      SbtCommand.module(ModuleNode(id = id), of(task))
+    }
+
+  /** Same task for each project. */
+  def each(projects: Seq[Project], task: RunnableKey): List[SbtCommand] =
+    projects.toList.map { p =>
+      val id = ModuleId.make(p.id).fold(e => sys.error(s"zipx: $e"), identity)
+      SbtCommand.module(ModuleNode(id = id), of(task))
+    }
+
+  def only(projects: ProjectReference*): ModuleNode => Boolean =
+    val ids = projects.flatMap(refIds).toSet
+    n => ids.contains(n.id: String)
+
+  def except(projects: ProjectReference*): ModuleNode => Boolean =
+    val ids = projects.flatMap(refIds).toSet
+    n => !ids.contains(n.id: String)
+
+  /** Participate filter for every row of a project matrix (`matrix.projectRefs`). */
+  def onlyRows(refs: Seq[ProjectRef]): ModuleNode => Boolean =
+    val ids = refs.map(_.project).toSet
+    n => ids.contains(n.id: String)
+
+  private def refIds(ref: ProjectReference): List[String] = ref match
+    case LocalProject(id)  => List(id)
+    case ProjectRef(_, id) => List(id)
+    case _                 =>
+      sys.error(s"zipx: only/except need a named project reference; got ${ref.getClass.getSimpleName}")
+
+  /** Capability helpers that take real keys. */
+  extension (cap: Capability)
+    def running(key: RunnableKey): Capability          = cap.running(of(key))
+    def runningEach(key: RunnableKey): Capability      = cap.runningEach(of(key))
+    def runningEachCross(key: RunnableKey): Capability = cap.runningEachCross(of(key))
+    def thenOnce(key: RunnableKey): Capability         = cap.thenOnce(of(key))
+    def thenOnce(command: sbt.Command): Capability     = cap.thenOnce(of(command))
 
   /** Render one splice for the `cmd"…"` interpolator against a module. A `Scoped` (task/input key) renders
     * module-scoped and config-aware (`<id>/[<Config>/]<label>`); a `String` passes through verbatim (so you can splice
@@ -95,7 +193,7 @@ object CapabilityTasks:
       sys.error("""zipx: cmd"…" produced an empty sbt command""")
     // Total: every piece above is ShText, a module id and a key label add only safe characters, and the check above
     // established that the result is non-empty.
-    n => SbtCommand.unsafeMake(interleave(parts, splices.map(renderSplice(_, n))))
+    n => SbtCommand.unsafeBuilt(interleave(parts, splices.map(renderSplice(_, n))))
   end commandFrom
 
   private def interleave(parts: List[String], splices: List[String]): String =

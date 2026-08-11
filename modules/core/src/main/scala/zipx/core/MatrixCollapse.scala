@@ -66,26 +66,22 @@ object MatrixCollapse:
     go(List(node.id), Nil, Set.empty)
   end nearestParticipatingAncestors
 
-  /** Rewrite `<module>/<task>` (or `+<module>/<task>`) to use `${{ matrix.module }}`. */
+  /** Rewrite module-scoped [[SbtStep.Task]]s to [[TaskScope.MatrixModule]]. */
   def underMatrixModule(node: ModuleNode, command: SbtCommand): Either[String, SbtCommand] =
-    import zipx.workflow.Expr
-    val id            = node.id: String
-    val text          = command.text: String
-    val (cross, body) =
-      if text.startsWith("+") then (true, text.drop(1)) else (false, text)
-    if body.startsWith(s"$id/") then
-      val task       = body.drop(id.length + 1)
-      val matrixBody = s"${Expr.matrix("module").render}/$task"
-      val next       = if cross then s"+$matrixBody" else matrixBody
-      Right(command match
-        case SbtCommand.Built(_)     => SbtCommand.Built(SbtCommandText.unsafeMake(next))
-        case SbtCommand.Unchecked(_) => SbtCommand.Unchecked(SbtCommandText.unsafeMake(next)))
+    val id      = node.id
+    var matched = false
+    val next    = command.steps.map {
+      case SbtStep.Task(label, TaskScope.Module(mid), cross) if mid == id =>
+        matched = true
+        SbtStep.Task(label, TaskScope.MatrixModule, cross)
+      case other => other
+    }
+    if matched then Right(SbtCommand.fromSteps(next))
     else
       Left(
         s"command '${command.text}' is not parametric in module '$id' " +
-          s"(expected '$id/<task>' or '+$id/<task>')"
+          s"(expected a Task scoped to that module)"
       )
-    end if
   end underMatrixModule
 
   /** Targets are collapse-safe when environment is absent or equals the target name (so

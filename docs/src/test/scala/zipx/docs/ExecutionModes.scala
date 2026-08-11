@@ -53,7 +53,8 @@ flowchart TD
 Aggregate always starts the stage command (one root `test` job). That is fine: after zipx restores the epoch cache
 (or a remote cache hits), sbt may compile almost nothing and rerun almost no suites even on a cold JVM. Graph can
 skip entire module jobs when their reverse-dep closure is untouched, and it can show a green check per module. Use
-[`testFull`](https://www.scala-sbt.org/2.x/docs/en/reference/sbt-test.html) (`zipxTestTask := "testFull"`) when CI must
+[`testFull`](https://www.scala-sbt.org/2.x/docs/en/reference/sbt-test.html) (`zipxTestTask := zipxTasks.of(testFull)`, the
+plugin default) when CI must
 run every suite every time, uncached. See **Caching** and **Affected** (fail-open handoff, who is gated).
 """
     ),

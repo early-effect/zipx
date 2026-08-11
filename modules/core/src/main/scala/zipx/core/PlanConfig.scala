@@ -172,7 +172,10 @@ object PlanConfig:
 
   val DefaultVerifyCleanLabel: ExprLiteral = ExprLiteral("clean")
 
-  val DefaultCacheRehydrateTask: SbtCommand = SbtCommand("compile")
+  /** Wire-form placeholder for planner unit tests; the sbt plugin always overwrites from zipxTasks.of. Not an sbt API
+    * surface.
+    */
+  val DefaultCacheRehydrateTask: SbtCommand = SbtCommand.unsafeTask("compile")
 
   inline def verifyCleanLabel(inline label: String): Option[ExprLiteral] = Some(ExprLiteral(label))
 

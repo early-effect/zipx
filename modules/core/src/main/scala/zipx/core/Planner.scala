@@ -114,7 +114,8 @@ object Planner:
     * (no participating nodes, or every node's command is action-only).
     */
   private def joinCommands(capability: Capability, nodes: List[ModuleNode]): Option[SbtCommand] =
-    SbtCommand.join(nodes.flatMap(n => capability.command(n).toList))
+    if !capability.command.runsSbt then None
+    else SbtCommand.join(nodes.map(n => capability.command.commandFor(n)))
 
   /** Cache sidecar / env only when the job will run sbt; action-only jobs get an empty contribution. */
   private def cacheForCommand(config: PlanConfig, hasCommand: Boolean): CacheContribution =
@@ -145,8 +146,39 @@ object Planner:
     capabilities.foreach(validateWorkflowCall)
     capabilities.foreach(c => validateSharedTargets(c, graph))
     capabilities.foreach(c => validateSatisfiable(c, graph))
+    capabilities.foreach(validateSessionTail)
     validateSkipConsumers(capabilities, config)
   end validateCapabilities
+
+  /** Rejects [[Capability.sessionTail]] on scopes where a tail would run too often or with a partial module set. */
+  private def validateSessionTail(capability: Capability): Unit =
+    capability.sessionTail.foreach { tail =>
+      val text                                    = tail.text: String
+      def fail(why: String, fix: String): Nothing =
+        sys.error(
+          s"zipx: capability '${capability.name}' has sessionTail '$text' but $why. $fix"
+        )
+      if capability.workflowCall.isDefined then
+        fail("it is a workflow_call job (no sbt session)", "Drop thenOnce, or use a non-workflowCall capability")
+      capability.command match
+        case CommandSource.ActionsOnly =>
+          fail("it is ActionsOnly (nothing to append to)", "Use running(...) or once(...), or drop thenOnce")
+        case _ => ()
+      capability.scope match
+        case CapabilityScope.Layer =>
+          fail(
+            "Layer runs one session per wave, so the tail would release a partial bundle per wave",
+            "Use Aggregate (or ZipxCentral.release) / Once, or Graph + releaseOnce",
+          )
+        case CapabilityScope.Graph =>
+          fail(
+            "Graph runs one session per module, so the tail would run once per module",
+            "Use Aggregate / Once, or Graph publishSigned + releaseOnce",
+          )
+        case CapabilityScope.Aggregate | CapabilityScope.Once => ()
+      end match
+    }
+  end validateSessionTail
 
   /** Rejects an [[CapabilityScope.Aggregate]] or [[CapabilityScope.Layer]] capability that needs an affected-gated
     * Graph one.
@@ -669,7 +701,7 @@ object Planner:
           `with` = ListMap.from(call.withInputs),
         )
       case None =>
-        val cache = cacheForCommand(config, capability.command(syntheticNode).isDefined)
+        val cache = cacheForCommand(config, capability.command.runsSbt)
         capability.name.asJobId -> Job(
           name = Some(capability.name),
           runsOn = capability.runsOn.getOrElse(List(config.runnerOs)),
@@ -983,22 +1015,17 @@ object Planner:
         )
 
       val matrixCommands = nodes.map { n =>
-        capability.command(n) match
-          case None      => None
-          case Some(cmd) =>
-            Some(
-              MatrixCollapse
-                .underMatrixModule(n, cmd)
-                .fold(err => sys.error(s"zipx: capability '${capability.name}': $err"), identity)
-            )
+        MatrixCollapse
+          .underMatrixModule(n, capability.command.commandFor(n))
+          .fold(err => sys.error(s"zipx: capability '${capability.name}': $err"), identity)
       }
       val commandOverride =
         matrixCommands.distinct match
-          case List(one) => one
+          case List(one) => Some(one)
           case other     =>
             sys.error(
               s"zipx: capability '${capability.name}': module commands are not isomorphic under matrix.module " +
-                s"(${other.flatten.map(_.text).mkString(" vs ")})"
+                s"(${other.map(_.text).mkString(" vs ")})"
             )
 
       val scalaVersions = nodes.map(_.crossScalaVersions).distinct
@@ -1137,7 +1164,7 @@ object Planner:
         Some(Strategy(matrix = ListMap("scala" -> node.crossScalaVersions)))
       else None
 
-    val cache = cacheForCommand(config, capability.command(node).isDefined)
+    val cache = cacheForCommand(config, capability.command.runsSbt)
     // Every need except the two jobs with a clause of their own: `affected` is read through its *output*, and
     // `verify-gate` through `applyVerifyGate`. That includes `crossNeeds`, so a failed `fmt` still blocks the tests
     // whose `!cancelled()` would otherwise let them through.
@@ -1415,7 +1442,11 @@ object Planner:
       destinations: List[Target] = Nil,
       matrixAxes: Set[String] = Set.empty,
   ): List[Step] =
-    val command  = commandOverride.orElse(capability.command(node))
+    val base =
+      commandOverride.orElse(
+        Option.when(capability.command.runsSbt)(capability.command.commandFor(node))
+      )
+    val command  = capability.sessionCommand(base)
     val ctx      = StepContext(node, target, hasMatrix, config.actions, destinations)
     val checkout =
       List(Step(uses = Some(config.actions.checkout), `with` = checkoutWith))
@@ -1482,7 +1513,7 @@ object Planner:
     end match
   end verifyCommandStep
 
-  /** `test` → `++${{ matrix.scala }} test`, so a matrixed job's one leg runs under its own Scala version. */
+  /** `test` → `++${{ matrix.scala }}; test`, so a matrixed job's one leg runs under its own Scala version. */
   private def underMatrixScala(command: SbtCommand): SbtCommand =
     SbtCommand.underScalaVersion(Expr.matrix("scala"), command)
 

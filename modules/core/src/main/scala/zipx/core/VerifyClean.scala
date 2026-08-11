@@ -9,10 +9,13 @@ enum VerifyClean:
   /** Prepend this clean mode to an sbt command, e.g. `test` → `cleanFull; test`. */
   def prefixCommand(command: SbtCommand): SbtCommand = this match
     case VerifyClean.None      => command
-    case VerifyClean.Clean     => SbtCommand.prefixedBy(VerifyClean.CleanCommand, command)
-    case VerifyClean.CleanFull => SbtCommand.prefixedBy(VerifyClean.CleanFullCommand, command)
+    case VerifyClean.Clean     => VerifyClean.CleanCommand.andThen(command)
+    case VerifyClean.CleanFull => VerifyClean.CleanFullCommand.andThen(command)
 end VerifyClean
 
 object VerifyClean:
-  private val CleanCommand: SbtCommand     = SbtCommand("clean")
-  private val CleanFullCommand: SbtCommand = SbtCommand("cleanFull")
+  /** Wire form: sbt's `clean` task. */
+  private val CleanCommand: SbtCommand = SbtCommand.unsafeTask("clean")
+
+  /** Wire form: sbt's `cleanFull` command (declared name; generate-checked). */
+  private val CleanFullCommand: SbtCommand = SbtCommand.unsafeCommand("cleanFull")

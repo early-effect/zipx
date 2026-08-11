@@ -56,7 +56,7 @@ lazy val root = (project in file("."))
     publish / skip := true,
     // `Def.uncached` because a file write is not a valid cached-task output.
     zipxWriteVersion := Def.uncached {
-      val out = (LocalRootProject / baseDirectory).value / ExampleCheck.VersionFile
+      val out = (LocalRootProject / baseDirectory).value / zipx.ExampleCheck.VersionFile
       IO.write(out, (ThisBuild / version).value)
       streams.value.log.info(s"zipx version ${(ThisBuild / version).value} -> ${out.getPath}")
       out
@@ -74,11 +74,11 @@ lazy val root = (project in file("."))
         // extraSteps: saferis-style pre-pull so Testcontainers does not hit Hub mid-suite (Ryuk stays on).
         Capability.once(
           name = Capability.TestName,
-          command = SbtCommand.prefixedBy(SbtCommand("test"), SbtCommand("plugin/scripted")),
+          command = zipxTasks.session(test, LocalProject("plugin") / scripted),
           phase = Phase.Verify,
           gate = Gate.Always,
           extraSteps = RemoteCacheItSteps.prePull,
-          postSteps = ExampleCheck.steps,
+          postSteps = zipx.ExampleCheck.steps,
         ),
       )
     },
@@ -162,6 +162,8 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     // Bundle the remote-cache transport so consumers need one addSbtPlugin line. RemoteCachePlugin triggers on
     // AllRequirements but is a no-op until Global/remoteCache is set (which zipx does only from the CI env).
     addSbtPlugin(remoteCachePlugin),
+    // sbt-pgp so ZipxCentral.release can take the real publishSigned TaskKey (Option C).
+    addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.3.1"),
     // JVM args for the sbt subprocess that runs scripted tests: suppress Unsafe/JNA warnings.
     scriptedLaunchOpts ++= Seq(
       "-Xmx1024m",
@@ -238,15 +240,15 @@ lazy val docs = project
     specularMetaProject   := Some(LocalProject("plugin")),
     specularArtifactKind  := "plugin",
     specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
-    specularJsLink := Def.uncached {
+    specularJsLink        := Def.uncached {
       (docsJS / Compile / fastLinkJS).value
       val outDir = (docsJS / Compile / fastLinkJSOutput).value
       val mainJs = outDir / "main.js"
-      if !mainJs.exists then
-        sys.error(
-          s"Expected $mainJs after fastLinkJS; directory contains: " +
-            Option(outDir.list).toSeq.flatten.mkString(", ")
-        )
+      if (!mainJs.exists) then
+      sys.error(
+        s"Expected $mainJs after fastLinkJS; directory contains: " +
+          Option(outDir.list).toSeq.flatten.mkString(", ")
+      )
       val marker = (ThisBuild / baseDirectory).value / "target" / "specular-client-js.path"
       IO.write(marker, mainJs.getAbsolutePath)
     },

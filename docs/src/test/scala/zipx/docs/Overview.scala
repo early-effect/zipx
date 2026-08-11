@@ -231,7 +231,7 @@ zipx is built for sbt 2 as a capable substrate, not a compromise:
 - optional Bazel-**gRPC remote cache** transport (`sbt-remote-cache`, bundled). That is cache plumbing, not “adopt
   Bazel as your build”
 - Scala 3 plugins, so `zipx-core` / `zipx-workflow` are ordinary unit-tested libraries with no sbt on the classpath
-- common settings: a bare `zipxTestTask := "testFull"` applies to every module; any module can override
+- common settings: a bare `zipxTestTask := zipxTasks.of(testFull)` is the plugin default; any module can override
 
 You keep the ergonomics Scala teams already know. CI stops being a second language for the same edges.
 """

@@ -82,7 +82,7 @@ zipxCapabilities += Capability.publish.copy(
 Shared across Aggregate, Layer, and Graph (details on the **Verify** page):
 
 ```scala
-zipxTestTask    := "testFull"
+zipxTestTask    := zipxTasks.of(testFull)
 zipxVerifyClean := VerifyClean.CleanFull
 // Aggregate → sbt 'cleanFull; testFull'
 // Graph     → sbt 'cleanFull; core/testFull' (per job)

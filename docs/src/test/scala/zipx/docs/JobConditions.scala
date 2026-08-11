@@ -139,7 +139,7 @@ nested conjunction is still found.
       exampleValue {
         val contradiction = Capability.deploy(
           participates = _.id == "service",
-          command = n => SbtCommand.module(n, SbtCommand("promote")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
           targets = _ => List(Target(TargetName("prod"), condition = Some(JobCondition.refIs("refs/heads/main")))),
           needsCapabilities = Nil,
           gate = Gate.OnReleaseTag,
@@ -279,7 +279,7 @@ Add label `deploy-stg` on the PR → only the stg job's `if` is true; prod still
         val cap = Capability
           .custom(
             name = Capability.DockerName,
-            command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publish")),
             participates = _.docker,
             gate = Gate.Always,
             targets = _ =>
@@ -337,7 +337,7 @@ Target(
         DocsRender.job("deploy-prod")(
           Capability.deploy(
             participates = _.id == "service",
-            command = n => SbtCommand.module(n, SbtCommand("promote")),
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
             targets = _ =>
               List(
                 Target(

@@ -37,7 +37,7 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
     Capability
       .custom(
         name = CapabilityName("image"),
-        command = n => SbtCommand.module(n, SbtCommand("Docker/publishLocal")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publishLocal")),
         participates = _.docker,
         ordering = Ordering.ParallelWithUpstream,
         gate = Gate.Always,
@@ -49,7 +49,7 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
     Capability
       .deploy(
         participates = _.docker,
-        command = n => SbtCommand.module(n, SbtCommand("promote")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
         targets = _ => targets,
       )
       .copy(matrixCollapse = mode)
@@ -119,7 +119,7 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
         val cap = Capability
           .deployGraph(
             participates = _.docker,
-            command = n => SbtCommand.module(n, SbtCommand("promote")),
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
             targets = _ => List(Target(TargetName("prod")), Target(TargetName("staging"))),
           )
           .withMatrixCollapse(MatrixCollapse.Strict)
@@ -155,7 +155,7 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
         val cap = Capability
           .deployGraph(
             participates = _.docker,
-            command = n => SbtCommand.module(n, SbtCommand("promote")),
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
             targets = _ => targets,
             needsCapabilities = Nil,
           )

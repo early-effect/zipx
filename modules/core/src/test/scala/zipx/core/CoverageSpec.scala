@@ -54,9 +54,9 @@ object CoverageSpec extends ZIOSpecDefault:
       },
       test("measuredTask substitutes only for the default, leaving an explicit choice alone") {
         val default  = ModuleNode(ModuleId("a"))
-        val explicit = ModuleNode(ModuleId("b"), testTask = SbtCommand("Test/testOnly com.example.*"))
+        val explicit = ModuleNode(ModuleId("b"), testTask = SbtCommand.unsafeTask("Test/testOnly com.example.*"))
         assertTrue(
-          Coverage.measuredTask(default) == Coverage.FullTest,
+          Coverage.measuredTask(default).text == "testFull",
           Coverage.measuredTask(explicit) == explicit.testTask,
         )
       },

@@ -140,7 +140,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         // every destination on every run is a legitimate combination, and one switch would take it away.
         val deploy = Capability.deployGraph(
           participates = _.id == "serviceA",
-          command = n => SbtCommand.module(n, SbtCommand("deploy")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
           targets = _ => List(Target(TargetName("prod"))),
           needsCapabilities = Nil,
         )
@@ -204,7 +204,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
       test("a Graph deploy needing a narrowed docker becomes skip-tolerant") {
         val deploy = Capability.deployGraph(
           participates = _.id == "serviceA",
-          command = n => SbtCommand.module(n, SbtCommand("deploy")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
           targets = _ => List(Target(TargetName("prod"))),
         )
         val wf = plan(List(Capability.dockerGraph, deploy), on, dockerGraphFixture)
@@ -234,7 +234,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
       test("a Once capability needing a narrowed publish is skip-tolerant") {
         val announce = Capability.once(
           CapabilityName("announce"),
-          SbtCommand("announce"),
+          SbtCommand.unsafeTask("announce"),
           phase = Phase.Deploy,
           gate = Gate.OnReleaseTag,
           needsCapabilities = List(Capability.PublishName),
@@ -264,7 +264,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
       test("with the knob off, a dependent's if: gains nothing: no tolerance where there is no skip") {
         val deploy = Capability.deploy(
           participates = _.id == "serviceA",
-          command = n => SbtCommand.module(n, SbtCommand("deploy")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
           targets = _ => List(Target(TargetName("prod"))),
         )
         val wf = plan(List(Capability.dockerGraph, deploy), off, dockerGraphFixture)
@@ -274,7 +274,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
       test("depending on an Aggregate docker adds no tolerance, since an Aggregate job cannot be narrowed") {
         val deploy = Capability.deploy(
           participates = _.id == "serviceA",
-          command = n => SbtCommand.module(n, SbtCommand("deploy")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
           targets = _ => List(Target(TargetName("prod"))),
         )
         val wf = plan(List(Capability.docker, deploy), on, dockerGraphFixture)
@@ -293,7 +293,8 @@ object AffectedPublishSpec extends ZIOSpecDefault:
       test("a cross-capability need is guarded as well, so a failed gate is not let through by !cancelled()") {
         // The trap: `!cancelled()` overrides the implicit success() for *every* need, not only the skippable ones. A
         // failed `fmt` would otherwise stop blocking the publish it gates.
-        val fmt = Capability.once(CapabilityName("fmt"), SbtCommand("scalafmtCheckAll"), phase = Phase.Publish)
+        val fmt =
+          Capability.once(CapabilityName("fmt"), SbtCommand.unsafeTask("scalafmtCheckAll"), phase = Phase.Publish)
         val pub = Capability.publishGraph.copy(needsCapabilities = List(fmt.name))
         val wf  = plan(List(fmt, pub), on)
         assertTrue(
@@ -348,7 +349,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         // Graph deploy, because an Aggregate one needing a narrowed docker is now refused outright.
         val deploy = Capability.deployGraph(
           participates = _.id == "serviceA",
-          command = n => SbtCommand.module(n, SbtCommand("deploy")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
           targets = _ => List(Target(TargetName("prod"))),
         )
         val wf = plan(List(Capability.testGraph, Capability.dockerGraph, deploy), on, dockerGraphFixture)

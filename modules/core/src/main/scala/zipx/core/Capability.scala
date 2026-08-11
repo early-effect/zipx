@@ -208,8 +208,8 @@ end Target
   *   applies to [[CapabilityScope.Graph]] only; ignored for the other scopes.
   * @param command
   *   the sbt command for one participating module, as an [[SbtCommand]] rather than a `String`: the combinators on its
-  *   companion build the `<module>/<task>` and `+<module>/<task>` shapes, and `SbtCommand.unchecked` takes command text
-  *   zipx did not build. Aggregate and Layer join these with `;`. `None` means an action-only job: checkout plus
+  *   companion build the `<module>/<task>` and `+<module>/<task>` shapes, and `SbtCommand.raw` takes command text zipx
+  *   did not build. Aggregate and Layer join these with `;`. `None` means an action-only job: checkout plus
   *   [[extraSteps]] / [[postSteps]], with no JDK, sbt, cache, or command step.
   * @param matrixed
   *   expands a Graph job over Scala versions. Aggregate and Layer are never matrixed.
@@ -252,7 +252,7 @@ final case class Capability(
     ordering: Ordering,
     gate: Gate,
     participates: ModuleNode => Boolean,
-    command: ModuleNode => Option[SbtCommand],
+    command: CommandSource,
     matrixed: Boolean,
     targets: ModuleNode => List[Target] = _ => Nil,
     targetFanOut: TargetFanOut = TargetFanOut.JobPerTarget,
@@ -272,6 +272,8 @@ final case class Capability(
       * [[MatrixCollapse.Off]]). `None` inherits from the plan allowlist, else Off.
       */
     matrixCollapse: Option[MatrixCollapse] = None,
+    /** Build-wide command appended once after joined module commands. See [[thenOnce]]. */
+    sessionTail: Option[SbtCommand] = None,
 ):
   def withCondition(condition: JobCondition): Capability =
     copy(condition = Some(condition))
@@ -332,12 +334,63 @@ final case class Capability(
   def withNodeVersion(version: NodeVersion): Capability =
     copy(nodeVersion = Some(version))
 
+  /** Fixed build-wide command ([[CommandSource.Fixed]]). */
+  def running(command: SbtCommand): Capability =
+    copy(command = CommandSource.Fixed(command))
+
+  /** Per participating module; zipx applies [[SbtCommand.module]]. */
+  def runningEach(task: SbtCommand): Capability =
+    copy(command = CommandSource.PerModule(n => SbtCommand.module(n, task)))
+
+  /** Per participating module; zipx applies [[SbtCommand.crossModule]]. */
+  def runningEachCross(task: SbtCommand): Capability =
+    copy(command = CommandSource.PerModule(n => SbtCommand.crossModule(n, task)))
+
+  /** Per-module command with custom logic (rare). Prefer [[runningEach]] / [[runningEachCross]]. */
+  def runningPerModule(build: ModuleNode => SbtCommand): Capability =
+    copy(command = CommandSource.PerModule(build))
+
+  /** No sbt command ([[CommandSource.ActionsOnly]]). */
+  def runningNothing: Capability =
+    copy(command = CommandSource.ActionsOnly)
+
+  /** Appends `tail` after joined module commands. Accumulates when called twice. */
+  def thenOnce(tail: SbtCommand): Capability =
+    copy(sessionTail = Some(sessionTail.fold(tail)(_.andThen(tail))))
+
+  def needing(names: CapabilityName*): Capability =
+    copy(needsCapabilities = needsCapabilities ++ names.toList)
+
+  def withEnv(env: Map[String, EnvValue]): Capability =
+    copy(env = env)
+
+  def plusEnv(entries: (String, EnvValue)*): Capability =
+    copy(env = env ++ entries.toMap)
+
+  def withExtraSteps(steps: Steps): Capability =
+    copy(extraSteps = steps)
+
+  def withPostSteps(steps: Steps): Capability =
+    copy(postSteps = steps)
+
+  /** Declared command names from the command source and the session tail. */
+  def declaredNames: List[SbtCommandName] =
+    command.declaredNames ++ sessionTail.toList.flatMap(_.declaredNames)
+
+  /** The command a job runs: `base` with [[sessionTail]] appended. */
+  def sessionCommand(base: Option[SbtCommand]): Option[SbtCommand] =
+    (base, sessionTail) match
+      case (Some(b), Some(t)) => Some(b.andThen(t))
+      case (Some(b), None)    => Some(b)
+      case (None, Some(t))    => Some(t)
+      case (None, None)       => None
+
 end Capability
 
 object Capability:
 
-  /** sbt-native-packager's `Docker / publish`, in the config-axis form the sbt CLI takes. */
-  private val dockerPublish: SbtCommand = SbtCommand("Docker/publish")
+  /** Wire form for native-packager's `Docker / publish` until a build passes the real key via zipxTasks. */
+  private val dockerPublish: SbtCommand = SbtCommand.unsafeTask("Docker/publish")
 
   /** The names of the built-ins, and the default name of a [[deploy]]. Named because they are also what a build writes
     * in `needsCapabilities` to depend on one, and a default argument cannot be a bare literal now that the parameter is
@@ -354,7 +407,7 @@ object Capability:
     ordering = Ordering.ParallelWithUpstream,
     gate = Gate.Always,
     participates = _.ciRelevant,
-    command = n => Some(SbtCommand.module(n, n.testTask)),
+    command = CommandSource.PerModule(n => SbtCommand.module(n, n.testTask)),
     matrixed = matrixed,
     scope = scope,
   )
@@ -365,7 +418,7 @@ object Capability:
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
     participates = _.publishes,
-    command = n => Some(SbtCommand.crossModule(n, n.publishTask)),
+    command = CommandSource.PerModule(n => SbtCommand.crossModule(n, n.publishTask)),
     matrixed = false,
     scope = scope,
   )
@@ -376,7 +429,7 @@ object Capability:
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
     participates = _.docker,
-    command = n => Some(SbtCommand.module(n, dockerPublish)),
+    command = CommandSource.PerModule(n => SbtCommand.module(n, dockerPublish)),
     matrixed = false,
     scope = scope,
   )
@@ -469,7 +522,7 @@ object Capability:
       ordering = Ordering.DependencyOrdered,
       gate = gate,
       participates = participates,
-      command = n => Some(command(n)),
+      command = CommandSource.PerModule(command),
       matrixed = false,
       targets = targets,
       needsCapabilities = needsCapabilities,
@@ -509,7 +562,7 @@ object Capability:
       ordering = ordering,
       gate = gate,
       participates = participates,
-      command = n => Some(command(n)),
+      command = CommandSource.PerModule(command),
       matrixed = matrixed,
       targets = targets,
       targetFanOut = targetFanOut,
@@ -529,7 +582,7 @@ object Capability:
     * `needsCapabilities` works in both directions: others name this capability to depend on it, and naming them here
     * makes this job wait on every one of their jobs.
     *
-    * For a reusable-workflow call with no local steps, use [[steps]] (or `.copy(command = _ => None)` plus a
+    * For a reusable-workflow call with no local steps, use [[steps]] (or `.runningNothing` plus a
     * [[Capability.workflowCall]]); see `ZipxDocs`.
     */
   def once(
@@ -553,7 +606,7 @@ object Capability:
       ordering = Ordering.ParallelWithUpstream,
       gate = gate,
       participates = _ => true,
-      command = _ => Some(command),
+      command = CommandSource.Fixed(command),
       matrixed = false,
       needsCapabilities = needsCapabilities,
       permissions = permissions,
@@ -590,7 +643,7 @@ object Capability:
       ordering = Ordering.ParallelWithUpstream,
       gate = gate,
       participates = _ => true,
-      command = _ => None,
+      command = CommandSource.ActionsOnly,
       matrixed = false,
       needsCapabilities = needsCapabilities,
       permissions = permissions,

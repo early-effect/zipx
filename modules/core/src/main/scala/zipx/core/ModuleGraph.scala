@@ -108,8 +108,19 @@ final case class ModuleNode(
 end ModuleNode
 
 object ModuleNode:
-  val DefaultTestTask: SbtCommand    = SbtCommand("test")
-  val DefaultPublishTask: SbtCommand = SbtCommand("publish")
+  /** Wire-form placeholders for planner unit tests and Coverage's "still the default test" footgun check. The plugin
+    * default is `zipxTasks.of(testFull)`; it always overwrites these when building [[ModuleNode]]s from the graph.
+    */
+  val DefaultTestTask: SbtCommand = SbtCommand.unsafeTask("test")
+
+  /** Wire-form placeholders for planner unit tests; the sbt plugin always overwrites from `zipxTasks.of(publish)`.
+    */
+  val DefaultPublishTask: SbtCommand = SbtCommand.unsafeTask("publish")
+
+  /** Stand-in for probing [[CommandSource.PerModule]] provenance. Underscore-prefixed so no real project id collides.
+    */
+  private[core] val probe: ModuleNode = ModuleNode(id = ModuleId("_probe"))
+end ModuleNode
 
 /** The module dependency graph. Nodes are keyed by id; edges are `dependsOn` (child → its dependencies).
   *

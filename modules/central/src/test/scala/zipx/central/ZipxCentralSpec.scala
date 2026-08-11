@@ -107,13 +107,13 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       }
       val multiDocker = Capability.custom(
         name = Capability.DockerName,
-        command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publish")),
         participates = _.docker,
         targets = _ => List(Target(TargetName("us")), Target(TargetName("eu"))),
       )
       val after = Capability.once(
         name = CapabilityName("notify"),
-        command = SbtCommand("echo done"),
+        command = SbtCommand.unsafeTask("echo done"),
         phase = Phase.Publish,
         gate = Gate.Always,
         needsCapabilities = List(Capability.DockerName),
@@ -127,13 +127,17 @@ object ZipxCentralSpec extends ZIOSpecDefault:
           Set("PGP_KEY_HEX", "PGP_SECRET", "PGP_PASSPHRASE", "SONATYPE_USERNAME", "SONATYPE_PASSWORD")
       )
     },
-    test("release is one publish job with publishSigned; sonaRelease and no staging artifacts") {
+    test(
+      "release is one Aggregate publish job: every publisher's publishSigned then sonaRelease, no staging artifacts"
+    ) {
       val wf  = Planner.plan(sampleGraph, List(ZipxCentral.release), config)
       val job = wf.jobs("publish")
       val run = job.steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
       assertTrue(
         wf.jobs.keys.toList == List("publish"),
-        run.contains("publishSigned; sonaRelease"),
+        run.contains("schema/publishSigned"),
+        run.contains("api/publishSigned"),
+        run.endsWith("sonaRelease'") || run.contains("; sonaRelease"),
         !wf.jobs.contains("central-release"),
         !job.steps.exists(_.name.contains("Upload sona staging")),
         job.steps.exists(_.name.contains("Import signing key")),

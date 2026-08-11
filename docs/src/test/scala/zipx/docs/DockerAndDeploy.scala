@@ -180,7 +180,7 @@ ANDed, and no ref is both a `v*` tag and `refs/heads/main`, so zipx refuses to g
         DocsRender.jobs("deploy-staging", "deploy-prod")(
           Capability.deploy(
             participates = _.id == "service",
-            command = n => SbtCommand.module(n, SbtCommand("promote")),
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
             targets = _ => targets,
             needsCapabilities = Nil,
           )
