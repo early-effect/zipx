@@ -76,8 +76,8 @@ object CapabilityTasks:
   /** The `cmd"…"` interpolator's runtime half: validate everything the caller wrote, then return a *total* function.
     *
     * Validation happens here rather than per module because it can: a splice is a key or a plain `String`, neither of
-    * which depends on the [[ModuleNode]], so every character of the result except the module id is known now. The id is
-    * a [[zipx.core.ModuleId]] and a key label is an sbt `AttributeKey` label, so both are already safe.
+    * which depends on the `ModuleNode`, so every character of the result except the module id is known now. The id is a
+    * [[zipx.core.ModuleId]] and a key label is an sbt `AttributeKey` label, so both are already safe.
     *
     * `ShText` is the per-piece rule: no newline, no carriage return, no control characters, which is exactly what an
     * [[zipx.core.SbtCommand]] forbids, minus the non-emptiness that applies to the whole and not to a part. Non-empty

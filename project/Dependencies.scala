@@ -52,7 +52,9 @@ object Dependencies:
   val testcontainersVersion = "2.0.5"
 
   val testcontainersDeps: Seq[ModuleID] = Seq(
-    "org.testcontainers" % "testcontainers" % testcontainersVersion % Test
+    "org.testcontainers" % "testcontainers" % testcontainersVersion % Test,
+    // SLF4J binding so testcontainers logs to console instead of NOP.
+    "org.slf4j"          % "slf4j-simple"   % "2.0.17"              % Test,
   )
 
 end Dependencies

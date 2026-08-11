@@ -5,8 +5,8 @@ import neotype.unwrap
 /** A shell conditional, the `…` in `if … ; then`.
   *
   * Each variant knows which bracket form it needs. `[ "$ref" = refs/tags/v* ]` compares against the literal string
-  * rather than matching, so [[GlobMatch]] renders `[[ ]]` and takes a [[GlobPattern]] rather than a [[Word]], which
-  * could arrive quoted; every other comparison renders `[ ]`.
+  * rather than matching, so [[ShTest.GlobMatch]] renders `[[ ]]` and takes a [[GlobPattern]] rather than a [[Word]],
+  * which could arrive quoted; every other comparison renders `[ ]`.
   */
 enum ShTest:
 
@@ -117,7 +117,7 @@ enum ShTest:
   private def glob(w: Word, op: String, pattern: GlobPattern): ShLines =
     ShLines.of("[[ ") ++ word(w) ++ ShLines.composed(s" $op ${pattern.unwrap} ]]")
 
-  /** Raw fragments carried by a [[Cmd]] test, for the generate-time warning. */
+  /** Raw fragments carried by a [[ShTest.Cmd]] test, for the generate-time warning. */
   def rawFragments: List[String] = this match
     case Cmd(command) => command.rawFragments
     case And(l, r)    => l.rawFragments ++ r.rawFragments

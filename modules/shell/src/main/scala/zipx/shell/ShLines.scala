@@ -6,8 +6,8 @@ import zio.{Chunk, NonEmptyChunk}
 /** The rendered form of one logical unit: a non-empty sequence of already-validated [[ScriptLine]]s.
   *
   * Non-empty because a word, a command and a test each render to *something*, and a value spelling "no lines" would
-  * silently vanish from a script. That is structural rather than validated: [[NonEmptyChunk]] has no empty case, and
-  * its `map` / `prepend` / `append` return one, so every operation here is total with nothing to assert.
+  * silently vanish from a script. That is structural rather than validated: `NonEmptyChunk` has no empty case, and its
+  * `map` / `prepend` / `append` return one, so every operation here is total with nothing to assert.
   *
   * More than one line because a `\` continuation and a wrapped `$(…)` are one logical unit across several physical
   * ones. Everything in this module renders to one of these rather than to a `String`, so no stage splits text on

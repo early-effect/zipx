@@ -96,7 +96,7 @@ enum Expr:
     case other           => s"$${{ ${other.unwrapped} }}"
 
   /** The text *inside* the `${{ }}`, for a position that is already an expression context: an `if:`, or an operand of
-    * an operator or [[Call]].
+    * an operator or [[Expr.Call]].
     *
     * Bare composes where wrapped does not: two conditions ANDed bare are one expression, where two wrapped ones
     * concatenate into a template string that evaluates to neither.
@@ -136,7 +136,7 @@ enum Expr:
   /** `!this`, with no parens; write `!Expr.group(…)` for `!(…)`. */
   def unary_! : Expr = Not(this)
 
-  /** Concatenate with `other`, flattening so nested [[Concat]]s do not nest. */
+  /** Concatenate with `other`, flattening so nested [[Expr.Concat]]s do not nest. */
   infix def ++(other: Expr): Expr = (this, other) match
     case (Concat(a), Concat(b)) => Concat(a ++ b)
     case (Concat(a), b)         => Concat(a :+ b)
