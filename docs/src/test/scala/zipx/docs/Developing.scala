@@ -50,9 +50,9 @@ The publishable `plugin` project remains for Central publish and scripted tests.
 `publishLocal` or a released `sbt-zipx`). Root dogfood uses Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
 both with `JobCondition.repositoryIs("early-effect/zipx")` so fork tag pushes do not publish or deploy Pages.
 
-**Remote-cache IT** lives in `modules/it` (not Aggregate). Run `sbt it/test` (Docker required). CI runs it as a parallel
-Verify job (`remote-cache-it`, needs `verify-gate` only). Pins and live Put/Get are documented under **Remote cache for
-teams** / `RemoteCacheProof`.
+**Remote-cache live proof** lives in `core` tests (`zipx.it.RemoteCacheItSpec`): plain Testcontainers for bazel-remote
+plus an sbt fixture image (Docker required; failure is a clear test failure). It runs under Aggregate `test` / `sbt
+core/test`. Pins and Put/Get are documented under **Remote cache for teams** / `RemoteCacheProof`.
 """
     ),
     section("Docs site")(
