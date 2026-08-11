@@ -70,7 +70,21 @@ lazy val service = (project in file("service"))
 
 lazy val root = (project in file("."))
   .aggregate(models, coreLib, client, service)
-  .settings(publish / skip := true)
+  .settings(
+    publish / skip := true,
+    // Exclude native-packager keys sbt sets up via DockerPlugin/JavaAppPackaging wiring but zipx does not consume.
+    Global / excludeLintKeys ++= Set(
+      Debian / executableScriptName,
+      Debian / sourceDirectory,
+      Rpm / daemonStdoutLogFile,
+      Rpm / executableScriptName,
+      Rpm / name,
+      Rpm / sourceDirectory,
+      Universal / executableScriptName,
+      UniversalDocs / name,
+      UniversalSrc / name,
+    ),
+  )
 
 // Format gate, then Layer-mode test/publish (dependency-ordered waves, few sbt sessions).
 // Deploy stays Aggregate-by-target (one job per staging/prod; modules batched). Multi-registry

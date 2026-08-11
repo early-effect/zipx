@@ -20,6 +20,8 @@ object Dependencies:
     "-deprecation",
     "-feature",
     "-Wunused:all",
+    // Suppress "Option -classpath was updated" noise from sbt's incremental compilation wiring.
+    "-Xlint:-classpath",
   )
 
   val zioDeps: Seq[ModuleID] = Seq(
