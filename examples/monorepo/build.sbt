@@ -7,6 +7,10 @@
 //
 // zipx derives everything (module set, needs edges, publish order, matrix) from this.
 
+import sbt.Keys._
+import com.typesafe.sbt.packager.linux.LinuxPlugin.autoImport._
+import com.typesafe.sbt.packager.rpm.RpmPlugin.autoImport._
+
 val scala3 = "3.8.4"
 val scala2 = "2.13.16"
 
@@ -83,6 +87,7 @@ lazy val root = (project in file("."))
       Universal / executableScriptName,
       UniversalDocs / name,
       UniversalSrc / name,
+      rpmScriptsDirectory, // native-packager sets this but we only use Docker packaging
     ),
   )
 

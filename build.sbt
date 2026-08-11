@@ -40,6 +40,8 @@ val commonSettings = Seq(
   testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
   publishMavenStyle    := true,
   pomIncludeRepository := { _ => false },
+  // ZIOSpecDefault suites are discovered as mains; tests don't use mainClass. Suppress the warning.
+  Test / mainClass := None,
 )
 
 // The version handoff for Aggregate test post-steps: examples/monorepo needs the in-dev plugin version, and CI must
