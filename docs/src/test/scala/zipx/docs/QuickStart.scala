@@ -80,11 +80,11 @@ lazy val root = (project in file("."))
     section("Bare settings (sbt 2.0)")(
       md"""
 zipx reads build-level settings from the root project's scope, so write plain bare settings, no `ThisBuild /` prefix.
-A bare `zipxTestTask := "testFull"` applies to every module; any module can override it in its own `.settings(...)`.
+A bare `zipxTestTask := zipxTasks.of(testFull)` is the plugin default; any module can override it in its own `.settings(...)`.
 
 ```scala
 zipxJavaVersion := JavaVersion("25")
-zipxTestTask    := "testFull"
+zipxTestTask    := zipxTasks.of(testFull)  // plugin default
 zipxWorkflowDispatch := true
 ```
 """

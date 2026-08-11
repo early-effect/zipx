@@ -40,7 +40,7 @@ object PipelineSpec extends ZIOSpecDefault:
   private val deploy = Capability
     .deployGraph(
       participates = _.id == "serviceA",
-      command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
+      command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publish")),
       targets = _ => deployTargets,
       permissions = Map("id-token" -> "write", "contents" -> "read"),
     )

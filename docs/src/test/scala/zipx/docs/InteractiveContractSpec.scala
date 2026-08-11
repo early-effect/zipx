@@ -27,7 +27,7 @@ object InteractiveContractSpec extends ZIOSpecDefault:
   )
 
   /** Same list [[ClientMain]] registers; duplicated because this JVM spec cannot see that object. */
-  private val clientPages: Vector[DocPage] = Vector(MatrixCollapsePage.doc)
+  private val clientPages: Vector[DocPage] = Vector(MatrixCollapsePage.doc, ComposingSbtCommands.doc)
 
   private def collectInteractive(pages: Vector[DocPage]): Vector[(String, Option[String])] =
     def go(nodes: Vector[DocNode]): Vector[(String, Option[String])] =

@@ -51,7 +51,7 @@ object ActionOnlyCapabilitySpec extends ZIOSpecDefault:
       )
       val wf = Planner.plan(
         sampleGraph,
-        List(Capability.once(fmt, SbtCommand("scalafmtCheckAll")), cap),
+        List(Capability.once(fmt, SbtCommand.unsafeTask("scalafmtCheckAll")), cap),
         config,
       )
       val job = wf.jobs("notify")
@@ -83,7 +83,7 @@ object ActionOnlyCapabilitySpec extends ZIOSpecDefault:
       )
     },
     test("existing Once capabilities still emit the toolchain") {
-      val fmt = Capability.once(CapabilityName("fmt"), SbtCommand("scalafmtCheckAll"))
+      val fmt = Capability.once(CapabilityName("fmt"), SbtCommand.unsafeTask("scalafmtCheckAll"))
       val job = Planner.plan(sampleGraph, List(fmt), config).jobs("fmt")
       assertTrue(
         job.steps.exists(usesAction(_, "actions/setup-java")),

@@ -85,7 +85,7 @@ object SharedTargetsSpec extends ZIOSpecDefault:
         val docker = dockerWith(sixRegistries, CapabilityScope.Graph, shared = true)
         val deploy = Capability.deployGraph(
           participates = _.id == "serviceA",
-          command = n => SbtCommand.module(n, SbtCommand("deploy")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
           targets = _ => List(Target(TargetName("prod"))),
         )
         val wf = Planner.plan(dockerGraph, List(docker, deploy), config)

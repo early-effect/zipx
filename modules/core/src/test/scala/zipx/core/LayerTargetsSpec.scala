@@ -39,7 +39,7 @@ object LayerTargetsSpec extends ZIOSpecDefault:
     val base = Capability
       .deploy(
         participates = _.docker,
-        command = n => SbtCommand.module(n, SbtCommand("promote")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
         targets = _ => targets,
       )
       .copy(scope = CapabilityScope.Layer)

@@ -107,15 +107,57 @@ object ZipxPlugin extends AutoPlugin:
     export zipx.core.EnvValue.secret
 
     /** Nested object rather than a re-exported type: this way a `build.sbt` needs only `Capability` from the plugin
-      * jar, not `zipx-central` on the meta classpath.
+      * jar, not `zipx-central` on the meta classpath. Release vals are built from real keys (`publishSigned`,
+      * `sonaRelease`); pure signing helpers still come from the central jar.
       */
     object ZipxCentral:
-      def release: Capability       = zipx.central.ZipxCentral.release
-      def publishSigned: Capability = zipx.central.ZipxCentral.publishSigned
-      def releaseOnce: Capability   = zipx.central.ZipxCentral.releaseOnce
-      def signingEnv                = zipx.central.ZipxCentral.signingEnv
-      def OrgSecretNames            = zipx.central.ZipxCentral.OrgSecretNames
-      def gpgImportSteps            = zipx.central.ZipxCentral.gpgImportSteps
+      import com.jsuereth.sbtpgp.PgpKeys.publishSigned as publishSignedKey
+      import sbt.internal.librarymanagement.Publishing
+
+      private def withSigning(cap: Capability): Capability =
+        cap.withEnv(zipx.central.ZipxCentral.signingEnv).withExtraSteps(zipx.central.ZipxCentral.gpgImportSteps)
+
+      /** Aggregate: every publishing module's `publishSigned`, then `sonaRelease` once. */
+      def release: Capability =
+        withSigning(
+          Capability.publish
+            .runningEachCross(CapabilityTasks.of(publishSignedKey))
+            .thenOnce(CapabilityTasks.of(Publishing.sonaRelease))
+        )
+
+      /** Root Once: `publishSigned; sonaRelease`. Prefer [[release]] when the root aggregate is not the publish set. */
+      def releaseRoot: Capability =
+        withSigning(
+          Capability.once(
+            name = Capability.PublishName,
+            command = CapabilityTasks.session(publishSignedKey, Publishing.sonaRelease),
+            phase = Phase.Publish,
+            gate = Gate.OnReleaseTag,
+          )
+        )
+
+      /** Graph fan-out publish; pair with [[releaseOnce]]. */
+      def publishSigned: Capability =
+        withSigning(
+          Capability.publishGraph
+            .runningEachCross(CapabilityTasks.of(publishSignedKey))
+            .withPostSteps(zipx.central.ZipxCentral.uploadStagingSteps)
+        )
+
+      def releaseOnce: Capability =
+        Capability.once(
+          name = CapabilityName("central-release"),
+          command = CapabilityTasks.of(Publishing.sonaRelease),
+          phase = Phase.Publish,
+          gate = Gate.OnReleaseTag,
+          needsCapabilities = List(Capability.PublishName),
+          env = zipx.central.ZipxCentral.signingEnv,
+          extraSteps = zipx.central.ZipxCentral.downloadStagingSteps ++ zipx.central.ZipxCentral.gpgImportSteps,
+        )
+
+      def signingEnv     = zipx.central.ZipxCentral.signingEnv
+      def OrgSecretNames = zipx.central.ZipxCentral.OrgSecretNames
+      def gpgImportSteps = zipx.central.ZipxCentral.gpgImportSteps
     end ZipxCentral
 
     /** The AWS pack. The newtypes are re-exported as `type` + `val` pairs rather than hidden behind factories, because
@@ -249,6 +291,11 @@ object ZipxPlugin extends AutoPlugin:
     val zipxTasks = zipx.sbt.CapabilityTasks
     export zipx.sbt.CapabilityTasks.cmd
 
+    /** `zipxPublish := zipxOn` / `zipxOff` / `zipxAuto` instead of `Some(true)` / `Some(false)` / `None`. */
+    val zipxOn: Option[Boolean]   = Some(true)
+    val zipxOff: Option[Boolean]  = Some(false)
+    val zipxAuto: Option[Boolean] = None
+
     // Descriptions come from [[ZipxSettings]] (sbt macros require settingKey/taskKey/inputKey on the val RHS).
     val zipxCapabilities      = settingKey[Seq[Capability]](ZipxSettings.capabilities.description)
     val zipxCache             = settingKey[CacheBackend](ZipxSettings.cache.description)
@@ -269,8 +316,8 @@ object ZipxPlugin extends AutoPlugin:
     val zipxWorkflowDispatch  = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
     val zipxCiRelevant        = settingKey[Boolean](ZipxSettings.ciRelevant.description)
     val zipxPublish           = settingKey[Option[Boolean]](ZipxSettings.publish.description)
-    val zipxTestTask          = settingKey[String](ZipxSettings.testTask.description)
-    val zipxPublishTask       = settingKey[String](ZipxSettings.publishTask.description)
+    val zipxTestTask          = settingKey[SbtCommand](ZipxSettings.testTask.description)
+    val zipxPublishTask       = settingKey[SbtCommand](ZipxSettings.publishTask.description)
     val zipxDocker            = settingKey[Boolean](ZipxSettings.docker.description)
     val zipxVerifyClean       = settingKey[VerifyClean](ZipxSettings.verifyClean.description)
     val zipxVerifyCleanLabel  = settingKey[Option[String]](ZipxSettings.verifyCleanLabel.description)
@@ -280,12 +327,13 @@ object ZipxPlugin extends AutoPlugin:
     val zipxAffectedDeploy    = settingKey[Boolean](ZipxSettings.affectedDeploy.description)
     val zipxSkipMergedPrPush  = settingKey[Boolean](ZipxSettings.skipMergedPrPush.description)
     val zipxCacheRehydrateOnMerge    = settingKey[Boolean](ZipxSettings.cacheRehydrateOnMerge.description)
-    val zipxCacheRehydrateTask       = settingKey[String](ZipxSettings.cacheRehydrateTask.description)
+    val zipxCacheRehydrateTask       = settingKey[SbtCommand](ZipxSettings.cacheRehydrateTask.description)
     val zipxCacheRehydrateExtraSteps =
       settingKey[StepContext => List[Step]](ZipxSettings.cacheRehydrateExtraSteps.description)
     val zipxCacheRehydrateEnv    = settingKey[Map[String, EnvValue]](ZipxSettings.cacheRehydrateEnv.description)
     val zipxEnv                  = settingKey[Map[String, EnvValue]](ZipxSettings.env.description)
     val zipxCancelSupersededRuns = settingKey[Boolean](ZipxSettings.cancelSupersededRuns.description)
+    val zipxCheckCommandNames    = settingKey[Boolean](ZipxSettings.checkCommandNames.description)
 
     val zipxGraph            = taskKey[Unit](ZipxSettings.graph.description)
     val zipxPublishOrder     = taskKey[Unit](ZipxSettings.publishOrder.description)
@@ -315,11 +363,12 @@ object ZipxPlugin extends AutoPlugin:
     zipxAffectedDeploy           := false,
     zipxSkipMergedPrPush         := true,
     zipxCacheRehydrateOnMerge    := true,
-    zipxCacheRehydrateTask       := "compile",
+    zipxCacheRehydrateTask       := CapabilityTasks.of(compile),
     zipxCacheRehydrateExtraSteps := (_ => Nil),
     zipxCacheRehydrateEnv        := Map.empty,
     zipxEnv                      := Map.empty,
     zipxCancelSupersededRuns     := true,
+    zipxCheckCommandNames        := true,
     zipxVerifyClean              := VerifyClean.None,
     zipxVerifyCleanLabel         := Some("clean"),
     zipxActions                  := ActionPins.Defaults,
@@ -383,9 +432,9 @@ object ZipxPlugin extends AutoPlugin:
     */
   override def projectSettings: Seq[Setting[?]] = Seq(
     zipxCiRelevant  := thisProject.value.aggregate.isEmpty,
-    zipxPublish     := None,
-    zipxTestTask    := "test",
-    zipxPublishTask := "publish",
+    zipxPublish     := zipxAuto,
+    zipxTestTask    := CapabilityTasks.of(testFull),
+    zipxPublishTask := CapabilityTasks.of(publish),
     zipxDocker      := thisProject.value.autoPlugins.exists(_.label == DockerPluginLabel),
   )
 
@@ -431,8 +480,8 @@ object ZipxPlugin extends AutoPlugin:
         publishes = publishes,
         ciRelevant = read(zipxCiRelevant, true),
         crossScalaVersions = crossVersions,
-        testTask = orFail(typedCommand("zipxTestTask", read(zipxTestTask, "test"))),
-        publishTask = orFail(typedCommand("zipxPublishTask", read(zipxPublishTask, "publish"))),
+        testTask = read(zipxTestTask, CapabilityTasks.of(testFull)),
+        publishTask = read(zipxPublishTask, CapabilityTasks.of(publish)),
         baseDir = baseDir,
         sourcePaths = sourcePathsFor(ref, extracted, buildRoot),
         docker = read(zipxDocker, false),
@@ -508,7 +557,7 @@ object ZipxPlugin extends AutoPlugin:
       workflowDispatch = read(zipxWorkflowDispatch, false),
       skipMergedPrPush = read(zipxSkipMergedPrPush, true),
       cacheRehydrateOnMerge = read(zipxCacheRehydrateOnMerge, true),
-      cacheRehydrateTask = orFail(typedCommand("zipxCacheRehydrateTask", read(zipxCacheRehydrateTask, "compile"))),
+      cacheRehydrateTask = read(zipxCacheRehydrateTask, CapabilityTasks.of(compile)),
       cacheRehydrateExtraSteps = read(zipxCacheRehydrateExtraSteps, (_ => Nil)),
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
       env = read(zipxEnv, Map.empty),
@@ -554,22 +603,66 @@ object ZipxPlugin extends AutoPlugin:
       case Some(value) =>
         PlanConfig.verifyCleanLabelMake(value).left.map(error => s"zipxVerifyCleanLabel: $error")
 
-  /** A command-valued setting as an [[SbtCommand]]. The settings stay `String`-typed, because a `build.sbt` assigns
-    * them as ordinary strings and an opaque type in a `settingKey` would need an sbt `JsonFormat`; the check moves
-    * here, where every other config value is already checked. `zipxTasks` and `cmd"…"` are the typed route that skips
-    * this.
-    */
-  private def typedCommand(setting: String, command: String): Either[String, SbtCommand] =
-    SbtCommand.make(command).left.map(error => s"$setting: $error")
+  private def knownCommandNames(st: State, extracted: Extracted): Set[String] =
+    val fromState    = st.definedCommands.flatMap(_.nameOption)
+    val fromProjects = extracted.structure.allProjectRefs.flatMap { r =>
+      extracted.getOpt(r / commands).toList.flatten.flatMap(_.nameOption)
+    }
+    (fromState ++ fromProjects).toSet
+
+  /** Fail generate/check when a capability declares a command name sbt does not know (aliases, `sonaRelease`, …). */
+  private def checkCommandNames(
+      capabilities: List[Capability],
+      st: State,
+      extracted: Extracted,
+  ): Unit =
+    if !readBuildSetting(extracted, zipxCheckCommandNames, true) then ()
+    else
+      val known = knownCommandNames(st, extracted)
+      if known.isEmpty then ()
+      else
+        val missing = capabilities
+          .flatMap(_.declaredNames)
+          .map(n => n: String)
+          .distinct
+          .filterNot(known.contains)
+        if missing.nonEmpty then
+          val hint = missing
+            .map { name =>
+              val nearest = known.minByOption(k => distance(name, k)).filter(k => distance(name, k) <= 3)
+              nearest match
+                case Some(k) => s"'$name' (did you mean '$k'?)"
+                case None    => s"'$name'"
+            }
+            .mkString(", ")
+          sys.error(
+            s"zipx: unknown sbt command name(s): $hint. Add the plugin/alias that defines them, or set zipxCheckCommandNames := false"
+          )
+        end if
+      end if
+
+  private def distance(a: String, b: String): Int =
+    val m  = a.length
+    val n  = b.length
+    val dp = Array.ofDim[Int](m + 1, n + 1)
+    for i <- 0 to m do dp(i)(0) = i
+    for j <- 0 to n do dp(0)(j) = j
+    for i <- 1 to m; j <- 1 to n do
+      val cost = if a(i - 1) == b(j - 1) then 0 else 1
+      dp(i)(j) = (dp(i - 1)(j) + 1).min(dp(i)(j - 1) + 1).min(dp(i - 1)(j - 1) + cost)
+    dp(m)(n)
+  end distance
 
   private def renderWorkflow: Def.Initialize[Task[String]] = Def.task {
     val graph        = buildGraph.value
     val cfg          = planConfig.value
-    val extracted    = Project.extract(state.value)
+    val st           = state.value
+    val extracted    = Project.extract(st)
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
-    val verifyTask   = orFail(typedCommand("zipxTestTask", readBuildSetting(extracted, zipxTestTask, "test")))
+    val verifyTask   = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
     val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
-    val yaml         = orFail(Render.render(Planner.plan(graph, capabilities, cfg)))
+    checkCommandNames(capabilities, st, extracted)
+    val yaml = orFail(Render.render(Planner.plan(graph, capabilities, cfg)))
     ActionPinFile.annotateUses(yaml, cfg.actions)
   }
 
@@ -593,7 +686,7 @@ object ZipxPlugin extends AutoPlugin:
     val cfg          = planConfig.value
     val extracted    = Project.extract(state.value)
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
-    val verifyTask   = orFail(typedCommand("zipxTestTask", readBuildSetting(extracted, zipxTestTask, "test")))
+    val verifyTask   = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
     val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask), userCaps.toList)
     Steps.rawWarnings(capabilities, cfg).foreach(w => log.warn(s"zipx: $w"))
     MatrixCollapse.warnings(capabilities, graph, cfg).foreach(w => log.warn(s"zipx: $w"))

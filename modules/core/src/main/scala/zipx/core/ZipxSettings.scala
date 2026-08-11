@@ -257,6 +257,16 @@ object ZipxSettings:
       Build,
     )
 
+  val checkCommandNames: SettingDef[Boolean] =
+    SettingDef.setting(
+      SettingName("zipxCheckCommandNames"),
+      true,
+      SettingPurpose(
+        "Fail zipxWorkflowGenerate when a declared sbt command name is unknown (default true)."
+      ),
+      Build,
+    )
+
   val verifyClean: SettingDef[VerifyClean] =
     SettingDef.setting(
       SettingName("zipxVerifyClean"),
@@ -297,7 +307,9 @@ object ZipxSettings:
     SettingDef.setting(
       SettingName("zipxTestTask"),
       ModuleNode.DefaultTestTask,
-      SettingPurpose("sbt task for Verify: Aggregate root command and Graph/Layer per-module task (default 'test')."),
+      SettingPurpose(
+        "sbt command for Verify: Aggregate root and Graph/Layer per-module (plugin default: testFull)."
+      ),
       Project,
     )
 
@@ -305,7 +317,7 @@ object ZipxSettings:
     SettingDef.setting(
       SettingName("zipxPublishTask"),
       ModuleNode.DefaultPublishTask,
-      SettingPurpose("sbt task used to publish this module (default 'publish')."),
+      SettingPurpose("sbt command used to publish this module (plugin default: publish)."),
       Project,
     )
 
@@ -381,6 +393,7 @@ object ZipxSettings:
     cacheRehydrateEnv,
     env,
     cancelSupersededRuns,
+    checkCommandNames,
     verifyClean,
     verifyCleanLabel,
   )

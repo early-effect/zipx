@@ -42,7 +42,8 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
   def spec = suite("Capability container and services")(
     suite("every Job construction site carries them, not just the one that was easy to test")(
       test("Once, the scope a database-backed integration suite actually uses") {
-        val cap = withRuntime(Capability.once(name = CapabilityName("it"), command = SbtCommand("it/testFull")))
+        val cap =
+          withRuntime(Capability.once(name = CapabilityName("it"), command = SbtCommand.unsafeTask("it/testFull")))
         assertRuntime(plan(cap).jobs("it"))
       },
       test("Aggregate with no targets") {
@@ -68,7 +69,7 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
     suite("several sidecars, and the cache backend beside them")(
       test("two services coexist, since a suite may need a database and a cache") {
         val cap = Capability
-          .once(name = CapabilityName("it"), command = SbtCommand("it/testFull"))
+          .once(name = CapabilityName("it"), command = SbtCommand.unsafeTask("it/testFull"))
           .withServices(Map("postgres" -> postgres, "redis" -> redis))
         val job = plan(cap).jobs("it")
         assertTrue(job.services.get("postgres").contains(postgres), job.services.get("redis").contains(redis))
@@ -98,7 +99,7 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
       // put them. Dropping them silently would leave a job whose steps expect a sidecar that is not there.
       test("services with workflowCall is refused, naming the field") {
         val cap = Capability
-          .once(name = CapabilityName("pages"), command = SbtCommand("noop"))
+          .once(name = CapabilityName("pages"), command = SbtCommand.unsafeTask("noop"))
           .withService("postgres", postgres)
           .copy(workflowCall = Some(WorkflowCall(ActionRef("org/repo/.github/workflows/pages.yml@main"))))
         val err = scala.util.Try(plan(cap)).failed.get.getMessage
@@ -106,21 +107,21 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
       },
       test("container with workflowCall is refused too") {
         val cap = Capability
-          .once(name = CapabilityName("pages"), command = SbtCommand("noop"))
+          .once(name = CapabilityName("pages"), command = SbtCommand.unsafeTask("noop"))
           .inContainer(image)
           .copy(workflowCall = Some(WorkflowCall(ActionRef("org/repo/.github/workflows/pages.yml@main"))))
         val err = scala.util.Try(plan(cap)).failed.get.getMessage
         assertTrue(err.contains("container"), !err.contains("services"))
       },
       test("both at once are named in one message, so a fix is one edit rather than two runs") {
-        val cap = withRuntime(Capability.once(name = CapabilityName("pages"), command = SbtCommand("noop")))
+        val cap = withRuntime(Capability.once(name = CapabilityName("pages"), command = SbtCommand.unsafeTask("noop")))
           .copy(workflowCall = Some(WorkflowCall(ActionRef("org/repo/.github/workflows/pages.yml@main"))))
         val err = scala.util.Try(plan(cap)).failed.get.getMessage
         assertTrue(err.contains("container and services"))
       },
       test("a workflowCall capability asking for neither still plans, which is every existing one") {
         val cap = Capability
-          .once(name = CapabilityName("pages"), command = SbtCommand("noop"))
+          .once(name = CapabilityName("pages"), command = SbtCommand.unsafeTask("noop"))
           .copy(workflowCall = Some(WorkflowCall(ActionRef("org/repo/.github/workflows/pages.yml@main"))))
         assertTrue(plan(cap).jobs("pages").uses.isDefined)
       },
@@ -128,7 +129,9 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
     suite("the rendered YAML, and nothing changed for a build that asks for neither")(
       test("both keys reach the file in the shape GitHub reads") {
         val out =
-          Render.render(plan(withRuntime(Capability.once(CapabilityName("it"), SbtCommand("it/testFull"))))).yaml
+          Render
+            .render(plan(withRuntime(Capability.once(CapabilityName("it"), SbtCommand.unsafeTask("it/testFull")))))
+            .yaml
         assertTrue(
           out.contains(s"container: $image"),
           out.contains("postgres:"),

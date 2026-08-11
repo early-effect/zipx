@@ -20,8 +20,8 @@ page (Graph only, fail-open handoff, concurrency).
     section("Test task and optional clean")(
       md"""
 ```scala
-zipxTestTask    := "testFull"            // Aggregate root; Graph/Layer per-module task
-zipxVerifyClean := VerifyClean.CleanFull // None (default) | Clean | CleanFull
+zipxTestTask    := zipxTasks.of(testFull)  // Aggregate root; Graph/Layer per-module (plugin default)
+zipxVerifyClean := VerifyClean.CleanFull   // None (default) | Clean | CleanFull
 ```
 
 For a **one-off** LocalDir / action-cache bust without making clean permanent, leave `zipxVerifyClean` at
@@ -175,7 +175,7 @@ val browserSetup = Steps.built("browsers")(
 
 zipxSkipMergedPrPush := true  // default
 zipxCacheRehydrateOnMerge := true  // default; LocalDir only
-zipxCacheRehydrateTask := "compile"  // default
+zipxCacheRehydrateTask := zipxTasks.of(compile)  // default
 zipxEnv := Map(
   "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.typed(Expr.github("workspace") ++ Expr.lit("/target/ms-playwright")),
 )

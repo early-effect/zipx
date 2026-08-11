@@ -40,7 +40,7 @@ object StepsSpec extends ZIOSpecDefault:
       test("the planner needs no edit: a bundle reaches the rendered job") {
         val capability =
           Capability
-            .once(CapabilityName("check"), SbtCommand("scalafmtCheckAll"))
+            .once(CapabilityName("check"), SbtCommand.unsafeTask("scalafmtCheckAll"))
             .copy(extraSteps = Steps.of("marker")(named("mark")))
         val plan = Planner.plan(GraphFixture(List(node)), List(capability), PlanConfig())
         assertTrue(plan.jobs("check").steps.exists(_.name.contains("mark")))

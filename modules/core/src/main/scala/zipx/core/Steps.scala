@@ -104,23 +104,15 @@ object Steps:
     }
     bundleWarnings ++ commandWarnings(capabilities, config)
 
-  /** The same reporting for [[SbtCommand.Unchecked]]: command text zipx was handed rather than built.
+  /** The same reporting for [[SbtStep.Raw]]: command text zipx was handed rather than built.
     *
-    * A `command` is a `ModuleNode => Option[SbtCommand]`, so reaching its fragments needs a node. `probeNode` is enough
-    * because provenance does not depend on the module: a combinator threads `Unchecked` through whatever node it is
-    * given, so one application answers the question for all of them. The id it carries is what the fragment shows.
-    * Action-only capabilities (`None`) contribute no fragments.
-    *
-    * The exception is a command built from a *node's own* field, `n.testTask`, where the probe reports its default
-    * rather than a real module's. That costs nothing today, because every route into those fields (`zipxTestTask`,
-    * `zipxPublishTask`) goes through [[SbtCommand.make]] and so is `Built`.
+    * [[CommandSource]] exposes [[CommandSource.rawFragments]] (Fixed exact; PerModule via [[ModuleNode.probe]]).
+    * Session tails are included so an unchecked tail cannot go unwarned.
     */
   private def commandWarnings(capabilities: List[Capability], config: PlanConfig): List[String] =
     val capabilityFragments = capabilities.flatMap { c =>
-      c.command(probeNode)
-        .toList
-        .flatMap(_.rawFragments)
-        .map(f => s"capability '${c.name}' uses an unchecked sbt command: $f")
+      val fragments = c.command.rawFragments ++ c.sessionTail.toList.flatMap(_.rawFragments)
+      fragments.map(f => s"capability '${c.name}' uses an unchecked sbt command: $f")
     }
     val rehydrateFragments =
       config.cacheRehydrateTask.rawFragments.map(f => s"cacheRehydrateTask is an unchecked sbt command: $f")
@@ -129,11 +121,6 @@ object Steps:
         "failing job rather than a compile error"
     )
   end commandWarnings
-
-  /** A stand-in module for asking a `command` lambda about its provenance. Underscore-prefixed for the same reason
-    * `Planner`'s synthetic node is: no real sbt project id can collide with it.
-    */
-  private val probeNode = ModuleNode(id = ModuleId("_probe"))
 
   /** `unwrapped` rather than `render` because an `if:` is already an expression context: `${{ a }} && ${{ b }}` is a
     * template string that evaluates to neither operand, where `a && b` is the conjunction the caller asked for.

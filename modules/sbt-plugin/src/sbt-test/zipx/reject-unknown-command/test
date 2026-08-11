@@ -1,0 +1,3 @@
+# A Named step whose command is not on the build fails generate before writing.
+-> zipxWorkflowGenerate
+-$ exists .github/workflows/ci.yml

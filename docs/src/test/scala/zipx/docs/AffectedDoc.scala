@@ -253,7 +253,7 @@ be let through by the same `!cancelled()` that lets a skipped publish through.
           Capability.publishGraph,
           Capability.once(
             CapabilityName("announce"),
-            SbtCommand("announce"),
+            SbtCommand.unsafeTask("announce"),
             phase = Phase.Deploy,
             gate = Gate.OnReleaseTag,
             needsCapabilities = List(Capability.PublishName),
@@ -325,7 +325,7 @@ pushes when a Deploy capability reads it, and there it emits `["all"]` without t
           Capability.dockerGraph,
           Capability.deployGraph(
             participates = _.docker,
-            command = n => SbtCommand.module(n, SbtCommand("deployTask")),
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deployTask")),
             targets = _ => List(Target(TargetName("prod"), environment = Some("production"))),
             gate = Gate.Always,
             condition = Some(JobCondition.refIs("refs/heads/main")),

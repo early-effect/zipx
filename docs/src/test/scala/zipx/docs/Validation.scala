@@ -65,16 +65,18 @@ constructor without a region, which is why a generated login step cannot omit `a
         )
       ),
     ),
-    section("Why some settings are plain Strings")(
+    section("Typed command settings")(
       md"""
-`zipxTestTask`, `zipxPublishTask` and `zipxCacheRehydrateTask` are `String`, not `SbtCommand`, and that is deliberate: a
-`build.sbt` assigns them as ordinary strings, and an opaque type in an sbt `settingKey` would need a `JsonFormat`. The
-check moves to the plugin, where every other config value is already checked, so `zipxTestTask := "api/tets\\n"` fails
-`zipxWorkflowGenerate` naming the setting rather than emitting a broken `run:` line.
+`zipxTestTask`, `zipxPublishTask` and `zipxCacheRehydrateTask` are `SettingKey[SbtCommand]`. Prefer real keys:
 
-`zipxTasks` and `cmd"…"` are the typed route that skips this entirely: they take real sbt `TaskKey`s, so
-`zipxTasks.once(Fmt, scalafmtCheckAll)` is code-completed and cannot name a task that does not exist. See
-**Custom capabilities**.
+```scala
+zipxTestTask := zipxTasks.of(testFull)          // plugin default
+zipxCacheRehydrateTask := zipxTasks.of(compile)
+```
+
+`SbtCommand.raw("…")` remains the escape hatch for free text. Declared command names (`zipxTasks.of(someCommand)`,
+Coverage's `coverage` alias, `sonaRelease`) are checked at generate time when `zipxCheckCommandNames` is true (default).
+See **Composing sbt commands**.
 """
     ),
     section("Generate time: everything assembled from more than one file")(
@@ -122,7 +124,7 @@ because that is the documented default. See **Action pins**.
     ),
     section("Generate time: warnings for the escape hatches")(
       md"""
-`Script.raw`, `Step.runRaw`, `JobCondition.raw` and `SbtCommand.unchecked` exist because no AST covers everything. They
+`Script.raw`, `Step.runRaw`, `JobCondition.raw` and `SbtCommand.raw` exist because no AST covers everything. They
 are not holes: the text rules that would corrupt the generated file still apply. What they skip is the *structure*, so
 `api/tets` is a failing job rather than a compile error.
 
@@ -132,7 +134,7 @@ get to decide that your sbt syntax is wrong. Reaching for a hatch inside a bare 
 `Steps.built(...)` bundle hides it from this report, which is the incentive to use the bundle.
 """,
       exampleValue {
-        SbtCommand.unchecked("api/tets") match
+        SbtCommand.raw("api/tets") match
           case Left(error) => s"unexpected rejection: $error"
           case Right(cmd)  =>
             val smoke = Capability.custom(name = CapabilityName("smoke"), command = _ => cmd)

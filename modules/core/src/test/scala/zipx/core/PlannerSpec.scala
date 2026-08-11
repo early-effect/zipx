@@ -22,7 +22,7 @@ object PlannerSpec extends ZIOSpecDefault:
     ordering = Ordering.DependencyOrdered,
     gate = Gate.OnReleaseTag,
     participates = _.id == "serviceA",
-    command = n => Some(SbtCommand.module(n, SbtCommand("deploy"))),
+    command = CommandSource.PerModule(n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy"))),
     matrixed = false,
     targets = _ => targets,
     scope = CapabilityScope.Graph,
@@ -610,7 +610,7 @@ object PlannerSpec extends ZIOSpecDefault:
       }
       val deploy = Capability.deployGraph(
         participates = _.id == "serviceA",
-        command = n => SbtCommand.module(n, SbtCommand("deploy")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
         targets = _ => stagingProd,
       )
       val wf = Planner.plan(graph, List(Capability.dockerGraph, deploy), config)
@@ -625,7 +625,11 @@ object PlannerSpec extends ZIOSpecDefault:
         case n                       => n
       }
       val deploy =
-        Capability.deployGraph(_.id == "serviceA", n => SbtCommand.module(n, SbtCommand("deploy")), _ => stagingProd)
+        Capability.deployGraph(
+          _.id == "serviceA",
+          n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
+          _ => stagingProd,
+        )
       val wf   = Planner.plan(graph, List(deploy, Capability.dockerGraph), config)
       val keys = wf.jobs.keys.toList
       assertTrue(keys.indexOf("docker-serviceA") < keys.indexOf("deploy-serviceA-prod"))
@@ -633,7 +637,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("Capability.permissions renders on the job (OIDC id-token)") {
       val deploy = Capability.deployGraph(
         participates = _.id == "serviceA",
-        command = n => SbtCommand.module(n, SbtCommand("deploy")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
         targets = _ => stagingProd,
         permissions = Map("id-token" -> "write", "contents" -> "read"),
       )
@@ -645,23 +649,23 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("a needsCapabilities cycle is rejected") {
       val a = Capability(
-        CapabilityName("a"),
-        Phase.Publish,
-        Ordering.DependencyOrdered,
-        Gate.Always,
-        _ => true,
-        _ => Some(SbtCommand("a")),
-        false,
+        name = CapabilityName("a"),
+        phase = Phase.Publish,
+        ordering = Ordering.DependencyOrdered,
+        gate = Gate.Always,
+        participates = _ => true,
+        command = CommandSource.Fixed(SbtCommand.unsafeTask("a")),
+        matrixed = false,
         needsCapabilities = List(CapabilityName("b")),
       )
       val b = Capability(
-        CapabilityName("b"),
-        Phase.Publish,
-        Ordering.DependencyOrdered,
-        Gate.Always,
-        _ => true,
-        _ => Some(SbtCommand("b")),
-        false,
+        name = CapabilityName("b"),
+        phase = Phase.Publish,
+        ordering = Ordering.DependencyOrdered,
+        gate = Gate.Always,
+        participates = _ => true,
+        command = CommandSource.Fixed(SbtCommand.unsafeTask("b")),
+        matrixed = false,
         needsCapabilities = List(CapabilityName("a")),
       )
       assertTrue(scala.util.Try(Planner.plan(sampleGraph, List(a, b), config)).isFailure)
@@ -670,7 +674,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val cap = Capability
         .deployGraph(
           participates = _.id == "serviceA",
-          command = n => SbtCommand.module(n, SbtCommand("deploy")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
           targets = _ => stagingProd,
         )
         .copy(
@@ -691,7 +695,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("postSteps are injected after the command") {
       val cap = Capability.custom(
         name = Capability.PublishName,
-        command = n => SbtCommand.module(n, SbtCommand("publish")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("publish")),
         participates = _.id == "schema",
         postSteps = _ => List(Step(name = Some("Upload"), run = Some("echo uploaded"))),
       )
@@ -703,7 +707,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("Capability.runsOn overrides the build-level runner (list form)") {
       val cap = Capability.custom(
         name = CapabilityName("release"),
-        command = _ => SbtCommand("release"),
+        command = _ => SbtCommand.unsafeTask("release"),
         participates = _.id == "serviceA",
         runsOn = Some(List("self-hosted", "linux")),
       )
@@ -715,7 +719,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val cap =
         Capability.custom(
           name = CapabilityName("notify"),
-          command = _ => SbtCommand("notify"),
+          command = _ => SbtCommand.unsafeTask("notify"),
           participates = _.id == "schema",
         )
       val wf = Planner.plan(sampleGraph, List(cap), config)
@@ -742,7 +746,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val multiDocker = Capability
         .custom(
           name = Capability.DockerName,
-          command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publish")),
           participates = _.docker,
           phase = Phase.Publish,
           targets = _ => registries,
@@ -768,7 +772,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("a Once capability emits a single build-wide job (no module suffix)") {
-      val fmt = Capability.once(CapabilityName("fmt"), SbtCommand("scalafmtCheckAll"))
+      val fmt = Capability.once(CapabilityName("fmt"), SbtCommand.unsafeTask("scalafmtCheckAll"))
       val wf  = Planner.plan(sampleGraph, List(fmt), config)
       assertTrue(
         wf.jobs.contains("fmt"),
@@ -777,7 +781,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("per-module capabilities can depend on a Once gate by name") {
-      val fmt  = Capability.once(CapabilityName("fmt"), SbtCommand("scalafmtCheckAll"))
+      val fmt  = Capability.once(CapabilityName("fmt"), SbtCommand.unsafeTask("scalafmtCheckAll"))
       val test = Capability.testGraph.copy(needsCapabilities = List(fmt.name))
       val wf   = Planner.plan(sampleGraph, List(fmt, test), config)
       assertTrue(
@@ -804,7 +808,7 @@ object PlannerSpec extends ZIOSpecDefault:
         List(
           Capability.custom(
             name = CapabilityName("ship"),
-            command = _ => SbtCommand("ship"),
+            command = _ => SbtCommand.unsafeTask("ship"),
             participates = _.id == "serviceA",
             gate = Gate.Always,
             env = Map("TIER" -> EnvValue.plain("capability-default"), "SHARED" -> EnvValue.plain("from-cap")),
@@ -832,7 +836,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val fmt =
         Capability.once(
           CapabilityName("fmt"),
-          SbtCommand("scalafmtCheckAll"),
+          SbtCommand.unsafeTask("scalafmtCheckAll"),
           env = Map("SCALAFMT_VERSION" -> EnvValue.plain("3.8")),
         )
       assertTrue(
@@ -842,7 +846,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("FromEnv renders as ${{ env.NAME }}") {
       val cap = Capability.custom(
         name = CapabilityName("relay"),
-        command = _ => SbtCommand("relay"),
+        command = _ => SbtCommand.unsafeTask("relay"),
         participates = _.id == "schema",
         gate = Gate.Always,
         env = Map("UPSTREAM" -> EnvValue.env("DEPLOY_ROLE")),
@@ -859,7 +863,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("Expr is an escape hatch rendered verbatim") {
       val cap = Capability.custom(
         name = CapabilityName("expr"),
-        command = _ => SbtCommand("x"),
+        command = _ => SbtCommand.unsafeTask("x"),
         participates = _.id == "schema",
         gate = Gate.Always,
         env = Map("COMPLEX" -> EnvValue.expr("${{ github.sha }}-${{ github.run_id }}")),
@@ -912,13 +916,13 @@ object PlannerSpec extends ZIOSpecDefault:
       }
       val multiDocker = Capability.custom(
         name = Capability.DockerName,
-        command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publish")),
         participates = _.docker,
         targets = _ => List(Target(TargetName("us")), Target(TargetName("eu"))),
       )
       val deploy = Capability.deployGraph(
         participates = _.id == "serviceA",
-        command = n => SbtCommand.module(n, SbtCommand("promote")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
         targets = _ => List(Target(TargetName("staging"))),
       )
       val needs = Planner.plan(graph, List(multiDocker, deploy), config).jobs("deploy-serviceA-staging").needs
@@ -958,7 +962,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("andConditions with Always gate still applies a bare target condition") {
       val cap = Capability.custom(
         name = CapabilityName("gate"),
-        command = _ => SbtCommand("x"),
+        command = _ => SbtCommand.unsafeTask("x"),
         participates = _.id == "schema",
         gate = Gate.Always,
         targets = _ => List(Target(TargetName("only"), condition = Some(JobCondition.refIs("refs/heads/main")))),
@@ -972,7 +976,8 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("Once capability with OnReleaseTag is gated") {
-      val once = Capability.once(CapabilityName("releaseNotes"), SbtCommand("notes"), gate = Gate.OnReleaseTag)
+      val once =
+        Capability.once(CapabilityName("releaseNotes"), SbtCommand.unsafeTask("notes"), gate = Gate.OnReleaseTag)
       assertTrue(
         Planner
           .plan(sampleGraph, List(once), config)
@@ -1090,7 +1095,7 @@ object PlannerSpec extends ZIOSpecDefault:
       }
       val deploy = Capability.deploy(
         participates = n => n.id == "serviceA" || n.id == "clientA",
-        command = n => SbtCommand.module(n, SbtCommand("promote")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
         targets = _ => stagingProd,
       )
       val wf = Planner.plan(graph, List(Capability.docker, deploy), config)
@@ -1177,7 +1182,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val wf = Planner.plan(
         sampleGraph,
         List(Capability.test, Capability.publish),
-        config.copy(skipMergedPrPush = true, cacheRehydrateTask = SbtCommand("Test/compile")),
+        config.copy(skipMergedPrPush = true, cacheRehydrateTask = SbtCommand.unsafeTask("Test/compile")),
       )
       assertTrue(
         wf.jobs("cache-rehydrate").steps.exists(_.run.contains("sbt 'Test/compile'")),
@@ -1308,7 +1313,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("capability + target conditions both present on Aggregate-by-target") {
       val cap = Capability.deploy(
         participates = _.id == "serviceA",
-        command = n => SbtCommand.module(n, SbtCommand("promote")),
+        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
         targets = _ =>
           List(
             Target(TargetName("stg"), condition = Some(JobCondition.hasPrLabel("deploy-stg"))),
@@ -1348,7 +1353,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("Once capability condition appears on the single job") {
       val cap = Capability.once(
         name = Capability.PublishName,
-        command = SbtCommand("publishSigned; sonaRelease"),
+        command = SbtCommand.session(SbtCommand.unsafeTask("publishSigned"), SbtCommand.unsafeCommand("sonaRelease")),
         phase = Phase.Publish,
         gate = Gate.OnReleaseTag,
         condition = Some(JobCondition.repositoryIs("early-effect/zipx")),
@@ -1452,7 +1457,7 @@ object PlannerSpec extends ZIOSpecDefault:
         ordering = Ordering.DependencyOrdered,
         gate = Gate.Always,
         participates = _ => false,
-        command = n => Some(SbtCommand.module(n, SbtCommand("nobody"))),
+        command = CommandSource.PerModule(n => SbtCommand.module(n, SbtCommand.unsafeTask("nobody"))),
         matrixed = false,
         targets = _ => Nil,
         scope = CapabilityScope.Graph,

@@ -7,7 +7,8 @@ import zio.*
 object ClientMain extends ZIOAppDefault:
 
   val pages = Vector(
-    MatrixCollapsePage.doc
+    MatrixCollapsePage.doc,
+    ComposingSbtCommands.doc,
   )
 
   def run = ZIO.scoped {

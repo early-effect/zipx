@@ -33,7 +33,7 @@ zipxCapabilities += Capability.test.copy(needsCapabilities = List(Fmt))
       exampleValue {
         val fmt = CapabilityName("fmt")
         DocsRender.jobs("fmt", "test")(
-          Capability.once(fmt, SbtCommand("scalafmtCheckAll")),
+          Capability.once(fmt, SbtCommand.unsafeTask("scalafmtCheckAll")),
           Capability.test.copy(needsCapabilities = List(fmt)),
         )
       }.assert(yaml =>
@@ -114,7 +114,7 @@ zipxCapabilities += Capability
         val docker = Capability
           .custom(
             name = Capability.DockerName,
-            command = n => SbtCommand.module(n, SbtCommand("Docker/publish")),
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publish")),
             participates = _.docker,
             phase = Phase.Publish,
             targets = _ =>

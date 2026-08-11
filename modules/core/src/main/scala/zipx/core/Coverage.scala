@@ -20,22 +20,21 @@ object Coverage:
 
   val Name: CapabilityName = CapabilityName("coverage")
 
-  /** sbt-scoverage's own commands. `coverage` toggles instrumentation for the *session*, which is why it has to share
-    * one sbt invocation with the test task rather than be a step of its own.
-    */
-  val Enable: SbtCommand    = SbtCommand("coverage")
-  val Aggregate: SbtCommand = SbtCommand("coverageAggregate")
-  val Report: SbtCommand    = SbtCommand("coverageReport")
+  /** Wire form: scoverage's `coverage` alias. Declared name; generate checks it when the alias is on the classpath. */
+  private val Enable: SbtCommand = SbtCommand.unsafeCommand("coverage")
 
-  /** The task that actually runs every test on sbt 2, and so the one a coverage run wants. */
-  val FullTest: SbtCommand = SbtCommand("testFull")
+  /** Wire form: scoverage `coverageAggregate` task label. */
+  private val Aggregate: SbtCommand = SbtCommand.unsafeTask("coverageAggregate")
+  private val Report: SbtCommand    = SbtCommand.unsafeTask("coverageReport")
+
+  /** Wire form: sbt 2's full suite (not `testQuick`). */
+  private val FullTest: SbtCommand = SbtCommand.unsafeTask("testFull")
 
   /** The task to measure for `node`: its own [[ModuleNode.testTask]], substituting [[FullTest]] when that is still the
     * default `test`.
     *
-    * The substitution is the point of the pack. `zipxTestTask` defaults to `test` because that is the right task for an
-    * ordinary Verify job, where sbt's incrementality is a feature, and it is the wrong one under coverage for exactly
-    * the same reason. A module that set `zipxTestTask` itself is left alone: an explicit choice outranks this one.
+    * The substitution is the point of the pack. A module that set `zipxTestTask` itself is left alone: an explicit
+    * choice outranks this one.
     *
     * Pass `_.testTask` to [[graph]] for literal inheritance instead, default included.
     */
@@ -94,7 +93,7 @@ object Coverage:
   ): Capability =
     Capability.once(
       name = name,
-      command = session(Enable, task, Aggregate),
+      command = SbtCommand.session(Enable, task, Aggregate),
       phase = Phase.Verify,
       gate = gate,
       postSteps = if uploadReport then uploadReportSteps(artifact) else Steps.empty,
@@ -120,15 +119,13 @@ object Coverage:
       ordering = Ordering.ParallelWithUpstream,
       gate = gate,
       participates = participates,
-      command = n => Some(session(Enable, SbtCommand.module(n, task(n)), SbtCommand.module(n, Report))),
+      command = CommandSource.PerModule(n =>
+        SbtCommand.session(Enable, SbtCommand.module(n, task(n)), SbtCommand.module(n, Report))
+      ),
       matrixed = false,
       postSteps = if uploadReport then uploadModuleReportSteps() else Steps.empty,
       scope = CapabilityScope.Graph,
       condition = condition,
     )
-
-  /** `a; b; c` in one sbt invocation. Varargs rather than a `List` so it is total. */
-  private def session(first: SbtCommand, rest: SbtCommand*): SbtCommand =
-    rest.foldLeft(first)((acc, next) => SbtCommand.prefixedBy(acc, next))
 
 end Coverage
