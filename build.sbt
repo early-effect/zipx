@@ -188,14 +188,12 @@ lazy val it = project
     Test / fork := true,
     // Always mark this module's tests as the live suite; gating still requires Docker at runtime.
     Test / javaOptions += "-Dzipx.it.docker=1",
-    Test / envVars ++= {
-      val m = scala.collection.mutable.Map.empty[String, String]
-      sys.env.get("PATH").foreach(v => m += "PATH" -> v)
-      sys.env.get("DOCKER_HOST").foreach(v => m += "DOCKER_HOST" -> v)
-      sys.env.get("HOME").foreach(v => m += "HOME" -> v)
-      // Forward when present (fresh GHA runners); sbt server may have been started without it locally.
-      sys.env.get("ZIPX_IT_DOCKER").foreach(v => m += "ZIPX_IT_DOCKER" -> v)
-      m.toMap
+    // Live PATH (and friends) for the forked IT JVM. Must be Def.uncached: sbt 2 caches settings, and
+    // actions/cache restores target/, so a cached PATH can still point at an older setup-sbt toolcache
+    // version (e.g. 2.0.4) after the job installs a newer one (2.0.6). That made child `sbt` ENOENT.
+    Test / envVars := Def.uncached {
+      val keys = List("PATH", "DOCKER_HOST", "HOME", "ZIPX_IT_DOCKER")
+      keys.flatMap(k => sys.env.get(k).map(k -> _)).toMap
     },
   )
 
