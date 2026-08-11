@@ -159,9 +159,9 @@ jobs:
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
-            sbt 'cleanFull; models/test'
+            sbt 'cleanFull; models/testFull'
           else
-            sbt 'models/test'
+            sbt 'models/testFull'
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
@@ -226,9 +226,9 @@ jobs:
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
-            sbt 'cleanFull; coreLib/test'
+            sbt 'cleanFull; coreLib/testFull'
           else
-            sbt 'coreLib/test'
+            sbt 'coreLib/testFull'
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
@@ -293,9 +293,9 @@ jobs:
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
-            sbt 'cleanFull; client/test; service/test'
+            sbt 'cleanFull; client/testFull; service/testFull'
           else
-            sbt 'client/test; service/test'
+            sbt 'client/testFull; service/testFull'
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
