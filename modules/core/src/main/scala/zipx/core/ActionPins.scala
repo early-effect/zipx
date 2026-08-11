@@ -135,7 +135,7 @@ object ActionPins:
   private[core] val BootstrapSetupJava: ActionRef =
     ActionRef("actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961")
   private[core] val BootstrapSetupSbt: ActionRef =
-    ActionRef("sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf")
+    ActionRef("sbt/setup-sbt@5ed7fa239084076151f66fa1dc45d4363b2dfee5")
   private[core] val BootstrapSetupNode: ActionRef =
     ActionRef("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020")
   private[core] val BootstrapCache: ActionRef =
@@ -145,17 +145,17 @@ object ActionPins:
   private[core] val BootstrapDownloadArtifact: ActionRef =
     ActionRef("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
   private[core] val BootstrapScalaSteward: ActionRef =
-    ActionRef("scala-steward-org/scala-steward-action@41bd88543dcf5e5455689f04d041b095eb901660")
+    ActionRef("scala-steward-org/scala-steward-action@6162b21b93d4be314a61ce0462fd026630132fee")
 
   private[core] val BootstrapVersions: Map[String, String] = Map(
     Field.Checkout.key         -> "v7.0.1",
     Field.SetupJava.key        -> "v5.7.0",
-    Field.SetupSbt.key         -> "v1.5.6",
+    Field.SetupSbt.key         -> "v1.5.7",
     Field.SetupNode.key        -> "v7.0.0",
     Field.Cache.key            -> "v6.1.0",
     Field.UploadArtifact.key   -> "v7.0.1",
     Field.DownloadArtifact.key -> "v8.0.1",
-    Field.ScalaSteward.key     -> "v2.93.0",
+    Field.ScalaSteward.key     -> "v2.96.0",
   )
 
   private[core] val Bootstrap: ActionPins = ActionPins(
