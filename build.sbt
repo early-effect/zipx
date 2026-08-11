@@ -69,11 +69,13 @@ lazy val root = (project in file("."))
         ZipxDocs.pages().andCondition(upstream),
         // Override Aggregate `test` so consumer proofs share the verify job: unit/IT tests, then plugin scripted,
         // then publishLocal + examples/monorepo zipxWorkflowCheck (former consumer-verify job).
+        // extraSteps: saferis-style pre-pull so Testcontainers does not hit Hub mid-suite (Ryuk stays on).
         Capability.once(
           name = Capability.TestName,
           command = SbtCommand.prefixedBy(SbtCommand("test"), SbtCommand("plugin/scripted")),
           phase = Phase.Verify,
           gate = Gate.Always,
+          extraSteps = RemoteCacheItSteps.prePull,
           postSteps = ExampleCheck.steps,
         ),
       )

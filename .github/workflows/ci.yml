@@ -156,6 +156,27 @@ jobs:
             ubuntu-latest-jdk25-sbt-${{ steps.cache-epoch.outputs.epoch }}-
             ubuntu-latest-jdk25-sbt-${{ steps.cache-epoch.outputs.release }}-
             ubuntu-latest-jdk25-sbt-
+      - name: Pre-pull remote-cache IT images
+        run: |
+          set -euo pipefail
+          pull_with_retry() {
+            local image="$1"
+            local max=5
+            local attempt
+            for attempt in $(seq 1 "$max"); do
+              if docker pull "$image"; then
+                return 0
+              fi
+              if [ "$attempt" -eq "$max" ]; then
+                echo "Failed to pull $image after $max attempts" >&2
+                return 1
+              fi
+              sleep $((attempt * 10))
+            done
+          }
+          pull_with_retry 'buchgr/bazel-remote-cache:v2.6.1'
+          pull_with_retry 'sbtscala/scala-sbt:eclipse-temurin-25.0.3_9_2.x'
+
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
