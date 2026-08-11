@@ -206,19 +206,9 @@ Even with that, the contract is weak: the check is the image's own, the failure 
 nothing is listening on yet, and nothing about it is expressible in your test code. If a suite needs a container to be
 ready, it is usually better off **owning the container's lifecycle itself** with Testcontainers, which waits on a
 strategy you choose and reports a startup failure as a test failure. zipx's own live remote-cache suite does exactly
-that (see `BazelRemoteTestContainer` in `modules/it`, which waits on an HTTP `/status` 200 because a listening gRPC port
-alone races), and it runs as a plain `Capability.once` over a separate sbt project:
-
-```scala
-lazy val it = project.in(file("modules/it")).dependsOn(core) // not aggregated: `sbt test` stays Docker-free
-
-zipxCapabilities += Capability.once(
-  name = CapabilityName("remote-cache-it"),
-  command = SbtCommand("it/testFull"),
-  phase = Phase.Verify,
-  env = Map("ZIPX_IT_DOCKER" -> EnvValue.plain("1")),
-)
-```
+that (`BazelRemoteTestContainer` in core tests, waiting on HTTP `/status` 200 because a listening gRPC port alone races)
+and runs under Aggregate `test` like any other suite. Docker must be available; if it is not, the suite fails with a
+clear message rather than being ignored.
 
 The rule of thumb: a service the job just needs *present* (and can retry against) is a `withService`; a container a test
 needs *ready*, or needs to inspect and restart, belongs to the test.

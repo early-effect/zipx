@@ -5,11 +5,11 @@ import zio.*
 import zio.test.*
 
 import java.net.HttpURLConnection
-import java.nio.file.Files
 
+/** Live remote-cache proof: plain Testcontainers (saferis-style) for bazel-remote, plus a one-shot sbt image container
+  * for the fixture. Docker is required; failure to start is a clear test failure.
+  */
 object RemoteCacheItSpec extends ZIOSpecDefault:
-
-  private val dockerOk = FixtureRunner.shouldRunLiveIt
 
   private def require(cond: Boolean, msg: => String): Unit =
     if !cond then throw new RuntimeException(msg)
@@ -31,19 +31,10 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
       conn.disconnect()
   end httpGet
 
-  /** One sbt process under an isolated HOME; in-session `wipeItCaches` forces the post-wipe phase onto remote. */
-  private def runIsolatedSbt(
-      grpcUri: String,
-      script: String,
-      homePrefix: String,
-  ): FixtureRunner.RunResult =
+  private def runFixture(bazel: BazelRemoteTestContainer, script: String): FixtureRunner.RunResult =
     val fixture = FixtureRunner.materializeFixture()
-    val home    = Files.createTempDirectory(s"$homePrefix-")
-    try FixtureRunner.runSbt(fixture, grpcUri, script, home)
-    finally
-      FixtureRunner.deleteTree(fixture)
-      FixtureRunner.deleteTree(home)
-  end runIsolatedSbt
+    try FixtureRunner.runSbt(bazel.network, fixture, script)
+    finally FixtureRunner.deleteTree(fixture)
 
   private def remoteHitHint(out: String): Boolean =
     val lower = out.toLowerCase
@@ -59,6 +50,8 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
           c.config.image == RemoteCacheProof.image,
           c.config.grpcPort == RemoteCacheProof.port,
           c.grpcUri.startsWith("grpc://"),
+          RemoteCacheProof.grpcServiceUri == s"grpc://${RemoteCacheProof.serviceName}:${RemoteCacheProof.port}",
+          RemoteCacheProof.sbtFixtureImage.nonEmpty,
         )
       } @@ TestAspect.timeout(30.seconds) @@ TestAspect.timed,
       test("sidecar is ready (HTTP status)") {
@@ -72,10 +65,9 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
         for
           c           <- ZIO.service[BazelRemoteTestContainer]
           (wall, run) <- ZIO.attemptBlockingInterrupt {
-            runIsolatedSbt(
-              c.grpcUri,
+            runFixture(
+              c,
               script = "itStamp; compile; test; wipeItCaches; itStamp; compile; test; itStamp",
-              homePrefix = "zipx-it-home",
             )
           }.timed
           _ <- ZIO.succeed(run.ok).debug("put/get ok")
@@ -94,20 +86,19 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
           putMs = phases.map(_._1).getOrElse(0L)
           getMs = phases.map(_._2).getOrElse(Long.MaxValue)
         yield
-          require(run.ok, s"Put/Get script failed:\n${run.out}")
+          require(run.ok, s"Put/Get script failed (exit=${run.exitCode}):\n${run.out}")
           require(
             hitHint || getMs <= putMs * 2,
             s"Expected remote reuse signal or non-regressing time; put=${putMs}ms get=${getMs}ms\n$after",
           )
           assertTrue(run.ok)
-      } @@ TestAspect.timeout(5.minutes) @@ TestAspect.timed,
+      } @@ TestAspect.timeout(10.minutes) @@ TestAspect.timed,
       test("different cacheVersion does not false-hit") {
         for
           c           <- ZIO.service[BazelRemoteTestContainer]
           (wall, run) <- ZIO.attemptBlockingInterrupt {
-            // Load-time safe: writeItCacheVersion + reload (no `set` / `eval`).
-            runIsolatedSbt(
-              c.grpcUri,
+            runFixture(
+              c,
               script = List(
                 "writeItCacheVersion111",
                 "reload",
@@ -120,7 +111,6 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
                 "compile",
                 "itStamp",
               ).mkString("; "),
-              homePrefix = "zipx-it-home-cv",
             )
           }.timed
           phases = run.phaseMs
@@ -132,14 +122,13 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
             )
             .debug("cacheVersion")
         yield
-          require(run.ok, s"cacheVersion script failed:\n${run.out}")
+          require(run.ok, s"cacheVersion script failed (exit=${run.exitCode}):\n${run.out}")
           assertTrue(run.ok)
-      } @@ TestAspect.timeout(5.minutes) @@ TestAspect.timed,
+      } @@ TestAspect.timeout(10.minutes) @@ TestAspect.timed,
     ).provideShared(BazelRemoteTestContainer.default) @@
       TestAspect.sequential @@
       TestAspect.withLiveClock @@
-      TestAspect.timeout(5.minutes) @@
-      TestAspect.timed @@
-      (if dockerOk then TestAspect.identity else TestAspect.ignore)
+      TestAspect.timeout(15.minutes) @@
+      TestAspect.timed
 
 end RemoteCacheItSpec

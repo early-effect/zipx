@@ -60,4 +60,5 @@ env injection, target fan-out, cache wiring. Semantics live in Scala packs on th
 ## Verification (how we prove changes)
 
 Always `testFull`, never plain `test` (sbt 2's `test` is `testQuick`). Prefer Metals for format and focused suite runs
-while iterating; CI runs the full matrix including `docs/testFull`, `plugin/scripted`, and `it/test` (Docker).
+while iterating; CI Aggregate `test` runs unit/IT (including live remote-cache via Testcontainers; Docker required),
+`plugin/scripted`, and the examples/monorepo workflow check.

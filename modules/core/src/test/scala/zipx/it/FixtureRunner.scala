@@ -1,39 +1,38 @@
 package zipx.it
 
+import org.testcontainers.containers.GenericContainer
+import org.testcontainers.containers.Network
+import org.testcontainers.containers.output.ToStringConsumer
+import org.testcontainers.containers.startupcheck.OneShotStartupCheckStrategy
+import org.testcontainers.utility.DockerImageName
+import org.testcontainers.utility.MountableFile
 import zipx.core.RemoteCacheProof
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, StandardCopyOption}
+import java.time.Duration
 import java.util.Comparator
-import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
-import scala.sys.process.*
-import scala.util.Try
 
-/** Runs the bundled remote-cache fixture under an isolated HOME with ZIPX_REMOTE_CACHE set. */
+/** Materializes the classpath fixture and runs sbt **inside** a plain Testcontainers `GenericContainer`
+  * (`RemoteCacheProof.sbtFixtureImage`) on the same Docker network as bazel-remote.
+  *
+  * No host `Process("sbt")`: the fixture does not depend on setup-sbt / PATH on the runner.
+  */
 object FixtureRunner:
 
-  /** Classpath resource root for the tiny sbt fixture. */
   private val FixtureResource = "remote-cache-fixture"
-
-  /** Suite-scoped boot + coursier so successive fixture runs do not re-download the launcher. */
-  private lazy val SharedTooling: Path =
-    val root = Files.createTempDirectory("zipx-it-sbt-tooling-")
-    Files.createDirectories(root.resolve("boot"))
-    Files.createDirectories(root.resolve("coursier"))
-    root
+  private val FixtureMount    = "/fixture"
 
   final case class RunResult(exitCode: Int, out: String, elapsedMs: Long):
     def ok: Boolean = exitCode == 0
 
-    /** Output after the in-session [[wipeItCaches]] marker (empty if wipe never ran). */
     def afterWipe: String =
       val marker = "ZIPX_IT_WIPE"
       out.indexOf(marker) match
         case -1 => ""
         case i  => out.substring(i + marker.length)
 
-    /** Put/Get phase durations from `itStamp` markers (`before; put; afterWipe; get; end` => 3 stamps). */
     def phaseMs: Option[(Long, Long)] =
       val stamps =
         raw"ZIPX_IT_STAMP (\d+)".r.findAllMatchIn(out).map(_.group(1).toLong).toVector
@@ -41,63 +40,65 @@ object FixtureRunner:
       else None
   end RunResult
 
-  def dockerAvailable: Boolean =
-    Try(Process(Seq("docker", "info")).!(ProcessLogger(_ => (), _ => ())) == 0).getOrElse(false)
-
-  /** Live IT when `-Dzipx.it.docker=1` (set on the `it` module) or `ZIPX_IT_DOCKER=1`, and Docker is up. */
-  def shouldRunLiveIt: Boolean =
-    val enabled =
-      sys.props.get("zipx.it.docker").contains("1") || sys.env.get("ZIPX_IT_DOCKER").contains("1")
-    if !enabled then false
-    else if !dockerAvailable then sys.error("zipx.it.docker / ZIPX_IT_DOCKER enabled but docker is not available")
-    else true
-
   /** Materialize fixture into a temp dir (unique per call). */
   def materializeFixture(): Path =
     val root = Files.createTempDirectory("zipx-remote-cache-fixture-")
     copyResourceTree(FixtureResource, root)
     root
 
-  /** One sbt process; `script` is a `;`-joined command string (`compile`, `wipeItCaches`, `set ...`, …). */
+  /** One-shot sbt container: put/get scripts, isolated HOME inside the container. */
   def runSbt(
+      network: Network,
       fixtureDir: Path,
-      grpcUri: String,
       script: String,
-      home: Path,
-      extraEnv: Map[String, String] = Map.empty,
   ): RunResult =
-    Files.createDirectories(home)
-    val log    = new StringBuilder
-    val logger = ProcessLogger(
-      line =>
-        log.append(line).append('\n'); ()
-      ,
-      line =>
-        log.append(line).append('\n'); (),
+    val logs                   = new ToStringConsumer
+    val c: GenericContainer[?] =
+      new GenericContainer(DockerImageName.parse(RemoteCacheProof.sbtFixtureImage))
+    c.withNetwork(network)
+    // Copy (not bind): Docker Desktop on macOS often cannot mount /var/folders or /tmp; a container-local
+    // copy is writable for wipeItCaches and works the same on GHA Linux.
+    c.withCopyFileToContainer(
+      MountableFile.forHostPath(fixtureDir.toAbsolutePath.toString),
+      FixtureMount,
     )
-    val bootDir     = SharedTooling.resolve("boot").toAbsolutePath.toString
-    val coursierDir = SharedTooling.resolve("coursier").toAbsolutePath.toString
-    val env         = scala.collection.mutable.Map.from(sys.env) ++ extraEnv ++ Map(
-      RemoteCacheProof.envUri -> grpcUri,
-      "HOME"                  -> home.toAbsolutePath.toString,
-      "COURSIER_CACHE"        -> coursierDir,
-      "SBT_OPTS"              -> s"-Xmx512m -Dsbt.boot.directory=$bootDir",
-    )
-
+    c.withWorkingDirectory(FixtureMount)
+    c.withEnv(RemoteCacheProof.envUri, RemoteCacheProof.grpcServiceUri)
+    c.withEnv("HOME", "/tmp/sbt-home")
+    c.withEnv("SBT_OPTS", "-Xmx512m")
     // Foreground server: thin client reuses a background server across fixtures and breaks isolation.
-    val cmd     = Seq("sbt", "--server", "--batch", s"-Dsbt.boot.directory=$bootDir", script)
-    val started = System.nanoTime()
-    val code    =
-      Process(cmd, fixtureDir.toFile, env.toSeq*).!(logger)
-    val elapsed = (System.nanoTime() - started).nanos.toMillis
-    RunResult(code, log.toString, elapsed)
-  end runSbt
+    c.withCommand(
+      "sbt",
+      "--server",
+      "--batch",
+      script,
+    )
+    c.withStartupCheckStrategy(
+      new OneShotStartupCheckStrategy().withTimeout(Duration.ofMinutes(8))
+    )
+    c.withLogConsumer(logs)
+    c.withStartupTimeout(Duration.ofMinutes(8))
 
-  /** Drop project outputs + sbt action cache; keep boot/coursier (shared tooling) intact. */
-  def wipeLocalCaches(fixtureDir: Path, home: Path): Unit =
-    deleteTree(fixtureDir.resolve("target"))
-    deleteTree(fixtureDir.resolve("project/target"))
-    deleteTree(home.resolve(".cache/sbt"))
+    val started = System.nanoTime()
+    try
+      try c.start()
+      catch
+        case e: Throwable =>
+          throw new RuntimeException(
+            s"Remote-cache IT requires Docker; could not run sbt fixture (${RemoteCacheProof.sbtFixtureImage}): ${e.getMessage}\n${logs.toUtf8String}",
+            e,
+          )
+      val elapsed = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+      val exit    =
+        Option(c.getCurrentContainerInfo)
+          .map(_.getState.getExitCodeLong.longValue.toInt)
+          .getOrElse(-1)
+      RunResult(exit, logs.toUtf8String, elapsed)
+    finally
+      try c.stop()
+      catch case _: Throwable => ()
+    end try
+  end runSbt
 
   def deleteTree(p: Path): Unit =
     if Files.exists(p) then

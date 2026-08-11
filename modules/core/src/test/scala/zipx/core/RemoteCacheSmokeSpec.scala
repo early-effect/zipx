@@ -14,22 +14,17 @@ object RemoteCacheSmokeSpec extends ZIOSpecDefault:
         wf.jobs.keySet == Set("test"),
       )
     },
-    test("remote-cache-it once-job stays parallel with Aggregate test") {
+    test("live remote-cache proof is Aggregate test, not a parallel once-job") {
+      // Put/Get runs inside core tests via Testcontainers; CI only needs the normal `test` job.
       val wf = Planner.plan(
         RemoteCacheSmoke.graph,
-        List(
-          Capability.test,
-          Capability.once(name = CapabilityName("remote-cache-it"), command = SbtCommand("it/test")),
-        ),
+        List(Capability.test),
         RemoteCacheSmoke.config().copy(skipMergedPrPush = true),
       )
       assertTrue(
         wf.jobs.contains("test"),
-        wf.jobs.contains("remote-cache-it"),
+        !wf.jobs.contains("remote-cache-it"),
         wf.jobs("test").needs.contains("verify-gate"),
-        wf.jobs("remote-cache-it").needs.contains("verify-gate"),
-        !wf.jobs("remote-cache-it").needs.contains("test"),
-        !wf.jobs("test").needs.contains("remote-cache-it"),
       )
     },
   )

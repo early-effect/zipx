@@ -68,7 +68,7 @@ What's covered:
 - **Execution modes** (Aggregate / Layer / Graph)
 - Built-in **capabilities** and **custom capabilities** (`once`, `custom`, `zipxTasks`, `cmd`)
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
-- Caching and **Remote cache for teams** (CI-hydrated digests; live proof via `it/test`)
+- Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate `test` via Testcontainers)
 - **Action pins** (pin file, Dependabot, `zipxActionsPull`, sync workflow)
 - **Dependency updates** (Scala Steward opt-in)
 - Docker and multi-target deploy
@@ -77,7 +77,7 @@ What's covered:
 
 Runnable reference: [`examples/monorepo`](examples/monorepo). Roadmap: [ROADMAP.md](ROADMAP.md).
 
-Live remote-cache IT (Docker): `sbt it/test` (parallel CI job `remote-cache-it`).
+Live remote-cache proof (Docker required): part of `sbt core/test` / Aggregate `test` (Testcontainers + sbt fixture image).
 
 ## License
 

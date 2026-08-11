@@ -42,7 +42,7 @@ val commonSettings = Seq(
   pomIncludeRepository := { _ => false },
 )
 
-// The version handoff for the `consumer-verify` job: examples/monorepo needs the in-dev plugin version, and CI must
+// The version handoff for Aggregate test post-steps: examples/monorepo needs the in-dev plugin version, and CI must
 // read it from a file rather than by capturing sbt stdout (which carries log lines). Same discipline as the plugin's
 // own `zipxAffectedModules`, which writes target/zipx-affected.json for exactly this reason.
 lazy val zipxWriteVersion = taskKey[File]("Write the build version to target/zipx-version.txt for the example check")
@@ -67,25 +67,15 @@ lazy val root = (project in file("."))
         ZipxCentral.release.withCondition(upstream),
         // andCondition keeps ZipxDocs tag|dispatch filter and layers the fork gate
         ZipxDocs.pages().andCondition(upstream),
-        // Parallel with Aggregate test (needs verify-gate only): live remote-cache IT.
+        // Override Aggregate `test` so consumer proofs share the verify job: unit/IT tests, then plugin scripted,
+        // then publishLocal + examples/monorepo zipxWorkflowCheck (former consumer-verify job).
+        // extraSteps: saferis-style pre-pull so Testcontainers does not hit Hub mid-suite (Ryuk stays on).
         Capability.once(
-          name = CapabilityName("remote-cache-it"),
-          command = SbtCommand("it/test"),
+          name = Capability.TestName,
+          command = SbtCommand.prefixedBy(SbtCommand("test"), SbtCommand("plugin/scripted")),
           phase = Phase.Verify,
           gate = Gate.Always,
-          needsCapabilities = Nil,
-          env = Map("ZIPX_IT_DOCKER" -> EnvValue.plain("1")),
-        ),
-        // The two verifications that only a consumer can perform: `scripted` (the plugin against real sbt builds) and
-        // examples/monorepo (the published API against a build a human wrote). Neither ran in CI before, which is why
-        // the example rotted: a stale plugin pin, a missing aws-region, and an unsatisfiable deploy condition all
-        // survived on main. One job, because both need the same checkout, JDK and sbt setup, and scripted is the
-        // cheaper of the two so it fails first.
-        Capability.once(
-          name = CapabilityName("consumer-verify"),
-          command = SbtCommand("plugin/scripted"),
-          phase = Phase.Verify,
-          gate = Gate.Always,
+          extraSteps = RemoteCacheItSteps.prePull,
           postSteps = ExampleCheck.steps,
         ),
       )
@@ -95,9 +85,6 @@ lazy val root = (project in file("."))
     zipxDependabotSync   := true,
     zipxScalaSteward     := true,
   )
-
-// Keep `it` on the build even though it is not aggregated (parallel CI job runs it/test).
-lazy val zipxItRef = LocalProject("it")
 
 // Scala 3. Shell AST: no zipx concepts, no zio-blocks, usable standalone.
 lazy val shell = (project in file("modules/shell"))
@@ -134,6 +121,13 @@ lazy val core = (project in file("modules/core"))
       IO.copyFile(src, out)
       Seq(out)
     }.taskValue,
+    // Live remote-cache proof (plain Testcontainers, saferis-style). Fixture sbt runs in an sbt
+    // Docker image; host setup-sbt PATH is irrelevant. Docker is required when these tests run.
+    // Leave Testcontainers Ryuk enabled (do not set TESTCONTAINERS_RYUK_DISABLED): cleans up containers
+    // after aborted runs locally and is fine on GHA.
+    libraryDependencies ++= testcontainersDeps ++ Seq(
+      "org.slf4j" % "slf4j-nop" % "2.0.18" % Test
+    ),
   )
 
 // Early-effect / Maven Central paved path (typed secrets + GPG import + publishSigned + sonaRelease).
@@ -170,31 +164,6 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     addSbtPlugin(remoteCachePlugin),
     scriptedLaunchOpts ++= Seq("-Xmx1024m", s"-Dplugin.version=${version.value}"),
     scriptedBufferLog := false,
-  )
-
-// Live remote-cache proof (Testcontainers). Not aggregated: Aggregate `sbt test` stays free of Docker IT.
-// Dogfood `remote-cache-it` job runs `it/test` in parallel with `test`.
-lazy val it = project
-  .in(file("modules/it"))
-  .dependsOn(core)
-  .settings(commonSettings)
-  .settings(
-    name            := "zipx-it",
-    publish / skip  := true,
-    publishArtifact := false,
-    libraryDependencies ++= testcontainersDeps ++ Seq(
-      "org.slf4j" % "slf4j-nop" % "2.0.18" % Test
-    ),
-    Test / fork := true,
-    // Always mark this module's tests as the live suite; gating still requires Docker at runtime.
-    Test / javaOptions += "-Dzipx.it.docker=1",
-    // Live PATH (and friends) for the forked IT JVM. Must be Def.uncached: sbt 2 caches settings, and
-    // actions/cache restores target/, so a cached PATH can still point at an older setup-sbt toolcache
-    // version (e.g. 2.0.4) after the job installs a newer one (2.0.6). That made child `sbt` ENOENT.
-    Test / envVars := Def.uncached {
-      val keys = List("PATH", "DOCKER_HOST", "HOME", "ZIPX_IT_DOCKER")
-      keys.flatMap(k => sys.env.get(k).map(k -> _)).toMap
-    },
   )
 
 // Docs-as-tests site (Specular + early-effect theme). Deployed via ZipxDocs.pages in generated CI.

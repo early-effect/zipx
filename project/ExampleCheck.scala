@@ -2,11 +2,12 @@ import zipx.core.*
 import zipx.shell.{Assign, Exec, Script, Word}
 import zipx.workflow.Step
 
-/** The `consumer-verify` job's steps: publish the in-dev plugin locally, then prove `examples/monorepo` still generates
+/** Post-steps on Aggregate `test`: publish the in-dev plugin locally, then prove `examples/monorepo` still generates
   * the YAML committed beside it.
   *
-  * A named [[zipx.core.Steps]] bundle rather than a bare lambda, so escape-hatch use inside it reaches
-  * `zipxWorkflowGenerate`'s warning (see `Steps.rawWarnings`).
+  * Runs after the job command (`test; plugin/scripted`), so unit/IT and scripted fail first. A named [[zipx.core.Steps]]
+  * bundle rather than a bare lambda, so escape-hatch use reaches `zipxWorkflowGenerate`'s warning (see
+  * `Steps.rawWarnings`).
   *
   * Lives in the meta-build because it is dogfood wiring for *this* repo, not published API. A consumer wanting the same
   * shape writes the same thing in its own `project/`.
@@ -70,9 +71,7 @@ object ExampleCheck:
       .in("examples/monorepo")
   )
 
-  /** Runs after the job's own command (`plugin/scripted`), so a scripted failure is reported before the slower example
-    * publish and check, and both share one checkout and one JDK setup.
-    */
+  /** Runs after `test; plugin/scripted` on the Aggregate test job. */
   val steps: Steps = publishLocalSteps ++ checkExampleSteps
 
 end ExampleCheck
