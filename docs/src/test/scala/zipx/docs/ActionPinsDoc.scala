@@ -167,25 +167,31 @@ The version is a `NodeVersion` newtype, so every form `setup-node` accepts (`22`
 than a workflow GitHub rejects.
 
 Per-capability rather than build-wide, which is the difference from `zipxJavaVersion`: a Node toolchain belongs to one
-test suite, so asking for it must not put a `setup-node` step on every publish job in the build. The step goes
-immediately after `setup-sbt`, before any cache restore or `extraSteps`, so a `jsEnv` and an `npm ci` both see it.
+test suite, so asking for it must not put a Node tool on every publish job in the build. The version is an input on
+`zipx-sbt-setup` (after checkout), so a `jsEnv` and an `npm ci` both see it before any cache restore or `extraSteps`.
 """,
       exampleValue {
         DocsRender.job("test-schema")(Capability.testGraph.withNodeVersion(NodeVersion("22")))
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("actions/setup-node@"),
-          yaml.contains("node-version:"),
-          yaml.contains("Setup Node 22"),
+          yaml.contains("uses: ./.github/actions/zipx-sbt-setup"),
+          yaml.contains("node-version: \"22\""),
+          !yaml.contains("actions/setup-node@"),
         )
       ),
       md"""
-Without `withNodeVersion` the same job has no `setup-node` step at all, so adopting this changes only the capability
-that asked:
+Without `withNodeVersion` the same job passes an empty `node-version` input (the composite skips setup-node), so
+adopting this changes only the capability that asked:
 """,
       exampleValue {
         DocsRender.job("test-schema")(Capability.testGraph)
-      }.assert(yaml => assertTrue(!yaml.contains("setup-node"))),
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("uses: ./.github/actions/zipx-sbt-setup"),
+          yaml.contains("node-version: \"\""),
+          !yaml.contains("actions/setup-node@"),
+        )
+      ),
     ),
     section("A line zipx cannot read fails the build")(
       md"""

@@ -33,7 +33,8 @@ flowchart TD
 ```
 
 Miss path (amber → red) pays compile/test and writes digests; hit path (green) reuses them. Both land in the same
-backend: `LocalDir` via `actions/cache`, or a remote gRPC store. The restore key is the commit-stable epoch
+backend: `LocalDir` via `actions/cache` inside `zipx-sbt-setup`, or a remote gRPC store. The restore key is the
+commit-stable epoch
 (`zipxCacheEpoch`), so PR pushes share hits and a release tag rolls a fresh namespace.
 
 zipx wires cache into **generated jobs** (same planner as topology). It is not a standalone acceleration appliance: the
@@ -67,21 +68,22 @@ zipxCache := CacheBackend.BazelRemoteSidecar(RemoteCacheProof.image, RemoteCache
 zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
 ```
 
-- **LocalDir**: persist local cache dirs and `target/` with `actions/cache`. Primary key is OS + JDK + epoch + run id +
-  job id; restore-keys prefer the same run, then the epoch, then the prior release epoch (Fixed: strip `-ci` /
-  `-SNAPSHOT`; GitTags/Script: `steps.*.outputs.release`) so the first post-tag PR can warm from the tag build, then
-  any older OS+JDK sbt cache. No infrastructure. GitHub scopes cache entries to the branch that saved them; other PRs
-  restore from the **default branch**. With `zipxSkipMergedPrPush`, Verify does not run on the merge push, so by
-  default a minimal `cache-rehydrate` job recreates a main-scoped save (see **Verify**). You cannot copy a PR cache
-  onto main via the API.
+- **LocalDir**: persist local cache dirs and `target/` with `actions/cache` inside the generated `zipx-sbt-setup`
+  composite. Primary key is OS + JDK + epoch + run id + job id; restore-keys prefer the same run, then the epoch, then
+  the prior release epoch (Fixed: strip `-ci` / `-SNAPSHOT`; GitTags/Script: `steps.*.outputs.release`) so the first
+  post-tag PR can warm from the tag build, then any older OS+JDK sbt cache. No infrastructure. GitHub scopes cache
+  entries to the branch that saved them; other PRs restore from the **default branch**. With `zipxSkipMergedPrPush`,
+  Verify does not run on the merge push, so by default a minimal `cache-rehydrate` job recreates a main-scoped save
+  (see **Verify**). You cannot copy a PR cache onto main via the API.
 - **BazelRemoteSidecar**: pinned `buchgr/bazel-remote-cache` as a job service; shared across the run via Bazel gRPC.
   Proof pins live in `RemoteCacheProof` (docs, planner tests, and `RemoteCacheItSpec` share them).
 - **ManagedRemote**: point sbt at BuildBuddy / EngFlow / NativeLink; auth header from a named repository secret.
   This is the path for **CI-hydrated caches that developers reuse** (see **Remote cache for teams**).
 
 The remote-cache transport is bundled with zipx. For remote backends zipx also sets `Global / cacheVersion` from
-`(JDK, OS)` so heterogeneous runners cannot poison the shared cache. Remote backends omit `actions/cache` (the gRPC
-store is the persistence); LocalDir uses epoch-keyed `actions/cache` instead.
+`(JDK, OS)` so heterogeneous runners cannot poison the shared cache. Remote backends turn off LocalDir cache in
+`zipx-sbt-setup` (the gRPC store is the persistence); LocalDir passes `local-cache: true` so the composite runs
+epoch-keyed `actions/cache`.
 """,
       exampleValue {
         val local = DocsRender.job("test")(Capability.test)(using
@@ -99,13 +101,16 @@ store is the persistence); LocalDir uses epoch-keyed `actions/cache` instead.
         local + "\n---\n" + sidecar + "\n---\n" + remote
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("actions/cache"),
+          yaml.contains("uses: ./.github/actions/zipx-sbt-setup"),
           RemoteCacheProof.sidecarYamlMustContain.forall(yaml.contains),
           yaml.contains(s"${RemoteCacheProof.envUri}: grpcs://cache.example") ||
             yaml.contains(s"${RemoteCacheProof.envUri}: \"grpcs://cache.example\""),
           yaml.split("---").toList match
             case local :: sidecar :: managed :: Nil =>
-              local.contains("actions/cache") &&
+              local.contains("local-cache: \"true\"") &&
+              !local.contains("actions/cache") &&
+              sidecar.contains("local-cache: \"false\"") &&
+              managed.contains("local-cache: \"false\"") &&
               !sidecar.contains("actions/cache") &&
               !managed.contains("actions/cache") &&
               sidecar.contains(RemoteCacheProof.image)

@@ -32,8 +32,8 @@ object Planner:
 
   /** Every job id a capability produces, which is how one capability's `needs` names another's jobs.
     *
-    * When [[MatrixCollapse.effective]] is not [[MatrixCollapse.Off]], returns the collapsed job id(s) the emitter will
-    * produce (eligibility failures still abort [[plan]] before dependents are wired).
+    * Must match what [[plan]] emits under the same [[MatrixCollapse.effective]] mode: [[MatrixCollapse.Auto]] expands
+    * when collapse is not feasible, so this returns expanded ids in that case (not the collapsed capability name).
     */
   def allJobIds(capability: Capability, graph: ModuleGraph, config: PlanConfig = PlanConfig()): List[JobId] =
     val mode = MatrixCollapse.effective(capability, config)
@@ -41,30 +41,44 @@ object Planner:
       case CapabilityScope.Once      => List(capability.name.asJobId)
       case CapabilityScope.Aggregate =>
         distinctFannedTargets(capability, graph) match
-          case Nil                             => List(capability.name.asJobId)
-          case _ if mode != MatrixCollapse.Off => List(capability.name.asJobId)
-          case targets                         => targets.map(t => aggregateTargetJobId(capability, t))
+          case Nil                                             => List(capability.name.asJobId)
+          case targets if collapsesTargetFanOut(mode, targets) => List(capability.name.asJobId)
+          case targets                                         => targets.map(t => aggregateTargetJobId(capability, t))
       case CapabilityScope.Layer =>
         val layers = graph.subsetLayers(capability.participates)
         distinctFannedTargets(capability, graph) match
-          case Nil                             => layers.indices.map(i => layerJobId(capability, i)).toList
-          case _ if mode != MatrixCollapse.Off => layers.indices.map(i => layerJobId(capability, i)).toList
-          case targets                         =>
+          case Nil => layers.indices.map(i => layerJobId(capability, i)).toList
+          case targets if collapsesTargetFanOut(mode, targets) =>
+            layers.indices.map(i => layerJobId(capability, i)).toList
+          case targets =>
             (for
               i <- layers.indices
               t <- targets
             yield layerTargetJobId(capability, i, t)).toList
       case CapabilityScope.Graph =>
-        mode match
-          case MatrixCollapse.Off =>
-            graph.nodes
-              .filter(capability.participates)
-              .flatMap(node => jobIdsForGraph(capability, node))
-              .distinct
-              .sorted
-          case _ => List(capability.name.asJobId)
+        val expanded = graph.nodes
+          .filter(capability.participates)
+          .flatMap(node => jobIdsForGraph(capability, node))
+          .distinct
+          .sorted
+        if collapsesGraph(mode, capability, graph) then List(capability.name.asJobId)
+        else expanded
     end match
   end allJobIds
+
+  /** Same predicate the Graph emitter uses before calling [[graphMatrixJobs]]. */
+  private def collapsesGraph(mode: MatrixCollapse, capability: Capability, graph: ModuleGraph): Boolean =
+    mode match
+      case MatrixCollapse.Off                            => false
+      case MatrixCollapse.Auto                           => MatrixCollapse.graphCollapseFeasible(capability, graph)
+      case MatrixCollapse.Strict | MatrixCollapse.Coarse => true
+
+  /** Same soft-fail predicate Aggregate / Layer use for target collapse under Auto. */
+  private def collapsesTargetFanOut(mode: MatrixCollapse, targets: List[Target]): Boolean =
+    mode match
+      case MatrixCollapse.Off                            => false
+      case MatrixCollapse.Auto                           => MatrixCollapse.targetsCompatible(targets).isRight
+      case MatrixCollapse.Strict | MatrixCollapse.Coarse => true
 
   private def jobIdsForGraph(capability: Capability, node: ModuleNode): List[JobId] =
     fannedTargets(capability, node) match

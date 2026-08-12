@@ -137,6 +137,58 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
       test("defaults to Auto") {
         assertTrue(MatrixCollapse.effective(Capability.dockerGraph, baseConfig) == MatrixCollapse.Auto)
       },
+      test("allJobIds matches emitted Graph keys for every mode that plans") {
+        check(
+          gMode,
+          Gen.elements(
+            (independentDocker, dockerCap(_)),
+            (orderedDocker, dockerCap(_)),
+            (sampleGraph, (m: MatrixCollapse) => Capability.publishGraph.withMatrixCollapse(m)),
+          ),
+        ) { (mode, graphCap) =>
+          val (graph, capOf) = graphCap
+          val cap            = capOf(mode)
+          val ids            = Planner.allJobIds(cap, graph, baseConfig).map(id => id: String).sorted
+          tryPlan(graph, List(cap)).fold(
+            err =>
+              assertTrue(
+                err.startsWith("zipx:"),
+                mode == MatrixCollapse.Strict ||
+                  err.contains("not isomorphic") ||
+                  err.contains("JobPerTarget") ||
+                  err.contains("divergent target") ||
+                  err.contains("differing crossScalaVersions"),
+              ),
+            wf =>
+              val prefix = cap.name: String
+              val keys   = wf.jobs.keys.filter(k => k == prefix || k.startsWith(prefix + "-")).toList.sorted
+              assertTrue(ids == keys),
+          )
+        }
+      },
+      test("Auto expands Graph allJobIds when same-cap needs make collapse infeasible") {
+        check(
+          Gen.elements(
+            (orderedDocker, Capability.dockerGraph),
+            (sampleGraph, Capability.publishGraph),
+          )
+        ) { (graph, cap) =>
+          val feas   = MatrixCollapse.graphCollapseFeasible(cap, graph)
+          val ids    = Planner.allJobIds(cap, graph, baseConfig).map(id => id: String).sorted
+          val prefix = cap.name: String
+          val keys   = Planner
+            .plan(graph, List(cap), baseConfig)
+            .jobs
+            .keys
+            .filter(k => k == prefix || k.startsWith(prefix + "-"))
+            .toList
+            .sorted
+          assertTrue(MatrixCollapse.effective(cap, baseConfig) == MatrixCollapse.Auto) &&
+          assertTrue(feas == false) &&
+          assertTrue(ids == keys) &&
+          assertTrue(ids.length > 1)
+        }
+      },
       test("effective = cap.orElse(plan).getOrElse(Auto)") {
         check(
           Gen.option(gMode),

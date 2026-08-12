@@ -132,8 +132,10 @@ and the login step itself.
           yaml.contains("contents: read"),
           yaml.contains("AWS_REGION: us-east-1"),
           yaml.contains("""AWS_ECR_REGISTRY: "111122223333.dkr.ecr.us-east-1.amazonaws.com""""),
-          yaml.contains("role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}"),
-          yaml.contains("aws-region: ${{ env.AWS_REGION }}"),
+          yaml.contains("uses: ./.github/actions/zipx-aws-login"),
+          yaml.contains("role-env: AWS_ROLE_TO_ASSUME"),
+          yaml.contains("region-env: AWS_REGION"),
+          yaml.contains("login-ecr: \"true\""),
         )
       ),
       md"""
@@ -195,13 +197,13 @@ zipxCapabilities += ZipxAws.dockerPublishAll(
         )
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("Assume AWS role (OIDC, us)"),
-          yaml.contains("Assume AWS role (OIDC, eu)"),
-          yaml.contains("Log in to ECR (us)"),
-          yaml.contains("Log in to ECR (eu)"),
-          yaml.contains("role-to-assume: ${{ env.ZIPX_EU_AWS_ROLE_TO_ASSUME }}"),
-          yaml.contains("aws-region: ${{ env.ZIPX_EU_AWS_REGION }}"),
-          yaml.contains("registries: ${{ env.ZIPX_US_AWS_ACCOUNT_ID }}"),
+          yaml.contains("uses: ./.github/actions/zipx-aws-login"),
+          yaml.contains("name-suffix: us"),
+          yaml.contains("name-suffix: eu"),
+          yaml.contains("role-env: ZIPX_EU_AWS_ROLE_TO_ASSUME"),
+          yaml.contains("region-env: ZIPX_EU_AWS_REGION"),
+          yaml.contains("account-env: ZIPX_US_AWS_ACCOUNT_ID"),
+          yaml.contains("login-ecr: \"true\""),
           yaml.contains("ZIPX_US_AWS_ROLE_TO_ASSUME: ${{ secrets.US_ROLE }}"),
           yaml.contains("ZIPX_US_AWS_ACCOUNT_ID:"),
         )
