@@ -97,7 +97,7 @@ object CapabilityTasks:
   type RunnableKey = TaskKey[?] | InputKey[?]
   type SessionPart = RunnableKey | sbt.Command | SbtCommand | Seq[SbtCommand]
 
-  /** Render a runnable key to an [[SbtCommand]] (honours project + config axes). */
+  /** Render a runnable key to an [[zipx.core.SbtCommand]] (honours project + config axes). */
   def of(key: RunnableKey): SbtCommand = key match
     case k: Scoped => scopedLabel(k)
 
