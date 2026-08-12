@@ -21,8 +21,12 @@ honest. The graph *is* the CI topology. How aggressively that topology fans out 
 
 That power is for **everyone** who ships Scala on GitHub Actions: a single-library publish path, a multi-module
 monorepo with several services, Central and GitHub Packages side by side, docker and deploy stages you describe in
-Scala. Modes are how you schedule work; the graph stays the source of truth. You get typed capabilities, commit-stable
-caching, and SHA-pinned actions without hand-rolling YAML module lists.
+Scala. Modes are how you schedule work; the graph stays the source of truth.
+
+What you write in Scala is a typed **capability** list (test, publish, docker, deploy, packs, or stages you invent).
+What you commit is short, reviewable YAML: in-repo composites for bootstrap / AWS login, `MatrixCollapse.Auto` so
+isomorphic Graph and target fan-out collapses when safe, SHA-pinned third-party actions, and drift checks on both the
+workflow and the composites. No hand-rolled module matrices.
 
 If you already carry scar tissue from a second copy of the build (disconnected CI, or a Bazel graph that restated the
 same edges), you will feel the relief fastest. zipx does not ask you to flee sbt. It makes the build you already write
@@ -33,8 +37,8 @@ the source of truth for CI again. Start with **Why zipx** when you want the reco
 ### Monorepos that stay honest
 
 In a multi-module repo, edges already live in `build.sbt`. zipx turns them into jobs, `needs`, publish order, and
-(when you opt into Graph) affected-only PRs (fail-open when the diff breaks; see **Affected**). Add a module the way you always do; regenerate; CI tracks the graph
-instead of a hand-maintained matrix.
+(when you opt into Graph) affected-only PRs (fail-open when the diff breaks; see **Affected**). Add a module the way
+you always do; regenerate; CI tracks the graph instead of a hand-maintained matrix.
 
 ### Libraries that skip hand-rolled release YAML
 
@@ -42,10 +46,25 @@ Even a small Aggregate library benefits: one root `test` job, a release-gated pu
 `ZipxGitHubPackages`), docs Pages when you want them. No separate `release.yml` that drifts from who actually
 `publishes`. Fork gates and job conditions are Scala, not pasted `if:` strings.
 
+### Reviewable YAML by default
+
+Generated CI is meant to be read in a PR, not only executed. Two defaults keep the file short:
+
+- **In-repo composites** under `.github/actions/zipx-*` parameterize checkout / JDK / sbt / cache bootstrap and AWS
+  OIDC / ECR login. Jobs call `uses: ./.github/actions/…` with inputs; nested third-party `uses:` stay SHA-pinned
+  inside the composites (see **Action pins**).
+- **`MatrixCollapse.Auto`** folds isomorphic Graph module siblings (and Aggregate / Layer target siblings) into one
+  `strategy.matrix` job when safe, including `matrix.include` when GitHub Environments differ from target names. When
+  collapse would drop same-capability `needs`, Auto expands instead of failing generate (`Off` / `Strict` / `Coarse`
+  remain available; see **Matrix collapse**).
+
+On this repository's dogfood `ci.yml` that cut about **290 → 164** lines; the `examples/monorepo` sample went about
+**786 → 307** lines.
+
 ### CI as a generated artifact
 
-`zipxWorkflowGenerate` writes `.github/workflows/ci.yml`. `zipxWorkflowCheck` fails the PR when the committed file
-no longer matches the build. Drift becomes a red check, not a surprise on tag day.
+`zipxWorkflowGenerate` writes `.github/workflows/ci.yml` and `.github/actions/zipx-*/action.yml`. `zipxWorkflowCheck`
+fails the PR when committed files no longer match the build. Drift becomes a red check, not a surprise on tag day.
 """
     ),
     section("Especially if you have lived the alternatives")(
@@ -170,7 +189,7 @@ lazy val root = (project in file("."))
     zipxWorkflowDispatch := true,
   )
 
-// Then: sbt zipxWorkflowGenerate && git add .github/workflows/ci.yml
+// Then: sbt zipxWorkflowGenerate && git add .github/workflows/ci.yml .github/actions/
 // CI runs zipxWorkflowCheck so a graph change without regenerating fails the PR.
 ```
 
@@ -179,15 +198,22 @@ One graph. Generated CI. Drift fails the build.
     ),
     section("What it derives")(
       md"""
-From the loaded sbt build, zipx emits:
+From the loaded sbt build, zipx emits a full CI surface, not only a test job:
 
-- **Aggregate** Verify by default: one root `sbt test` (matching `.aggregate`), plus Aggregate publish/docker when needed
-- **Layer** and **Graph** modes when you opt in (waves or one job per module, affected-only PRs, Scala matrix)
-- dependency-ordered publish under Layer/Graph, gated on release tags
-- commit-stable caching keyed by a version epoch (pairs with `sbt-dynver-ci`)
-- pluggable **capabilities** (test, publish, docker, deploy, or stages you invent in Scala)
-- typed **job conditions** (fork repo, PR label, vars) ANDed with Gate; see **Job conditions**
-- **SHA-pinned** GitHub Actions (`uses:`), with an optional pin file + Dependabot sync path
+| Surface | What you get |
+|---|---|
+| **Execution modes** | **Aggregate** Verify by default (one root `sbt test` matching `.aggregate`); **Layer** waves and **Graph** per-module jobs when you opt in |
+| **Matrix collapse** | **`Auto`** by default: collapse safe isomorphic fan-out (simple matrix or `matrix.include`); expand when unsafe; `Off` / `Strict` / `Coarse` as escapes |
+| **Composites** | `.github/actions/zipx-sbt-setup` and `zipx-aws-login` (and drift-checked with `ci.yml`) |
+| **Capabilities** | Built-in test / publish / docker / deploy; packs (`ZipxCentral`, `ZipxGitHubPackages`, `ZipxDocs`, AWS); custom stages in Scala |
+| **Ordering & gates** | Dependency-ordered publish under Layer/Graph; release-tag publish; Deploy destinations never path-affected |
+| **Affected** | Graph path gating on PR / push (`zipxAffectedOnPR` / `zipxAffectedOnPush`); fail-open when the diff breaks |
+| **Caching** | Commit-stable local cache keys (pairs with `sbt-dynver-ci`); optional Bazel-gRPC remote cache transport |
+| **Action pins** | SHA-pinned third-party `uses:` (jar defaults, pin file, Dependabot + `zipxActionsPull`) |
+| **Job conditions** | Typed `if:` (fork repo, PR label, vars) ANDed with Gate |
+| **Validation** | Generate-time checks for cycles, never-true conditions, invalid job ids, unreadable pin files |
+
+Topology is derived. *What* to run stays your tasks, expressed as typed capabilities.
 """
     ),
     section("Default Aggregate shape")(
@@ -254,9 +280,9 @@ flowchart TD
   Workflow --> Ci
 ```
 
-- **`zipx-workflow`**: GitHub Actions AST + deterministic YAML printer
-- **`zipx-core`**: pure planner (`ModuleGraph` → `Workflow`)
-- **`sbt-zipx`**: AutoPlugin; the only layer that touches `sbt.*`
+- **zipx-workflow**: GitHub Actions AST + deterministic YAML printer (including composite `action.yml`)
+- **zipx-core**: pure planner (`ModuleGraph` → `Workflow`)
+- **sbt-zipx**: AutoPlugin; the only layer that touches `sbt.*`
 
 The plugin owns topology. The build owns *what* to run (capabilities).
 """

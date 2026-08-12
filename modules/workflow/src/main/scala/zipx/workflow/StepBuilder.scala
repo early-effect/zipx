@@ -54,6 +54,9 @@ sealed trait StepBuilder:
 
   def in(workingDirectory: String): This = withStep(step.copy(workingDirectory = Some(workingDirectory)))
 
+  /** Required on `run:` steps inside a composite action; omit in ordinary workflow jobs. */
+  def withShell(shell: String): This = withStep(step.copy(shell = Some(shell)))
+
   def build: Step = step
 
 end StepBuilder

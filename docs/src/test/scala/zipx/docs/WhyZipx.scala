@@ -70,11 +70,14 @@ CI (and skips restating the graph in BUILD), then leans on sbt 2’s cache so Ag
 **The hard years:** a hand `ci.yml` module matrix, or BUILD files plus CI glue, plus cache product config. Every “add a
 module” meant a scavenger hunt.
 
-**The recovery:** `build.sbt` and a small typed capability list. Generated `.github/workflows/ci.yml` is an **output**
-you commit and drift-gate. Reviewers (and future you) see intent, not archaeology.
+**The recovery:** `build.sbt` and a small typed capability list. Generated `.github/workflows/ci.yml` plus
+`.github/actions/zipx-*` composites are **outputs** you commit and drift-gate. Reviewers (and future you) see intent,
+not archaeology: short jobs that call local composites, matrix collapse when safe, and named packs instead of pasted
+secret/step soup.
 
 Default Aggregate Verify is **one** calm job (`test`), not one job per module. Reach for Graph when the **workflow**
-needs isolation, not when you are only trying to make caching feel less lonely.
+needs isolation, not when you are only trying to make caching feel less lonely. `MatrixCollapse.Auto` keeps Graph /
+multi-target fan-out readable when legs are isomorphic.
 """,
       exampleValue {
         val aggregate = DocsRender.body(Capability.test, Capability.publish)
@@ -100,9 +103,9 @@ A self-documenting, single-graph build is easier to nurture, whether the reviewe
 - **One place to edit** when adding a module (no “also update workflow / BUILD”).
 - **A contract that cares:** `zipxWorkflowCheck` + Specular DocSpecs fail when examples drift from planner output.
 - **Narrow diffs:** capability and graph changes are typed Scala; generated YAML is regeneratable when you want a clean
-  re-diff.
-- **Named paved paths:** packs like `ZipxCentral` and `ZipxDocs` say what you meant, instead of a paste of secret/step
-  soup.
+  re-diff. Composites and Auto collapse keep that YAML short enough to actually review.
+- **Named paved paths:** packs like `ZipxCentral`, `ZipxDocs`, and AWS login say what you meant, instead of a paste of
+  secret/step soup.
 
 The everyday loop: edit `build.sbt` → `zipxWorkflowGenerate` → the PR shows the graph and a regeneratable workflow.
 That is the experience we are trying to give you back.

@@ -675,8 +675,21 @@ object ZipxPlugin extends AutoPlugin:
     IO.write(out, content)
     log.info(s"zipx wrote ${out.getPath}")
     warnRawFragments.value
+    writeCompositeActions.value
     writeSyncWorkflowIfEnabled.value
     writeStewardWorkflowIfEnabled.value
+  }
+
+  private def writeCompositeActions: Def.Initialize[Task[Unit]] = Def.task {
+    val log   = streams.value.log
+    val root  = (LocalRootProject / baseDirectory).value
+    val cfg   = planConfig.value
+    val files = orFail(ZipxComposites.artifacts(cfg.actions, cfg.cacheEpoch))
+    files.foreach { (rel, body) =>
+      val file = root / rel
+      IO.write(file, body)
+      log.info(s"zipx wrote ${file.getPath}")
+    }
   }
 
   /** Warns once per escape-hatch fragment, naming the bundle. Raw content is typed, so it cannot emit YAML GitHub fails
@@ -760,8 +773,18 @@ object ZipxPlugin extends AutoPlugin:
     val pinPath = (root / rel).toPath
     // A pull rewrites the pin file, so both reads fail loudly: overwriting a file zipx could not read would launder the
     // unreadable line away, and a workflow whose `uses:` is not a valid ref is exactly what must not be pulled in.
-    val base   = ActionPinFile.loadOption(pinPath).fold(ActionPins.Defaults)(orFail)
-    val pulled = orFail(ActionPinFile.pullFromWorkflow(IO.read(wfFile), base))
+    val base        = ActionPinFile.loadOption(pinPath).fold(ActionPins.Defaults)(orFail)
+    val wfYaml      = IO.read(wfFile)
+    val actionYamls =
+      ZipxComposites.artifacts(base, planConfig.value.cacheEpoch).toOption.toList.flatMap(_.keys).flatMap { rel =>
+        val f = root / rel
+        if f.exists then Some(IO.read(f)) else None
+      }
+    val pulled = orFail(
+      actionYamls.foldLeft[Either[String, ActionPins]](ActionPinFile.pullFromWorkflow(wfYaml, base)) { (acc, yaml) =>
+        acc.flatMap(pins => ActionPinFile.pullFromWorkflow(yaml, pins))
+      }
+    )
     ActionPinFile.write(pinPath, pulled)
     log.info(s"zipx wrote ${pinPath}")
     writeGeneratedWorkflows.value
@@ -821,11 +844,21 @@ object ZipxPlugin extends AutoPlugin:
         s"${out.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
       )
     streams.value.log.info(s"zipx: ${out.getPath} is up to date.")
+    val cfg             = planConfig.value
+    val root            = (LocalRootProject / baseDirectory).value
+    val expectedActions = orFail(ZipxComposites.artifacts(cfg.actions, cfg.cacheEpoch))
+    expectedActions.foreach { (rel, expectedBody) =>
+      val file   = root / rel
+      val actual = if file.exists then IO.read(file) else ""
+      if actual != expectedBody then
+        sys.error(
+          s"${file.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
+        )
+      streams.value.log.info(s"zipx: ${file.getPath} is up to date.")
+    }
     val extracted = Project.extract(state.value)
     if readBuildSetting(extracted, zipxDependabotSync, false) then
-      val root         = (LocalRootProject / baseDirectory).value
       val syncFile     = root / ActionPinsSyncWorkflow.DefaultPath
-      val cfg          = planConfig.value
       val actionsRel   = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath)
       val wfRel        = readBuildSetting(extracted, zipxWorkflowPath, ".github/workflows/ci.yml")
       val expectedSync = orFail(
@@ -845,9 +878,7 @@ object ZipxPlugin extends AutoPlugin:
       streams.value.log.info(s"zipx: ${syncFile.getPath} is up to date.")
     end if
     if readBuildSetting(extracted, zipxScalaSteward, false) then
-      val root        = (LocalRootProject / baseDirectory).value
       val stewardFile = root / ScalaStewardWorkflow.DefaultPath
-      val cfg         = planConfig.value
       val maybeConf   = stewardGrouping(extracted)
       val configPath  = maybeConf.map(_ => ScalaStewardWorkflow.DefaultConfigPath)
       warnDeadRepoRootStewardGrouping(root, streams.value.log)

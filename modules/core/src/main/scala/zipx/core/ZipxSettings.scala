@@ -68,7 +68,7 @@ object ZipxSettings:
       SettingName("zipxMatrixCollapse"),
       Map.empty,
       SettingPurpose(
-        "Per-capability MatrixCollapse defaults (Off / Strict / Coarse). Capability.withMatrixCollapse overrides. Empty = Off."
+        "Per-capability MatrixCollapse defaults (Auto / Off / Strict / Coarse). Capability.withMatrixCollapse overrides. Empty = Auto."
       ),
       Build,
     )

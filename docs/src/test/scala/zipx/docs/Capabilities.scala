@@ -12,7 +12,12 @@ object Capabilities extends DocSpecSuite:
   def doc = page("Capabilities")(
     md"""
 A **capability** is a pipeline stage. Built-ins default to **Aggregate**; Graph/Layer variants are explicit
-constructors. Test, publish, and docker are built-in; you can add your own (see **Custom capabilities**).
+constructors. Test, publish, and docker are built-in; packs add paved Central / GitHub Packages / docs Pages / AWS
+login; you can also invent stages (see **Custom capabilities**).
+
+Capabilities decide *what* runs. Execution mode and **Matrix collapse** decide *how many* Actions jobs appear for that
+stage. Bootstrap and AWS login always go through in-repo composites so the workflow YAML stays short (see **Overview**
+and **Action pins**).
 """,
     section("Built-ins")(
       md"""
@@ -23,7 +28,9 @@ constructors. Test, publish, and docker are built-in; you can add your own (see 
 | **docker** | Aggregate | `<module>/Docker/publish` (joined) | `DockerPlugin` modules | Publish | release tag |
 
 Use `testGraph` / `publishGraph` / `dockerGraph` for one-job-per-module. Use `*Layers` for wave scheduling. Use
-`testJoined` if Aggregate must join `<module>/<testTask>` instead of a root task.
+`testJoined` if Aggregate must join `<module>/<testTask>` instead of a root task. Packs (`ZipxCentral.release`,
+`ZipxGitHubPackages`, `ZipxDocs.pages`, AWS helpers) replace or extend these by **name**; see **Packs** and **Docker
+and deploy**.
 """
     ),
     section("Phases and replace-by-name")(

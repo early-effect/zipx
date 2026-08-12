@@ -113,7 +113,71 @@ object Render:
     )
 
   private def encodeJob(job: Job): Yaml =
-    collapseSingletonRunsOn(prune(jobCodec.encodeValue(job)))
+    nestMatrixInclude(collapseSingletonRunsOn(prune(jobCodec.encodeValue(job))))
+
+  /** The derived codec puts [[Strategy.include]] next to `matrix:`; GitHub wants it under `matrix.include`. */
+  private def nestMatrixInclude(job: Yaml): Yaml = job match
+    case Yaml.Mapping(entries) =>
+      Yaml.Mapping(entries.map {
+        case (k @ Yaml.Scalar("strategy", _), Yaml.Mapping(stratEntries)) =>
+          val includeOpt = stratEntries.collectFirst { case (Yaml.Scalar("include", _), v) => v }
+          val rest       = stratEntries.filter {
+            case (Yaml.Scalar("include", _), _) => false
+            case _                              => true
+          }
+          includeOpt match
+            case None          => (k, Yaml.Mapping(rest))
+            case Some(include) =>
+              var sawMatrix = false
+              val nested    = rest.map {
+                case (mk @ Yaml.Scalar("matrix", _), Yaml.Mapping(matrixEntries)) =>
+                  sawMatrix = true
+                  (mk, Yaml.Mapping(matrixEntries ++ Chunk(Yaml.Scalar("include") -> include)))
+                case (mk @ Yaml.Scalar("matrix", _), _) =>
+                  sawMatrix = true
+                  (mk, Yaml.Mapping(Chunk(Yaml.Scalar("include") -> include)))
+                case other => other
+              }
+              val withMatrix =
+                if sawMatrix then nested
+                else nested ++ Chunk(Yaml.Scalar("matrix") -> Yaml.Mapping(Chunk(Yaml.Scalar("include") -> include)))
+              (k, Yaml.Mapping(withMatrix))
+          end match
+        case other => other
+      })
+    case other => other
+  end nestMatrixInclude
+
+  /** The file as written to `.github/actions/<name>/action.yml`, header included. */
+  def renderComposite(action: CompositeAction): Either[String, String] =
+    checked(action.steps, compositeYaml(action)).map(body => s"$header\n$body\n")
+
+  private def compositeYaml(action: CompositeAction): Yaml =
+    val inputEntries = action.inputs.map { (id, input) =>
+      val fields =
+        scalar("description", input.description) ++
+          Seq("required" -> Yaml.Scalar(input.required.toString)) ++
+          input.default.toSeq.flatMap(d => scalar("default", d))
+      Yaml.Scalar(id) -> Yaml.Mapping.fromStringKeys(fields*)
+    }
+    val outputEntries = action.outputs.map { (id, output) =>
+      val fields = scalar("description", output.description) ++ scalar("value", output.value)
+      Yaml.Scalar(id) -> Yaml.Mapping.fromStringKeys(fields*)
+    }
+    val runs = Yaml.Mapping.fromStringKeys(
+      "using" -> Yaml.Scalar("composite"),
+      "steps" -> Yaml.Sequence(Chunk.from(action.steps.map(encodeStep))),
+    )
+    val entries =
+      scalar("name", action.name) ++
+        scalar("description", action.description) ++
+        (if action.inputs.isEmpty then Nil
+         else Seq("inputs" -> Yaml.Mapping(Chunk.from(inputEntries)))) ++
+        (if action.outputs.isEmpty then Nil
+         else Seq("outputs" -> Yaml.Mapping(Chunk.from(outputEntries)))) ++
+        Seq("runs" -> runs)
+    Yaml.Mapping.fromStringKeys(entries*)
+  end compositeYaml
 
   /** The derived codec renders `runsOn: List[String]` as a sequence, but GitHub's convention for a single label is a
     * scalar. Multi-label runners stay a sequence.

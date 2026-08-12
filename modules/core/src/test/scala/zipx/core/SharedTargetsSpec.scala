@@ -55,7 +55,10 @@ object SharedTargetsSpec extends ZIOSpecDefault:
     val base = scope match
       case CapabilityScope.Graph => Capability.dockerGraph
       case _                     => Capability.docker
-    if shared then base.withSharedTargets(targets) else base.withTargets(_ => targets)
+    val shaped =
+      if shared then base.withSharedTargets(targets) else base.withTargets(_ => targets)
+    // Expansion arithmetic is the load-bearing property here; Auto collapse is covered in MatrixCollapseSpec.
+    shaped.withMatrixCollapse(MatrixCollapse.Off)
 
   private def plan(capability: Capability) = Planner.plan(dockerGraph, List(capability), config)
 
@@ -73,25 +76,46 @@ object SharedTargetsSpec extends ZIOSpecDefault:
       },
       test("an Aggregate capability collapses to the one job it would have had with no targets at all") {
         val shared   = jobIds(dockerWith(sixRegistries, CapabilityScope.Aggregate, shared = true))
-        val noTarget = jobIds(Capability.docker)
+        val noTarget = jobIds(Capability.docker.withMatrixCollapse(MatrixCollapse.Off))
         assertTrue(shared == noTarget, shared == List("docker"))
       },
       test("the shared job ids are exactly the no-target ids, so a needs: edge onto them keeps working") {
         val shared   = jobIds(dockerWith(sixRegistries, CapabilityScope.Graph, shared = true))
-        val noTarget = jobIds(Capability.dockerGraph)
+        val noTarget = jobIds(Capability.dockerGraph.withMatrixCollapse(MatrixCollapse.Off))
         assertTrue(shared == noTarget)
       },
       test("a dependent's needs names the shared job, not a per-destination one that does not exist") {
         val docker = dockerWith(sixRegistries, CapabilityScope.Graph, shared = true)
-        val deploy = Capability.deployGraph(
-          participates = _.id == "serviceA",
-          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
-          targets = _ => List(Target(TargetName("prod"))),
-        )
+        val deploy = Capability
+          .deployGraph(
+            participates = _.id == "serviceA",
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
+            targets = _ => List(Target(TargetName("prod"))),
+          )
+          .withMatrixCollapse(MatrixCollapse.Off)
         val wf = Planner.plan(dockerGraph, List(docker, deploy), config)
         assertTrue(
           wf.jobs("deploy-serviceA-prod").needs.contains("docker-serviceA"),
           wf.jobs("deploy-serviceA-prod").needs.forall(n => wf.jobs.contains(n)),
+        )
+      },
+      test("Auto SharedJob folds independent Graph modules into one matrix job") {
+        val shared = dockerWith(sixRegistries, CapabilityScope.Graph, shared = true)
+          .withMatrixCollapse(MatrixCollapse.Auto)
+        val wf = Planner.plan(dockerGraph, List(shared), config)
+        assertTrue(
+          wf.jobs.keys.count(_.startsWith("docker")) == 1,
+          wf.jobs.contains("docker"),
+          wf.jobs("docker").strategy.exists(_.matrix.contains("module")),
+        )
+      },
+      test("Auto JobPerTarget folds registries into one include job when shape allows") {
+        val perJob = dockerWith(sixRegistries, CapabilityScope.Graph, shared = false)
+          .withMatrixCollapse(MatrixCollapse.Auto)
+        val wf = Planner.plan(dockerGraph, List(perJob), config)
+        assertTrue(
+          wf.jobs.keys.count(_.startsWith("docker")) == 1,
+          wf.jobs("docker").strategy.exists(s => s.include.nonEmpty || s.matrix.contains("target")),
         )
       },
     ),
@@ -196,7 +220,9 @@ object SharedTargetsSpec extends ZIOSpecDefault:
     ),
     suite("nothing changes for a capability that does not ask for it")(
       test("JobPerTarget is the default, so an existing build's job ids are untouched") {
-        val cap = Capability.dockerGraph.copy(targets = _ => sixRegistries)
+        val cap = Capability.dockerGraph
+          .copy(targets = _ => sixRegistries)
+          .withMatrixCollapse(MatrixCollapse.Off)
         assertTrue(
           cap.targetFanOut == TargetFanOut.JobPerTarget,
           jobIds(cap).count(_.startsWith("docker")) == 24,

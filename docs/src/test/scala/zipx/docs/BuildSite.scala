@@ -41,9 +41,12 @@ object BuildSite extends DocsSite:
       clientScript = Some("assets/client.js"),
       summaryMarkdown = Some(
         s"""**zipx** generates GitHub Actions from your real sbt graph. Aggregate-first works for libraries *and*
-multi-service monorepos; Layer/Graph when you need waves, per-module isolation, or multi-environment deploys. Typed
-capabilities cover test, Central, GitHub Packages, docker, and deploy so you do not hand-roll YAML module lists.
-Drift fails the PR via `zipxWorkflowCheck`.
+multi-service monorepos; Layer/Graph when you need waves, per-module isolation, or multi-environment deploys.
+
+Typed capabilities cover test, Central, GitHub Packages, docs Pages, docker, deploy, and stages you invent. Generated
+CI stays reviewable by default: in-repo composites (`.github/actions/zipx-*`) parameterize bootstrap and AWS login, and
+`MatrixCollapse.Auto` folds safe Graph / target fan-out into one matrix job. SHA-pinned actions, affected-only Graph
+PRs, commit-stable caching, and `zipxWorkflowCheck` keep the committed YAML honest.
 
 If you have maintained a second copy of the build (disconnected CI or a restated Bazel graph), start with **Why zipx**:
 a kinder path back to one honest graph. The power is for every Scala team on Actions, and especially monorepos.
@@ -61,7 +64,7 @@ Dependency updates → Docker and deploy → Job conditions → Validation → P
         CodeSnippet(
           "Generate & check",
           """sbt zipxWorkflowGenerate
-git add .github/workflows/ci.yml
+git add .github/workflows/ci.yml .github/actions/
 sbt zipxWorkflowCheck   # fails CI when the committed YAML drifts""",
         ),
         CodeSnippet(

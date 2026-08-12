@@ -16,6 +16,7 @@ Live behavior is documented in Specular (`docs/`), not here. Git history records
 | Milestone | Status |
 |---|---|
 | M0–M8, M9a, M10 (skeleton through zipx-aws, Aggregate/Layer/Graph, typed DSL, Central) | done |
+| M12a: In-repo composites + MatrixCollapse.Auto (default size reduction) | done |
 | M9: Dynver-ci + publishSigned auto-detect | not started |
 | M11: "Extend with Scala" docs & org rollout | not started |
 | M12: Typed SbtCommand (keys in plugin, wire form in core) | in progress |

@@ -21,6 +21,11 @@ read which release a SHA corresponds to:
 
 zipx ships current defaults in the plugin jar. Consumers who want to track upstream action releases **ahead of a zipx
 upgrade** use a small pin file plus optional Dependabot automation, the same path this repository dogfoods.
+
+`zipxWorkflowGenerate` also writes in-repo **composite actions** under `.github/actions/zipx-*` (checkout/JDK/sbt/cache
+bootstrap, AWS OIDC/ECR login). Nested third-party `uses:` inside those composites stay SHA-pinned from the same pin
+file; the workflow only calls `uses: ./.github/actions/…`. Commit the composites alongside `ci.yml`;
+`zipxWorkflowCheck` drifts both.
 """,
     section("Resolve order")(
       md"""
@@ -66,7 +71,7 @@ After editing the pin file (or syncing from Dependabot):
 
 ```
 sbt zipxWorkflowGenerate
-git add .github/zipx/action-pins.yml .github/workflows/ci.yml
+git add .github/zipx/action-pins.yml .github/workflows/ci.yml .github/actions/
 ```
 
 If `zipxDependabotSync := true`, also commit `.github/workflows/zipx-action-pins-sync.yml` when it changes.
@@ -247,8 +252,8 @@ updates:
 
 ```
 sbt zipxActionsPull
-# updates the pin file from ci.yml, then regenerates workflows
-git add .github/zipx/action-pins.yml .github/workflows/
+# updates the pin file from ci.yml and .github/actions/**/action.yml, then regenerates
+git add .github/zipx/action-pins.yml .github/workflows/ .github/actions/
 ```
 
 `zipxActionsPull` refuses to run if `zipxActionsPath` is empty (nowhere to write).

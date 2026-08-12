@@ -56,6 +56,19 @@ object MatrixCollapsePage extends DocSpec:
               )
             else perModule("docker")
           (Column("Publish · docker", jobs), None)
+        case "Auto" if batchNeedsApi =>
+          (
+            Column(
+              "Publish · docker",
+              perModule("docker").map {
+                case j if j.id == "docker-batch" => j.copy(detail = "needs: docker api · Auto keeps expanded")
+                case j                           => j
+              },
+            ),
+            Some(
+              "Auto expands when same-capability needs would be dropped; generate stays green (unlike Strict)."
+            ),
+          )
         case "Strict" if batchNeedsApi =>
           (
             Column(
@@ -73,7 +86,7 @@ object MatrixCollapsePage extends DocSpec:
               "Generate fails: MatrixCollapse.Strict cannot collapse DependencyOrdered docker while batch needs api."
             ),
           )
-        case "Strict" =>
+        case "Strict" | "Auto" =>
           (
             Column("Publish · docker", matrix("docker", "matrix", matrixModules)),
             None,
@@ -97,6 +110,7 @@ object MatrixCollapsePage extends DocSpec:
     val deployCol =
       mode match
         case "Off"                     => Column("Deploy", perModule("deploy"))
+        case "Auto" if batchNeedsApi   => Column("Deploy", perModule("deploy"))
         case "Strict" if batchNeedsApi =>
           Column("Deploy", List(Job("deploy", "deploy", "blocked until docker generates", "gate")))
         case _ =>
@@ -338,7 +352,7 @@ object MatrixCollapsePage extends DocSpec:
 
   private def actionsGraphLab: UIO[UI[Any]] =
     for
-      mode  <- sq("Off")
+      mode  <- sq("Auto")
       chain <- sq(true)
     yield
       val state = Squawk.zipWith(mode, chain)(buildGraph)
@@ -358,6 +372,7 @@ object MatrixCollapsePage extends DocSpec:
         E.div(
           Styles.Row,
           E.strong("MatrixCollapse: "),
+          modeButton(mode, "Auto"),
           modeButton(mode, "Off"),
           modeButton(mode, "Strict"),
           modeButton(mode, "Coarse"),
@@ -396,20 +411,22 @@ object MatrixCollapsePage extends DocSpec:
 **Matrix collapse** folds Graph module siblings (or Aggregate/Layer target siblings) into one GitHub Actions job with
 `strategy.matrix`, so the Actions UI shows one expandable node instead of a busy DAG.
 
-Default remains **Off**. Modes:
+Default is **Auto**. Modes:
 
 | Mode | Behavior |
 |---|---|
-| **Off** | Today's emission |
+| **Auto** (default) | Collapse when legs are safe (simple matrix or `matrix.include`); otherwise expand without failing generate |
+| **Off** | One job per Graph module / Aggregate-or-Layer target |
 | **Strict** | Collapse only when legs are independent and isomorphic; else generate fails |
 | **Coarse** | May drop Graph `needs` between modules of the **same capability** (GHA cannot do per-leg needs); still errors if templates diverge |
 
-Cascade: `Capability.withMatrixCollapse` wins over `zipxMatrixCollapse` plan map, else Off.
+Cascade: `Capability.withMatrixCollapse` wins over `zipxMatrixCollapse` plan map, else **Auto**.
 """,
     section("Actions graph")(
       md"""
 A small monorepo: Aggregate `test`, then Graph `image` / `docker` / `deploy` for `api`, `web`, and `batch`. Toggle
-**Strict** with the api→batch edge on to see the generate gate; switch to **Coarse** to collapse anyway (needs dropped).
+**Strict** with the api→batch edge on to see the generate gate; **Auto** keeps the expanded jobs instead; switch to
+**Coarse** to collapse anyway (needs dropped).
 """,
       exampleIO {
         actionsGraphLab
@@ -423,7 +440,7 @@ zipxMatrixCollapse := Map(
 )
 
 zipxCapabilities += Capability.custom(...).withMatrixCollapse(MatrixCollapse.Strict)
-zipxCapabilities += Capability.dockerGraph.withMatrixCollapse(MatrixCollapse.Off) // veto
+zipxCapabilities += Capability.dockerGraph.withMatrixCollapse(MatrixCollapse.Off) // veto Auto
 ```
 
 Adopting collapse **renames** required checks: `image api` becomes `image (api)`. Use capability `Off`

@@ -6,7 +6,13 @@ import zipx.core.*
 object DocsFixtures:
 
   val config: PlanConfig =
-    PlanConfig(cacheEpoch = CacheEpoch.Fixed("0.1.0-ci"), skipMergedPrPush = false, verifyCleanLabel = None)
+    PlanConfig(
+      cacheEpoch = CacheEpoch.Fixed("0.1.0-ci"),
+      skipMergedPrPush = false,
+      verifyCleanLabel = None,
+      // Doc fragments teach job ids and YAML shape; Auto collapse is covered on the Matrix collapse page.
+      // Capabilities that call `.withMatrixCollapse(...)` still win over this empty map via their own field.
+    )
 
   val libGraph: ModuleGraph = GraphFixture(
     List(

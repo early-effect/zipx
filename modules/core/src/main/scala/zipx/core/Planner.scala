@@ -1,6 +1,5 @@
 package zipx.core
 
-import neotype.unwrap
 import zipx.shell.*
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
@@ -391,6 +390,13 @@ object Planner:
                   if c.participates(node)
                   job <- graphJobsFor(c, node, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames)
                 yield job
+              case MatrixCollapse.Auto if !MatrixCollapse.graphCollapseFeasible(c, graph) =>
+                for
+                  moduleId <- topoOrder
+                  node     <- graph.get(moduleId).toList
+                  if c.participates(node)
+                  job <- graphJobsFor(c, node, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames)
+                yield job
               case collapse =>
                 graphMatrixJobs(c, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames, collapse)
         end match
@@ -540,11 +546,10 @@ object Planner:
       ),
       env = EnvValue.renderAll(config.env) ++ EnvValue.renderAll(config.cacheRehydrateEnv),
       steps = List(
-        Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
-      ) ++ jdkAndSbtSteps(config, None) ++ localDirCacheSteps(config, cacheRehydrateJobId) ++
-        config.cacheRehydrateExtraSteps(ctx) ++ List(
-          Step.run(Script(config.cacheRehydrateTask.render)).named(cacheRehydrateJobId).build
-        ),
+        ZipxComposites.sbtSetupStep(config, cacheRehydrateJobId, nodeVersion = None, localCache = true)
+      ) ++ config.cacheRehydrateExtraSteps(ctx) ++ List(
+        Step.run(Script(config.cacheRehydrateTask.render)).named(cacheRehydrateJobId).build
+      ),
     )
   end cacheRehydrateJob
 
@@ -596,13 +601,12 @@ object Planner:
       env = EnvValue.renderAll(config.env),
       outputs = ListMap("modules" -> Expr.stepOutput("compute", "modules").render),
       steps = List(
-        Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
-      ) ++ jdkAndSbtSteps(config, None) ++ List(
+        ZipxComposites.sbtSetupStep(config, affectedJobId, nodeVersion = None, localCache = false),
         Step
           .run(affectedScript(config.affectedOnPush))
           .withId("compute")
           .named("Compute affected modules")
-          .build
+          .build,
       ),
     )
   end affectedSetupJob
@@ -779,64 +783,102 @@ object Planner:
               ),
             )
           )
-        case targets if mode != MatrixCollapse.Off =>
-          MatrixCollapse
-            .targetsAllowSimpleMatrix(targets)
-            .left
-            .foreach(err => sys.error(s"zipx: capability '${capability.name}': $err"))
-          val sharedCond = targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
-          val envBinding =
-            Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("target").render)
-          List(
-            capability.name.asJobId -> Job(
-              name = Some(capability.name),
-              runsOn = runner,
-              needs = baseNeeds,
-              `if` = andConditions(baseCond, sharedCond),
-              environment = envBinding,
-              permissions = ListMap.from(capability.permissions),
-              strategy = Some(Strategy(matrix = ListMap("target" -> targets.map(_.name: String)))),
-              container = capability.container,
-              services = mergeServices(capability, cache),
-              env = mergeEnv(config.env, cache.env, capability.env, MatrixCollapse.collapsedTargetEnv(targets)),
-              steps = stepsFor(
-                capability,
-                nodes.head,
-                targets.headOption,
-                config,
-                hasMatrix = true,
-                cache,
-                commandOverride = joined,
-                jobSuffix = capability.name.asJobId,
-                matrixAxes = Set("target"),
-              ),
-            )
-          )
         case targets =>
-          targets.map { target =>
-            val id = aggregateTargetJobId(capability, target)
-            id -> Job(
-              name = Some(s"${capability.name} (${target.name})"),
-              runsOn = runner,
-              needs = baseNeeds,
-              `if` = andConditions(baseCond, JobCondition.renderOpt(target.condition)),
-              environment = target.environment,
-              permissions = ListMap.from(capability.permissions),
-              container = capability.container,
-              services = mergeServices(capability, cache),
-              env = mergeEnv(config.env, cache.env, capability.env, target.env),
-              steps = stepsFor(
-                capability,
-                nodes.head,
-                Some(target),
-                config,
-                hasMatrix = false,
-                cache,
-                commandOverride = joined,
-                jobSuffix = id,
-              ),
-            )
-          }
+          val collapseKind =
+            if mode == MatrixCollapse.Off then None
+            else
+              MatrixCollapse.targetsCompatible(targets) match
+                case Right(kind)                            => Some(kind)
+                case Left(_) if mode == MatrixCollapse.Auto => None
+                case Left(err)                              =>
+                  sys.error(s"zipx: capability '${capability.name}': $err")
+          collapseKind match
+            case Some(MatrixCollapse.TargetMatrix.Simple) =>
+              val sharedCond = targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
+              val envBinding =
+                Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("target").render)
+              List(
+                capability.name.asJobId -> Job(
+                  name = Some(capability.name),
+                  runsOn = runner,
+                  needs = baseNeeds,
+                  `if` = andConditions(baseCond, sharedCond),
+                  environment = envBinding,
+                  permissions = ListMap.from(capability.permissions),
+                  strategy = Some(Strategy(matrix = ListMap("target" -> targets.map(_.name: String)))),
+                  container = capability.container,
+                  services = mergeServices(capability, cache),
+                  env = mergeEnv(config.env, cache.env, capability.env, MatrixCollapse.collapsedTargetEnv(targets)),
+                  steps = stepsFor(
+                    capability,
+                    nodes.head,
+                    targets.headOption,
+                    config,
+                    hasMatrix = true,
+                    cache,
+                    commandOverride = joined,
+                    jobSuffix = capability.name.asJobId,
+                    matrixAxes = Set("target"),
+                  ),
+                )
+              )
+            case Some(MatrixCollapse.TargetMatrix.Include) =>
+              val sharedCond = targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
+              val envBinding =
+                Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("environment").render)
+              List(
+                capability.name.asJobId -> Job(
+                  name = Some(capability.name),
+                  runsOn = runner,
+                  needs = baseNeeds,
+                  `if` = andConditions(baseCond, sharedCond),
+                  environment = envBinding,
+                  permissions = ListMap.from(capability.permissions),
+                  strategy = Some(
+                    Strategy(include = MatrixCollapse.includeRows(Nil, targets))
+                  ),
+                  container = capability.container,
+                  services = mergeServices(capability, cache),
+                  env = mergeEnv(config.env, cache.env, capability.env, MatrixCollapse.collapsedIncludeEnv(targets)),
+                  steps = stepsFor(
+                    capability,
+                    nodes.head,
+                    targets.headOption,
+                    config,
+                    hasMatrix = true,
+                    cache,
+                    commandOverride = joined,
+                    jobSuffix = capability.name.asJobId,
+                    matrixAxes = Set("target"),
+                  ),
+                )
+              )
+            case None =>
+              targets.map { target =>
+                val id = aggregateTargetJobId(capability, target)
+                id -> Job(
+                  name = Some(s"${capability.name} (${target.name})"),
+                  runsOn = runner,
+                  needs = baseNeeds,
+                  `if` = andConditions(baseCond, JobCondition.renderOpt(target.condition)),
+                  environment = target.environment,
+                  permissions = ListMap.from(capability.permissions),
+                  container = capability.container,
+                  services = mergeServices(capability, cache),
+                  env = mergeEnv(config.env, cache.env, capability.env, target.env),
+                  steps = stepsFor(
+                    capability,
+                    nodes.head,
+                    Some(target),
+                    config,
+                    hasMatrix = false,
+                    cache,
+                    commandOverride = joined,
+                    jobSuffix = id,
+                  ),
+                )
+              }
+          end match
       end match
     end if
   end aggregateJobs
@@ -861,12 +903,15 @@ object Planner:
       val shared    = capability.targetFanOut match
         case TargetFanOut.JobPerTarget => Nil
         case TargetFanOut.SharedJob    => distinctTargets(capability, graph)
-      val fanned = distinctFannedTargets(capability, graph)
-      if mode != MatrixCollapse.Off && fanned.nonEmpty then
-        MatrixCollapse
-          .targetsAllowSimpleMatrix(fanned)
-          .left
-          .foreach(err => sys.error(s"zipx: capability '${capability.name}': $err"))
+      val fanned                                             = distinctFannedTargets(capability, graph)
+      val layerCollapse: Option[MatrixCollapse.TargetMatrix] =
+        if mode == MatrixCollapse.Off || fanned.isEmpty then None
+        else
+          MatrixCollapse.targetsCompatible(fanned) match
+            case Right(kind)                            => Some(kind)
+            case Left(_) if mode == MatrixCollapse.Auto => None
+            case Left(err)                              =>
+              sys.error(s"zipx: capability '${capability.name}': $err")
 
       layers.zipWithIndex.flatMap { (layerIds, i) =>
         val firstWave  = i == 0
@@ -935,39 +980,60 @@ object Planner:
                 prev,
               )
             )
-          case targets if mode != MatrixCollapse.Off =>
-            val prev       = if firstWave then Nil else List(layerJobId(capability, i - 1))
-            val sharedCond = targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
-            val envBinding =
-              Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("target").render)
-            List(
-              waveJob(
-                layerJobId(capability, i),
-                s"${capability.name} L$i",
-                targets.headOption,
-                sharedCond,
-                envBinding,
-                MatrixCollapse.collapsedTargetEnv(targets),
-                Nil,
-                prev,
-                strategy = Some(Strategy(matrix = ListMap("target" -> targets.map(_.name: String)))),
-                matrixAxes = Set("target"),
-              )
-            )
           case targets =>
-            targets.map { t =>
-              val prev = if firstWave then Nil else List(layerTargetJobId(capability, i - 1, t))
-              waveJob(
-                layerTargetJobId(capability, i, t),
-                s"${capability.name} L$i (${t.name})",
-                Some(t),
-                JobCondition.renderOpt(t.condition),
-                t.environment,
-                t.env,
-                Nil,
-                prev,
-              )
-            }
+            layerCollapse match
+              case Some(MatrixCollapse.TargetMatrix.Simple) =>
+                val prev       = if firstWave then Nil else List(layerJobId(capability, i - 1))
+                val sharedCond = targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
+                val envBinding =
+                  Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("target").render)
+                List(
+                  waveJob(
+                    layerJobId(capability, i),
+                    s"${capability.name} L$i",
+                    targets.headOption,
+                    sharedCond,
+                    envBinding,
+                    MatrixCollapse.collapsedTargetEnv(targets),
+                    Nil,
+                    prev,
+                    strategy = Some(Strategy(matrix = ListMap("target" -> targets.map(_.name: String)))),
+                    matrixAxes = Set("target"),
+                  )
+                )
+              case Some(MatrixCollapse.TargetMatrix.Include) =>
+                val prev       = if firstWave then Nil else List(layerJobId(capability, i - 1))
+                val sharedCond = targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
+                val envBinding =
+                  Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("environment").render)
+                List(
+                  waveJob(
+                    layerJobId(capability, i),
+                    s"${capability.name} L$i",
+                    targets.headOption,
+                    sharedCond,
+                    envBinding,
+                    MatrixCollapse.collapsedIncludeEnv(targets),
+                    Nil,
+                    prev,
+                    strategy = Some(Strategy(include = MatrixCollapse.includeRows(Nil, targets))),
+                    matrixAxes = Set("target"),
+                  )
+                )
+              case None =>
+                targets.map { t =>
+                  val prev = if firstWave then Nil else List(layerTargetJobId(capability, i - 1, t))
+                  waveJob(
+                    layerTargetJobId(capability, i, t),
+                    s"${capability.name} L$i (${t.name})",
+                    Some(t),
+                    JobCondition.renderOpt(t.condition),
+                    t.environment,
+                    t.env,
+                    Nil,
+                    prev,
+                  )
+                }
         end match
       }
     end if
@@ -992,21 +1058,21 @@ object Planner:
       if foldTargets && mode == MatrixCollapse.Strict then
         sys.error(
           s"zipx: capability '${capability.name}' is MatrixCollapse.Strict with JobPerTarget fan-out; " +
-            "Strict collapses the module axis only when targets are empty or SharedJob. Use Coarse for " +
+            "Strict collapses the module axis only when targets are empty or SharedJob. Use Coarse or Auto for " +
             "module × target, or SharedJob / no targets for Strict."
         )
-      if foldTargets then
-        val targetSets = nodes.map(n => capability.targets(n).map(_.name).sorted)
-        if targetSets.distinct.sizeIs > 1 then
-          sys.error(
-            s"zipx: capability '${capability.name}': participating modules have divergent target sets; " +
-              "refuse matrix collapse"
-          )
-        MatrixCollapse
-          .targetsAllowSimpleMatrix(distinctTargets(capability, graph))
-          .left
-          .foreach(err => sys.error(s"zipx: capability '${capability.name}': $err"))
-      end if
+      val targetKind: Option[MatrixCollapse.TargetMatrix] =
+        if !foldTargets then None
+        else
+          val targetSets = nodes.map(n => capability.targets(n).map(_.name).sorted)
+          if targetSets.distinct.sizeIs > 1 then
+            sys.error(
+              s"zipx: capability '${capability.name}': participating modules have divergent target sets; " +
+                "refuse matrix collapse"
+            )
+          MatrixCollapse.targetsCompatible(distinctTargets(capability, graph)) match
+            case Right(kind) => Some(kind)
+            case Left(err)   => sys.error(s"zipx: capability '${capability.name}': $err")
 
       if mode == MatrixCollapse.Strict && MatrixCollapse.hasSameCapInterModuleNeeds(capability, nodes, graph) then
         sys.error(
@@ -1014,19 +1080,9 @@ object Planner:
             "same-capability inter-module needs. Use Coarse to drop those needs, or leave collapse Off."
         )
 
-      val matrixCommands = nodes.map { n =>
-        MatrixCollapse
-          .underMatrixModule(n, capability.command.commandFor(n))
-          .fold(err => sys.error(s"zipx: capability '${capability.name}': $err"), identity)
-      }
-      val commandOverride =
-        matrixCommands.distinct match
-          case List(one) => Some(one)
-          case other     =>
-            sys.error(
-              s"zipx: capability '${capability.name}': module commands are not isomorphic under matrix.module " +
-                s"(${other.map(_.text).mkString(" vs ")})"
-            )
+      val commandOverride = MatrixCollapse.isomorphicMatrixCommands(capability, nodes) match
+        case Right(cmd) => Some(cmd)
+        case Left(err)  => sys.error(s"zipx: capability '${capability.name}': $err")
 
       val scalaVersions = nodes.map(_.crossScalaVersions).distinct
       val scalaAxis     =
@@ -1041,12 +1097,21 @@ object Planner:
               )
         else None
 
-      val moduleNames                              = nodes.map(_.id: String)
-      val targets                                  = if foldTargets then distinctTargets(capability, graph) else Nil
-      val matrixMap: ListMap[String, List[String]] =
-        ListMap("module" -> moduleNames) ++
-          (if targets.nonEmpty then ListMap("target" -> targets.map(_.name: String)) else ListMap.empty) ++
-          scalaAxis.fold(ListMap.empty[String, List[String]])(v => ListMap("scala" -> v))
+      val moduleNames              = nodes.map(_.id: String)
+      val targets                  = if foldTargets then distinctTargets(capability, graph) else Nil
+      val (matrixMap, includeRows) = targetKind match
+        case Some(MatrixCollapse.TargetMatrix.Include) =>
+          (
+            scalaAxis.fold(ListMap.empty[String, List[String]])(v => ListMap("scala" -> v)),
+            MatrixCollapse.includeRows(moduleNames, targets),
+          )
+        case _ =>
+          (
+            ListMap("module" -> moduleNames) ++
+              (if targets.nonEmpty then ListMap("target" -> targets.map(_.name: String)) else ListMap.empty) ++
+              scalaAxis.fold(ListMap.empty[String, List[String]])(v => ListMap("scala" -> v)),
+            Nil,
+          )
 
       val crossNeeds =
         for
@@ -1084,11 +1149,18 @@ object Planner:
       val runner    = capability.runsOn.getOrElse(List(config.runnerOs))
       val shared    = sharedTargets(capability, nodes.head)
       val targetEnv =
-        if targets.nonEmpty then MatrixCollapse.collapsedTargetEnv(targets)
-        else sharedEnv(shared)
+        targetKind match
+          case Some(MatrixCollapse.TargetMatrix.Include) => MatrixCollapse.collapsedIncludeEnv(targets)
+          case _ if targets.nonEmpty                     => MatrixCollapse.collapsedTargetEnv(targets)
+          case _                                         => sharedEnv(shared)
       val envBinding =
-        Option.when(targets.exists(_.environment.isDefined))(Expr.matrix("target").render)
-      val axes  = matrixMap.keySet
+        targetKind match
+          case Some(MatrixCollapse.TargetMatrix.Include) if targets.exists(_.environment.isDefined) =>
+            Some(Expr.matrix("environment").render)
+          case _ if targets.exists(_.environment.isDefined) =>
+            Some(Expr.matrix("target").render)
+          case _ => None
+      val axes  = if includeRows.nonEmpty then Set("module", "target") else matrixMap.keySet
       val steps = stepsFor(
         capability,
         nodes.head,
@@ -1110,7 +1182,7 @@ object Planner:
           `if` = cond,
           environment = envBinding,
           permissions = ListMap.from(capability.permissions),
-          strategy = Some(Strategy(matrix = matrixMap)),
+          strategy = Some(Strategy(matrix = matrixMap, include = includeRows)),
           container = capability.container,
           services = mergeServices(capability, cache),
           env = mergeEnv(config.env, cache.env, capability.env, targetEnv),
@@ -1406,30 +1478,6 @@ object Planner:
   /** `nodeVersion` is the capability's, not the config's: a Node toolchain is per-suite, so a Scala.js test capability
     * can ask for one without putting it on every publish job in the build.
     */
-  private def jdkAndSbtSteps(config: PlanConfig, nodeVersion: Option[NodeVersion]): List[Step] =
-    val setupSbtWith =
-      if config.cache == CacheBackend.LocalDir then ListMap("disk-cache" -> "false")
-      else ListMap.empty[String, String]
-    val nodeSteps = nodeVersion.toList.map { version =>
-      Step(
-        name = Some(s"Setup Node $version"),
-        uses = Some(config.actions.setupNode),
-        `with` = ListMap("node-version" -> version),
-      )
-    }
-    List(
-      Step(
-        name = Some(s"Setup JDK ${config.javaVersion}"),
-        uses = Some(config.actions.setupJava),
-        `with` = ListMap(
-          "distribution" -> "temurin",
-          "java-version" -> config.javaVersion,
-        ),
-      ),
-      Step(uses = Some(config.actions.setupSbt), `with` = setupSbtWith),
-    ) ++ nodeSteps
-  end jdkAndSbtSteps
-
   private def stepsFor(
       capability: Capability,
       node: ModuleNode,
@@ -1461,11 +1509,10 @@ object Planner:
         val commandStep =
           if capability.phase == Phase.Verify then verifyCommandStep(capability.name, onMatrixLeg, cmd, config)
           else Step.run(Script(onMatrixLeg(cmd).render)).named(capability.name).build
-        val cacheSteps =
-          if cache.steps.isEmpty then localDirCacheSteps(config, jobSuffix) else cache.steps
-        checkout ++ jdkAndSbtSteps(config, capability.nodeVersion) ++ cacheSteps ++ capability.extraSteps(ctx) ++
-          List(commandStep) ++
-          capability.postSteps(ctx)
+        val localCache = config.cache == CacheBackend.LocalDir && cache.steps.isEmpty
+        val setup      = ZipxComposites.sbtSetupStep(config, jobSuffix, capability.nodeVersion, localCache)
+        // Remote backends inject services/env via CacheContribution; any explicit cache.steps (none today) still append.
+        List(setup) ++ cache.steps ++ capability.extraSteps(ctx) ++ List(commandStep) ++ capability.postSteps(ctx)
     end match
   end stepsFor
 
@@ -1531,98 +1578,6 @@ object Planner:
   /** Full history + tags so affected diffs and [[CacheEpoch.GitTags]] can see release tags. */
   private val checkoutWith: ListMap[String, String] =
     ListMap("fetch-depth" -> "0", "fetch-tags" -> "true")
-
-  private def localDirCacheSteps(config: PlanConfig, jobSuffix: JobId): List[Step] =
-    config.cache match
-      case CacheBackend.LocalDir =>
-        val prefix = s"${config.runnerOs}-jdk${config.javaVersion}-sbt-"
-        val paths  = List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n")
-        config.cacheEpoch match
-          case CacheEpoch.Fixed(value) =>
-            val epoch        = lit(s"$prefix$value-")
-            val run          = perRunKey(epoch)
-            val priorRelease = priorReleaseEpochKey(prefix, value)
-            List(
-              cacheStep(
-                cacheAction = config.actions.cache,
-                paths = paths,
-                key = run ++ lit(jobSuffix),
-                restoreKeys = run.render :: epoch.render :: priorRelease.toList ::: prefix :: Nil,
-              )
-            )
-
-          case CacheEpoch.GitTags(tagMatch) =>
-            runtimeEpochCacheSteps(
-              prefix = prefix,
-              paths = paths,
-              jobSuffix = jobSuffix,
-              stepId = CacheEpoch.GitTagsStepId,
-              resolveRun = CacheEpoch.gitTagsResolveScript(tagMatch),
-              cacheAction = config.actions.cache,
-            )
-
-          case CacheEpoch.Script(run, stepId) =>
-            runtimeEpochCacheSteps(
-              prefix = prefix,
-              paths = paths,
-              jobSuffix = jobSuffix,
-              stepId = stepId,
-              resolveRun = run,
-              cacheAction = config.actions.cache,
-            )
-        end match
-
-      case _ => Nil
-
-  /** A resolve step plus a cache action whose keys reference `steps.<id>.outputs.{epoch,release}`, so the namespace is
-    * decided at workflow runtime rather than baked in at generate time.
-    */
-  private def runtimeEpochCacheSteps(
-      prefix: String,
-      paths: String,
-      jobSuffix: JobId,
-      stepId: StepId,
-      resolveRun: String,
-      cacheAction: ActionRef,
-  ): List[Step] =
-    // `Expr.StepOutput` directly rather than `stepOutputMake`: both arguments are already validated, so there is no
-    // failure left for a caller to report. `CacheEpoch` holding a `StepId` is what bought that.
-    def output(name: OutputName): Expr =
-      lit(prefix) ++ Expr.StepOutput(stepId, name) ++ Expr.lit("-")
-    val epoch   = output(OutputName("epoch"))
-    val run     = perRunKey(epoch)
-    val release = output(OutputName("release"))
-    List(
-      Step(
-        id = Some(stepId.unwrap),
-        name = Some("Resolve cache epoch"),
-        run = Some(resolveRun),
-      ),
-      cacheStep(
-        cacheAction = cacheAction,
-        paths = paths,
-        key = run ++ lit(jobSuffix),
-        restoreKeys = List(run.render, epoch.render, release.render, prefix),
-      ),
-    )
-  end runtimeEpochCacheSteps
-
-  /** Folds in the run id, so every job saves its own entry rather than racing for one key. */
-  private def perRunKey(epoch: Expr): Expr = epoch ++ Expr.github("run_id") ++ Expr.lit("-")
-
-  /** `path` and `restore-keys` are newline-joined strings because that is the multi-line form `actions/cache` reads and
-    * [[zipx.workflow.YamlPrinter]] emits as a block scalar.
-    */
-  private def cacheStep(cacheAction: ActionRef, paths: String, key: Expr, restoreKeys: List[String]): Step =
-    Step(
-      name = Some("Cache sbt"),
-      uses = Some(cacheAction),
-      `with` = ListMap(
-        "path"         -> paths,
-        "key"          -> key.render,
-        "restore-keys" -> restoreKeys.mkString("\n"),
-      ),
-    )
 
   /** A `-ci` / `-SNAPSHOT` epoch is the post-tag continuation of a release, so its first restore fallback is that
     * release's own bare epoch.

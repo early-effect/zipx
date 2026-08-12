@@ -67,6 +67,7 @@ object ActionOnlyCapabilitySpec extends ZIOSpecDefault:
     test("action-only job skips setup-java, setup-sbt, and actions/cache") {
       val job = Planner.plan(sampleGraph, List(actionOnly()), config).jobs("notify")
       assertTrue(
+        !job.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
         !job.steps.exists(usesAction(_, "actions/setup-java")),
         !job.steps.exists(usesAction(_, "sbt/setup-sbt")),
         !job.steps.exists(usesAction(_, "actions/cache")),
@@ -86,9 +87,7 @@ object ActionOnlyCapabilitySpec extends ZIOSpecDefault:
       val fmt = Capability.once(CapabilityName("fmt"), SbtCommand.unsafeTask("scalafmtCheckAll"))
       val job = Planner.plan(sampleGraph, List(fmt), config).jobs("fmt")
       assertTrue(
-        job.steps.exists(usesAction(_, "actions/setup-java")),
-        job.steps.exists(usesAction(_, "sbt/setup-sbt")),
-        job.steps.exists(usesAction(_, "actions/cache")),
+        job.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
         job.steps.exists(_.run.exists(_.contains("scalafmtCheckAll"))),
       )
     },

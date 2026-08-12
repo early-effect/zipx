@@ -16,8 +16,14 @@ object DocsRender:
     def yaml: String =
       result.fold(error => throw AssertionError(s"planner produced an invalid workflow: $error"), identity)
 
+  /** Doc examples that do not set [[Capability.matrixCollapse]] keep expanded job ids (Off). Pages that teach Auto /
+    * Strict / Coarse pass an explicit mode on the capability.
+    */
+  private def forDocs(caps: Seq[Capability]): List[Capability] =
+    caps.map(c => if c.matrixCollapse.isEmpty then c.withMatrixCollapse(MatrixCollapse.Off) else c).toList
+
   def plan(caps: Capability*)(using graph: ModuleGraph = libGraph, cfg: PlanConfig = config): Workflow =
-    Planner.plan(graph, caps.toList, cfg)
+    Planner.plan(graph, forDocs(caps), cfg)
 
   /** Single job YAML fragment (`publish:` + body). */
   def job(id: String)(caps: Capability*)(using graph: ModuleGraph = libGraph, cfg: PlanConfig = config): String =
