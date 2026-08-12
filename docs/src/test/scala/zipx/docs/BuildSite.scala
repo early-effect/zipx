@@ -44,7 +44,8 @@ object BuildSite extends DocsSite:
 multi-service monorepos; Layer/Graph when you need waves, per-module isolation, or multi-environment deploys.
 
 Typed capabilities cover test, Central, GitHub Packages, docs Pages, docker, deploy, and stages you invent. Generated
-CI stays reviewable by default: in-repo composites (`.github/actions/zipx-*`) parameterize bootstrap and AWS login, and
+CI stays reviewable by default: in-repo composites (`.github/actions/zipx-*`) parameterize JDK/sbt/cache bootstrap and
+AWS login (checkout remains a prior workflow step), and
 `MatrixCollapse.Auto` folds safe Graph / target fan-out into one matrix job. SHA-pinned actions, affected-only Graph
 PRs, commit-stable caching, and `zipxWorkflowCheck` keep the committed YAML honest.
 

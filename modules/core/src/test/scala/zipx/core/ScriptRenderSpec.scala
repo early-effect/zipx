@@ -1,5 +1,6 @@
 package zipx.core
 
+import neotype.unwrap
 import zio.test.*
 import zipx.workflow.Step
 
@@ -174,15 +175,17 @@ object ScriptRenderSpec extends ZIOSpecDefault:
         fixed.`with`("restore-keys").contains("${{ inputs.cache-epoch }}-"),
       )
     },
-    test("LocalDir jobs call the zipx-sbt-setup composite") {
-      val step = Planner
+    test("LocalDir jobs checkout then call the zipx-sbt-setup composite") {
+      val steps = Planner
         .plan(Fixtures.sampleGraph, List(Capability.test), PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci")))
         .jobs("test")
         .steps
-        .head
+      val checkoutIdx = steps.indexWhere(_.uses.exists(_.unwrap.contains("actions/checkout@")))
+      val setupIdx    = steps.indexWhere(_.uses.contains(ZipxComposites.SbtSetupRef))
       assertTrue(
-        step.uses.contains(ZipxComposites.SbtSetupRef),
-        step.`with`.get("cache-epoch").contains("1.2.3-ci"),
+        checkoutIdx >= 0,
+        setupIdx == checkoutIdx + 1,
+        steps(setupIdx).`with`.get("cache-epoch").contains("1.2.3-ci"),
       )
     },
     test("a path containing a single quote is reported as a value rather than escaped around") {

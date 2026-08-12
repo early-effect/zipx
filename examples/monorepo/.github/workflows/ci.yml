@@ -42,6 +42,10 @@ jobs:
       - verify-gate
     if: needs.verify-gate.result == 'success' && needs.verify-gate.outputs.run == 'false'
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:
@@ -62,6 +66,10 @@ jobs:
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:
@@ -87,6 +95,10 @@ jobs:
     needs:
       - test-L0
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:
@@ -112,6 +124,10 @@ jobs:
     needs:
       - test-L1
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:
@@ -138,6 +154,10 @@ jobs:
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:
@@ -162,6 +182,10 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:
@@ -181,6 +205,10 @@ jobs:
       - publish-L0
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:
@@ -200,6 +228,10 @@ jobs:
       - publish-L1
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:
@@ -229,6 +261,10 @@ jobs:
       ZIPX_US_AWS_REGION: us-east-1
       ZIPX_US_AWS_ROLE_TO_ASSUME: ${{ secrets.US_REGISTRY_ROLE }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:
@@ -285,6 +321,10 @@ jobs:
       AWS_ROLE_TO_ASSUME: ${{ matrix.AWS_ROLE_TO_ASSUME }}
       TIER: ${{ matrix.TIER }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
         with:

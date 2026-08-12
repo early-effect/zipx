@@ -22,9 +22,10 @@ read which release a SHA corresponds to:
 zipx ships current defaults in the plugin jar. Consumers who want to track upstream action releases **ahead of a zipx
 upgrade** use a small pin file plus optional Dependabot automation, the same path this repository dogfoods.
 
-`zipxWorkflowGenerate` also writes in-repo **composite actions** under `.github/actions/zipx-*` (checkout/JDK/sbt/cache
-bootstrap, AWS OIDC/ECR login). Nested third-party `uses:` inside those composites stay SHA-pinned from the same pin
-file; the workflow only calls `uses: ./.github/actions/…`. Commit the composites alongside `ci.yml`;
+`zipxWorkflowGenerate` also writes in-repo **composite actions** under `.github/actions/zipx-*` (JDK/sbt/cache
+bootstrap, AWS OIDC/ECR login). Checkout is a prior workflow step: GitHub must resolve local `uses: ./…` from the
+workspace before the composite runs. Nested third-party `uses:` inside those composites stay SHA-pinned from the same
+pin file; the workflow only calls `uses: ./.github/actions/…` after checkout. Commit the composites alongside `ci.yml`;
 `zipxWorkflowCheck` drifts both.
 """,
     section("Resolve order")(

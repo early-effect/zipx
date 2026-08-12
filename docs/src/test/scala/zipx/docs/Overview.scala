@@ -50,9 +50,10 @@ Even a small Aggregate library benefits: one root `test` job, a release-gated pu
 
 Generated CI is meant to be read in a PR, not only executed. Two defaults keep the file short:
 
-- **In-repo composites** under `.github/actions/zipx-*` parameterize checkout / JDK / sbt / cache bootstrap and AWS
-  OIDC / ECR login. Jobs call `uses: ./.github/actions/…` with inputs; nested third-party `uses:` stay SHA-pinned
-  inside the composites (see **Action pins**).
+- **In-repo composites** under `.github/actions/zipx-*` parameterize JDK / sbt / cache bootstrap and AWS
+  OIDC / ECR login (checkout stays a prior workflow step so local `uses: ./…` can resolve). Jobs call
+  `uses: ./.github/actions/…` with inputs; nested third-party `uses:` stay SHA-pinned inside the composites (see
+  **Action pins**).
 - **`MatrixCollapse.Auto`** folds isomorphic Graph module siblings (and Aggregate / Layer target siblings) into one
   `strategy.matrix` job when safe, including `matrix.include` when GitHub Environments differ from target names. When
   collapse would drop same-capability `needs`, Auto expands instead of failing generate (`Off` / `Strict` / `Coarse`

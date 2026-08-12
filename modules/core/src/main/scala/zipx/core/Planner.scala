@@ -545,11 +545,10 @@ object Planner:
         ).unwrapped
       ),
       env = EnvValue.renderAll(config.env) ++ EnvValue.renderAll(config.cacheRehydrateEnv),
-      steps = List(
-        ZipxComposites.sbtSetupStep(config, cacheRehydrateJobId, nodeVersion = None, localCache = true)
-      ) ++ config.cacheRehydrateExtraSteps(ctx) ++ List(
-        Step.run(Script(config.cacheRehydrateTask.render)).named(cacheRehydrateJobId).build
-      ),
+      steps = checkoutThenSbtSetup(config, cacheRehydrateJobId, nodeVersion = None, localCache = true) ++
+        config.cacheRehydrateExtraSteps(ctx) ++ List(
+          Step.run(Script(config.cacheRehydrateTask.render)).named(cacheRehydrateJobId).build
+        ),
     )
   end cacheRehydrateJob
 
@@ -600,13 +599,12 @@ object Planner:
       `if` = cond,
       env = EnvValue.renderAll(config.env),
       outputs = ListMap("modules" -> Expr.stepOutput("compute", "modules").render),
-      steps = List(
-        ZipxComposites.sbtSetupStep(config, affectedJobId, nodeVersion = None, localCache = false),
+      steps = checkoutThenSbtSetup(config, affectedJobId, nodeVersion = None, localCache = false) ++ List(
         Step
           .run(affectedScript(config.affectedOnPush))
           .withId("compute")
           .named("Compute affected modules")
-          .build,
+          .build
       ),
     )
   end affectedSetupJob
@@ -1496,8 +1494,7 @@ object Planner:
       )
     val command  = capability.sessionCommand(base)
     val ctx      = StepContext(node, target, hasMatrix, config.actions, destinations)
-    val checkout =
-      List(Step(uses = Some(config.actions.checkout), `with` = checkoutWith))
+    val checkout = List(checkoutStep(config))
     command match
       case None =>
         checkout ++ capability.extraSteps(ctx) ++ capability.postSteps(ctx)
@@ -1510,11 +1507,26 @@ object Planner:
           if capability.phase == Phase.Verify then verifyCommandStep(capability.name, onMatrixLeg, cmd, config)
           else Step.run(Script(onMatrixLeg(cmd).render)).named(capability.name).build
         val localCache = config.cache == CacheBackend.LocalDir && cache.steps.isEmpty
-        val setup      = ZipxComposites.sbtSetupStep(config, jobSuffix, capability.nodeVersion, localCache)
-        // Remote backends inject services/env via CacheContribution; any explicit cache.steps (none today) still append.
-        List(setup) ++ cache.steps ++ capability.extraSteps(ctx) ++ List(commandStep) ++ capability.postSteps(ctx)
+        // Local composites need the workspace on disk before `uses: ./.github/actions/…` can resolve.
+        checkoutThenSbtSetup(config, jobSuffix, capability.nodeVersion, localCache) ++ cache.steps ++
+          capability.extraSteps(ctx) ++ List(commandStep) ++ capability.postSteps(ctx)
     end match
   end stepsFor
+
+  /** Full-history checkout, then [[ZipxComposites.sbtSetupStep]]. Order is load-bearing for local composites. */
+  private[core] def checkoutThenSbtSetup(
+      config: PlanConfig,
+      jobSuffix: JobId,
+      nodeVersion: Option[NodeVersion],
+      localCache: Boolean,
+  ): List[Step] =
+    List(
+      checkoutStep(config),
+      ZipxComposites.sbtSetupStep(config, jobSuffix, nodeVersion, localCache),
+    )
+
+  private def checkoutStep(config: PlanConfig): Step =
+    Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
 
   /** A static [[VerifyClean]] prefix when one is set, otherwise a runtime `cleanFull` decided by
     * [[PlanConfig.verifyCleanLabel]].

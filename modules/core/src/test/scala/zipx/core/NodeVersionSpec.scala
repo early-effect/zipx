@@ -19,10 +19,13 @@ object NodeVersionSpec extends ZIOSpecDefault:
   def spec = suite("NodeVersion")(
     suite("the step")(
       test("sbt-setup composite receives node-version so a jsEnv sees the pinned Node") {
-        val step = plan(Capability.testJoined.withNodeVersion(NodeVersion("22"))).jobs("test").steps.head
+        val step = plan(Capability.testJoined.withNodeVersion(NodeVersion("22")))
+          .jobs("test")
+          .steps
+          .find(_.uses.contains(ZipxComposites.SbtSetupRef))
         assertTrue(
-          step.uses.contains(ZipxComposites.SbtSetupRef),
-          step.`with`.get("node-version").contains("22"),
+          step.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
+          step.exists(_.`with`.get("node-version").contains("22")),
         )
       },
       test("carries node-version into the composite inputs") {
@@ -36,8 +39,11 @@ object NodeVersionSpec extends ZIOSpecDefault:
         )
       },
       test("absent by default, so no existing workflow gains a node-version input") {
-        val step = plan(Capability.testJoined).jobs("test").steps.head
-        assertTrue(step.`with`.get("node-version").contains(""))
+        val step = plan(Capability.testJoined)
+          .jobs("test")
+          .steps
+          .find(_.uses.contains(ZipxComposites.SbtSetupRef))
+        assertTrue(step.exists(_.`with`.get("node-version").contains("")))
       },
       test("only the capability that asked for it, not the affected or cache-rehydrate jobs") {
         val cfg = config.copy(affected = AffectedMode.AffectedOnPR, cacheRehydrateOnMerge = true)

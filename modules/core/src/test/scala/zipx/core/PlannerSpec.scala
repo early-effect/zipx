@@ -323,11 +323,19 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("GitTags epoch configures checkout with full history and tags") {
-      val setup    = ZipxComposites.sbtSetup(ActionPins.Defaults, CacheEpoch.GitTags())
-      val checkout = setup.steps.find(_.uses.exists(_.unwrap.contains("checkout")))
+      val steps = Planner.checkoutThenSbtSetup(
+        PlanConfig(cacheEpoch = CacheEpoch.GitTags()),
+        zipx.workflow.JobId("test"),
+        None,
+        localCache = true,
+      )
+      val checkout = steps.find(_.uses.exists(_.unwrap.contains("checkout")))
       assertTrue(
-        checkout.exists(_.`with`.get("fetch-tags").contains("${{ inputs.fetch-tags }}")),
-        checkout.exists(_.`with`.get("fetch-depth").contains("${{ inputs.fetch-depth }}")),
+        checkout.exists(_.`with`.get("fetch-tags").contains("true")),
+        checkout.exists(_.`with`.get("fetch-depth").contains("0")),
+        steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
+        steps.indexWhere(_.uses.exists(_.unwrap.contains("checkout"))) <
+          steps.indexWhere(_.uses.contains(ZipxComposites.SbtSetupRef)),
       )
     },
     test("GitTags resolve step emits epoch via git describe and GITHUB_OUTPUT") {

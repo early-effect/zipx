@@ -9,13 +9,16 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
   private val pins = ActionPins.Defaults
 
   def spec = suite("ZipxComposites")(
-    test("sbt-setup action.yml has composite runs and pinned nested uses") {
+    test("sbt-setup action.yml has composite runs and pinned nested uses, but not checkout") {
       val yaml = ZipxComposites.renderSbtSetup(pins).toOption.get
       assertTrue(
         yaml.startsWith(Render.header),
         yaml.contains("using: composite"),
         yaml.contains("zipx sbt setup"),
-        yaml.contains("actions/checkout@") || yaml.contains(pins.checkout.unwrap),
+        // Local composites cannot checkout themselves: GHA resolves `uses: ./…` before the composite runs.
+        !yaml.contains("actions/checkout"),
+        !yaml.contains("uses: actions/checkout"),
+        yaml.contains("actions/setup-java@") || yaml.contains(pins.setupJava.unwrap),
         yaml.contains("shell: bash"),
         yaml.contains("java-version:"),
       )
