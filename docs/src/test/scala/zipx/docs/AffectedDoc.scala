@@ -188,8 +188,8 @@ Three properties carry over unchanged, and each is what makes the opt-in safe ra
 3. **A skipped image never silently skips its deploy.** This is the trap the feature opens, so the planner closes it
    (see the next section).
 
-The `affected` job itself now runs on tag pushes when a Publish capability reads it, where a Verify-only setup skips
-there. That is free: on a tag it takes no diff.
+The `affected` job itself now runs on tag pushes and on merged-PR pushes when a Publish or Deploy capability reads
+it, where a Verify-only setup skips there. That is free: on a non-PR event it takes no diff, and it emits `["all"]`.
 """,
       exampleValue {
         given PlanConfig = config.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)
@@ -315,8 +315,8 @@ that module's artifacts really are unchanged. The cost of `Graph` over `Aggregat
 target), and with it one approval per module per environment.
 
 Both safety properties carry over. A **release tag deploys everything**: the `affected` job is forced onto tag
-pushes when a Deploy capability reads it, and there it emits `["all"]` without taking a diff. And an unusable diff
-**fails open** to `["all"]` the same way.
+pushes and merged-PR pushes when a Deploy capability reads it, and on a non-PR event it emits `["all"]` without
+taking a diff. And an unusable diff **fails open** to `["all"]` the same way.
 """,
       exampleValue {
         given PlanConfig =

@@ -446,6 +446,45 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
           !api.`if`.exists(_.contains("matrix.")),
         )
       },
+      test("collapsed Graph Publish cannot fromJson a skipped affected job") {
+        // Production shape: job-level `modules != '[]'`, step-level `contains(fromJson(...), matrix.module)`.
+        // GitHub's skipped-job output is `""`, not `'[]'`, so `!= '[]'` does not protect a step `fromJson`.
+        val cfg = baseConfig.copy(
+          affected = AffectedMode.AffectedOnPR,
+          affectedPublish = true,
+          skipMergedPrPush = true,
+        )
+        val image = Capability
+          .custom(
+            name = CapabilityName("image"),
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publishLocal")),
+            participates = _.docker,
+            phase = Phase.Verify,
+            gate = Gate.Always,
+            ordering = Ordering.ParallelWithUpstream,
+          )
+          .withMatrixCollapse(MatrixCollapse.Coarse)
+        val wf             = Planner.plan(independentDocker, List(image, dockerCap(MatrixCollapse.Coarse)), cfg)
+        val affectedIf     = wf.jobs("affected").`if`.getOrElse("")
+        val docker         = wf.jobs("docker")
+        val imageJob       = wf.jobs("image")
+        val fromJson       = "fromJson(needs.affected.outputs.modules)"
+        val dockerFromJson =
+          docker.`if`.exists(_.contains(fromJson)) || docker.steps.exists(_.`if`.exists(_.contains(fromJson)))
+        val imageFromJson =
+          imageJob.`if`.exists(_.contains(fromJson)) ||
+            imageJob.steps.exists(_.`if`.exists(_.contains(fromJson)))
+        assertTrue(
+          !affectedIf.contains("needs.verify-gate.outputs.run == 'true'"),
+          docker.`if`.exists(_.contains("needs.affected.outputs.modules != '[]'")),
+          dockerFromJson,
+          docker.needs.contains("affected"),
+          !docker.needs.contains("verify-gate"),
+          imageJob.`if`.exists(_.contains("needs.verify-gate.outputs.run == 'true'")),
+          imageJob.needs.contains("verify-gate"),
+          imageFromJson,
+        )
+      },
       test("rendered YAML job if line is matrix-free for every collapsing mode") {
         check(Gen.elements(MatrixCollapse.Auto, MatrixCollapse.Strict, MatrixCollapse.Coarse)) { mode =>
           val cfg   = baseConfig.copy(affected = AffectedMode.AffectedOnPR, affectedPublish = true)

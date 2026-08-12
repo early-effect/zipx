@@ -353,13 +353,14 @@ object Planner:
       config.affected == AffectedMode.AffectedOnPR &&
         capabilities.exists(c => affectedGatedPhase(c.phase, config) && c.scope == CapabilityScope.Graph)
 
-    // Publish and Deploy jobs run on a release tag, where Verify does not, so the `affected` job they now depend on has
-    // to run there too. It emits the `all` sentinel for a tag push already (see `affectedScript`), which is what makes a
-    // release publish and deploy everything regardless of any diff.
+    // Publish and Deploy jobs run on a release tag and on a merged-PR push, where Verify does not, so the `affected`
+    // job they depend on has to run there too. It emits the `all` sentinel for a non-PR event already (see
+    // `affectedScript`), which is what makes a release publish and deploy everything regardless of any diff.
     //
     // Both phases, not just Publish: a tag-gated Graph deploy would otherwise carry `needs: affected` and an expression
-    // reading its output on a ref where that job does not exist.
-    val affectedOnTags =
+    // reading its output on a ref where that job does not exist. The same hole on a merged-PR push is `fromJson("")`:
+    // GitHub's skipped-job output is empty, not `'[]'`.
+    val affectedWhenVerifySkips =
       usesAffected && List(Phase.Publish, Phase.Deploy).exists(phase =>
         affectedGatedPhase(phase, config) && capabilities.exists(c =>
           c.phase == phase && c.scope == CapabilityScope.Graph
@@ -421,7 +422,8 @@ object Planner:
         Option.when(usesVerifyGate)(verifyGateJobId         -> verifyGateJob(config)),
         Option.when(usesCacheRehydrate)(cacheRehydrateJobId -> cacheRehydrateJob(config)),
         Option.when(usesAffected)(
-          affectedJobId -> affectedSetupJob(config, usesVerifyGate, affectedOnTags)
+          affectedJobId ->
+            affectedSetupJob(config, usesVerifyGate && !affectedWhenVerifySkips, affectedWhenVerifySkips)
         ),
       ).flatten
 
@@ -570,8 +572,8 @@ object Planner:
     * run is for a docs-only deploy). Non-Verify phases pass through untouched.
     *
     * @param excludeTagsAndDispatch
-    *   `false` keeps the merged-PR skip but drops the tag/dispatch exclusion, for the one job that is Verify-shaped and
-    *   yet has to run on a tag: the `affected` setup job, once Publish reads its output too.
+    *   `false` drops the tag/dispatch exclusion. Combined with `usesVerifyGate = false`, this is how the `affected`
+    *   setup job stays running on a tag and on a merged-PR push once Publish or Deploy reads its output.
     */
   private def applyVerifyGate(
       needs: List[JobId],
@@ -598,14 +600,14 @@ object Planner:
         (gatedNeeds, andConditions(Some(gateCond.unwrapped), cond))
       end if
 
-  /** @param runsOnTags
-    *   an affected-gated Publish job runs on a release tag, so the job it reads its module list from has to as well.
-    *   Cheap: on a tag push [[affectedScript]] takes no diff at all, it emits the `all` sentinel directly, which is
-    *   what makes a release publish everything.
+  /** @param runsWhenVerifySkips
+    *   an affected-gated Publish or Deploy job runs on a release tag and on a merged-PR push, where Verify does not, so
+    *   the job it reads its module list from has to as well. Cheap: on a non-PR event [[affectedScript]] takes no diff
+    *   at all, it emits the `all` sentinel directly, which is what makes a release publish everything.
     */
-  private def affectedSetupJob(config: PlanConfig, usesVerifyGate: Boolean, runsOnTags: Boolean): Job =
+  private def affectedSetupJob(config: PlanConfig, usesVerifyGate: Boolean, runsWhenVerifySkips: Boolean): Job =
     val (needs, cond) =
-      applyVerifyGate(Nil, None, Phase.Verify, usesVerifyGate, excludeTagsAndDispatch = !runsOnTags)
+      applyVerifyGate(Nil, None, Phase.Verify, usesVerifyGate, excludeTagsAndDispatch = !runsWhenVerifySkips)
     Job(
       name = Some("affected"),
       runsOn = List(config.runnerOs),
@@ -1153,8 +1155,7 @@ object Planner:
       val clauses        = tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ tolerance.drop(1)
       val baseCond       = if clauses.isEmpty then None else Some(clauses.mkString(" && "))
       val (needs, gated) =
-        if gatedOnAffected then applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate = false)
-        else applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
+        applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
       val targetCond =
         targets.headOption.flatMap(t => JobCondition.renderOpt(t.condition))
       val cond      = andConditions(andConditions(gated, JobCondition.renderOpt(capability.condition)), targetCond)
@@ -1255,11 +1256,10 @@ object Planner:
     val guardedNeeds = rawNeeds.filterNot(id => id == affectedJobId || id == verifyGateJobId)
     val skipTolerant = dependsOnSkippable(capability, affectedGatedNames)
     val baseCond     = jobCondition(capability, node, guardedNeeds, gatedOnAffected, skipTolerant)
-    // The affected setup job already needs verify-gate, so a gated-on-affected job inherits the skip through it and asks
-    // only for the tag exclusion.
+    // Verify jobs carry their own gate. They must not inherit a merged-PR skip by hoping `affected` is skipped: when
+    // Publish or Deploy reads `affected`, that job stays running so later `fromJson` sees real JSON.
     val (needs, gated) =
-      if gatedOnAffected then applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate = false)
-      else applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
+      applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
     val cond   = andConditions(gated, JobCondition.renderOpt(capability.condition))
     val runner = capability.runsOn.getOrElse(List(config.runnerOs))
 
