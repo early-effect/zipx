@@ -155,7 +155,9 @@ Changed files → owning module (longest base-dir prefix) → reverse-dependency
     section("Skip Verify after merge / on tags")(
       md"""
 By default (`zipxSkipMergedPrPush := true`), a push to `main` that lands a merged PR does **not** re-run Verify.
-Direct pushes still Verify. **Tag pushes never run Verify** (release tags only need Publish / Deploy).
+Direct pushes still Verify. **Tag pushes never run Verify** (release tags only need Publish / Deploy). Graph
+Publish and Deploy still run after a merge; the `affected` job they read stays up and emits `["all"]` on that
+non-PR push, so they do not `fromJson` an empty output.
 
 With **LocalDir**, that skip would otherwise leave `main` without an `actions/cache` save (PR caches are
 branch-scoped; later PRs only warm from the default branch). So by default zipx also emits a minimal

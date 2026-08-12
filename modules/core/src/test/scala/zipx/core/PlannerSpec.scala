@@ -1151,6 +1151,50 @@ object PlannerSpec extends ZIOSpecDefault:
         !wf.jobs("publish").`if`.exists(_.contains("!startsWith(github.ref, 'refs/tags/')")),
       )
     },
+    test("skipMergedPrPush gates Graph Verify even when it is affected-gated") {
+      // Once `affected` itself no longer skips after a merged PR (Publish/Deploy read it), Graph Verify must
+      // carry its own gate clause. Skip-inheritance-through-affected is how production `fromJson("")` happened.
+      val graph = sampleGraph.mapNodes {
+        case n if n.id.startsWith("service") => n.copy(docker = true)
+        case n                               => n
+      }
+      val image = Capability
+        .custom(
+          name = CapabilityName("image"),
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publishLocal")),
+          participates = _.docker,
+          phase = Phase.Verify,
+          gate = Gate.Always,
+          ordering = Ordering.ParallelWithUpstream,
+        )
+        .withMatrixCollapse(MatrixCollapse.Coarse)
+      val docker = Capability.dockerGraph.withMatrixCollapse(MatrixCollapse.Coarse)
+      val wf     = Planner.plan(
+        graph,
+        List(Capability.test, image, docker),
+        config.copy(
+          skipMergedPrPush = true,
+          affected = AffectedMode.AffectedOnPR,
+          affectedPublish = true,
+        ),
+      )
+      val fromJson = "fromJson(needs.affected.outputs.modules)"
+      assertTrue(
+        wf.jobs("test").`if`.exists(_.contains("needs.verify-gate.outputs.run == 'true'")),
+        wf.jobs("image").`if`.exists(_.contains("needs.verify-gate.outputs.run == 'true'")),
+        wf.jobs("image").needs.contains("verify-gate"),
+        wf.jobs("image").needs.contains("affected"),
+        !wf.jobs("affected").`if`.exists(_.contains("needs.verify-gate.outputs.run == 'true'")),
+        !wf.jobs("docker").needs.contains("verify-gate"),
+        wf.jobs("docker").`if`.exists(_.contains("needs.affected.outputs.modules")),
+        wf.jobs("docker").steps.exists(_.`if`.exists(_.contains(fromJson))),
+        wf.jobs("cache-rehydrate")
+          .`if`
+          .contains(
+            "needs.verify-gate.result == 'success' && needs.verify-gate.outputs.run == 'false'"
+          ),
+      )
+    },
     test("skipMergedPrPush false omits verify-gate but still skips Verify on tags and dispatch") {
       val wf = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = false))
       assertTrue(

@@ -188,13 +188,41 @@ object AffectedPublishSpec extends ZIOSpecDefault:
           cond(wf, "test-schema").contains("!startsWith(github.ref, 'refs/tags/')"),
         )
       },
-      test("the merged-PR skip still applies to the affected job, only the tag exclusion is dropped") {
+      test("the affected job runs on a merged-PR push once Publish reads it") {
+        // Without this the whole publish is skipped: `affected` would carry Verify's merged-PR skip, skip after
+        // merge, and every Publish job's membership test would `fromJson` an empty output.
         val wf = plan(List(testExpanded, publishExpanded), on.copy(skipMergedPrPush = true))
         assertTrue(
-          wf.jobs("affected").needs.contains("verify-gate"),
-          // Fail-open: a gate that did not succeed (on a tag it is skipped outright) lets this run anyway.
-          cond(wf, "affected").contains("needs.verify-gate.result != 'success'"),
+          !cond(wf, "affected").contains("needs.verify-gate.outputs.run == 'true'"),
           !cond(wf, "affected").contains("!startsWith(github.ref, 'refs/tags/')"),
+          cond(wf, "test-schema").contains("needs.verify-gate.outputs.run == 'true'"),
+          !wf.jobs("publish-schema").needs.contains("verify-gate"),
+        )
+      },
+      test("with only Verify gated, the affected job still skips after a merged PR") {
+        val wf = plan(List(testExpanded), off.copy(skipMergedPrPush = true))
+        assertTrue(
+          cond(wf, "affected").contains("needs.verify-gate.outputs.run == 'true'"),
+          cond(wf, "test-schema").contains("needs.verify-gate.outputs.run == 'true'"),
+        )
+      },
+      test("affected emits JSON whenever a later job will fromJson it") {
+        val wf        = plan(List(testExpanded, publishExpanded), on.copy(skipMergedPrPush = true))
+        val fromJson  = "fromJson(needs.affected.outputs.modules)"
+        val consumers = wf.jobs.filter { (id, job) =>
+          id != "affected" && (
+            job.`if`.exists(_.contains(fromJson)) ||
+              job.steps.exists(_.`if`.exists(_.contains(fromJson)))
+          )
+        }
+        val mergedPrSkip = "needs.verify-gate.outputs.run == 'true'"
+        assertTrue(
+          consumers.nonEmpty,
+          consumers.forall((_, job) => job.needs.contains("affected")),
+          // affected's skip condition is a subset of the consumers': the merged-PR skip is not on affected, so
+          // it cannot skip while a consumer's if: is still true.
+          !cond(wf, "affected").contains(mergedPrSkip),
+          consumers.exists((_, job) => job.`if`.exists(_.contains("needs.affected.outputs.modules"))),
         )
       },
       test("fail-open is unchanged: an unusable diff publishes everything") {
