@@ -138,16 +138,16 @@ syntax. Typing comes back through **composition and provenance**: real keys in t
 
 ```mermaid
 flowchart LR
-  Key["core / publishSigned<br/>a real TaskKey"] --> Task["SbtStep.Task"]
-  Rows["zipxTasks.rows(refs, publishSigned)"] --> Task
-  Name["sonaRelease<br/>a declared Command"] --> Named["SbtStep.Named"]
-  Text["SbtCommand.raw"] --> Raw["SbtStep.Raw"]
-  Graph(["ModuleGraph"]) --> Join
-  Task --> Join["session · a; b; c"]
+  Key[core publishSigned TaskKey] --> Task[SbtStep.Task]
+  Rows[zipxTasks.rows] --> Task
+  Name[sonaRelease Command] --> Named[SbtStep.Named]
+  Text[SbtCommand.raw] --> Raw[SbtStep.Raw]
+  Graph([ModuleGraph]) --> Join
+  Task --> Join[session a then b then c]
   Named --> Join
   Raw --> Join
-  Join --> Tail["thenOnce · one tail"]
-  Tail --> Run(["sbt 'a; b; c; sonaRelease'"])
+  Join --> Tail[thenOnce tail]
+  Tail --> Run([sbt session])
   class Key,Rows,Name,Graph,Task,Named,Join,Tail,Run happy
   class Text,Raw sad
 ```
@@ -181,12 +181,10 @@ bundle per wave (generate fails naming Aggregate / `releaseOnce`).
 
 ```mermaid
 flowchart TD
-  subgraph OK["Aggregate · one session, one staging tree"]
-    A1[core/publishSigned] --> A2[coreJS/publishSigned] --> A3[sonaRelease] --> A4([whole bundle])
-  end
-  subgraph NO["Layer · refused at generate"]
-    L1["wave 1 · publishSigned + sonaRelease?"] --> L2([partial · green])
-  end
+  A1[core publishSigned] --> A2[coreJS publishSigned]
+  A2 --> A3[sonaRelease]
+  A3 --> A4([Aggregate whole bundle])
+  L1[Layer wave thenOnce] --> L2([partial bundle refused])
   class A1,A2,A3,A4 happy
   class L1,L2 sad
 ```
@@ -206,7 +204,7 @@ Pick the shape that matches your aggregate vs publish set. Rendered YAML for eac
       md"""
 ```mermaid
 flowchart LR
-  Key[a TaskKey / Command] --> Compile([compile: key must exist])
+  Key[a TaskKey or Command] --> Compile([compile: key must exist])
   Named[SbtStep.Named] --> Gen([generate: name in definedCommands])
   Raw[SbtStep.Raw] --> Warn([generate: warn only])
   Run[the runner] --> Ci([CI: sbt executes the text])
