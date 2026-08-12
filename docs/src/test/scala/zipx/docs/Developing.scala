@@ -60,7 +60,7 @@ core/test`. Pins and Put/Get are documented under **Remote cache for teams** / `
 Docs are Specular DocSpecs under `docs/src/test/scala`:
 
 ```
-sbt docs/test
+sbt docs/testFull        # Specular DocSpecs (same gate as CI; plain docs/test can skip on sbt 2)
 sbt docs/specularSite
 sbt docsDev              # watch: ~docs/specularPreview (rebuild + restart DocsServe)
 ```
@@ -74,8 +74,9 @@ coordinates.
     ),
     section("Status")(
       md"""
-See [ROADMAP.md](https://github.com/early-effect/zipx/blob/main/ROADMAP.md). The plugin targets sbt 2.x / Scala 3.8.4.
-License: Apache-2.0.
+See [ROADMAP.md](https://github.com/early-effect/zipx/blob/main/ROADMAP.md) and
+[AGENTS.md](https://github.com/early-effect/zipx/blob/main/AGENTS.md) (verification blast radius for agents).
+The plugin targets sbt 2.x / Scala 3.8.4. License: Apache-2.0.
 """
     ),
   )

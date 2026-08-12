@@ -73,3 +73,5 @@ env injection, target fan-out, cache wiring. Semantics live in Scala packs on th
 Always `testFull`, never plain `test` (sbt 2's `test` is `testQuick`). Prefer Metals for format and focused suite runs
 while iterating; CI Aggregate `test` runs unit/IT (including live remote-cache via Testcontainers; Docker required),
 `plugin/scripted`, and the examples/monorepo workflow check.
+
+Agent-oriented blast radius (docs vs packs vs `allJobIds` laws): **[AGENTS.md](AGENTS.md)**.
