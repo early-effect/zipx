@@ -41,4 +41,4 @@ Killing the sbt server kills `docsDev`. Restart deliberately; do not assume the 
 
 ## Format and PRs
 
-Metals format while editing; before push run `sbt scalafmtCheckAll` (pre-commit may skip under the agent sandbox). No AI attribution in commits or PR text. Do not force-push `main`.
+Metals format while editing; before push run `sbt scalafmtCheckAll` (pre-commit may skip under the agent sandbox) then test (as fmt could break code). No AI attribution in commits or PR text. Do not force-push `main`.
