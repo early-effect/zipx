@@ -99,6 +99,8 @@ object ZipxPlugin extends AutoPlugin:
     val Ordering = zipx.core.Ordering
     type CapabilityScope = zipx.core.CapabilityScope
     val CapabilityScope = zipx.core.CapabilityScope
+    type MatrixCollapse = zipx.core.MatrixCollapse
+    val MatrixCollapse = zipx.core.MatrixCollapse
     type VerifyClean = zipx.core.VerifyClean
     val VerifyClean = zipx.core.VerifyClean
     type EnvValue = zipx.core.EnvValue
