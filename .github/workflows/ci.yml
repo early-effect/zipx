@@ -159,24 +159,31 @@ jobs:
       - name: Pre-pull remote-cache IT images
         run: |
           set -euo pipefail
-          pull_with_retry() {
-            local image="$1"
-            local max=5
-            local attempt
-            for attempt in $(seq 1 "$max"); do
-              if docker pull "$image"; then
-                return 0
+          for image in 'buchgr/bazel-remote-cache:v2.6.1' 'sbtscala/scala-sbt:eclipse-temurin-25.0.3_9_2.x'; do
+            pulled=0
+            for attempt in 1 2 3 4 5; do
+              if [ "$pulled" -eq 0 ]; then
+                if docker pull "$image"; then
+                  pulled=1
+                else
+                  if [ "$attempt" -eq 5 ]; then
+                    echo "Failed to pull $image after 5 attempts" 1>&2
+                    exit 1
+                  else
+                    if [ "$attempt" -eq 1 ]; then
+                      sleep 10
+                    elif [ "$attempt" -eq 2 ]; then
+                      sleep 20
+                    elif [ "$attempt" -eq 3 ]; then
+                      sleep 30
+                    elif [ "$attempt" -eq 4 ]; then
+                      sleep 40
+                    fi
+                  fi
+                fi
               fi
-              if [ "$attempt" -eq "$max" ]; then
-                echo "Failed to pull $image after $max attempts" >&2
-                return 1
-              fi
-              sleep $((attempt * 10))
             done
-          }
-          pull_with_retry 'buchgr/bazel-remote-cache:v2.6.1'
-          pull_with_retry 'sbtscala/scala-sbt:eclipse-temurin-25.0.3_9_2.x'
-
+          done
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
