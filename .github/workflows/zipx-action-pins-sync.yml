@@ -26,13 +26,13 @@ jobs:
         run: sbt zipxActionsPull
       - name: Commit pin file and workflows
         run: |
-          if [ -z "$(git status --porcelain '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml')" ]; then
+          if [ -z "$(git status --porcelain '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml' '.github/actions/zipx-sbt-setup/action.yml' '.github/actions/zipx-aws-login/action.yml')" ]; then
             echo "No pin/workflow changes to commit."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml'
+          git add '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml' '.github/actions/zipx-sbt-setup/action.yml' '.github/actions/zipx-aws-login/action.yml'
           git commit -m "ci: sync zipx action pins from Dependabot"
           git push
 

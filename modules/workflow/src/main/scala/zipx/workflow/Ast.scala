@@ -126,6 +126,11 @@ final case class JobService(
 final case class Strategy(
     failFast: Boolean = false,
     matrix: Map[String, List[String]] = ListMap.empty,
+    /** Rows for `strategy.matrix.include` when axes are not a cartesian product (environment ≠ target name, etc.).
+      *
+      * Derived codecs place this next to `matrix:`; [[Render]] nests it under `matrix.include` before printing.
+      */
+    include: List[Map[String, String]] = Nil,
 ) derives Schema
 
 /** One flat case class with all-optional fields rather than a `uses`-vs-`run` sum type, because that is the on-disk
@@ -138,6 +143,9 @@ final case class Strategy(
   * `uses` is an [[ActionRef]], not a `String`: the *shape* of an action ref is the field's own business, so a step
   * cannot be built around an unpinned or malformed one even by hand-construction. zio-blocks derives a `Schema` for a
   * neotype as its underlying primitive, so this renders as the same YAML scalar a `String` did.
+  *
+  * `shell` is required on `run:` steps inside a composite action; workflow jobs inherit the runner default and leave it
+  * empty.
   */
 final case class Step(
     name: Option[String] = None,
@@ -148,6 +156,7 @@ final case class Step(
     `with`: Map[String, String] = ListMap.empty,
     env: Map[String, String] = ListMap.empty,
     workingDirectory: Option[String] = None,
+    shell: Option[String] = None,
 ) derives Schema
 
 object Step:

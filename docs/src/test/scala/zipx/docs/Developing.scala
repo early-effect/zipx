@@ -60,13 +60,12 @@ core/test`. Pins and Put/Get are documented under **Remote cache for teams** / `
 Docs are Specular DocSpecs under `docs/src/test/scala`:
 
 ```
-sbt docs/test
+sbt docs/testFull        # Specular DocSpecs (same gate as CI; plain docs/test can skip on sbt 2)
 sbt docs/specularSite
-sbt docs/specularServe   # one-shot preview
-sbt docsPreview          # watch: ~docs/specularPreview (rebuild + restart DocsServe)
+sbt docsDev              # watch: ~docs/specularPreview (rebuild + restart DocsServe)
 ```
 
-Open http://127.0.0.1:8765/ while `docsPreview` is running. Pages deploy on `v*` tags **or** manual
+Open http://127.0.0.1:8765/ while `docsDev` is running. Pages deploy on `v*` tags **or** manual
 `workflow_dispatch` (`zipxWorkflowDispatch := true`) via `ZipxDocs.pages` in the generated workflow. Verify is skipped
 on dispatch so a docs-only refresh does not re-run the full test suite. Install / chrome versions use
 `specularDisplayVersion` (last stable tag when dynver is `*-ci`) so docs-only deploys do not advertise `-ci`
@@ -75,8 +74,9 @@ coordinates.
     ),
     section("Status")(
       md"""
-See [ROADMAP.md](https://github.com/early-effect/zipx/blob/main/ROADMAP.md). The plugin targets sbt 2.x / Scala 3.8.4.
-License: Apache-2.0.
+See [ROADMAP.md](https://github.com/early-effect/zipx/blob/main/ROADMAP.md) and
+[AGENTS.md](https://github.com/early-effect/zipx/blob/main/AGENTS.md) (verification blast radius for agents).
+The plugin targets sbt 2.x / Scala 3.8.4. License: Apache-2.0.
 """
     ),
   )

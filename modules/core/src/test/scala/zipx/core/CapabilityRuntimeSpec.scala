@@ -31,7 +31,7 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
 
   /** The same runtime asked for on every scope, so each scope's assertion reads identically. */
   private def withRuntime(capability: Capability): Capability =
-    capability.withService("postgres", postgres).inContainer(image)
+    capability.withService("postgres", postgres).inContainer(image).withMatrixCollapse(MatrixCollapse.Off)
 
   private def assertRuntime(job: zipx.workflow.Job): TestResult =
     assertTrue(
@@ -54,6 +54,14 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
           withRuntime(Capability.testJoined).withTargets(_ => List(Target(TargetName("a")), Target(TargetName("b"))))
         val wf = plan(cap)
         assertRuntime(wf.jobs("test-a")) && assertRuntime(wf.jobs("test-b"))
+      },
+      test("Auto Aggregate target fan-out still carries runtime on the collapsed job") {
+        val cap = Capability.testJoined
+          .withService("postgres", postgres)
+          .inContainer(image)
+          .withTargets(_ => List(Target(TargetName("a")), Target(TargetName("b"))))
+        val wf = plan(cap)
+        assertTrue(wf.jobs.contains("test")) && assertRuntime(wf.jobs("test"))
       },
       test("Layer, every wave of it and not only L0") {
         val wf    = plan(withRuntime(Capability.testLayers))
@@ -86,7 +94,9 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
       test("the cache sidecar wins a colliding id, because the sbt invocation is configured to reach it") {
         // A capability losing its own sidecar surfaces as a connection error in the test that wanted it. The cache
         // sidecar losing would fail *every* job in the workflow on a name nobody chose deliberately.
-        val cap = Capability.testGraph.withService(RemoteCacheProof.serviceName, postgres)
+        val cap = Capability.testGraph
+          .withService(RemoteCacheProof.serviceName, postgres)
+          .withMatrixCollapse(MatrixCollapse.Off)
         val job = plan(cap, config.copy(cache = RemoteCacheProof.sidecar)).jobs("test-core")
         assertTrue(
           job.services(RemoteCacheProof.serviceName).image == RemoteCacheProof.image,
@@ -142,11 +152,10 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
         )
       },
       test("a capability declaring neither renders byte-identically to before the fields existed") {
-        // The regression guard for the five sites: `container` stays absent and `services` stays whatever the cache
-        // backend put there, so no existing workflow file moves.
-        val plain    = Render.render(plan(Capability.testGraph)).yaml
-        val sidecar  = Render.render(plan(Capability.testGraph, config.copy(cache = RemoteCacheProof.sidecar))).yaml
-        val jobPlain = plan(Capability.testGraph).jobs("test-core")
+        val expanded = Capability.testGraph.withMatrixCollapse(MatrixCollapse.Off)
+        val plain    = Render.render(plan(expanded)).yaml
+        val sidecar  = Render.render(plan(expanded, config.copy(cache = RemoteCacheProof.sidecar))).yaml
+        val jobPlain = plan(expanded).jobs("test-core")
         assertTrue(
           !plain.contains("container:"),
           !plain.contains("services:"),

@@ -263,20 +263,21 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("LocalDir cache primary key includes run_id + job id so same-run jobs accumulate and can save") {
       val wf       = Planner.plan(sampleGraph, List(Capability.testGraph), config)
-      val coreStep = wf.jobs("test-core").steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
-      val apiStep  = wf.jobs("test-api").steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
-      val coreKey  = coreStep.map(_.`with`("key")).getOrElse("")
-      val apiKey   = apiStep.map(_.`with`("key")).getOrElse("")
+      val coreStep = wf.jobs("test-core").steps.find(_.uses.contains(ZipxComposites.SbtSetupRef))
+      val apiStep  = wf.jobs("test-api").steps.find(_.uses.contains(ZipxComposites.SbtSetupRef))
       assertTrue(
-        coreKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-core"),
-        apiKey.contains("ubuntu-latest-jdk21-sbt-1.2.3-ci-${{ github.run_id }}-test-api"),
-        coreKey != apiKey,
+        coreStep.exists(_.`with`.get("cache-key-suffix").contains("test-core")),
+        apiStep.exists(_.`with`.get("cache-key-suffix").contains("test-api")),
+        coreStep.flatMap(_.`with`.get("cache-key-suffix")) != apiStep.flatMap(_.`with`.get("cache-key-suffix")),
       )
     },
     test("LocalDir cache paths cover sbt tooling and target directories") {
-      val wf    = Planner.plan(sampleGraph, List(Capability.testGraph), config)
-      val step  = wf.jobs("test-core").steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
-      val paths = step.map(_.`with`("path")).getOrElse("")
+      val paths = ZipxComposites
+        .sbtSetup(ActionPins.Defaults, CacheEpoch.Fixed("1.2.3-ci"))
+        .steps
+        .find(_.name.contains("Cache sbt"))
+        .map(_.`with`("path"))
+        .getOrElse("")
       assertTrue(
         paths.contains("~/.sbt"),
         paths.contains("~/.cache/sbt"),
@@ -285,79 +286,61 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("LocalDir cache disables setup-java and sbt/setup-sbt internal caching") {
-      val wf   = Planner.plan(sampleGraph, List(Capability.testGraph), config)
-      val java = wf.jobs("test-core").steps.find(_.uses.exists(_.unwrap.startsWith("actions/setup-java@")))
-      val sbt  = wf.jobs("test-core").steps.find(_.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@")))
+      val setup = ZipxComposites.sbtSetup(ActionPins.Defaults, CacheEpoch.Fixed("1.2.3-ci"))
+      val java  = setup.steps.find(_.uses.exists(_.unwrap.startsWith("actions/setup-java@")))
+      val sbt   = setup.steps.find(_.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@")))
       assertTrue(
         !java.exists(_.`with`.contains("cache")),
-        sbt.exists(_.`with`.get("disk-cache").contains("false")),
+        sbt.exists(_.`with`.get("disk-cache").contains("${{ inputs.sbt-disk-cache }}")),
       )
     },
     test("LocalDir restore-keys bridge -ci / -SNAPSHOT epochs to the prior release epoch") {
-      val prefix                 = "ubuntu-latest-jdk21-sbt-"
-      def restore(epoch: String) =
-        Planner
-          .plan(
-            sampleGraph,
-            List(Capability.test),
-            config.copy(cacheEpoch = CacheEpoch.Fixed(epoch), skipMergedPrPush = false),
-          )
-          .jobs("test")
-          .steps
-          .find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
-          .map(_.`with`("restore-keys"))
-          .getOrElse("")
-      val ci      = restore("1.2.3-ci")
-      val snap    = restore("1.2.3-SNAPSHOT")
-      val release = restore("1.2.3")
+      val prefix = "ubuntu-latest-jdk21-sbt-"
+      val step   = ZipxComposites.sbtSetupStep(
+        PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci")),
+        zipx.workflow.JobId("test"),
+        None,
+        localCache = true,
+      )
       assertTrue(
         Planner.priorReleaseEpochKey(prefix, "1.2.3-ci").contains(s"${prefix}1.2.3-"),
         Planner.priorReleaseEpochKey(prefix, "1.2.3-SNAPSHOT").contains(s"${prefix}1.2.3-"),
         Planner.priorReleaseEpochKey(prefix, "1.2.3").isEmpty,
-        ci.split('\n').toList == List(
-          s"${prefix}1.2.3-ci-$${{ github.run_id }}-",
-          s"${prefix}1.2.3-ci-",
-          s"${prefix}1.2.3-",
-          prefix,
-        ),
-        snap.split('\n').toList == List(
-          s"${prefix}1.2.3-SNAPSHOT-$${{ github.run_id }}-",
-          s"${prefix}1.2.3-SNAPSHOT-",
-          s"${prefix}1.2.3-",
-          prefix,
-        ),
-        release.split('\n').toList == List(
-          s"${prefix}1.2.3-$${{ github.run_id }}-",
-          s"${prefix}1.2.3-",
-          prefix,
-        ),
+        step.`with`.get("cache-epoch").contains("1.2.3-ci"),
       )
     },
     test("cache key is identical across commits with the same epoch+job template, differs across epochs") {
-      def keyFor(epoch: String) =
+      def epochFor(epoch: String) =
         Planner
           .plan(sampleGraph, List(Capability.testGraph), config.copy(cacheEpoch = CacheEpoch.Fixed(epoch)))
           .jobs("test-core")
           .steps
-          .find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
-          .map(_.`with`("key"))
+          .find(_.uses.contains(ZipxComposites.SbtSetupRef))
+          .flatMap(_.`with`.get("cache-epoch"))
       assertTrue(
-        keyFor("1.2.3-ci") == keyFor("1.2.3-ci"),
-        keyFor("1.2.3-ci") != keyFor("1.3.0"),
+        epochFor("1.2.3-ci") == epochFor("1.2.3-ci"),
+        epochFor("1.2.3-ci") != epochFor("1.3.0"),
       )
     },
     test("GitTags epoch configures checkout with full history and tags") {
-      val wf       = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = CacheEpoch.GitTags()))
-      val checkout = wf.jobs("test").steps.find(_.uses.exists(_.unwrap.contains("checkout")))
+      val steps = Planner.checkoutThenSbtSetup(
+        PlanConfig(cacheEpoch = CacheEpoch.GitTags()),
+        zipx.workflow.JobId("test"),
+        None,
+        localCache = true,
+      )
+      val checkout = steps.find(_.uses.exists(_.unwrap.contains("checkout")))
       assertTrue(
         checkout.exists(_.`with`.get("fetch-tags").contains("true")),
         checkout.exists(_.`with`.get("fetch-depth").contains("0")),
+        steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
+        steps.indexWhere(_.uses.exists(_.unwrap.contains("checkout"))) <
+          steps.indexWhere(_.uses.contains(ZipxComposites.SbtSetupRef)),
       )
     },
     test("GitTags resolve step emits epoch via git describe and GITHUB_OUTPUT") {
-      val wf      = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = CacheEpoch.GitTags()))
-      val steps   = wf.jobs("test").steps
-      val resolve = steps.find(_.id.contains(CacheEpoch.GitTagsStepId))
+      val setup   = ZipxComposites.sbtSetup(ActionPins.Defaults, CacheEpoch.GitTags())
+      val resolve = setup.steps.find(_.id.contains(CacheEpoch.GitTagsStepId))
       val run     = resolve.flatMap(_.run).getOrElse("")
       assertTrue(
         resolve.exists(_.name.contains("Resolve cache epoch")),
@@ -368,30 +351,18 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("GitTags wires resolve step outputs into cache key and restore-keys") {
-      val wf      = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = CacheEpoch.GitTags()))
-      val steps   = wf.jobs("test").steps
-      val cache   = steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
-      val key     = cache.map(_.`with`("key")).getOrElse("")
+      val setup = ZipxComposites.sbtSetup(ActionPins.Defaults, CacheEpoch.GitTags())
+      val cache = setup.steps.find(s => s.name.contains("Cache sbt") && s.`if`.exists(_.contains("cache-epoch == ''")))
+      val key   = cache.map(_.`with`("key")).getOrElse("")
       val restore = cache.map(_.`with`("restore-keys")).getOrElse("")
       assertTrue(
-        key.contains("ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-test"),
-        restore.split('\n').toList == List(
-          "ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-",
-          "ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.epoch }}-",
-          "ubuntu-latest-jdk21-sbt-${{ steps.cache-epoch.outputs.release }}-",
-          "ubuntu-latest-jdk21-sbt-",
-        ),
+        key.contains("steps.cache-epoch.outputs.epoch"),
+        key.contains("github.run_id"),
+        restore.contains("steps.cache-epoch.outputs.release"),
       )
     },
     test("GitTags resolve step precedes the cache action") {
-      val steps = Planner
-        .plan(
-          sampleGraph,
-          List(Capability.test),
-          config.copy(cacheEpoch = CacheEpoch.GitTags()),
-        )
-        .jobs("test")
-        .steps
+      val steps = ZipxComposites.sbtSetup(ActionPins.Defaults, CacheEpoch.GitTags()).steps
       assertTrue(
         steps.indexWhere(_.id.contains(CacheEpoch.GitTagsStepId)) <
           steps.indexWhere(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
@@ -404,14 +375,15 @@ object PlannerSpec extends ZIOSpecDefault:
                 |""".stripMargin,
         stepId = StepId("my-epoch"),
       )
-      val wf      = Planner.plan(sampleGraph, List(Capability.test), config.copy(cacheEpoch = custom))
-      val steps   = wf.jobs("test").steps
+      val steps   = ZipxComposites.sbtSetup(ActionPins.Defaults, custom).steps
       val resolve = steps.find(_.id.contains("my-epoch"))
-      val key     = steps.find(_.uses.exists(_.unwrap.startsWith("actions/cache@"))).map(_.`with`("key")).getOrElse("")
+      val key     = steps
+        .find(s => s.name.contains("Cache sbt") && s.`if`.exists(_.contains("cache-epoch == ''")))
+        .map(_.`with`("key"))
+        .getOrElse("")
       assertTrue(
         resolve.flatMap(_.run).exists(_.contains("epoch=9.9.9-ci")),
         key.contains("${{ steps.my-epoch.outputs.epoch }}"),
-        key.contains("-test"),
       )
     },
     test("release triggers include the tag pattern; PR/test-only builds do not gate on tags") {
@@ -434,8 +406,7 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs.contains("affected"),
         wf.jobs.keys.head == "affected",
         wf.jobs("affected").outputs.contains("modules"),
-        wf.jobs("affected").steps.exists(_.`with`.get("fetch-depth").contains("0")),
-        wf.jobs("affected").steps.exists(_.`with`.get("fetch-tags").contains("true")),
+        wf.jobs("affected").steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
       )
     },
     test("verify jobs gate on affected-set membership (with the `all` sentinel escape hatch)") {
@@ -472,7 +443,7 @@ object PlannerSpec extends ZIOSpecDefault:
         script.contains("sbt -batch --error \"zipxAffectedModules $BASE\""),
         script.contains("modules=$(cat target/zipx-affected.json)"),
         !script.contains("modules=$(sbt"),
-        wf.jobs("affected").steps.exists(_.uses.exists(_.unwrap.startsWith("actions/setup-java@"))),
+        wf.jobs("affected").steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
       )
     },
     test("affectedOnPush adds a guarded before-sha diff for pushes") {
@@ -506,9 +477,12 @@ object PlannerSpec extends ZIOSpecDefault:
       assertTrue(
         job.services.isEmpty,
         job.env.isEmpty,
-        job.steps.exists(_.uses.exists(_.unwrap.startsWith("actions/cache@"))),
+        job.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
         job.steps.exists(s =>
-          s.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@")) && s.`with`.get("disk-cache").contains("false")
+          s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("local-cache").contains("true")
+        ),
+        job.steps.exists(s =>
+          s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("sbt-disk-cache").contains("false")
         ),
       )
     },
@@ -524,8 +498,10 @@ object PlannerSpec extends ZIOSpecDefault:
         job.services(RemoteCacheProof.serviceName).image == RemoteCacheProof.image,
         job.services(RemoteCacheProof.serviceName).ports == List(RemoteCacheProof.portMapping),
         job.env.get(RemoteCacheProof.envUri).contains(RemoteCacheProof.grpcLocalhost),
-        !job.steps.exists(_.uses.exists(_.unwrap.startsWith("actions/cache@"))),
-        !job.steps.exists(s => s.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@")) && s.`with`.contains("disk-cache")),
+        job.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
+        job.steps.exists(s =>
+          s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("local-cache").contains("false")
+        ),
       )
     },
     test("ManagedRemote backend sets the endpoint + header-from-secret env, no service") {
@@ -546,7 +522,8 @@ object PlannerSpec extends ZIOSpecDefault:
         case n if n.id == "serviceA" || n.id == "serviceB" => n.copy(docker = true)
         case n                                             => n
       }
-      val wf = Planner.plan(withDocker, List(Capability.dockerGraph), config)
+      // Off: this suite asserts expanded Graph job ids; Auto collapse is covered in MatrixCollapseSpec.
+      val wf = Planner.plan(withDocker, List(Capability.dockerGraph.withMatrixCollapse(MatrixCollapse.Off)), config)
       assertTrue(
         wf.jobs.contains("docker-serviceA"),
         wf.jobs.contains("docker-serviceB"),
@@ -557,7 +534,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("a capability with no targets still emits a single job (unchanged path)") {
-      val wf = Planner.plan(sampleGraph, List(deployCap(Nil)), config)
+      val wf = Planner.plan(sampleGraph, List(deployCap(Nil).withMatrixCollapse(MatrixCollapse.Off)), config)
       assertTrue(
         wf.jobs.contains("deploy-serviceA"),
         wf.jobs("deploy-serviceA").environment.isEmpty,
@@ -613,7 +590,11 @@ object PlannerSpec extends ZIOSpecDefault:
         command = n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
         targets = _ => stagingProd,
       )
-      val wf = Planner.plan(graph, List(Capability.dockerGraph, deploy), config)
+      val wf = Planner.plan(
+        graph,
+        List(Capability.dockerGraph.withMatrixCollapse(MatrixCollapse.Off), deploy),
+        config,
+      )
       assertTrue(
         wf.jobs("deploy-serviceA-prod").needs.contains("docker-serviceA"),
         wf.jobs("deploy-serviceA-staging").needs.contains("docker-serviceA"),
@@ -630,9 +611,12 @@ object PlannerSpec extends ZIOSpecDefault:
           n => SbtCommand.module(n, SbtCommand.unsafeTask("deploy")),
           _ => stagingProd,
         )
-      val wf   = Planner.plan(graph, List(deploy, Capability.dockerGraph), config)
+      val wf = Planner.plan(graph, List(deploy, Capability.dockerGraph.withMatrixCollapse(MatrixCollapse.Off)), config)
       val keys = wf.jobs.keys.toList
-      assertTrue(keys.indexOf("docker-serviceA") < keys.indexOf("deploy-serviceA-prod"))
+      assertTrue(
+        keys.contains("docker-serviceA"),
+        keys.indexOf("docker-serviceA") < keys.indexOf("deploy-serviceA-prod"),
+      )
     },
     test("Capability.permissions renders on the job (OIDC id-token)") {
       val deploy = Capability.deployGraph(
@@ -693,12 +677,14 @@ object PlannerSpec extends ZIOSpecDefault:
       assertTrue(credIdx >= 0, cmdIdx >= 0, credIdx < cmdIdx)
     },
     test("postSteps are injected after the command") {
-      val cap = Capability.custom(
-        name = Capability.PublishName,
-        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("publish")),
-        participates = _.id == "schema",
-        postSteps = _ => List(Step(name = Some("Upload"), run = Some("echo uploaded"))),
-      )
+      val cap = Capability
+        .custom(
+          name = Capability.PublishName,
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("publish")),
+          participates = _.id == "schema",
+          postSteps = _ => List(Step(name = Some("Upload"), run = Some("echo uploaded"))),
+        )
+        .withMatrixCollapse(MatrixCollapse.Off)
       val steps   = Planner.plan(sampleGraph, List(cap), config).jobs("publish-schema").steps
       val cmdIdx  = steps.indexWhere(_.run.exists(_.contains("schema/publish")))
       val postIdx = steps.indexWhere(_.name.contains("Upload"))
@@ -762,6 +748,7 @@ object PlannerSpec extends ZIOSpecDefault:
               )
             )
         )
+        .withMatrixCollapse(MatrixCollapse.Off)
       val wf = Planner.plan(graph, List(multiDocker), config)
       assertTrue(
         wf.jobs.contains("docker-serviceA-us"),
@@ -914,17 +901,21 @@ object PlannerSpec extends ZIOSpecDefault:
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n
       }
-      val multiDocker = Capability.custom(
-        name = Capability.DockerName,
-        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publish")),
-        participates = _.docker,
-        targets = _ => List(Target(TargetName("us")), Target(TargetName("eu"))),
-      )
-      val deploy = Capability.deployGraph(
-        participates = _.id == "serviceA",
-        command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
-        targets = _ => List(Target(TargetName("staging"))),
-      )
+      val multiDocker = Capability
+        .custom(
+          name = Capability.DockerName,
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("Docker/publish")),
+          participates = _.docker,
+          targets = _ => List(Target(TargetName("us")), Target(TargetName("eu"))),
+        )
+        .withMatrixCollapse(MatrixCollapse.Off)
+      val deploy = Capability
+        .deployGraph(
+          participates = _.id == "serviceA",
+          command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
+          targets = _ => List(Target(TargetName("staging"))),
+        )
+        .withMatrixCollapse(MatrixCollapse.Off)
       val needs = Planner.plan(graph, List(multiDocker, deploy), config).jobs("deploy-serviceA-staging").needs
       assertTrue(
         needs.contains("docker-serviceA-eu"),
@@ -946,16 +937,21 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("StepContext.matrixed is true only when a Scala matrix is active") {
       var seen: List[Boolean] = Nil
-      val cap                 = Capability.testGraph.copy(
-        participates = _.id == "api",
-        extraSteps = ctx =>
-          seen = ctx.matrixed :: seen; Nil,
-      )
-      val noMatrix = Capability.testGraph.copy(
-        participates = _.id == "core",
-        extraSteps = ctx =>
-          seen = ctx.matrixed :: seen; Nil,
-      )
+      // Off so Auto module collapse does not also set matrixed on the single-Scala core job.
+      val cap = Capability.testGraph
+        .copy(
+          participates = _.id == "api",
+          extraSteps = ctx =>
+            seen = ctx.matrixed :: seen; Nil,
+        )
+        .withMatrixCollapse(MatrixCollapse.Off)
+      val noMatrix = Capability.testGraph
+        .copy(
+          participates = _.id == "core",
+          extraSteps = ctx =>
+            seen = ctx.matrixed :: seen; Nil,
+        )
+        .withMatrixCollapse(MatrixCollapse.Off)
       val _ = Planner.plan(sampleGraph, List(cap, noMatrix), config)
       assertTrue(seen.contains(true), seen.contains(false))
     },
@@ -1173,7 +1169,7 @@ object PlannerSpec extends ZIOSpecDefault:
         rehydrate.`if`.contains(
           "needs.verify-gate.result == 'success' && needs.verify-gate.outputs.run == 'false'"
         ),
-        rehydrate.steps.exists(_.uses.exists(_.unwrap.contains("actions/cache"))),
+        rehydrate.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
         rehydrate.steps.exists(_.run.contains("sbt 'compile'")),
         !rehydrate.steps.exists(_.run.exists(_.contains("test"))),
       )
@@ -1222,14 +1218,14 @@ object PlannerSpec extends ZIOSpecDefault:
       )
       val rehydrate = Planner.plan(sampleGraph, List(Capability.test), withExtras).jobs("cache-rehydrate")
       val names     = rehydrate.steps.flatMap(_.name)
-      val cacheIdx  = rehydrate.steps.indexWhere(_.uses.exists(_.unwrap.contains("actions/cache")))
+      val setupIdx  = rehydrate.steps.indexWhere(_.uses.contains(ZipxComposites.SbtSetupRef))
       val extraIdx  = rehydrate.steps.indexWhere(_.name.contains("Install browsers"))
       val cmdIdx    = rehydrate.steps.indexWhere(_.run.exists(_.contains("sbt 'compile'")))
       val plain     = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = true))
       assertTrue(
         rehydrate.env.get("PLAYWRIGHT_BROWSERS_PATH").contains("${{ github.workspace }}/target/ms-playwright"),
         names.contains("Install browsers"),
-        cacheIdx >= 0 && extraIdx > cacheIdx && cmdIdx > extraIdx,
+        setupIdx >= 0 && extraIdx > setupIdx && cmdIdx > extraIdx,
         plain.jobs("cache-rehydrate").env.isEmpty,
         !plain.jobs("cache-rehydrate").steps.exists(_.name.contains("Install browsers")),
       )
@@ -1336,10 +1332,12 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("OnReleaseTag + Target HasPrLabel still includes tag clause (stage-on-PR footgun)") {
-      val cap = Capability.dockerGraph.copy(
-        gate = Gate.OnReleaseTag,
-        targets = _ => List(Target(TargetName("stg"), condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
-      )
+      val cap = Capability.dockerGraph
+        .copy(
+          gate = Gate.OnReleaseTag,
+          targets = _ => List(Target(TargetName("stg"), condition = Some(JobCondition.hasPrLabel("deploy-stg")))),
+        )
+        .withMatrixCollapse(MatrixCollapse.Off)
       val graph = sampleGraph.mapNodes {
         case n if n.id == "serviceA" => n.copy(docker = true)
         case n                       => n

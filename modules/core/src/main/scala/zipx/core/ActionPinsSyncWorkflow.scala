@@ -67,7 +67,15 @@ object ActionPinsSyncWorkflow:
   end planWith
 
   private def commitScript(actionsPath: String, workflowPath: String): Either[String, Script] =
-    quotedPaths(List(actionsPath, workflowPath, DefaultPath)).map(commitScriptWith)
+    quotedPaths(
+      List(
+        actionsPath,
+        workflowPath,
+        DefaultPath,
+        ZipxComposites.SbtSetupPath,
+        ZipxComposites.AwsLoginPath,
+      )
+    ).map(commitScriptWith)
 
   private def commitScriptWith(paths: List[Word]): Script =
     Script(

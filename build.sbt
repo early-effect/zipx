@@ -176,7 +176,7 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
 
 // Docs-as-tests site (Specular + early-effect theme). Deployed via ZipxDocs.pages in generated CI.
 lazy val specularPreview =
-  taskKey[Unit]("Build specularSite then serve with sbt-reload (prefer alias: docsPreview)")
+  taskKey[Unit]("Build specularSite then serve with sbt-reload (prefer alias: docsDev)")
 
 /** Scala.js docs client: remounts `.interactive` ascent / mermoid examples after SSR. */
 lazy val docsJS = project
@@ -271,4 +271,5 @@ lazy val docs = project
   )
 
 addCommandAlias("docsPreview", "~docs/specularPreview")
+addCommandAlias("docsDev", "docsPreview")
 addCommandAlias("release", "; publishSigned; sonaRelease")

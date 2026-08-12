@@ -54,12 +54,19 @@ object PipelineSpec extends ZIOSpecDefault:
           )
         )
     )
+    .withMatrixCollapse(MatrixCollapse.Off)
 
   private val config =
     PlanConfig(cacheEpoch = CacheEpoch.Fixed("9.9.9"), affected = AffectedMode.Always, skipMergedPrPush = false)
 
-  private val wf =
-    Planner.plan(graph, List(Capability.testGraph, Capability.publishGraph, Capability.dockerGraph, deploy), config)
+  private val expanded = List(
+    Capability.testGraph.withMatrixCollapse(MatrixCollapse.Off),
+    Capability.publishGraph.withMatrixCollapse(MatrixCollapse.Off),
+    Capability.dockerGraph.withMatrixCollapse(MatrixCollapse.Off),
+    deploy,
+  )
+
+  private val wf              = Planner.plan(graph, expanded, config)
   private def job(id: String) = wf.jobs(id)
 
   def spec = suite("Pipeline (M6e end-to-end)")(
@@ -72,6 +79,22 @@ object PipelineSpec extends ZIOSpecDefault:
         wf.jobs.contains("docker-serviceA"),
         wf.jobs.contains("deploy-serviceA-staging"),
         wf.jobs.contains("deploy-serviceA-prod"),
+      )
+    },
+    test("Auto collapses isomorphic docker while leaving condition-split deploy expanded") {
+      val auto = Planner.plan(
+        graph,
+        List(
+          Capability.dockerGraph, // Auto default
+          deploy.copy(matrixCollapse = None),
+        ),
+        config,
+      )
+      assertTrue(
+        auto.jobs.contains("docker"),
+        !auto.jobs.contains("docker-serviceA"),
+        auto.jobs.contains("deploy-serviceA-staging"),
+        auto.jobs.contains("deploy-serviceA-prod"),
       )
     },
     test("publishing is dependency-ordered (schema → api → clients)") {

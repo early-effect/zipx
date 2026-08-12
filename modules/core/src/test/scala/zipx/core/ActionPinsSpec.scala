@@ -33,16 +33,16 @@ object ActionPinsSpec extends ZIOSpecDefault:
         setupSbt = ActionRef("sbt/setup-sbt@feedface"),
         cache = ActionRef("actions/cache@00ff00ff"),
       )
-      val wf  = Planner.plan(Fixtures.sampleGraph, List(Capability.testGraph), config.copy(actions = custom))
-      val job = wf.jobs("test-core")
+      val wf    = Planner.plan(Fixtures.sampleGraph, List(Capability.testGraph), config.copy(actions = custom))
+      val job   = wf.jobs("test-core")
+      val setup = ZipxComposites.sbtSetup(custom, CacheEpoch.Fixed("1.0.0"))
       assertTrue(
         job.steps.exists(_.uses.contains(ActionRef("actions/checkout@deadbeef"))),
-        job.steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@feedface"))),
-        job.steps.exists(_.uses.contains(ActionRef("actions/setup-java@cafebabe"))),
-        job.steps.exists(_.uses.contains(ActionRef("actions/cache@00ff00ff"))),
-        job.steps
-          .find(_.uses.exists(_.unwrap.contains("checkout")))
-          .exists(_.`with`.get("fetch-depth").contains("0")),
+        job.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
+        setup.steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@feedface"))),
+        setup.steps.exists(_.uses.contains(ActionRef("actions/setup-java@cafebabe"))),
+        setup.steps.exists(_.uses.contains(ActionRef("actions/cache@00ff00ff"))),
+        !setup.steps.exists(_.uses.exists(_.unwrap.contains("checkout"))),
       )
     },
     test("affected setup job also uses the configured checkout and setup-sbt pins") {
@@ -56,10 +56,28 @@ object ActionPinsSpec extends ZIOSpecDefault:
         config.copy(affected = AffectedMode.AffectedOnPR, actions = custom),
       )
       val steps = wf.jobs("affected").steps
+      val setup = ZipxComposites.sbtSetup(custom, CacheEpoch.Fixed("1.0.0"))
       assertTrue(
         steps.exists(_.uses.contains(ActionRef("actions/checkout@aabbccdd"))),
-        steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@11223344"))),
+        steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
+        setup.steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@11223344"))),
       )
+    },
+    test("checkout precedes every local zipx-sbt-setup uses (GHA cannot resolve local actions otherwise)") {
+      val wf = Planner.plan(
+        Fixtures.sampleGraph,
+        List(Capability.test, Capability.testGraph),
+        config.copy(affected = AffectedMode.AffectedOnPR, skipMergedPrPush = true),
+      )
+      val jobsWithSetup = wf.jobs.values.filter(_.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef))).toList
+      val ordered       = jobsWithSetup.forall { job =>
+        val idxCheckout = job.steps.indexWhere(_.uses.exists(_.unwrap.contains("actions/checkout@")))
+        val idxSetup    = job.steps.indexWhere(_.uses.contains(ZipxComposites.SbtSetupRef))
+        idxCheckout >= 0 && idxSetup > idxCheckout
+      }
+      val compositeHasNoCheckout =
+        !ZipxComposites.sbtSetup(ActionPins.Defaults).steps.exists(_.uses.exists(_.unwrap.contains("checkout")))
+      assertTrue(jobsWithSetup.nonEmpty, ordered, compositeHasNoCheckout)
     },
   )
 end ActionPinsSpec

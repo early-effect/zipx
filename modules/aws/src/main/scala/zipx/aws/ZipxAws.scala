@@ -2,9 +2,7 @@ package zipx.aws
 
 import neotype.unwrap
 import zipx.core.*
-import zipx.workflow.{ActionRef, EnvName, Expr, Step}
-
-import scala.collection.immutable.ListMap
+import zipx.workflow.{ActionRef, EnvName}
 
 /** AWS paved path for zipx: OIDC role assumption, ECR registries whose region cannot be forgotten, and the tag set an
   * image is pushed under.
@@ -60,7 +58,7 @@ object ZipxAws:
     * through a pack, so pinning it must not require a zipx release. The cost is stated in `ActionPins`: an extra pin's
     * ref is checked for being pinned, not for naming this particular action.
     */
-  val CredentialsPinKey: String = "configureAwsCredentials"
+  val CredentialsPinKey: String = ZipxComposites.CredentialsPinKey
 
   /** Used when the consumer's pin file has no [[CredentialsPinKey]] entry. A literal, so its shape is checked while
     * this file compiles, and a SHA rather than `@v6` so the fallback is not itself an unpinned action.
@@ -97,21 +95,12 @@ object ZipxAws:
     * A named [[zipx.core.Steps]] rather than a lambda, so it composes with `++`, gates with `when`, and names itself in
     * the generate-time raw-fragment warning.
     */
-  val oidcLoginSteps: Steps = Steps.one("aws-oidc-login") { ctx =>
-    Step
-      .usesRef(credentialsAction(ctx.actions))
-      .named("Assume AWS role (OIDC)")
-      .withInputs(
-        ListMap(
-          "role-to-assume" -> Expr.Env(Role).render,
-          "aws-region"     -> Expr.Env(Region).render,
-        )
-      )
-      .build
+  val oidcLoginSteps: Steps = Steps.one("aws-oidc-login") { _ =>
+    ZipxComposites.awsLoginStep(loginEcr = false)
   }
 
   /** The pin key and fallback for `aws-actions/amazon-ecr-login`, on the same terms as [[CredentialsPinKey]]. */
-  val EcrLoginPinKey: String = "amazonEcrLogin"
+  val EcrLoginPinKey: String = ZipxComposites.EcrLoginPinKey
 
   val DefaultEcrLoginAction: ActionRef =
     ActionRef("aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64")
@@ -125,12 +114,8 @@ object ZipxAws:
     * `registries:` is the account id from [[AccountEnv]], so multi-account shared jobs accumulate one credential entry
     * per host rather than relying on whichever role was assumed last.
     */
-  val ecrLoginSteps: Steps = oidcLoginSteps ++ Steps.one("aws-ecr-login") { ctx =>
-    Step
-      .usesRef(ecrLoginAction(ctx.actions))
-      .named("Log in to ECR")
-      .withInputs(ListMap("registries" -> Expr.Env(Account).render))
-      .build
+  val ecrLoginSteps: Steps = Steps.one("aws-ecr-login") { _ =>
+    ZipxComposites.awsLoginStep(loginEcr = true)
   }
 
   /** The `env:` a job needs for [[ecrLoginSteps]]: role, region, registry host, and account id for `registries:`.
@@ -177,22 +162,14 @@ object ZipxAws:
     * last `configure-aws-credentials` wins ambient AWS credentials; `amazon-ecr-login` with that destination's account
     * id is what accumulates a `~/.docker/config.json` entry per registry host.
     */
-  val sharedLoginSteps: Steps = Steps.buildingWith("aws-ecr-login-per-destination") { ctx =>
-    ctx.destinations.flatMap { target =>
-      List(
-        Step
-          .usesRef(credentialsAction(ctx.actions))
-          .named(s"Assume AWS role (OIDC, ${target.name})")
-          .withInputs(
-            ListMap(
-              "role-to-assume" -> Expr.Env(target.envName(Role)).render,
-              "aws-region"     -> Expr.Env(target.envName(Region)).render,
-            )
-          ),
-        Step
-          .usesRef(ecrLoginAction(ctx.actions))
-          .named(s"Log in to ECR (${target.name})")
-          .withInputs(ListMap("registries" -> Expr.Env(target.envName(Account)).render)),
+  val sharedLoginSteps: Steps = Steps("aws-ecr-login-per-destination") { ctx =>
+    ctx.destinations.map { target =>
+      ZipxComposites.awsLoginStep(
+        roleEnv = target.envName(Role).unwrap,
+        regionEnv = target.envName(Region).unwrap,
+        accountEnv = target.envName(Account).unwrap,
+        loginEcr = true,
+        nameSuffix = target.name: String,
       )
     }
   }

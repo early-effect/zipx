@@ -17,13 +17,13 @@ object ScriptRenderSpec extends ZIOSpecDefault:
         .getOrElse(throw AssertionError("commit step missing"))
       assertTrue(
         step.run.contains(
-          """if [ -z "$(git status --porcelain '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml')" ]; then
+          """if [ -z "$(git status --porcelain '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml' '.github/actions/zipx-sbt-setup/action.yml' '.github/actions/zipx-aws-login/action.yml')" ]; then
             |  echo "No pin/workflow changes to commit."
             |  exit 0
             |fi
             |git config user.name "github-actions[bot]"
             |git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            |git add '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml'
+            |git add '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml' '.github/actions/zipx-sbt-setup/action.yml' '.github/actions/zipx-aws-login/action.yml'
             |git commit -m "ci: sync zipx action pins from Dependabot"
             |git push
             |""".stripMargin
@@ -157,24 +157,35 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       )
     },
     test("the cache key and restore-keys, assembled from Expr rather than interpolated") {
-      val prefix = "ubuntu-latest-jdk21-sbt-"
-      val cache  = cacheStep(PlanConfig(cacheEpoch = CacheEpoch.GitTags()))
-      val fixed  = cacheStep(PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci")))
+      val action = ZipxComposites.sbtSetup(ActionPins.Defaults, CacheEpoch.GitTags())
+      val cache  =
+        action.steps.find(s => s.name.contains("Cache sbt") && s.`if`.exists(_.contains("cache-epoch == ''"))).get
+      val fixed =
+        action.steps.find(s => s.name.contains("Cache sbt") && s.`if`.exists(_.contains("cache-epoch != ''"))).get
+      val key     = cache.`with`("key")
+      val restore = cache.`with`("restore-keys")
       assertTrue(
-        cache.`with`("key") ==
-          s"$prefix$${{ steps.cache-epoch.outputs.epoch }}-$${{ github.run_id }}-test",
-        cache.`with`("restore-keys") ==
-          s"""$prefix$${{ steps.cache-epoch.outputs.epoch }}-$${{ github.run_id }}-
-             |$prefix$${{ steps.cache-epoch.outputs.epoch }}-
-             |$prefix$${{ steps.cache-epoch.outputs.release }}-
-             |$prefix""".stripMargin,
+        key.startsWith("${{ inputs.runner-os }}-jdk${{ inputs.java-version }}-sbt-"),
+        key.contains("${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-"),
+        key.endsWith("${{ inputs.cache-key-suffix }}"),
+        restore.contains("${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-"),
+        restore.contains("${{ steps.cache-epoch.outputs.release }}-"),
         cache.`with`("path") == "~/.sbt\n~/.cache/sbt\n~/.cache/coursier\ntarget",
-        fixed.`with`("key") == s"${prefix}1.2.3-ci-$${{ github.run_id }}-test",
-        fixed.`with`("restore-keys") ==
-          s"""${prefix}1.2.3-ci-$${{ github.run_id }}-
-             |${prefix}1.2.3-ci-
-             |${prefix}1.2.3-
-             |$prefix""".stripMargin,
+        fixed.`with`("key").contains("${{ inputs.cache-epoch }}-${{ github.run_id }}-"),
+        fixed.`with`("restore-keys").contains("${{ inputs.cache-epoch }}-"),
+      )
+    },
+    test("LocalDir jobs checkout then call the zipx-sbt-setup composite") {
+      val steps = Planner
+        .plan(Fixtures.sampleGraph, List(Capability.test), PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci")))
+        .jobs("test")
+        .steps
+      val checkoutIdx = steps.indexWhere(_.uses.exists(_.unwrap.contains("actions/checkout@")))
+      val setupIdx    = steps.indexWhere(_.uses.contains(ZipxComposites.SbtSetupRef))
+      assertTrue(
+        checkoutIdx >= 0,
+        setupIdx == checkoutIdx + 1,
+        steps(setupIdx).`with`.get("cache-epoch").contains("1.2.3-ci"),
       )
     },
     test("a path containing a single quote is reported as a value rather than escaped around") {
@@ -194,14 +205,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
 
   private def verifyStep(config: PlanConfig, capability: Capability = Capability.test): Step =
     Planner.plan(Fixtures.sampleGraph, List(capability), config).jobs(capability.name).steps.last
-
-  private def cacheStep(config: PlanConfig): Step =
-    Planner
-      .plan(Fixtures.sampleGraph, List(Capability.test), config)
-      .jobs("test")
-      .steps
-      .find(_.uses.exists(_.unwrap.startsWith("actions/cache@")))
-      .getOrElse(throw AssertionError("cache step missing"))
 
   private def affectedScript(affectedOnPush: Boolean): Option[String] =
     Planner

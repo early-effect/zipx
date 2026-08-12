@@ -21,6 +21,12 @@ read which release a SHA corresponds to:
 
 zipx ships current defaults in the plugin jar. Consumers who want to track upstream action releases **ahead of a zipx
 upgrade** use a small pin file plus optional Dependabot automation, the same path this repository dogfoods.
+
+`zipxWorkflowGenerate` also writes in-repo **composite actions** under `.github/actions/zipx-*` (JDK/sbt/cache
+bootstrap, AWS OIDC/ECR login). Checkout is a prior workflow step: GitHub must resolve local `uses: ./…` from the
+workspace before the composite runs. Nested third-party `uses:` inside those composites stay SHA-pinned from the same
+pin file; the workflow only calls `uses: ./.github/actions/…` after checkout. Commit the composites alongside `ci.yml`;
+`zipxWorkflowCheck` drifts both.
 """,
     section("Resolve order")(
       md"""
@@ -66,7 +72,7 @@ After editing the pin file (or syncing from Dependabot):
 
 ```
 sbt zipxWorkflowGenerate
-git add .github/zipx/action-pins.yml .github/workflows/ci.yml
+git add .github/zipx/action-pins.yml .github/workflows/ci.yml .github/actions/
 ```
 
 If `zipxDependabotSync := true`, also commit `.github/workflows/zipx-action-pins-sync.yml` when it changes.
@@ -161,25 +167,31 @@ The version is a `NodeVersion` newtype, so every form `setup-node` accepts (`22`
 than a workflow GitHub rejects.
 
 Per-capability rather than build-wide, which is the difference from `zipxJavaVersion`: a Node toolchain belongs to one
-test suite, so asking for it must not put a `setup-node` step on every publish job in the build. The step goes
-immediately after `setup-sbt`, before any cache restore or `extraSteps`, so a `jsEnv` and an `npm ci` both see it.
+test suite, so asking for it must not put a Node tool on every publish job in the build. The version is an input on
+`zipx-sbt-setup` (after checkout), so a `jsEnv` and an `npm ci` both see it before any cache restore or `extraSteps`.
 """,
       exampleValue {
         DocsRender.job("test-schema")(Capability.testGraph.withNodeVersion(NodeVersion("22")))
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("actions/setup-node@"),
-          yaml.contains("node-version:"),
-          yaml.contains("Setup Node 22"),
+          yaml.contains("uses: ./.github/actions/zipx-sbt-setup"),
+          yaml.contains("node-version: \"22\""),
+          !yaml.contains("actions/setup-node@"),
         )
       ),
       md"""
-Without `withNodeVersion` the same job has no `setup-node` step at all, so adopting this changes only the capability
-that asked:
+Without `withNodeVersion` the same job passes an empty `node-version` input (the composite skips setup-node), so
+adopting this changes only the capability that asked:
 """,
       exampleValue {
         DocsRender.job("test-schema")(Capability.testGraph)
-      }.assert(yaml => assertTrue(!yaml.contains("setup-node"))),
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("uses: ./.github/actions/zipx-sbt-setup"),
+          yaml.contains("node-version: \"\""),
+          !yaml.contains("actions/setup-node@"),
+        )
+      ),
     ),
     section("A line zipx cannot read fails the build")(
       md"""
@@ -247,8 +259,8 @@ updates:
 
 ```
 sbt zipxActionsPull
-# updates the pin file from ci.yml, then regenerates workflows
-git add .github/zipx/action-pins.yml .github/workflows/
+# updates the pin file from ci.yml and .github/actions/**/action.yml, then regenerates
+git add .github/zipx/action-pins.yml .github/workflows/ .github/actions/
 ```
 
 `zipxActionsPull` refuses to run if `zipxActionsPath` is empty (nowhere to write).

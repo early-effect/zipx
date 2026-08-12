@@ -16,6 +16,7 @@ Live behavior is documented in Specular (`docs/`), not here. Git history records
 | Milestone | Status |
 |---|---|
 | M0–M8, M9a, M10 (skeleton through zipx-aws, Aggregate/Layer/Graph, typed DSL, Central) | done |
+| M12a: In-repo composites + MatrixCollapse.Auto (default size reduction) | done |
 | M9: Dynver-ci + publishSigned auto-detect | not started |
 | M11: "Extend with Scala" docs & org rollout | not started |
 | M12: Typed SbtCommand (keys in plugin, wire form in core) | in progress |
@@ -72,3 +73,5 @@ env injection, target fan-out, cache wiring. Semantics live in Scala packs on th
 Always `testFull`, never plain `test` (sbt 2's `test` is `testQuick`). Prefer Metals for format and focused suite runs
 while iterating; CI Aggregate `test` runs unit/IT (including live remote-cache via Testcontainers; Docker required),
 `plugin/scripted`, and the examples/monorepo workflow check.
+
+Agent-oriented blast radius (docs vs packs vs `allJobIds` laws): **[AGENTS.md](AGENTS.md)**.

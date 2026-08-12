@@ -43,7 +43,9 @@ object LayerTargetsSpec extends ZIOSpecDefault:
         targets = _ => targets,
       )
       .copy(scope = CapabilityScope.Layer)
+      .withMatrixCollapse(MatrixCollapse.Off)
     if shared then base.withSharedTargets(targets) else base
+  end deployLayers
 
   private def plan(caps: Capability*) = Planner.plan(dockerGraph, caps.toList, config)
 

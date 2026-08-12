@@ -34,10 +34,14 @@ assertBothRowsGetJobs := {
     content.contains("contains(fromJson(needs.affected.outputs.modules), 'sharedJS')"),
     "the JS row must gate on its own module id",
   )
-  // The capability's node version, pinned by SHA like every other action zipx emits.
-  assert(content.contains("actions/setup-node@"), "expected a pinned setup-node step")
-  assert(content.contains("node-version:"), "expected the node-version input")
-  assert(content.contains("Setup Node 22"), "expected the step to name the version")
+  // Node is wired through zipx-sbt-setup (pin lives in the generated composite, not the job body).
+  assert(content.contains("uses: ./.github/actions/zipx-sbt-setup"), "expected zipx-sbt-setup composite")
+  assert(content.contains("node-version: \"22\""), "expected the node-version input on the composite")
+  assert(!content.contains("actions/setup-node@"), "setup-node must not be inlined in the workflow")
+  assert(!content.contains("Setup Node 22"), "Setup Node step name lives in the composite")
+  val setup = IO.read((LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-sbt-setup" / "action.yml")
+  assert(setup.contains("actions/setup-node@"), "composite must SHA-pin setup-node")
+  assert(setup.contains("Setup Node"), "composite must name the Setup Node step")
 }
 
 val assertSharedAffectsBothRows = taskKey[Unit]("a shared source change affects both platform rows")
