@@ -3,6 +3,8 @@ scalaVersion := "3.8.4"
 version      := "1.0.0-ci"
 // Keep Fixed so scripted asserts stay on a literal epoch (default is now GitTags at runtime).
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+// Bare MatrixCollapse from autoImport (no import zipx.core._); Off is the default so YAML asserts stay green.
+zipxMatrixCollapse := Map(Capability.TestName -> MatrixCollapse.Off)
 // A build-wide default is now testFull from the plugin; client overrides back to plain `test`.
 zipxTestTask := zipxTasks.of(testFull)
 
