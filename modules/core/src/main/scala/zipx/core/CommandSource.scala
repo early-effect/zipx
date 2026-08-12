@@ -6,9 +6,9 @@ package zipx.core
   * [[Capability.runningEachCross]], [[Capability.runningPerModule]], or [[Capability.runningNothing]] (and the built-in
   * / `once` / `steps` factories). Do not invent a fourth encoding with `Option` inside a lambda.
   *
-  *   - [[ActionsOnly]]: no sbt session
-  *   - [[Fixed]]: one command for the job
-  *   - [[PerModule]]: one command per participating module
+  *   - [[CommandSource.ActionsOnly]]: no sbt session
+  *   - [[CommandSource.Fixed]]: one command for the job
+  *   - [[CommandSource.PerModule]]: one command per participating module
   */
 enum CommandSource:
 
@@ -25,12 +25,13 @@ enum CommandSource:
     */
   case PerModule(build: ModuleNode => SbtCommand)
 
-  /** True for [[Fixed]] and [[PerModule]]; false for [[ActionsOnly]]. */
+  /** True for [[CommandSource.Fixed]] and [[CommandSource.PerModule]]; false for [[CommandSource.ActionsOnly]]. */
   def runsSbt: Boolean = this match
     case CommandSource.ActionsOnly                           => false
     case CommandSource.Fixed(_) | CommandSource.PerModule(_) => true
 
-  /** The command for `node`. Valid only when [[runsSbt]] is true; [[ActionsOnly]] is a programmer error here.
+  /** The command for `node`. Valid only when [[runsSbt]] is true; [[CommandSource.ActionsOnly]] is a programmer error
+    * here.
     *
     * Callers that must handle actions-only jobs match on this enum (or branch on [[runsSbt]]) instead of probing
     * `Option`.

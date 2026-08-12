@@ -7,8 +7,8 @@ import zipx.shell.SquoteText
 import zipx.shell.Word
 import zipx.workflow.Expr
 
-/** Where a task command runs. [[MatrixModule]] exists because a collapsed matrix leg addresses its module through an
-  * expression, which is not a [[ModuleId]].
+/** Where a task command runs. [[TaskScope.MatrixModule]] exists because a collapsed matrix leg addresses its module
+  * through an expression, which is not a [[ModuleId]].
   */
 enum TaskScope:
   case Unscoped
@@ -46,8 +46,8 @@ end SbtStep
   * Provenance is per step so a typed task next to a raw fragment reports exactly one raw fragment, and
   * [[SbtCommand.module]] scopes only unscoped [[SbtStep.Task]] steps (so `core/a; b` is unrepresentable).
   *
-  * Core does not publicly encode sbt command/task name strings: sbt owns its API. Wire-form helpers ([[unsafeTask]],
-  * [[unsafeCommand]], [[unsafeBuilt]], [[fromSteps]]) are `private[zipx]` for the plugin, packs, and tests. Authors use
+  * Core does not publicly encode sbt command/task name strings: sbt owns its API. Wire-form helpers (`unsafeTask`,
+  * `unsafeCommand`, `unsafeBuilt`, `fromSteps`) are `private[zipx]` for the plugin, packs, and tests. Authors use
   * `zipxTasks.of` / `session` in the plugin.
   */
 final case class SbtCommand private (steps: List[SbtStep]):
