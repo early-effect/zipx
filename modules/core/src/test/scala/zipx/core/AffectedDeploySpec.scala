@@ -294,6 +294,22 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
         assertTrue(cond(wf, "affected").contains("!startsWith(github.ref, 'refs/tags/')"))
       },
+      test("the affected job runs on a merged-PR push once Deploy reads it") {
+        val wf = plan(
+          List(
+            Capability.testGraph.withMatrixCollapse(MatrixCollapse.Off),
+            dockerExpanded,
+            deployGraph(),
+          ),
+          on.copy(skipMergedPrPush = true),
+        )
+        assertTrue(
+          !cond(wf, "affected").contains("needs.verify-gate.outputs.run == 'true'"),
+          cond(wf, "test-serviceA").contains("needs.verify-gate.outputs.run == 'true'"),
+          !wf.jobs("deploy-serviceA-prod").needs.contains("verify-gate"),
+          cond(wf, "deploy-serviceA-prod").contains("needs.affected.outputs.modules"),
+        )
+      },
       test("fail-open is unchanged: an unusable diff deploys everything") {
         assertTrue(
           Affected.outputModules(dockerGraphFixture, None) == Affected.AllSentinel,
