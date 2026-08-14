@@ -85,7 +85,7 @@ sbt zipxActionsPull   # after Dependabot bumps workflow uses:""",
   end site
 
   override def layers: ZLayer[Any, Nothing, SiteBuilder] =
-    DocsDiagrams.layers
+    EarlyEffectTheme.layers
 
   override def afterBuild(out: Path, result: SiteOutput): Task[Unit] =
     EarlyEffectTheme.writeLogo(out) *> copyClientBundle(out)
