@@ -211,6 +211,8 @@ From the loaded sbt build, zipx emits a full CI surface, not only a test job:
 | **Affected** | Graph path gating on PR / push (`zipxAffectedOnPR` / `zipxAffectedOnPush`); fail-open when the diff breaks |
 | **Caching** | Commit-stable local cache keys (pairs with `sbt-dynver-ci`); optional Bazel-gRPC remote cache transport |
 | **Action pins** | SHA-pinned third-party `uses:` (jar defaults, pin file, Dependabot + `zipxActionsPull`) |
+| **Pin feeds** | Topology and OSV policy for pins Dependabot never sees (CDN/sha256, tarballs); see **Pin feeds** |
+| **Versions** | Typed `Lib` / `Plugin` catalog; generated `plugins.sbt`; local `zipxDepUpdate` |
 | **Job conditions** | Typed `if:` (fork repo, PR label, vars) ANDed with Gate |
 | **Validation** | Generate-time checks for cycles, never-true conditions, invalid job ids, unreadable pin files |
 

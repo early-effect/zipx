@@ -52,7 +52,7 @@ Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Lay
 `CapabilityName` and `TargetName` are validated wrappers, not aliases for `String`: joined with `-` they *are* the
 `jobs.<job_id>` key GitHub sees, so a space or a `/` in one used to produce a workflow that failed on push. A literal
 is checked where you write it, `CapabilityName("docker-stg")`, and the built-in names are available as
-`Capability.TestName` / `.PublishName` / `.DockerName` / `.DeployName` for `needsCapabilities`. What a combination of
+`Capability.TestName` / `.PublishName` / `.DockerName` / `.DeployName` / `.PinCheckName` for `needsCapabilities`. What a combination of
 fields cannot be checked at a literal (`needsCapabilities` cycles, `workflowCall` beside `services`, a never-true `if:`)
 is checked at `zipxWorkflowGenerate`; see **Validation**.
 
@@ -78,6 +78,24 @@ and regenerates so `zipxWorkflowCheck` stays green.
 A present pin file must be readable in full: a line `zipx` cannot use (a typo'd key, an unpinned ref, a key pointing
 at a different action) fails `zipxWorkflowGenerate` naming the line, rather than falling back to the jar pin for that
 field. An *absent* file still falls back silently, since that is the documented default.
+"""
+    ),
+    section("Pin feeds")(
+      md"""
+Pins Dependabot never sees (CDN + sha256, tarball tags, vendor files). Full guide: **Pin feeds**.
+
+`zipxPinFeeds` registers feeds; `zipxPinPrGate` is All / Introduced / Off. The PR job is builtin `Capability.pinCheck`.
+Scheduled apply and snapshot submit are companion workflows, not `ci.yml`. Local `zipxPinUpdate` lists outdated pins
+and applies only after approval (`yes`, or an interactive `y`), including alert-only feeds.
+"""
+    ),
+    section("Versions catalog")(
+      md"""
+Typed `Lib` / `Plugin` rows in `project/ZipxVersions.scala`. Full guide: **Versions**.
+
+`zipxVersions` is the catalog; `zipxCheckDeps` fails generate when `libraryDependencies` contain a GAV that is not a
+`Lib` row. `zipxWorkflowGenerate` writes `project/plugins.sbt` and `project/build.properties`. Local `zipxDepUpdate`
+rewrites version literals in `zipxVersionsFile`.
 """
     ),
   )

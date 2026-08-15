@@ -1,0 +1,13 @@
+# Fake file-backed pin feed: generate emits pin-check on ci.yml plus both companions.
+> zipxWorkflowGenerate
+$ exists .github/workflows/ci.yml
+$ exists .github/workflows/zipx-pin-check.yml
+$ exists .github/workflows/zipx-pin-snapshot.yml
+> assertPinFeeds
+> zipxWorkflowCheck
+# Local update with approval: dry-run lists only; yes applies through the feed.
+> zipxPinUpdate dry-run
+$ absent applied.txt
+> zipxPinUpdate yes
+$ exists applied.txt
+> assertPinUpdate

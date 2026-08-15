@@ -59,6 +59,22 @@ env injection, target fan-out, cache wiring. Semantics live in Scala packs on th
 - **Still open:** move Coverage / VerifyClean / docker command construction fully onto plugin keys where those plugins
   are on the classpath; consumer migrations (mechanoid / saferis / marklit) after release.
 
+### Pin feeds
+
+Issue [#105](https://github.com/early-effect/zipx/issues/105). Typed `PinFeed` so zipx owns topology and Ignore / Report
+/ Update policy, while the build owns inventory, lookup, and apply. Deliberate divergence from the issue letter: the PR
+advisory merge gate is a builtin Once capability (`Capability.pinCheck` on `ci.yml`) so `needsCapabilities` can actually
+ensure a merge. Scheduled outdated/apply and snapshot submit stay companion workflows (cron is not a `Gate`; PR
+snapshots pollute the Security tab). Local `zipxPinUpdate` lists outdated pins and applies only after approval, ignoring
+`PinAction` so alert-only feeds can still bump before a PR. Not an M12 item. First consumer feed is sbt-splice, in that repo.
+
+### Versions catalog
+
+Typed `Lib` / `Plugin` rows in `project/ZipxVersions.scala`. `zipxWorkflowGenerate` writes `project/plugins.sbt` and
+`project/build.properties`; `zipxCheckDeps` fails generate when `libraryDependencies` contain a GAV that is not a `Lib`
+row. Local `zipxDepUpdate` looks up Maven metadata and rewrites constructors after approval. Scala Steward stays the CI
+bot. Not an M12 item.
+
 ### Design guardrails
 
 1. Topology in zipx; semantics in Scala packs.

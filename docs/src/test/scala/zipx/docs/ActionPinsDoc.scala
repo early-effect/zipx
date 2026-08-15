@@ -322,6 +322,9 @@ Consumer repos without a pin file get those jar defaults until they add their ow
 Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`,
 `actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, `scala-steward-org/scala-steward-action`.
 Anything else your steps use goes in the `extra:` block.
+
+Pins that are not GitHub Actions (CDN + sha256, tarball tags, vendor files) are **Pin feeds**, a different machine.
+See **Pin feeds** and **Dependency updates**.
 """
     ),
   )

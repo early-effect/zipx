@@ -8,17 +8,29 @@ import zipx.docs.DocsRender.yaml
 import zipx.workflow.{Cron, DayOfWeek}
 import zio.test.*
 
-/** Dependabot (Actions) and Scala Steward (sbt/Scala deps). */
+/** Three machines: Dependabot (Actions), Scala Steward (sbt/Scala), pin feeds (everything else). */
 object DependencyUpdates extends DocSpecSuite:
 
   def doc = page("Dependency updates")(
     md"""
-zipx splits dependency automation in two:
+zipx does not fold every ecosystem into one bot. Three machines, three owners:
+
+```mermaid
+flowchart LR
+  Act[GitHub Actions SHAs] --> Dep[Dependabot plus zipxDependabotSync]
+  Scala[sbt and Maven GAVs] --> St[zipxScalaSteward]
+  Other[CDN sha256 pins, tarballs, vendor files] --> Pf[Pin feeds]
+```
 
 - **Dependabot** (`github-actions`) bumps SHA-pinned GitHub Actions in generated workflows; sync back via the pin
   file (`zipxDependabotSync` / `zipxActionsPull`). See **Action pins**.
-- **Scala Steward** bumps sbt / Scala / library dependencies. Opt in with `zipxScalaSteward := true`. Updates arrive
-  grouped into a handful of PRs, not one per artifact (`zipxStewardGrouping`).
+- **Scala Steward** bumps sbt / Scala / library dependencies on CI. Opt in with `zipxScalaSteward := true`. Updates
+  arrive grouped into a handful of PRs (`zipxStewardGrouping`). Locally, a typed catalog plus `zipxDepUpdate` is the
+  apply path; see **Versions**.
+- **Pin feeds** cover pins Dependabot never sees. zipx owns topology and policy; the build owns lookup and apply.
+  Local `zipxPinUpdate` bumps with approval before a PR. See **Pin feeds**.
+
+Do not generate `dependabot.yml`. Do not fold Steward onto `PinFeed`.
 """,
     section("Scala Steward (opt-in)")(
       md"""
@@ -119,7 +131,8 @@ Cron.hourly(minute = 45)                // 45 * * * *
 Cron.raw("0 */6 * * *")                 // escape hatch
 ```
 
-`Cron` / `DayOfWeek` are re-exported from the plugin `autoImport`.
+`Cron` / `DayOfWeek` are re-exported from the plugin `autoImport`. Pin-feed companions use the same Sunday weekly
+default. See **Pin feeds**.
 """,
       exampleValue {
         List(

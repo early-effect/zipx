@@ -3,6 +3,7 @@ package zipx.core
 import neotype.Subtype
 import neotype.unwrap
 import zipx.workflow.EnvName
+import zipx.workflow.Expr
 import zipx.workflow.JobId
 import zipx.workflow.JobService
 import zipx.workflow.Names
@@ -396,10 +397,11 @@ object Capability:
     * in `needsCapabilities` to depend on one, and a default argument cannot be a bare literal now that the parameter is
     * a [[CapabilityName]].
     */
-  val TestName: CapabilityName    = CapabilityName("test")
-  val PublishName: CapabilityName = CapabilityName("publish")
-  val DockerName: CapabilityName  = CapabilityName("docker")
-  val DeployName: CapabilityName  = CapabilityName("deploy")
+  val TestName: CapabilityName     = CapabilityName("test")
+  val PublishName: CapabilityName  = CapabilityName("publish")
+  val DockerName: CapabilityName   = CapabilityName("docker")
+  val DeployName: CapabilityName   = CapabilityName("deploy")
+  val PinCheckName: CapabilityName = CapabilityName("pin-check")
 
   private def testBody(scope: CapabilityScope, matrixed: Boolean): Capability = Capability(
     name = TestName,
@@ -433,6 +435,19 @@ object Capability:
     matrixed = false,
     scope = scope,
   )
+
+  /** PR advisory merge gate. Once, Verify, `pull_request` only. The plugin injects this when `zipxPinFeeds` warrants
+    * it; scheduled apply and snapshot stay companion workflows.
+    */
+  def pinCheck(command: SbtCommand = SbtCommand.unsafeTask("zipxPinCheckPr")): Capability =
+    Capability.once(
+      name = PinCheckName,
+      command = command,
+      phase = Phase.Verify,
+      gate = Gate.Always,
+      condition = Some(JobCondition.eventIs("pull_request")),
+      env = Map(PinCheck.BaseShaEnv -> EnvValue.typed(Expr.github("event.pull_request.base.sha"))),
+    )
 
   /** One root sbt task, mirroring sbt's own `.aggregate`. `zipxTestTask` overrides the task and `zipxVerifyClean`
     * prepends a clean.

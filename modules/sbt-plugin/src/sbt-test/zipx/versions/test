@@ -1,0 +1,7 @@
+# Generated catalog: plugins.sbt / build.properties round-trip, then check.
+> zipxWorkflowGenerate
+$ exists project/plugins.sbt
+$ exists project/build.properties
+> assertVersions
+> zipxWorkflowCheck
+> zipxDepUpdate dry-run

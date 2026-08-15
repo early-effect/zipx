@@ -1,0 +1,4 @@
+# An inline GAV that is not a Lib row must fail generate before writing YAML or plugins.sbt.
+-> zipxWorkflowGenerate
+-$ exists .github/workflows/ci.yml
+$ exec grep -q plugin.version project/plugins.sbt

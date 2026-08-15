@@ -1,6 +1,6 @@
-import Dependencies.*
+import ZipxVersions as V
 
-ThisBuild / scalaVersion         := scala3Version
+ThisBuild / scalaVersion         := V.scala3
 ThisBuild / organization         := "rocks.earlyeffect"
 ThisBuild / organizationName     := "Early Effect"
 ThisBuild / organizationHomepage := Some(url("https://www.earlyeffect.rocks"))
@@ -35,8 +35,8 @@ ThisBuild / publishTo := {
 usePgpKeyHex(sys.env.getOrElse("PGP_KEY_HEX", "MISSING_KEY_HEX"))
 
 val commonSettings = Seq(
-  scalacOptions ++= commonScalacOptions,
-  libraryDependencies ++= zioDeps,
+  scalacOptions ++= V.commonScalacOptions,
+  libraryDependencies ++= V.zioDeps,
   testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
   publishMavenStyle    := true,
   pomIncludeRepository := { _ => false },
@@ -86,6 +86,11 @@ lazy val root = (project in file("."))
     zipxWorkflowDispatch := true,
     zipxDependabotSync   := true,
     zipxScalaSteward     := true,
+    zipxVersions         := V.coords,
+    zipxSbt              := Some(V.sbt),
+    zipxScala            := Some(V.scala3),
+    zipxCheckDeps        := true,
+    zipxEmitSelf         := false,
   )
 
 // Scala 3. Shell AST: no zipx concepts, no zio-blocks, usable standalone.
@@ -94,7 +99,7 @@ lazy val shell = (project in file("modules/shell"))
   .settings(
     name        := "zipx-shell",
     description := "Typed, composable shell script AST with compile-time-validated primitives",
-    libraryDependencies ++= shellLibraryDeps,
+    libraryDependencies ++= V.shellLibraryDeps,
   )
 
 // Scala 3. GitHub Actions AST + deterministic YAML renderer.
@@ -104,7 +109,7 @@ lazy val workflow = (project in file("modules/workflow"))
   .settings(
     name        := "zipx-workflow",
     description := "GitHub Actions AST and deterministic YAML printer for zipx",
-    libraryDependencies ++= workflowLibraryDeps,
+    libraryDependencies ++= V.workflowLibraryDeps,
   )
 
 // Scala 3. Module-graph model, toposort, capabilities, and the planner.
@@ -127,7 +132,7 @@ lazy val core = (project in file("modules/core"))
     // Docker image; host setup-sbt PATH is irrelevant. Docker is required when these tests run.
     // Leave Testcontainers Ryuk enabled (do not set TESTCONTAINERS_RYUK_DISABLED): cleans up containers
     // after aborted runs locally and is fine on GHA.
-    libraryDependencies ++= testcontainersDeps,
+    libraryDependencies ++= V.testcontainersDeps,
   )
 
 // Early-effect / Maven Central paved path (typed secrets + GPG import + publishSigned + sonaRelease).
@@ -156,14 +161,14 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
   .settings(
     name        := "sbt-zipx",
     description := "sbt 2 AutoPlugin: the build describes its own GitHub Actions CI",
-    scalacOptions ++= commonScalacOptions,
+    scalacOptions ++= V.commonScalacOptions,
     publishMavenStyle    := true,
     pomIncludeRepository := { _ => false },
     // Bundle the remote-cache transport so consumers need one addSbtPlugin line. RemoteCachePlugin triggers on
     // AllRequirements but is a no-op until Global/remoteCache is set (which zipx does only from the CI env).
-    addSbtPlugin(remoteCachePlugin),
+    addSbtPlugin(V.remoteCachePlugin),
     // sbt-pgp so ZipxCentral.release can take the real publishSigned TaskKey (Option C).
-    addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.3.1"),
+    addSbtPlugin(ZipxDeps.moduleID(V.pgp)),
     // JVM args for the sbt subprocess that runs scripted tests: suppress Unsafe/JNA warnings.
     scriptedLaunchOpts ++= Seq(
       "-Xmx1024m",
@@ -185,20 +190,19 @@ lazy val docsJS = project
   .settings(
     name           := "zipx-docsJS",
     publish / skip := true,
-    scalacOptions ++= commonScalacOptions :+ "-language:implicitConversions",
+    scalacOptions ++= V.commonScalacOptions :+ "-language:implicitConversions",
     scalaJSUseMainModuleInitializer := true,
     scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
     Compile / mainClass := Some("zipx.docs.ClientMain"),
     Compile / unmanagedSourceDirectories += (LocalProject("docs") / baseDirectory).value / "shared" / "scala",
-    libraryDependencies ++= Seq(
+    libraryDependencies ++= ZipxDeps(
       // sbt 2 + ScalaJSPlugin: `%%` already appends `_sjs1` (no `%%%`).
-      // specular-site is JVM-only; the client needs core + mermoid + ascent-js.
-      "rocks.earlyeffect" %% "specular-core"    % specularVersion,
-      "rocks.earlyeffect" %% "specular-mermoid" % specularVersion,
-      "rocks.earlyeffect" %% "ascent-js"        % ascentVersion,
-      "rocks.earlyeffect" %% "ascent-css"       % ascentVersion,
-      "dev.zio"           %% "zio"              % zioVersion,
-      "dev.zio"           %% "zio-test"         % zioVersion,
+      V.specular,
+      V.specularMermoid,
+      V.ascentJs,
+      V.ascentCss,
+      V.zio,
+      V.zio.mod("zio-test"),
     ),
   )
 
@@ -210,17 +214,17 @@ lazy val docs = project
     name            := "zipx-docs",
     publish / skip  := true,
     publishArtifact := false, // also honored; prefer publish/skip for opt-out
-    scalacOptions ++= commonScalacOptions :+ "-language:implicitConversions",
+    scalacOptions ++= V.commonScalacOptions :+ "-language:implicitConversions",
     Test / unmanagedSourceDirectories += baseDirectory.value / "shared" / "scala",
-    libraryDependencies ++= Seq(
-      "rocks.earlyeffect" %% "specular-core"           % specularVersion % Test,
-      "rocks.earlyeffect" %% "specular-zio-test"       % specularVersion % Test,
-      "rocks.earlyeffect" %% "specular-site"           % specularVersion % Test,
-      "rocks.earlyeffect" %% "specular-mermoid"        % specularVersion % Test,
-      "rocks.earlyeffect" %% "early-effect-docs-theme" % specularVersion % Test,
-      "rocks.earlyeffect" %% "ascent-core"             % ascentVersion   % Test,
-      "rocks.earlyeffect" %% "ascent-html"             % ascentVersion   % Test,
-    ) ++ zioDeps,
+    libraryDependencies ++= ZipxDeps(
+      V.specular.test,
+      V.specularZioTest,
+      V.specularSite,
+      V.specularMermoid.test,
+      V.specularTheme,
+      V.ascent.test,
+      V.ascentHtml.test,
+    ) ++ V.zioDeps,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     Test / mainClass       := Some("specular.site.DocsServe"),
     Test / run / mainClass := (Test / mainClass).value,

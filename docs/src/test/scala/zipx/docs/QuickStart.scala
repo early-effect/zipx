@@ -112,6 +112,9 @@ zipx upgrade:
 
 `zipxActionsPull` reads SHAs from both `ci.yml` and `.github/actions/**/action.yml`. Staying on jar defaults needs no
 pin file, just upgrade `sbt-zipx` when pins move.
+
+CDN / sha256 pins and other non-Action inventory are **Pin feeds**, not Dependabot. Library and plugin versions are a
+typed catalog (`zipxVersions`); see **Versions**.
 """
     ),
   )

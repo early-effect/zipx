@@ -24,6 +24,7 @@ and **Action pins**).
 | Capability | Default mode | Runs | Participates | Phase | Gate |
 |---|---|---|---|---|---|
 | **test** | Aggregate (Once) | root `zipxTestTask` | whole build (`.aggregate`) | Verify | always |
+| **pin-check** | Once | `zipxPinCheckPr` | when `zipxPinFeeds` warrants it | Verify | `pull_request` |
 | **publish** | Aggregate | `+?<module>/<publishTask>` (joined) | modules that publish | Publish | release tag |
 | **docker** | Aggregate | `<module>/Docker/publish` (joined) | `DockerPlugin` modules | Publish | release tag |
 

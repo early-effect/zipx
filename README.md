@@ -70,7 +70,7 @@ What's covered:
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate `test` via Testcontainers)
 - **Action pins** (pin file, Dependabot, `zipxActionsPull`, sync workflow)
-- **Dependency updates** (Scala Steward opt-in)
+- **Dependency updates** (Scala Steward opt-in), **Versions** (typed catalog, `zipxDepUpdate`), and **Pin feeds**
 - Docker and multi-target deploy
 - `ZipxCentral` / `ZipxDocs` packs
 - Settings reference and dogfood notes

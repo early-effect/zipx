@@ -149,6 +149,90 @@ object ZipxSettings:
       Build,
     )
 
+  val pinFeeds: SettingDef[Seq[PinFeed]] =
+    SettingDef.setting(
+      SettingName("zipxPinFeeds"),
+      Seq.empty,
+      SettingPurpose(
+        "Pin feeds zipx orchestrates (CDN/sha256 pins, later Docker/JDK). Empty by default. zipx owns Ignore/Report/Update policy and OSV; each feed owns inventory, lookup, and apply. See Pin feeds."
+      ),
+      Build,
+    )
+
+  val pinPrGate: SettingDef[PinPrGate] =
+    SettingDef.setting(
+      SettingName("zipxPinPrGate"),
+      PinPrGate.All,
+      SettingPurpose(
+        "PR advisory merge gate: All (default, fail on any current pin above min-severity), Introduced (only new or version-changed vs the PR base), or Off (disable the builtin pin-check job)."
+      ),
+      Build,
+    )
+
+  val versions: SettingDef[Seq[ZipxCoord]] =
+    SettingDef.setting(
+      SettingName("zipxVersions"),
+      Seq.empty,
+      SettingPurpose(
+        "Typed catalog of library and sbt-plugin coordinates (Lib / Plugin). Empty skips catalog generate. See Versions."
+      ),
+      Build,
+    )
+
+  val sbtVersionCoord: SettingDef[Option[SbtVersion]] =
+    SettingDef.setting(
+      SettingName("zipxSbt"),
+      None,
+      SettingPurpose("When set, zipx generates project/build.properties from this sbt version."),
+      Build,
+    )
+
+  val scalaVersionCoord: SettingDef[Option[ScalaVersion]] =
+    SettingDef.setting(
+      SettingName("zipxScala"),
+      None,
+      SettingPurpose("When set with zipxCheckDeps, ThisBuild / scalaVersion must match."),
+      Build,
+    )
+
+  val checkDeps: SettingDef[Boolean] =
+    SettingDef.setting(
+      SettingName("zipxCheckDeps"),
+      false,
+      SettingPurpose(
+        "Fail generate/check when libraryDependencies contain a GAV that is not a Lib in zipxVersions, or when zipxScala does not match scalaVersion."
+      ),
+      Build,
+    )
+
+  val emitSelf: SettingDef[Boolean] =
+    SettingDef.setting(
+      SettingName("zipxEmitSelf"),
+      true,
+      SettingPurpose(
+        "When true, generated project/plugins.sbt starts with the loaded sbt-zipx GAV. Dogfood sets false (zipx is loaded from source)."
+      ),
+      Build,
+    )
+
+  val pluginVersion: SettingDef[Option[String]] =
+    SettingDef.setting(
+      SettingName("zipxPluginVersion"),
+      None,
+      SettingPurpose(
+        "Override the sbt-zipx version written when zipxEmitSelf is true. Scripted sets this via -Dplugin.version; dogfood leaves it empty."
+      ),
+      Build,
+    )
+
+  val versionsFile: SettingDef[String] =
+    SettingDef.setting(
+      SettingName("zipxVersionsFile"),
+      ZipxCatalog.DefaultVersionsFile,
+      SettingPurpose("Catalog source zipxDepUpdate rewrites (default project/ZipxVersions.scala)."),
+      Build,
+    )
+
   val workflowDispatch: SettingDef[Boolean] =
     SettingDef.setting(
       SettingName("zipxWorkflowDispatch"),
@@ -364,6 +448,54 @@ object ZipxSettings:
       SettingPurpose("Print, as a JSON array, the modules affected by changes since the given git base ref."),
     )
 
+  val pinCheck: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxPinCheck"),
+      SettingPurpose(
+        "Scheduled pin-feed check: outdated lookup plus OSV. Applies under PinAction.Update. Non-zero exit on Report findings."
+      ),
+    )
+
+  val pinCheckPr: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxPinCheckPr"),
+      SettingPurpose(
+        "PR pin-check: OSV on current inventory (Introduced diffs vs ZIPX_PIN_BASE_SHA). Never applies or submits a snapshot."
+      ),
+    )
+
+  val pinSubmit: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxPinSubmit"),
+      SettingPurpose(
+        "Submit a GitHub dependency snapshot for feeds with submitSnapshot. Default-branch companion only."
+      ),
+    )
+
+  val pinInventory: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxPinInventory"),
+      SettingPurpose(
+        "Write target/zipx-pin-inventory.json of current pin-feed inventory (used by Introduced at the PR base SHA)."
+      ),
+    )
+
+  val pinUpdate: SettingDef[Unit] =
+    SettingDef.input(
+      SettingName("zipxPinUpdate"),
+      SettingPurpose(
+        "Local outdated pin bumps with approval: lists candidates, applies only after yes (or an interactive y). dry-run lists only. Ignores PinAction so alert-only feeds can still bump before a PR."
+      ),
+    )
+
+  val depUpdate: SettingDef[Unit] =
+    SettingDef.input(
+      SettingName("zipxDepUpdate"),
+      SettingPurpose(
+        "Local catalog bumps with approval: Coursier/Maven lookup of zipxVersions, rewrite of zipxVersionsFile after yes (or an interactive y). dry-run lists only."
+      ),
+    )
+
   val buildLevel: List[SettingDef[?]] = List(
     capabilities,
     workflowName,
@@ -377,6 +509,15 @@ object ZipxSettings:
     dependabotSync,
     scalaSteward,
     stewardGrouping,
+    pinFeeds,
+    pinPrGate,
+    versions,
+    sbtVersionCoord,
+    scalaVersionCoord,
+    checkDeps,
+    emitSelf,
+    pluginVersion,
+    versionsFile,
     workflowDispatch,
     cache,
     cacheEpoch,
@@ -413,6 +554,12 @@ object ZipxSettings:
     graph,
     publishOrder,
     affectedModules,
+    pinCheck,
+    pinCheckPr,
+    pinSubmit,
+    pinInventory,
+    pinUpdate,
+    depUpdate,
   )
 
   /** Every public catalog entry, in docs-friendly order. */
