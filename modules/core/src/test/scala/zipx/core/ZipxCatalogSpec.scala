@@ -122,5 +122,44 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
             out.contains("""Plugin("org.scalameta", "sbt-scalafmt", "2.7.0")"""),
           )
     },
+    test("coordsOf collects Lib and Plugin vals and skips SbtVersion, groups, and lists") {
+      trait Catalog:
+        inline def coords: Seq[ZipxCoord] = ZipxCatalog.coordsOf[this.type](this)
+      object Sample extends Catalog:
+        val sbt: SbtVersion     = SbtVersion("2.0.6")
+        val scala: ScalaVersion = ScalaVersion("3.8.4")
+        val zio                 = Lib("dev.zio", "zio", "2.1.26")
+        val zioTest             = zio.mod("zio-test").test
+        val fmt                 = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
+        val libs                = List(zio)
+        def service             = List(zio)
+      val ids = Sample.coords.map(c => (c.group: String, c.artifact: String)).toSet
+      assertTrue(
+        ids == Set(("dev.zio", "zio"), ("dev.zio", "zio-test"), ("org.scalameta", "sbt-scalafmt"))
+      )
+    },
+    test("coordsOf collects a parent-trait Lib val and an AsCoords bundle") {
+      final case class Bundle(runtime: Lib, plugin: Plugin)
+      object Bundle:
+        given AsCoords[Bundle] with
+          def coords(b: Bundle): Seq[ZipxCoord] = Seq(b.runtime, b.plugin)
+      trait Spliceish:
+        val fromTrait = Lib("com.acme", "from-trait", "1.0.0")
+      trait Catalog extends Spliceish:
+        inline def coords: Seq[ZipxCoord] = ZipxCatalog.coordsOf[this.type](this)
+      object Sample extends Catalog:
+        val bundle = Bundle(
+          Lib("com.acme", "runtime", "1.2.3"),
+          Plugin("com.acme", "sbt-acme", "1.2.3"),
+        )
+      val ids = Sample.coords.map(c => (c.group: String, c.artifact: String)).toSet
+      assertTrue(
+        ids == Set(
+          ("com.acme", "from-trait"),
+          ("com.acme", "runtime"),
+          ("com.acme", "sbt-acme"),
+        )
+      )
+    },
   )
 end ZipxCatalogSpec

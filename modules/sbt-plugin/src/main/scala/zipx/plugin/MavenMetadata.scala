@@ -1,4 +1,4 @@
-package zipx.sbt
+package zipx.plugin
 
 import zipx.core.*
 
@@ -22,7 +22,7 @@ object MavenMetadata:
     )
     combine(urls.map(fetchLatest))
 
-  private[sbt] def combine(results: List[Either[String, Option[String]]]): Either[String, Option[String]] =
+  private[plugin] def combine(results: List[Either[String, Option[String]]]): Either[String, Option[String]] =
     results.collectFirst { case Right(Some(v)) => v } match
       case Some(v) => Right(Some(v))
       case None    =>
@@ -49,7 +49,7 @@ object MavenMetadata:
       else Right(parseLatest(Option(res.body).getOrElse("")))
     catch case ex: Exception => Left(s"lookup $url: ${ex.getMessage}")
 
-  private[sbt] def parseLatest(xml: String): Option[String] =
+  private[plugin] def parseLatest(xml: String): Option[String] =
     val latest  = raw"<latest>([^<]+)</latest>".r.findFirstMatchIn(xml).map(_.group(1))
     val release = raw"<release>([^<]+)</release>".r.findFirstMatchIn(xml).map(_.group(1))
     latest.orElse(release)

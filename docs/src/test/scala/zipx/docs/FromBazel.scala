@@ -31,7 +31,7 @@ We speak Bazel-fluent on purpose. The mapping helps you translate without re-lit
 | Target | Project / module |
 | Remote cache | sbt 2 action cache over Bazel-compat gRPC |
 | Remote execution | Out of scope; use Graph for more runners |
-| `maven_install` / `MODULE.bazel` version strings | Typed `Lib` / `Plugin` catalog; constructor rewrite; generate owns `plugins.sbt` |
+| `maven_install` / `MODULE.bazel` version strings | `Lib` / `Plugin` vals (collected, not listed twice); constructor rewrite; generate owns `plugins.sbt` |
 
 In Bazel, many small packages often improve hit rates because the **target** *is* the cache boundary. In sbt 2,
 compile and test already invalidate at class and suite digests **inside** a module. You do not need to shatter the

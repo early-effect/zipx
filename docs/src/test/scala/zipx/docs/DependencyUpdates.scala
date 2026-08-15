@@ -32,8 +32,8 @@ flowchart LR
 - **GitHub Actions** in generated workflows. GitHub's Dependabot can open a PR when an Action SHA moves; you sync that
   back into zipx's pin file. zipx does not write `dependabot.yml`; you add a `github-actions` ecosystem yourself. See
   **Action pins**.
-- **Scala libraries and sbt plugins.** One typed catalog (`Lib` / `Plugin`), not a regex over `build.sbt`. You run
-  `zipxDepUpdate`. There is no weekly zipx job that opens a catalog PR. See **Versions**.
+- **Scala libraries and sbt plugins.** Extend `ZipxVersions`, drop `MyVersions.settings`. Every `Lib` / `Plugin` val is
+  a row. You run `zipxDepUpdate`. There is no weekly zipx job that opens a catalog PR. See **Versions**.
 - **Pins that are not Maven and not Actions.** A pin feed lists them; you run `zipxPinUpdate`, or CI can open a PR if
   you opt a feed into auto-apply. See **Pin feeds**.
 """,

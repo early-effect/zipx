@@ -7,9 +7,7 @@
 //
 // zipx derives everything (module set, needs edges, publish order, matrix) from this.
 
-import ZipxVersions as V
-
-scalaVersion := V.scala3
+MyVersions.settings
 organization := "com.example"
 version      := "1.4.2-ci" // stands in for sbt-dynver-ci output; drives the cache epoch (bare, a common setting)
 
@@ -17,23 +15,19 @@ version      := "1.4.2-ci" // stands in for sbt-dynver-ci output; drives the cac
 // scope, so no `ThisBuild /` prefix is needed.
 zipxWorkflowName := WorkflowName("CI")
 zipxJavaVersion  := JdkVersion("21")
-zipxVersions     := V.coords
-zipxSbt          := Some(V.sbt)
-zipxScala        := Some(V.scala3)
-zipxCheckDeps    := true
 // In-dev sbt-zipx is loaded from project/zipx.sbt via -Dzipx.version; do not emit a static GAV.
-zipxEmitSelf     := false
+zipxEmitSelf := false
 
 lazy val models = project
-  .settings(crossScalaVersions := Seq(V.scala2, V.scala3))
+  .settings(MyVersions.cross, MyVersions.libraries)
 
 lazy val coreLib = (project in file("core-lib"))
   .dependsOn(models)
-  .settings(crossScalaVersions := Seq(V.scala2, V.scala3))
+  .settings(MyVersions.cross, MyVersions.libraries)
 
 lazy val client = project
   .dependsOn(coreLib)
-  .settings(crossScalaVersions := Seq(V.scala2, V.scala3))
+  .settings(MyVersions.cross, MyVersions.client)
 
 // A deploy-time promote task that re-tags the image with a tier-scoped moving tag. It reads the TIER env var that
 // zipx injects from the deploy target, proving a user sbt task can consume per-target config (Gap 2).
@@ -45,9 +39,9 @@ val promote = taskKey[Unit]("Re-tag the image with a tier-scoped moving tag, usi
 lazy val service = (project in file("service"))
   .dependsOn(coreLib)
   .enablePlugins(JavaAppPackaging, DockerPlugin)
+  .settings(MyVersions.service)
   .settings(
     publishArtifact      := false, // application, not a library
-    crossScalaVersions   := Seq(V.scala3),
     Compile / mainClass  := Some("example.run"),
     dockerBaseImage      := "eclipse-temurin:21-jre",
     Docker / packageName := "example-service",

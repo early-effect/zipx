@@ -1,13 +1,8 @@
-ThisBuild / scalaVersion := ZipxVersions.scala3
+MyVersions.settings
 version                  := "1.0.0-ci"
 zipxCacheEpoch           := CacheEpoch.Fixed("1.0.0-ci")
 
-libraryDependencies ++= ZipxDeps(ZipxVersions.zio)
-
-zipxVersions  := ZipxVersions.coords
-zipxSbt       := Some(ZipxVersions.sbt)
-zipxScala     := Some(ZipxVersions.scala3)
-zipxCheckDeps := true
+libraryDependencies ++= MyVersions.deps(MyVersions.zio)
 
 lazy val root = (project in file("."))
   .settings(publish / skip := true)

@@ -243,9 +243,9 @@ flowchart LR
   end
 ```
 
-You own library and plugin versions in `project/ZipxVersions.scala`. Bump them locally with `zipxDepUpdate`, then open
-a PR; see **Versions** and **Dependency updates**. A pin feed is only for pins that have no Maven coordinate: a CDN
-URL plus a checksum, a tarball tag, a file you vendor into the repo.
+You own library and plugin versions as `Lib` / `Plugin` vals in `project/ZipxVersions.scala`. Bump them locally with
+`zipxDepUpdate`, then open a PR; see **Versions** and **Dependency updates**. A pin feed is only for pins that have no
+Maven coordinate: a CDN URL plus a checksum, a tarball tag, a file you vendor into the repo.
 """
     ),
   )

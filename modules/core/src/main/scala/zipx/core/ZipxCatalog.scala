@@ -1,5 +1,7 @@
 package zipx.core
 
+import scala.quoted.*
+
 /** Render and check the typed versions catalog; rewrite version literals in the catalog source. */
 object ZipxCatalog:
 
@@ -101,6 +103,32 @@ object ZipxCatalog:
 
   def constructorCall(ctor: String, group: String, artifact: String, version: String): String =
     s"""$ctor("$group", "$artifact", "$version")"""
+
+  /** Every val on `catalog` whose type has an [[AsCoords]] given. Pass `[this.type]` from a trait so expansion sees the
+    * concrete object. `Lib` / `Plugin` share one given; lists, `SbtVersion`, `ScalaVersion`, and named groups have
+    * none, so they are skipped. `def` members are not vals: they are skipped.
+    */
+  inline def coordsOf[A](inline catalog: A): Seq[ZipxCoord] =
+    ${ coordsOfImpl[A]('catalog) }
+
+  private def coordsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[ZipxCoord]] =
+    import quotes.reflect.*
+    val tpe   = TypeRepr.of[A].dealias
+    val parts = tpe.typeSymbol.fieldMembers.flatMap { sym =>
+      Option
+        .unless(sym.flags.is(Flags.Synthetic)) {
+          val mt = tpe.memberType(sym).widen.dealias
+          mt.asType match
+            case '[t] =>
+              Expr.summon[AsCoords[t]].map { tc =>
+                val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
+                '{ $tc.coords($field) }
+              }
+        }
+        .flatten
+    }
+    if parts.isEmpty then '{ Seq.empty[ZipxCoord] } else '{ ${ Expr.ofList(parts) }.flatten }
+  end coordsOfImpl
 
   private def renderExclude(ex: ZipxExclude): String =
     ex.artifact match

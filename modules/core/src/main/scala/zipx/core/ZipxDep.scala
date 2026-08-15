@@ -55,6 +55,17 @@ sealed trait ZipxCoord:
   def artifact: ArtifactId
   def version: DepVersion
 
+/** How a catalog val becomes rows. `Lib` and `Plugin` share [[AsCoords.ofCoord]]; a plugin (splice, a company catalog)
+  * adds a given for its own bundle type so those vals are collected too.
+  */
+trait AsCoords[A]:
+  def coords(value: A): Seq[ZipxCoord]
+
+object AsCoords:
+  def apply[A](using ev: AsCoords[A]): AsCoords[A] = ev
+
+  given ofCoord[A <: ZipxCoord]: AsCoords[A] = a => Seq(a)
+
 final case class Lib(
     group: GroupId,
     artifact: ArtifactId,

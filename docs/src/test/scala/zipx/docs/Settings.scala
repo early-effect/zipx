@@ -94,12 +94,13 @@ the PR.
     ),
     section("Versions catalog")(
       md"""
-Typed `Lib` / `Plugin` rows in `project/ZipxVersions.scala`. Full guide: **Versions**.
+Typed `Lib` / `Plugin` vals. You extend `ZipxVersions` and call `MyVersions.settings`, which collects every val. You do
+not maintain a `coords` list. Full guide: **Versions**. Plugin authors: **Extending Versions**.
 
-`zipxVersions` is the catalog; `zipxCheckDeps` fails generate when `libraryDependencies` contain a GAV that is not a
-`Lib` row. `zipxWorkflowGenerate` writes `project/plugins.sbt` and `project/build.properties`. Local `zipxDepUpdate`
-rewrites version literals in `zipxVersionsFile`. Then you commit and open the PR. After a plugin, sbt, or Scala bump,
-`reload` and generate so those files match.
+`settings` sets `scalaVersion` and the catalog keys. `zipxCheckDeps` fails generate when `libraryDependencies` contain a
+GAV that is not a `Lib` row. `zipxWorkflowGenerate` writes `project/plugins.sbt` and `project/build.properties`. Local
+`zipxDepUpdate` rewrites version literals in `zipxVersionsFile`. Then you commit and open the PR. After a plugin, sbt, or
+Scala bump, `reload` and generate so those files match.
 """
     ),
   )

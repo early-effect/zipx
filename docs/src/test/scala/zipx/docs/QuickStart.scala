@@ -84,6 +84,37 @@ lazy val root = (project in file("."))
         )
       ),
     ),
+    section("Versions catalog")(
+      md"""
+Library and plugin versions live in one object you write under `project/` and extend from `ZipxVersions`. Drop
+`MyVersions.settings` at the top of `build.sbt`. Every `Lib` / `Plugin` val is a catalog row; you do not list them
+again. Each module picks a group. Full guide: **Versions**.
+
+```scala
+// project/ZipxVersions.scala
+import zipx.*
+
+object MyVersions extends ZipxVersions:
+  val sbt: SbtVersion     = SbtVersion("2.0.6")
+  val scala: ScalaVersion = ScalaVersion("3.8.4")
+  val zio                 = Lib("dev.zio", "zio", "2.1.26")
+  val slf4j               = Lib("org.slf4j", "slf4j-simple", "2.0.18").java
+  def libraries           = library(zio)
+  def service             = library(zio, slf4j)
+```
+
+```scala
+// build.sbt
+MyVersions.settings
+lazy val lib     = project.settings(MyVersions.libraries)
+lazy val service = project.settings(MyVersions.service)
+```
+
+The trait is the extension point: another plugin that sits on zipx adds members and uses `inline override def settings`.
+Plugin authors: **Extending Versions**. When a row is stale, `zipxDepUpdate` and you open the PR. See **Dependency
+updates**.
+"""
+    ),
     section("Bare settings (sbt 2.0)")(
       md"""
 zipx reads these settings from the **root** project, so write them without a `ThisBuild /` prefix. That is an sbt 2

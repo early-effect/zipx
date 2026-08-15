@@ -55,9 +55,18 @@ CI YAML is not the only second copy. Scala versions usually live as `"org" %% "n
 tools search the repo with regex. That is how most of the ecosystem still works, and it is why dependency PRs feel
 brittle.
 
-zipx keeps `Lib` / `Plugin` values in one file the build selects. Apply rewrites those constructors. Generate owns
-`plugins.sbt`. A raw coordinate that is not in the catalog fails generate. Bazel locks resolved artifacts well; the
-coordinates you type are still strings. See **Versions**.
+zipx keeps `Lib` / `Plugin` vals in one object you extend from `ZipxVersions`. Every val is a catalog row; there is no
+second list to keep in sync. `MyVersions.settings` is the usual sbt wiring (`scalaVersion`, catalog keys,
+`zipxCheckDeps`). Apply rewrites those constructors. Generate owns `plugins.sbt`. A raw coordinate that is not in the
+catalog fails generate. Other plugins extend the same trait. See **Versions**. Plugin authors: **Extending Versions**.
+
+```scala
+import zipx.*
+object MyVersions extends ZipxVersions:
+  val sbt: SbtVersion     = SbtVersion("2.0.6")
+  val scala: ScalaVersion = ScalaVersion("3.8.4")
+  val zio                 = Lib("dev.zio", "zio", "2.1.26")
+```
 """
     ),
     section("Faster tasks are not the same as kinder CI")(

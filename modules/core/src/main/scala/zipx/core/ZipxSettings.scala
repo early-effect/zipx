@@ -174,7 +174,7 @@ object ZipxSettings:
       SettingName("zipxVersions"),
       Seq.empty,
       SettingPurpose(
-        "Typed catalog of library and sbt-plugin coordinates (Lib / Plugin). Empty skips catalog generate. See Versions."
+        "Lib / Plugin rows collected from the ZipxVersions object (every val). Empty skips catalog generate. See Versions."
       ),
       Build,
     )

@@ -7,6 +7,6 @@
 // CI is the source of truth. Locally, `sbt publishLocal` in the zipx root then
 // `sbt -Dzipx.version=$(cat ../../target/zipx-version.txt)` here reproduces what CI does.
 //
-// Catalog plugins (native-packager, scalafmt) live in ZipxVersions and are written to plugins.sbt by generate.
+// Catalog plugins (native-packager, scalafmt) live in MyVersions and are written to plugins.sbt by generate.
 // zipxEmitSelf is false so that generated file does not also emit a static sbt-zipx GAV.
 addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % sys.props.getOrElse("zipx.version", "0.1.6"))

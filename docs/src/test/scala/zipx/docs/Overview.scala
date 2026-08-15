@@ -95,9 +95,25 @@ Even a small library gets one root test job and a publish job gated on a version
 
 ### Versions you can actually bump
 
-The usual Scala bump is regex on `"org" %% "name" % "1.2.3"` sprinkled through the build. zipx keeps `Lib` / `Plugin`
-values in one file, rewrites those constructors, generates `plugins.sbt`, and fails generate if you sneak a raw
-coordinate in. That is stronger than a string lock file. See **Versions**.
+Extend `ZipxVersions`, drop `MyVersions.settings`. Every `Lib` / `Plugin` val is a catalog row (you do not list them
+again); each module picks a group (`libraries`, `client`, `service`). zipx rewrites those constructors, generates
+`plugins.sbt`, and fails generate if you sneak a raw coordinate in. Other plugins extend the same trait. See
+**Versions**.
+
+```scala
+import zipx.*
+object MyVersions extends ZipxVersions:
+  val sbt: SbtVersion     = SbtVersion("2.0.6")
+  val scala: ScalaVersion = ScalaVersion("3.8.4")
+  val zio                 = Lib("dev.zio", "zio", "2.1.26")
+  val slf4j               = Lib("org.slf4j", "slf4j-simple", "2.0.18").java
+  def libraries           = library(zio)
+  def service             = library(zio, slf4j)
+
+MyVersions.settings
+lazy val lib     = project.settings(MyVersions.libraries)
+lazy val service = project.settings(MyVersions.service)
+```
 
 ### The YAML is short enough to read in a PR
 
@@ -210,7 +226,8 @@ A map of later pages. On day one you can ignore everything except Aggregate test
 | **Caching** | Restore sbt's cache on the runner so test does not start from zero |
 | **Action pins** | Exact Action commits in the generated YAML; skip until you bump them yourself |
 | **Pin feeds** | Pins that are not Maven and not Actions; see **Pin feeds** |
-| **Versions** | Typed catalog; bump locally with `zipxDepUpdate`, then open a PR |
+| **Versions** | `Lib` / `Plugin` vals on a `ZipxVersions` object; `MyVersions.settings`; bump with `zipxDepUpdate` |
+| **Extending Versions** | For sbt plugins that sit on zipx (splice, a company catalog); skip unless you write one |
 | **Job conditions** | Optional extra `if:` (fork, label, …). Skip until you need one |
 | **Validation** | Generate fails instead of emitting a broken workflow |
 

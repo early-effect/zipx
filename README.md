@@ -48,14 +48,33 @@ the jar default. Full guide: **Action pins** on the docs site.
 
 ### Keeping versions current
 
-Library and plugin versions live in a Scala catalog (`project/ZipxVersions.scala`): typed `Lib` / `Plugin` values, not
-regex over `build.sbt`. Bump them locally, then open a PR:
+Extend `ZipxVersions` in `project/ZipxVersions.scala`, then drop `MyVersions.settings` in `build.sbt`. Every `Lib` /
+`Plugin` val is a catalog row; you do not list them again. Each module picks a group. Typed values, not regex over the
+build. Other plugins extend the same trait. Full guide: **Versions** on the docs site.
+
+```scala
+import zipx.*
+object MyVersions extends ZipxVersions:
+  val sbt: SbtVersion     = SbtVersion("2.0.6")
+  val scala: ScalaVersion = ScalaVersion("3.8.4")
+  val zio                 = Lib("dev.zio", "zio", "2.1.26")
+  val slf4j               = Lib("org.slf4j", "slf4j-simple", "2.0.18").java
+  def libraries           = library(zio)
+  def service             = library(zio, slf4j)
+
+MyVersions.settings
+lazy val lib     = project.settings(MyVersions.libraries)
+lazy val service = project.settings(MyVersions.service)
+```
+
+Bump locally, then open a PR:
 
 ```
 sbt zipxDepUpdate
 ```
 
-Pins that are not Maven (CDN URL plus checksum, tarballs, vendored files) use `sbt zipxPinUpdate`. Full loop: **Dependency updates** on the docs site.
+Pins that are not Maven (CDN URL plus checksum, tarballs, vendored files) use `sbt zipxPinUpdate`. Full loop:
+**Dependency updates** on the docs site.
 
 ### Scala Steward (optional)
 
@@ -75,13 +94,13 @@ Full guide (Specular):
 What's covered:
 
 - Overview, **Why zipx**, and **From Bazel** (strategy vs second graphs / acceleration layers)
-- Quick start and self-checking
+- Quick start, **Versions** (`ZipxVersions` catalog), **Extending Versions** (plugins that sit on zipx), and self-checking
 - **Execution modes** (Aggregate / Layer / Graph)
 - Built-in **capabilities**, **custom capabilities**, and **composing sbt commands** (`zipxTasks`, `thenOnce`, `ZipxCentral.release`)
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate `test` via Testcontainers)
 - **Action pins** (pin file, Dependabot, `zipxActionsPull`, sync workflow)
-- **Dependency updates** (local `zipxDepUpdate` / `zipxPinUpdate`, then you open the PR), **Versions**, and **Pin feeds**
+- **Dependency updates** (local `zipxDepUpdate` / `zipxPinUpdate`, then you open the PR) and **Pin feeds**
 - Docker and multi-target deploy
 - `ZipxCentral` / `ZipxDocs` packs
 - Settings reference and dogfood notes
