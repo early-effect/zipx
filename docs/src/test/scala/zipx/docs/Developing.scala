@@ -54,7 +54,7 @@ wire `dependsOn` like the existing chain.
 
 The publishable `plugin` project remains for Central publish and scripted tests.
 [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) is a **consumer** (uses
-`publishLocal` or a released `sbt-zipx`). Root dogfood uses Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
+`publishLocal` or a released `sbt-zipx`, with `project/ZipxVersions.scala` like a real repo). Root dogfood uses Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
 both with `JobCondition.repositoryIs("early-effect/zipx")` so fork tag pushes do not publish or deploy Pages.
 
 **Remote-cache live proof** lives in `core` tests (`zipx.it.RemoteCacheItSpec`): plain Testcontainers for bazel-remote

@@ -86,7 +86,9 @@ checked.
     section("Generated plugins.sbt")(
       md"""
 `zipxWorkflowGenerate` writes `project/plugins.sbt`. Consumers get the loaded `sbt-zipx` line first (`zipxEmitSelf`,
-default true). This repo sets `zipxEmitSelf := false` because dogfood loads zipx from source.
+default true). This repo sets `zipxEmitSelf := false` because dogfood loads zipx from source. The
+[`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) consumer also sets it false:
+CI injects the in-dev plugin via `-Dzipx.version` in `project/zipx.sbt`, and generate owns the other plugin lines.
 """,
       exampleValue {
         ZipxCatalog.renderPlugins(List(scalafmt), self = Some(zipx))
