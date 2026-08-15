@@ -133,6 +133,8 @@ object ComposingSbtCommands extends DocSpec:
 
   def doc = page("Composing sbt commands")(
     md"""
+Skip until a job needs more than one sbt task, or you are wiring a pack. Most builds never write this.
+
 A CI job step is one `sbt '<text>'`. zipx validates text that cannot corrupt the generated file; it does not parse sbt
 syntax. Typing comes back through **composition and provenance**: real keys in the plugin, a step list on the wire.
 

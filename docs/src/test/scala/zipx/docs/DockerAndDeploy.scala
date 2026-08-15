@@ -11,8 +11,9 @@ object DockerAndDeploy extends DocSpecSuite:
 
   def doc = page("Docker and deploy")(
     md"""
-Services opt into images by enabling [sbt-native-packager](https://github.com/sbt/sbt-native-packager)'s
-`DockerPlugin`. Deploying to multiple environments fans out over typed **targets**.
+Skip until you ship a service image or more than one environment. Enable
+[sbt-native-packager](https://github.com/sbt/sbt-native-packager)'s `DockerPlugin` on the module; zipx adds the docker
+job. **Targets** are named environments (staging, production) with separate GitHub Environment approvals.
 
 ```mermaid
 flowchart TD

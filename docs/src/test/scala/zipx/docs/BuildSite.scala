@@ -13,6 +13,8 @@ object BuildSite extends DocsSite:
     Overview.doc,
     WhyZipx.doc,
     QuickStart.doc,
+    Versions.doc,
+    ExtendingVersions.doc,
     ExecutionModes.doc,
     MatrixCollapsePage.doc,
     Capabilities.doc,
@@ -26,7 +28,6 @@ object BuildSite extends DocsSite:
     FromBazel.doc,
     ActionPinsDoc.doc,
     DependencyUpdates.doc,
-    Versions.doc,
     PinFeeds.doc,
     DockerAndDeploy.doc,
     JobConditions.doc,
@@ -42,21 +43,21 @@ object BuildSite extends DocsSite:
     branded.copy(
       clientScript = Some("assets/client.js"),
       summaryMarkdown = Some(
-        s"""**zipx** generates GitHub Actions from your real sbt graph. Aggregate-first works for libraries *and*
-multi-service monorepos; Layer/Graph when you need waves, per-module isolation, or multi-environment deploys.
+        s"""**zipx** generates GitHub Actions from your sbt build. You keep writing `build.sbt`. zipx writes the
+workflow, so you do not maintain a second copy in YAML.
 
-Typed capabilities cover test, Central, GitHub Packages, docs Pages, docker, deploy, and stages you invent. Generated
-CI stays reviewable by default: in-repo composites (`.github/actions/zipx-*`) parameterize JDK/sbt/cache bootstrap and
-AWS login (checkout remains a prior workflow step), and
-`MatrixCollapse.Auto` folds safe Graph / target fan-out into one matrix job. SHA-pinned actions, affected-only Graph
-PRs, commit-stable caching, and `zipxWorkflowCheck` keep the committed YAML honest.
+Day one is Aggregate: one test job, a publish job on a version tag. Add the plugin, run `zipxWorkflowGenerate`, commit,
+open a PR. `zipxWorkflowCheck` fails the PR if you forgot to regenerate. Versions live in a `ZipxVersions` catalog you
+extend (`Lib` / `Plugin` vals, no second list); drop `MyVersions.settings` in `build.sbt`.
 
-If you have maintained a second copy of the build (disconnected CI or a restated Bazel graph), start with **Why zipx**:
-a kinder path back to one honest graph. The power is for every Scala team on Actions, and especially monorepos.
+Later pages cover extra jobs (Graph, docker, deploy), packs (Central, Pages, AWS), and the local bump loop. Skip them
+until you need them. **Extending Versions** is for sbt plugins that sit on zipx (splice, a company catalog). If you
+already maintain painful CI YAML, **Why zipx** is the recovery story.
 
-Guide: Why zipx → Quick start → Execution modes → Matrix collapse → Capabilities → Custom capabilities → Composing sbt
-commands → Shell and steps → Verify → Affected → Caching → Remote cache for teams → From Bazel → Action pins →
-Dependency updates → Versions → Pin feeds → Docker and deploy → Job conditions → Validation → Packs → Settings.
+Guide: Why zipx → Quick start → Versions → Extending Versions → Execution modes → Matrix collapse → Capabilities →
+Custom capabilities → Composing sbt commands → Shell and steps → Verify → Affected → Caching → Remote cache for teams →
+From Bazel → Action pins → Dependency updates → Pin feeds → Docker and deploy → Job conditions → Validation → Packs →
+Settings.
 """
       ),
       installSnippets = Vector(
@@ -69,6 +70,23 @@ Dependency updates → Versions → Pin feeds → Docker and deploy → Job cond
           """sbt zipxWorkflowGenerate
 git add .github/workflows/ci.yml .github/actions/
 sbt zipxWorkflowCheck   # fails CI when the committed YAML drifts""",
+        ),
+        CodeSnippet(
+          "Versions catalog",
+          """// project/ZipxVersions.scala
+import zipx.*
+object MyVersions extends ZipxVersions:
+  val sbt   = SbtVersion("2.0.6")
+  val scala = ScalaVersion("3.8.4")
+  val zio   = Lib("dev.zio", "zio", "2.1.26")
+  val slf4j = Lib("org.slf4j", "slf4j-simple", "2.0.18").java
+  def libraries = library(zio)
+  def service   = library(zio, slf4j)
+
+// build.sbt
+MyVersions.settings
+lazy val lib     = project.settings(MyVersions.libraries)
+lazy val service = project.settings(MyVersions.service)""",
         ),
         CodeSnippet(
           "Action pins (optional)",

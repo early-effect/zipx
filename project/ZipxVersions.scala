@@ -1,16 +1,15 @@
 import sbt.ModuleID
-import zipx.sbt.ZipxDeps
-import zipx.core.*
+import zipx.*
 
 /** Typed catalog: every library and sbt plugin this build may use. `zipxDepUpdate` rewrites version literals here.
   *
   * Shared with the main `build.sbt` (not the meta-build). Dogfood ModuleIDs stay in `project/Dependencies.scala`; keep
   * those version literals in sync when a catalog row used by `project/dogfood.sbt` moves.
   */
-object ZipxVersions:
+object ZipxVersions extends zipx.ZipxVersions:
 
-  val sbt: SbtVersion      = SbtVersion("2.0.6")
-  val scala3: ScalaVersion = ScalaVersion("3.8.4")
+  val sbt: SbtVersion     = SbtVersion("2.0.6")
+  val scala: ScalaVersion = ScalaVersion("3.8.4")
 
   val zio: Lib            = Lib("dev.zio", "zio", "2.1.26")
   val zioTest: Lib        = zio.mod("zio-test").test
@@ -37,7 +36,7 @@ object ZipxVersions:
   val specularPlugin: Plugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.12.1")
   val sbtReload: Plugin      = Plugin("com.jamesward", "sbt-reload", "0.0.7")
   val scalajs: Plugin        = Plugin("org.scala-js", "sbt-scalajs", "1.22.0")
-  val remoteCache: Plugin =
+  val remoteCache: Plugin    =
     Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.5").excluding(ZipxExclude.org("org.scala-sbt"))
 
   val commonScalacOptions: Seq[String] = Seq(
@@ -47,33 +46,9 @@ object ZipxVersions:
     "-Xlint:-classpath",
   )
 
-  val libs: List[Lib] = List(
-    zio,
-    zioTest,
-    zioTestSbt,
-    zioBlocks,
-    zioBlocksYaml,
-    neotype,
-    testcontainers,
-    slf4jSimple,
-    specular,
-    specularMermoid,
-    specularZioTest,
-    specularSite,
-    specularTheme,
-    ascent,
-    ascentHtml,
-    ascentJs,
-    ascentCss,
-  )
-
-  val plugins: List[Plugin] = List(dynverCi, scalafmt, pgp, specularPlugin, sbtReload, scalajs, remoteCache)
-
-  def coords: Seq[ZipxCoord] = libs ++ plugins
-
-  def zioDeps: Seq[ModuleID]             = ZipxDeps(zio, zioTest, zioTestSbt)
-  def shellLibraryDeps: Seq[ModuleID]    = ZipxDeps(neotype)
-  def workflowLibraryDeps: Seq[ModuleID] = ZipxDeps(zioBlocks, zioBlocksYaml)
-  def testcontainersDeps: Seq[ModuleID]  = ZipxDeps(testcontainers, slf4jSimple)
-  def remoteCachePlugin: ModuleID        = ZipxDeps.moduleID(remoteCache)
+  def zioDeps: Seq[ModuleID]             = deps(zio, zioTest, zioTestSbt)
+  def shellLibraryDeps: Seq[ModuleID]    = deps(neotype)
+  def workflowLibraryDeps: Seq[ModuleID] = deps(zioBlocks, zioBlocksYaml)
+  def testcontainersDeps: Seq[ModuleID]  = deps(testcontainers, slf4jSimple)
+  def remoteCachePlugin: ModuleID        = moduleID(remoteCache)
 end ZipxVersions

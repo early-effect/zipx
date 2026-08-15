@@ -8,6 +8,9 @@ object Developing extends DocSpecSuite:
 
   def doc = page("Developing")(
     md"""
+This page is for people hacking on **zipx itself**, not for adopting it in your repo. Start at **Quick start**. If you
+are writing an sbt plugin that sits on zipx and should contribute catalog rows, that is **Extending Versions**.
+
 The **root** build loads zipx from **source** via a meta-build mirror (`project/dogfood.sbt`), not via `publishLocal`.
 """,
     section("Dogfood layout")(
@@ -42,17 +45,18 @@ planner output changed.
 (dogfood enables `zipxDependabotSync := true` for the automatic sync workflow). Published jar defaults embed this
 pin file via `resourceGenerators`. See the **Action pins** docs page.
 
-**When adding a library or sbt plugin:** add a `Lib` / `Plugin` row in `project/ZipxVersions.scala` and select it with
-`ZipxDeps`. If the meta-build dogfood mirror also needs it, add the same version to `project/Dependencies.scala`.
-`sbt zipxWorkflowGenerate` rewrites `project/plugins.sbt` and `project/build.properties`. `zipxCheckDeps`
-fails generate if a `libraryDependencies` GAV is not in the catalog.
+**When adding a library or sbt plugin:** add a `Lib` / `Plugin` **val** in `project/ZipxVersions.scala` and select it
+with `ZipxVersions.deps` (or a named group). You do not list it a second time. If the meta-build dogfood mirror also
+needs it, add the same version to `project/Dependencies.scala`. `sbt zipxWorkflowGenerate` rewrites
+`project/plugins.sbt` and `project/build.properties`. `zipxCheckDeps` fails generate if a `libraryDependencies` GAV is
+not in the catalog.
 
 **When adding a mirrored module:** add a `meta*` project in `project/dogfood.sbt`, create `project/meta-<name>/`, and
 wire `dependsOn` like the existing chain.
 
 The publishable `plugin` project remains for Central publish and scripted tests.
 [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) is a **consumer** (uses
-`publishLocal` or a released `sbt-zipx`). Root dogfood uses Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
+`publishLocal` or a released `sbt-zipx`, with `project/ZipxVersions.scala` like a real repo). Root dogfood uses Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
 both with `JobCondition.repositoryIs("early-effect/zipx")` so fork tag pushes do not publish or deploy Pages.
 
 **Remote-cache live proof** lives in `core` tests (`zipx.it.RemoteCacheItSpec`): plain Testcontainers for bazel-remote

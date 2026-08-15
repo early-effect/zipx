@@ -1,17 +1,17 @@
 import ZipxVersions as V
 
-ThisBuild / scalaVersion         := V.scala3
+V.settings
 ThisBuild / organization         := "rocks.earlyeffect"
 ThisBuild / organizationName     := "Early Effect"
-ThisBuild / organizationHomepage := Some(url("https://www.earlyeffect.rocks"))
+ThisBuild / organizationHomepage := Some(uri("https://www.earlyeffect.rocks"))
 ThisBuild / versionScheme        := Some("early-semver")
 // Version comes from sbt-dynver-ci (do not set ThisBuild / version).
 
-ThisBuild / homepage := Some(url("https://github.com/early-effect/zipx"))
-ThisBuild / licenses := Seq("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt"))
+ThisBuild / homepage := Some(uri("https://github.com/early-effect/zipx"))
+ThisBuild / licenses := Seq("Apache-2.0" -> uri("http://www.apache.org/licenses/LICENSE-2.0.txt"))
 ThisBuild / scmInfo  := Some(
   ScmInfo(
-    url("https://github.com/early-effect/zipx"),
+    uri("https://github.com/early-effect/zipx"),
     "scm:git@github.com:early-effect/zipx.git",
   )
 )
@@ -20,7 +20,7 @@ ThisBuild / developers := List(
     id = "russwyte",
     name = "Russ White",
     email = "356303+russwyte@users.noreply.github.com",
-    url = url("https://github.com/russwyte"),
+    url = uri("https://github.com/russwyte"),
   )
 )
 
@@ -86,10 +86,6 @@ lazy val root = (project in file("."))
     zipxWorkflowDispatch := true,
     zipxDependabotSync   := true,
     zipxScalaSteward     := true,
-    zipxVersions         := V.coords,
-    zipxSbt              := Some(V.sbt),
-    zipxScala            := Some(V.scala3),
-    zipxCheckDeps        := true,
     zipxEmitSelf         := false,
   )
 
@@ -168,7 +164,7 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     // AllRequirements but is a no-op until Global/remoteCache is set (which zipx does only from the CI env).
     addSbtPlugin(V.remoteCachePlugin),
     // sbt-pgp so ZipxCentral.release can take the real publishSigned TaskKey (Option C).
-    addSbtPlugin(ZipxDeps.moduleID(V.pgp)),
+    addSbtPlugin(V.moduleID(V.pgp)),
     // JVM args for the sbt subprocess that runs scripted tests: suppress Unsafe/JNA warnings.
     scriptedLaunchOpts ++= Seq(
       "-Xmx1024m",
@@ -195,7 +191,7 @@ lazy val docsJS = project
     scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
     Compile / mainClass := Some("zipx.docs.ClientMain"),
     Compile / unmanagedSourceDirectories += (LocalProject("docs") / baseDirectory).value / "shared" / "scala",
-    libraryDependencies ++= ZipxDeps(
+    libraryDependencies ++= V.deps(
       // sbt 2 + ScalaJSPlugin: `%%` already appends `_sjs1` (no `%%%`).
       V.specular,
       V.specularMermoid,
@@ -216,7 +212,7 @@ lazy val docs = project
     publishArtifact := false, // also honored; prefer publish/skip for opt-out
     scalacOptions ++= V.commonScalacOptions :+ "-language:implicitConversions",
     Test / unmanagedSourceDirectories += baseDirectory.value / "shared" / "scala",
-    libraryDependencies ++= ZipxDeps(
+    libraryDependencies ++= V.deps(
       V.specular.test,
       V.specularZioTest,
       V.specularSite,

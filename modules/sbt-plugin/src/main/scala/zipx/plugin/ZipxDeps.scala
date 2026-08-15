@@ -1,9 +1,10 @@
-package zipx.sbt
+package zipx.plugin
 
-import _root_.sbt.*
+import sbt.*
 import zipx.core.{Cross as ZipxCross, Lib, Plugin as ZipxPluginCoord, ZipxExclude}
 
-/** Convert catalog rows to sbt `ModuleID`s. `libraryDependencies ++= ZipxDeps(V.zio, V.zioTest)`. */
+/** Convert catalog rows to sbt `ModuleID`s. Prefer `MyVersions.deps(zio, zioTest)` on a [[zipx.ZipxVersions]] catalog.
+  */
 object ZipxDeps:
 
   def apply(libs: Lib*): Seq[ModuleID] = libs.map(moduleID).toSeq

@@ -15,10 +15,11 @@ object ShellAndSteps extends DocSpecSuite:
 
   def doc = page("Shell and steps")(
     md"""
-Everything zipx generates is ultimately YAML full of shell and `$${{ … }}` expressions. This page is about writing
-those in Scala instead of in strings.
+Skip until you are writing custom job steps. This page is how to write shell and GitHub expressions in Scala instead
+of in strings.
 
-Four layers, each usable on its own:
+Everything zipx generates is ultimately YAML full of shell and `$${{ … }}` expressions. Four layers, each usable on
+its own:
 
 ```mermaid
 flowchart TD

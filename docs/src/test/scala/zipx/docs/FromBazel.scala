@@ -11,16 +11,15 @@ object FromBazel extends DocSpecSuite:
 
   def doc = page("From Bazel")(
     md"""
-If you adopted Bazel because sbt CI felt unsafe or slow, that impulse was understandable. Many teams found peace in
-hermeticity talk and remote cache, then discovered a quieter cost: a **second graph** in BUILD files while Scala
-engineers still thought in modules and `dependsOn`.
+Skip unless you are leaving Bazel. If you adopted Bazel because sbt CI felt unsafe or slow, that impulse was
+understandable. Many teams found peace in hermeticity talk and remote cache, then discovered a quieter cost: a
+**second graph** in BUILD files while Scala engineers still thought in modules and `dependsOn`.
 
-zipx is not Bazel-parity, and it does not ask you to pretend the second graph never happened. It offers a **different
-strategy** for teams that already have the truth in sbt: one graph, generated CI, content-addressed reuse. Keep the
-vocabulary you learned; leave the duplicate edges behind.
+zipx is not Bazel-parity. It offers a **different strategy** for teams that already have the truth in sbt: one graph,
+generated CI, content-addressed reuse. Keep the vocabulary you learned; leave the duplicate edges behind.
 
-For the broader recovery story (disconnected CI and acceleration layers), see **Why zipx**. For shared digests across
-laptops, see **Remote cache for teams**.
+For the broader story (hand-written YAML and cache products), see **Why zipx**. For shared digests across laptops, see
+**Remote cache for teams**.
 """,
     section("Shared vocabulary, kinder boundaries")(
       md"""
@@ -32,6 +31,7 @@ We speak Bazel-fluent on purpose. The mapping helps you translate without re-lit
 | Target | Project / module |
 | Remote cache | sbt 2 action cache over Bazel-compat gRPC |
 | Remote execution | Out of scope; use Graph for more runners |
+| `maven_install` / `MODULE.bazel` version strings | `Lib` / `Plugin` vals (collected, not listed twice); constructor rewrite; generate owns `plugins.sbt` |
 
 In Bazel, many small packages often improve hit rates because the **target** *is* the cache boundary. In sbt 2,
 compile and test already invalidate at class and suite digests **inside** a module. You do not need to shatter the

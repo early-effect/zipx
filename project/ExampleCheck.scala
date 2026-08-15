@@ -51,7 +51,7 @@ object ExampleCheck:
     * `zipxWorkflowCheck` rather than `zipxWorkflowGenerate` plus a `git diff`: the task exists to report drift with a
     * message naming the file, and it is what a consumer runs.
     *
-    * The version reaches the example's `project/plugins.sbt` as a system property, read there via
+    * The version reaches the example's `project/zipx.sbt` as a system property, read there via
     * `sys.props.getOrElse("zipx.version", …)`. Through a file rather than captured sbt stdout, which carries log lines;
     * the plugin's own `zipxAffectedModules` hands off through `target/zipx-affected.json` for the same reason.
     */

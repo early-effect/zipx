@@ -4,7 +4,11 @@ import zipx.shell.*
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** Scheduled pin-feed companion: weekly + dispatch. Apply/PR only when some feed uses [[PinAction.Update]]. */
+/** Scheduled pin-feed companion: cron + dispatch. Apply/PR only when some feed uses [[PinAction.Update]].
+  *
+  * Opening that PR uses `GITHUB_TOKEN` and needs the repo or org setting **Allow GitHub Actions to create and approve
+  * pull requests**.
+  */
 object PinCheckWorkflow:
 
   val DefaultPath: String = ".github/workflows/zipx-pin-check.yml"

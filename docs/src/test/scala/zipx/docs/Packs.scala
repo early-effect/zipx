@@ -18,7 +18,8 @@ object Packs extends DocSpecSuite:
 
   def doc = page("Packs")(
     md"""
-Org paved paths are capabilities (secret *names* only; values stay in GitHub):
+Skip this page until you are ready to publish or deploy. A **pack** is a ready-made path: one line in the build.
+Secret *names* live in Scala; values stay in GitHub.
 
 ```mermaid
 flowchart TD

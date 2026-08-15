@@ -11,22 +11,19 @@ object ActionPinsDoc extends DocSpecSuite:
 
   def doc = page("Action pins")(
     md"""
-Generated workflows pin third-party GitHub Actions to **full commit SHAs** (not floating `@v4` tags). That keeps CI
-reproducible and resistant to tag moves. Version labels appear as trailing comments so humans and Dependabot can still
-read which release a SHA corresponds to:
+Skip this page at first. zipx already pins third-party GitHub Actions to **full commit SHAs** (not floating `@v4`
+tags) in the generated workflow, so a moved tag cannot change what CI runs. Version labels appear as trailing comments:
 
 ```yaml
 - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 ```
 
-zipx ships current defaults in the plugin jar. Consumers who want to track upstream action releases **ahead of a zipx
-upgrade** use a small pin file plus optional Dependabot automation, the same path this repository dogfoods.
+Jar defaults ship in the plugin. Come back when you want to bump those Actions **without** waiting for a zipx release:
+a small pin file plus optional Dependabot, the same path this repository uses.
 
 `zipxWorkflowGenerate` also writes in-repo **composite actions** under `.github/actions/zipx-*` (JDK/sbt/cache
-bootstrap, AWS OIDC/ECR login). Checkout is a prior workflow step: GitHub must resolve local `uses: ./…` from the
-workspace before the composite runs. Nested third-party `uses:` inside those composites stay SHA-pinned from the same
-pin file; the workflow only calls `uses: ./.github/actions/…` after checkout. Commit the composites alongside `ci.yml`;
-`zipxWorkflowCheck` drifts both.
+bootstrap, AWS login when you use those packs). Commit them alongside `ci.yml`; `zipxWorkflowCheck` drifts both.
+Checkout is a prior workflow step so GitHub can resolve local `uses: ./…` from the workspace.
 """,
     section("Resolve order")(
       md"""

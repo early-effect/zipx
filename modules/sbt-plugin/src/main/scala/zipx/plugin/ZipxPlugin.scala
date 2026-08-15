@@ -1,4 +1,4 @@
-package zipx.sbt
+package zipx.plugin
 
 import sbt.*
 import sbt.Keys.*
@@ -63,7 +63,8 @@ object ZipxPlugin extends AutoPlugin:
     val ScalaVersion = zipx.core.ScalaVersion
     type ZipxExclude = zipx.core.ZipxExclude
     val ZipxExclude = zipx.core.ZipxExclude
-    val ZipxDeps    = zipx.sbt.ZipxDeps
+    type ZipxVersions = zipx.ZipxVersions
+    val ZipxDeps    = zipx.plugin.ZipxDeps
     val ZipxCatalog = zipx.core.ZipxCatalog
     type PinLookup = zipx.core.PinLookup
     type PinApply  = zipx.core.PinApply
@@ -325,8 +326,8 @@ object ZipxPlugin extends AutoPlugin:
     // `zipx.shell.Command` and `InlineCommand` stay unexported: `Command` is sbt's own name in a `build.sbt`
     // (`commands += Command.command(…)`), and shadowing it would break that.
 
-    val zipxTasks = zipx.sbt.CapabilityTasks
-    export zipx.sbt.CapabilityTasks.cmd
+    val zipxTasks = zipx.plugin.CapabilityTasks
+    export zipx.plugin.CapabilityTasks.cmd
 
     /** `zipxPublish := zipxOn` / `zipxOff` / `zipxAuto` instead of `Some(true)` / `Some(false)` / `None`. */
     val zipxOn: Option[Boolean]   = Some(true)
@@ -943,7 +944,7 @@ object ZipxPlugin extends AutoPlugin:
           case "yes" | "--yes"         => true
           case "dry-run" | "--dry-run" => false
           case ""                      =>
-            confirmPinUpdates(bumps.size) match
+            confirmUpdates(bumps.size, "pin update(s)") match
               case None =>
                 log.info("zipx: no TTY; pass 'yes' to apply, or 'dry-run' to list only.")
                 false
@@ -958,9 +959,9 @@ object ZipxPlugin extends AutoPlugin:
     }
 
   /** `Some(true)` if the operator confirmed, `Some(false)` if they declined, `None` if there is no console to ask. */
-  private def confirmPinUpdates(n: Int): Option[Boolean] =
+  private def confirmUpdates(n: Int, what: String): Option[Boolean] =
     Option(System.console()).map { console =>
-      val line = Option(console.readLine(s"Apply $n pin update(s)? [y/N] ")).getOrElse("").trim
+      val line = Option(console.readLine(s"Apply $n $what? [y/N] ")).getOrElse("").trim
       line.equalsIgnoreCase("y") || line.equalsIgnoreCase("yes")
     }
 
@@ -1236,8 +1237,8 @@ object ZipxPlugin extends AutoPlugin:
     m.extraAttributes.keys.exists(k => k.contains("sbtVersion")) ||
       // sbt 2 `addSbtPlugin` uses CrossVersion.binaryWith("sbt2_", "") instead of extraAttributes.
       (m.crossVersion match
-        case b: _root_.sbt.librarymanagement.Binary => b.prefix.startsWith("sbt")
-        case _                                      => false)
+        case b: sbt.librarymanagement.Binary => b.prefix.startsWith("sbt")
+        case _                               => false)
 
   private def depUpdateTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
@@ -1257,7 +1258,7 @@ object ZipxPlugin extends AutoPlugin:
             case "yes" | "--yes"         => true
             case "dry-run" | "--dry-run" => false
             case ""                      =>
-              confirmPinUpdates(bumps.size) match
+              confirmUpdates(bumps.size, "catalog update(s)") match
                 case None =>
                   log.info("zipx: no TTY; pass 'yes' to apply, or 'dry-run' to list only.")
                   false

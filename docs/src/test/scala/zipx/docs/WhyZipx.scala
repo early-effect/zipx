@@ -6,25 +6,26 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zio.test.*
 
-/** Positioning hub: strategy and ergonomics, not Bazel-parity or another cache appliance. */
+/** Positioning: one sbt graph, generated Actions, no second YAML copy. */
 object WhyZipx extends DocSpecSuite:
 
   def doc = page("Why zipx")(
     md"""
-If your team has lived through hand-maintained CI matrices, a second BUILD graph, or a cache product that made
-**tasks** faster while **humans** still juggled two sources of truth: you are in the right place.
+Hand-written GitHub Actions YAML is a second copy of your build: module lists, job order, JDK setup. It drifts. zipx
+generates that YAML from `build.sbt` so CI stays honest without you learning a second language.
 
-zipx is not “almost Bazel,” and it is not another acceleration appliance bolted onto an opaque build. It is a gentler
-path home: **one sbt graph** becomes generated GitHub Actions, with sbt 2’s content-addressed cache along for the ride.
-Speed follows. The headline is **ergonomics**: fewer things to read, sync, and apologize for in review.
+If you are new to CI, **Quick start** is enough. Come back here when you want the "why," or when you already maintain
+a painful workflow.
 
-When you are ready for the migration stories, see **From Bazel**, **Caching**, and **Remote cache for teams**. Live
-Put/Get is proven by `RemoteCacheItSpec` (same `RemoteCacheProof` pins as the YAML examples here).
+If your team has lived through hand-maintained job lists, a second BUILD graph, or a cache product that made **tasks**
+faster while **humans** still juggled two sources of truth: the rest of this page is the recovery story.
+
+When you are ready for those migration stories, see **From Bazel**, **Caching**, and **Remote cache for teams**.
 """,
     section("Three paths, one that heals")(
       md"""
 Most teams we meet are somewhere on this triangle. None of the first two are foolish; they were reasonable responses
-to real pain. zipx is the recovery path that keeps your Scala mental model intact.
+to real pain. zipx is the path that keeps your Scala mental model: one `build.sbt`, generated CI.
 
 ```mermaid
 flowchart TD
@@ -46,6 +47,26 @@ flowchart TD
 | **zipx** | `build.sbt` / `.dependsOn` | CI is derived; `zipxWorkflowCheck` catches drift early |
 
 You do not need a second graph to feel safe. You need one honest graph, and a check that fails when CI lies.
+"""
+    ),
+    section("Versions were the other stringly mess")(
+      md"""
+CI YAML is not the only second copy. Scala versions usually live as `"org" %% "name" % "1.2.3"` strings, and the bump
+tools search the repo with regex. That is how most of the ecosystem still works, and it is why dependency PRs feel
+brittle.
+
+zipx keeps `Lib` / `Plugin` vals in one object you extend from `ZipxVersions`. Every val is a catalog row; there is no
+second list to keep in sync. `MyVersions.settings` is the usual sbt wiring (`scalaVersion`, catalog keys,
+`zipxCheckDeps`). Apply rewrites those constructors. Generate owns `plugins.sbt`. A raw coordinate that is not in the
+catalog fails generate. Other plugins extend the same trait. See **Versions**. Plugin authors: **Extending Versions**.
+
+```scala
+import zipx.*
+object MyVersions extends ZipxVersions:
+  val sbt: SbtVersion     = SbtVersion("2.0.6")
+  val scala: ScalaVersion = ScalaVersion("3.8.4")
+  val zio                 = Lib("dev.zio", "zio", "2.1.26")
+```
 """
     ),
     section("Faster tasks are not the same as kinder CI")(

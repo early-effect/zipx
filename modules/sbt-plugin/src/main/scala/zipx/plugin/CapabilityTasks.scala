@@ -1,4 +1,4 @@
-package zipx.sbt
+package zipx.plugin
 
 import sbt.*
 import zipx.core.{
