@@ -106,26 +106,47 @@ object ZipxCatalog:
 
   /** Every val on `catalog` whose type has an [[AsCoords]] given. Pass `[this.type]` from a trait so expansion sees the
     * concrete object. `Lib` / `Plugin` share one given; lists, `SbtVersion`, `ScalaVersion`, and named groups have
-    * none, so they are skipped. `def` members are not vals: they are skipped.
+    * none, so they are skipped. `def` members are not vals: they are skipped. Rows come out in source declaration order
+    * (parent traits, then the object), so generated `plugins.sbt` matches the catalog.
     */
   inline def coordsOf[A](inline catalog: A): Seq[ZipxCoord] =
     ${ coordsOfImpl[A]('catalog) }
 
   private def coordsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[ZipxCoord]] =
     import quotes.reflect.*
+
+    def skipClass(cls: Symbol): Boolean =
+      cls.flags.is(Flags.JavaDefined) ||
+        cls == defn.AnyClass || cls == defn.MatchableClass ||
+        cls == defn.AnyRefClass || cls == defn.ObjectClass
+
+    /** `fieldMembers` is reverse, and `Symbol.pos` is empty once the catalog is TASTy-loaded (`coords` expands in
+      * `build.sbt`). ClassDef bodies from TASTy keep source order.
+      */
+    def valsInSourceOrder(cls: Symbol): List[Symbol] =
+      val fromTree =
+        try
+          cls.tree match
+            case cd: ClassDef =>
+              Some(
+                cd.body.collect {
+                  case vd: ValDef if !vd.symbol.flags.is(Flags.Synthetic) => vd.symbol
+                }
+              )
+            case _ => None
+        catch case _: Exception => None
+      fromTree.getOrElse(cls.declaredFields.filterNot(_.flags.is(Flags.Synthetic)))
+    end valsInSourceOrder
+
     val tpe   = TypeRepr.of[A].dealias
-    val parts = tpe.typeSymbol.fieldMembers.flatMap { sym =>
-      Option
-        .unless(sym.flags.is(Flags.Synthetic)) {
-          val mt = tpe.memberType(sym).widen.dealias
-          mt.asType match
-            case '[t] =>
-              Expr.summon[AsCoords[t]].map { tc =>
-                val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
-                '{ $tc.coords($field) }
-              }
-        }
-        .flatten
+    val parts = tpe.baseClasses.filterNot(skipClass).reverse.flatMap(valsInSourceOrder).distinct.flatMap { sym =>
+      val mt = tpe.memberType(sym).widen.dealias
+      mt.asType match
+        case '[t] =>
+          Expr.summon[AsCoords[t]].map { tc =>
+            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
+            '{ $tc.coords($field) }
+          }
     }
     if parts.isEmpty then '{ Seq.empty[ZipxCoord] } else '{ ${ Expr.ofList(parts) }.flatten }
   end coordsOfImpl

@@ -130,12 +130,13 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
         val scala: ScalaVersion = ScalaVersion("3.8.4")
         val zio                 = Lib("dev.zio", "zio", "2.1.26")
         val zioTest             = zio.mod("zio-test").test
+        val packager            = Plugin("com.github.sbt", "sbt-native-packager", "1.11.7")
         val fmt                 = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
         val libs                = List(zio)
         def service             = List(zio)
-      val ids = Sample.coords.map(c => (c.group: String, c.artifact: String)).toSet
+      val arts = Sample.coords.map(c => c.artifact: String)
       assertTrue(
-        ids == Set(("dev.zio", "zio"), ("dev.zio", "zio-test"), ("org.scalameta", "sbt-scalafmt"))
+        arts == List("zio", "zio-test", "sbt-native-packager", "sbt-scalafmt")
       )
     },
     test("coordsOf collects a parent-trait Lib val and an AsCoords bundle") {
@@ -152,14 +153,8 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
           Lib("com.acme", "runtime", "1.2.3"),
           Plugin("com.acme", "sbt-acme", "1.2.3"),
         )
-      val ids = Sample.coords.map(c => (c.group: String, c.artifact: String)).toSet
-      assertTrue(
-        ids == Set(
-          ("com.acme", "from-trait"),
-          ("com.acme", "runtime"),
-          ("com.acme", "sbt-acme"),
-        )
-      )
+      val ids = Sample.coords.map(c => c.artifact: String)
+      assertTrue(ids == List("from-trait", "runtime", "sbt-acme"))
     },
   )
 end ZipxCatalogSpec
