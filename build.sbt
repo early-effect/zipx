@@ -3,15 +3,15 @@ import ZipxVersions as V
 V.settings
 ThisBuild / organization         := "rocks.earlyeffect"
 ThisBuild / organizationName     := "Early Effect"
-ThisBuild / organizationHomepage := Some(url("https://www.earlyeffect.rocks"))
+ThisBuild / organizationHomepage := Some(uri("https://www.earlyeffect.rocks"))
 ThisBuild / versionScheme        := Some("early-semver")
 // Version comes from sbt-dynver-ci (do not set ThisBuild / version).
 
-ThisBuild / homepage := Some(url("https://github.com/early-effect/zipx"))
-ThisBuild / licenses := Seq("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt"))
+ThisBuild / homepage := Some(uri("https://github.com/early-effect/zipx"))
+ThisBuild / licenses := Seq("Apache-2.0" -> uri("http://www.apache.org/licenses/LICENSE-2.0.txt"))
 ThisBuild / scmInfo  := Some(
   ScmInfo(
-    url("https://github.com/early-effect/zipx"),
+    uri("https://github.com/early-effect/zipx"),
     "scm:git@github.com:early-effect/zipx.git",
   )
 )
@@ -20,7 +20,7 @@ ThisBuild / developers := List(
     id = "russwyte",
     name = "Russ White",
     email = "356303+russwyte@users.noreply.github.com",
-    url = url("https://github.com/russwyte"),
+    url = uri("https://github.com/russwyte"),
   )
 )
 
