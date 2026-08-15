@@ -29,6 +29,8 @@ zipxCapabilities += zipxTasks.once(Fmt, scalafmtCheckAll)
 zipxCapabilities += Capability.test.copy(needsCapabilities = List(Fmt))
 // or Layers: Capability.testLayers.copy(needsCapabilities = List(Fmt))
 ```
+
+The builtin PR pin-check job is also Once (`Capability.pinCheck`, job id `pin-check`). See **Pin feeds**.
 """,
       exampleValue {
         val fmt = CapabilityName("fmt")

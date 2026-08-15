@@ -1,17 +1,15 @@
 import sbt.*
 
-/** One home for every dep shared by build.sbt and the meta-build dogfood mirror, so the two cannot drift.
+/** ModuleIDs for the meta-build dogfood mirror. The .sbt files in project/ cannot import zipx types (Lib / Plugin), so
+  * this file stays zipx-free and is pulled onto that classpath via project/project/build.sbt unmanagedSources.
   *
-  * The `.sbt` files in `project/` sit one level above the `.scala` files there, so dogfood cannot import this object by
-  * default; `project/project/build.sbt` adds this file to its `unmanagedSources` instead. Docs-only deps stay in
-  * build.sbt.
+  * Version literals here must match project/ZipxVersions.scala. zipxDepUpdate rewrites the catalog; copy those literals
+  * here when a dogfood dep moves. Docs-only deps stay in build.sbt.
   */
 object Dependencies:
 
   val scala3Version      = "3.8.4"
   val zioVersion         = "2.1.26"
-  val specularVersion    = "0.12.1"
-  val ascentVersion      = "0.3.1"
   val zioBlocksVersion   = "0.0.51"
   val remoteCacheVersion = "2.0.5"
   val neotypeVersion     = "0.7.0"
@@ -50,13 +48,5 @@ object Dependencies:
   val remoteCachePlugin: ModuleID =
     ("org.scala-sbt" % "sbt-remote-cache" % remoteCacheVersion)
       .excludeAll(ExclusionRule(organization = "org.scala-sbt"))
-
-  val testcontainersVersion = "2.0.5"
-
-  val testcontainersDeps: Seq[ModuleID] = Seq(
-    "org.testcontainers" % "testcontainers" % testcontainersVersion % Test,
-    // SLF4J binding so testcontainers logs to console instead of NOP.
-    "org.slf4j"          % "slf4j-simple"   % "2.0.18"              % Test,
-  )
 
 end Dependencies

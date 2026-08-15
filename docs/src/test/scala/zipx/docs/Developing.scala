@@ -27,7 +27,9 @@ Same trees under `modules/*/src`: the green path is dogfood (`project/meta-*` mi
 source). The amber path is the publishable `plugin` project for Central and scripted.
 
 - `project/meta-{workflow,core,central,plugin}` compile the same `modules/*/src/main/scala` trees
-- Shared versions live in [`project/Dependencies.scala`](https://github.com/early-effect/zipx/blob/main/project/Dependencies.scala)
+- Shared versions for the **main** build live in [`project/ZipxVersions.scala`](https://github.com/early-effect/zipx/blob/main/project/ZipxVersions.scala)
+  (`Lib` / `Plugin`). The meta-build cannot import those types, so dogfood ModuleIDs stay in
+  [`project/Dependencies.scala`](https://github.com/early-effect/zipx/blob/main/project/Dependencies.scala)
 - `project/*.sbt` cannot see `project/*.scala` directly (sbt layering).
   [`project/project/build.sbt`](https://github.com/early-effect/zipx/blob/main/project/project/build.sbt)
   pulls `Dependencies.scala` / `Dogfood.scala` onto that classpath via `unmanagedSources` (no symlinks)
@@ -40,7 +42,10 @@ planner output changed.
 (dogfood enables `zipxDependabotSync := true` for the automatic sync workflow). Published jar defaults embed this
 pin file via `resourceGenerators`. See the **Action pins** docs page.
 
-**When adding a library dependency** used by those modules: update `project/Dependencies.scala` only.
+**When adding a library or sbt plugin:** add a `Lib` / `Plugin` row in `project/ZipxVersions.scala` and select it with
+`ZipxDeps`. If the meta-build dogfood mirror also needs it, add the same version to `project/Dependencies.scala`.
+`sbt zipxWorkflowGenerate` rewrites `project/plugins.sbt` and `project/build.properties`. `zipxCheckDeps`
+fails generate if a `libraryDependencies` GAV is not in the catalog.
 
 **When adding a mirrored module:** add a `meta*` project in `project/dogfood.sbt`, create `project/meta-<name>/`, and
 wire `dependsOn` like the existing chain.

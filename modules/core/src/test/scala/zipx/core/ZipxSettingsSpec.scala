@@ -13,6 +13,11 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
         ZipxSettings.names.contains("zipxAffectedDeploy"),
         ZipxSettings.names.contains("zipxStewardGrouping"),
         ZipxSettings.names.contains("zipxMatrixCollapse"),
+        ZipxSettings.names.contains("zipxPinUpdate"),
+        ZipxSettings.names.contains("zipxDepUpdate"),
+        ZipxSettings.names.contains("zipxVersions"),
+        ZipxSettings.names.contains("zipxCheckDeps"),
+        ZipxSettings.names.contains("zipxEmitSelf"),
       )
     },
     test("build / project / task partitions cover every entry exactly once") {

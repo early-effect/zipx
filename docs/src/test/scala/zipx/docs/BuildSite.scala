@@ -26,6 +26,8 @@ object BuildSite extends DocsSite:
     FromBazel.doc,
     ActionPinsDoc.doc,
     DependencyUpdates.doc,
+    Versions.doc,
+    PinFeeds.doc,
     DockerAndDeploy.doc,
     JobConditions.doc,
     Validation.doc,
@@ -54,7 +56,7 @@ a kinder path back to one honest graph. The power is for every Scala team on Act
 
 Guide: Why zipx → Quick start → Execution modes → Matrix collapse → Capabilities → Custom capabilities → Composing sbt
 commands → Shell and steps → Verify → Affected → Caching → Remote cache for teams → From Bazel → Action pins →
-Dependency updates → Docker and deploy → Job conditions → Validation → Packs → Settings.
+Dependency updates → Versions → Pin feeds → Docker and deploy → Job conditions → Validation → Packs → Settings.
 """
       ),
       installSnippets = Vector(
