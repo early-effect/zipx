@@ -93,6 +93,12 @@ forgotten `needs:` between jobs.
 Even a small library gets one root test job and a publish job gated on a version tag (or `ZipxCentral.release` /
 `ZipxGitHubPackages`). Docs Pages when you want them. Fork gates are Scala, not pasted `if:` strings.
 
+### Versions you can actually bump
+
+The usual Scala bump is regex on `"org" %% "name" % "1.2.3"` sprinkled through the build. zipx keeps `Lib` / `Plugin`
+values in one file, rewrites those constructors, generates `plugins.sbt`, and fails generate if you sneak a raw
+coordinate in. That is stronger than a string lock file. See **Versions**.
+
 ### The YAML is short enough to read in a PR
 
 Generated CI is meant to be reviewed, not only executed. Two defaults keep the file short:

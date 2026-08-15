@@ -48,7 +48,8 @@ the jar default. Full guide: **Action pins** on the docs site.
 
 ### Keeping versions current
 
-Library and plugin versions live in a Scala catalog (`project/ZipxVersions.scala`). Bump them locally, then open a PR:
+Library and plugin versions live in a Scala catalog (`project/ZipxVersions.scala`): typed `Lib` / `Plugin` values, not
+regex over `build.sbt`. Bump them locally, then open a PR:
 
 ```
 sbt zipxDepUpdate

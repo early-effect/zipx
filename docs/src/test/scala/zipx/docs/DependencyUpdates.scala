@@ -32,8 +32,8 @@ flowchart LR
 - **GitHub Actions** in generated workflows. GitHub's Dependabot can open a PR when an Action SHA moves; you sync that
   back into zipx's pin file. zipx does not write `dependabot.yml`; you add a `github-actions` ecosystem yourself. See
   **Action pins**.
-- **Scala libraries and sbt plugins.** One catalog file lists them (`Lib` / `Plugin`). You run `zipxDepUpdate`. There
-  is no weekly zipx job that opens a catalog PR. See **Versions**.
+- **Scala libraries and sbt plugins.** One typed catalog (`Lib` / `Plugin`), not a regex over `build.sbt`. You run
+  `zipxDepUpdate`. There is no weekly zipx job that opens a catalog PR. See **Versions**.
 - **Pins that are not Maven and not Actions.** A pin feed lists them; you run `zipxPinUpdate`, or CI can open a PR if
   you opt a feed into auto-apply. See **Pin feeds**.
 """,
@@ -61,15 +61,17 @@ sbt "zipxPinUpdate yes"
 sbt "zipxPinUpdate dry-run"
 ```
 
-Catalog apply rewrites version literals in the catalog file only. Pin-feed apply goes through the feed so a version
-and a checksum stay together. After either command, **you** still commit and open the PR.
+Catalog apply rewrites version *constructors* in the catalog file only (`Lib("g", "a", "from")`), not a search across
+`build.sbt`. Pin-feed apply goes through the feed so a version and a checksum stay together. After either command,
+**you** still commit and open the PR.
 """
     ),
     section("Optional: a bot that opens catalog PRs")(
       md"""
 [Scala Steward](https://github.com/scala-steward-org/scala-steward) is a separate tool that opens pull requests when
-Maven or sbt versions are outdated. You do not need it: the catalog plus `zipxDepUpdate` is how zipx expects you to
-bump libraries and plugins.
+Maven or sbt versions are outdated. Its apply path is still brittle: regex (and similar) rewrites of version strings
+in the build. That is the weakness of almost every Scala bump tool. You do not need it: the catalog plus
+`zipxDepUpdate` rewrites typed constructors in one file. See **Versions**.
 
 If you still want that bot, zipx can generate a weekly workflow that runs it:
 

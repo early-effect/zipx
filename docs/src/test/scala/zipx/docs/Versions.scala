@@ -20,6 +20,11 @@ One Scala file lists the library and plugin versions this build may use. You pic
 `zipxDepUpdate`, say yes, commit, and open a pull request. That is the bump path. See **Dependency updates** for the
 full local loop.
 
+The usual Scala bump is search-and-replace on version strings scattered through `build.sbt` and `plugins.sbt`. Bots do
+it with regex. It misses, double-hits, and rewrites comments. zipx does not. The catalog is typed values the build
+*selects*; apply rewrites constructors only; generate owns `plugins.sbt`. That is a stronger source of truth than a
+lock file of strings, including Bazel `maven_install` / `MODULE.bazel` coordinates. Details in **Not a string rewrite**.
+
 ```scala
 // project/ZipxVersions.scala
 import zipx.core.*
@@ -53,6 +58,30 @@ A raw `"dev.zio" %% "zio" % "2.1.26"` still compiles. `zipxWorkflowGenerate` fai
           .map(_.render)
           .mkString("\n")
       }.assert(text => assertTrue(text.contains("org.slf4j:slf4j-simple:2.0.18"))),
+    ),
+    section("Not a string rewrite of the build")(
+      md"""
+Scala dependency management has been weak for a long time, and most people do not notice until a bot PR scares them.
+
+The common apply path (including popular update bots) is: find `"group" %% "artifact" % "1.2.3"` somewhere in the
+repo, or worse the version token alone, and replace it. That has to work across `build.sbt`, `project/plugins.sbt`, a
+`Dependencies.scala`, comments, and docs samples. Miss a call site and you ship mixed versions. Hit a comment and the
+diff is noise. There is no type that says "this is a catalog row."
+
+zipx's apply path is the opposite:
+
+| Usual Scala bump | zipx catalog |
+|---|---|
+| Regex / search-replace across the build | Rewrite `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` only |
+| Versions copied into `plugins.sbt` by hand | Generate writes `plugins.sbt` and `build.properties` |
+| A raw `%` coordinate is invisible | `zipxCheckDeps` fails generate if `libraryDependencies` is not a `Lib` row |
+| Each `"zio-test"` line is another string | `.mod("zio-test")` shares the parent version literal |
+
+Bazel locks a *resolved* graph well (`maven_install.json` and friends). The coordinates you type are still strings, and
+bumping them is still editing strings or regenerating JSON. zipx's catalog is the same `Lib` / `Plugin` values
+`libraryDependencies` selects. That is the bump path Scala has been missing: typed, one file, mechanically applied,
+checked.
+"""
     ),
     section("Generated plugins.sbt")(
       md"""

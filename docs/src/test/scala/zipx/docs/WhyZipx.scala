@@ -49,6 +49,17 @@ flowchart TD
 You do not need a second graph to feel safe. You need one honest graph, and a check that fails when CI lies.
 """
     ),
+    section("Versions were the other stringly mess")(
+      md"""
+CI YAML is not the only second copy. Scala versions usually live as `"org" %% "name" % "1.2.3"` strings, and the bump
+tools search the repo with regex. That is how most of the ecosystem still works, and it is why dependency PRs feel
+brittle.
+
+zipx keeps `Lib` / `Plugin` values in one file the build selects. Apply rewrites those constructors. Generate owns
+`plugins.sbt`. A raw coordinate that is not in the catalog fails generate. Bazel locks resolved artifacts well; the
+coordinates you type are still strings. See **Versions**.
+"""
+    ),
     section("Faster tasks are not the same as kinder CI")(
       md"""
 Acceleration layers (Develocity-class remote build cache, build scans, predictive test selection) can be wonderful at
