@@ -11,10 +11,12 @@ object AffectedDoc extends DocSpecSuite:
 
   def doc = page("Affected")(
     md"""
-**Affected** answers a GitHub Actions question Graph mode can ask: which *jobs* should run for this PR's diff?
-That is different from sbt 2 incrementality inside Aggregate (see **Execution modes**). **Graph Verify** jobs are
-path-gated by default. **Graph Publish** and **Graph Deploy** jobs can be, under the separate `zipxAffectedPublish`
-and `zipxAffectedDeploy` opt-ins below. Aggregate and Layer jobs never are.
+Skip this page unless you opted into **Graph** mode. **Affected** means: only run GitHub jobs for modules this PR
+touched. Aggregate (the default) does not skip jobs this way; sbt's cache skips work *inside* the one test job
+instead (see **Execution modes**).
+
+**Graph Verify** jobs are path-gated by default. **Graph Publish** and **Graph Deploy** can be, under the
+`zipxAffectedPublish` and `zipxAffectedDeploy` opt-ins below. Aggregate and Layer jobs never are.
 """,
     section("Closure flow")(
       md"""

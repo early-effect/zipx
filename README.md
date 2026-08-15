@@ -5,9 +5,9 @@
 [![Maven Central](https://img.shields.io/maven-central/v/rocks.earlyeffect/sbt-zipx_sbt2_3?logo=apachemaven)](https://central.sonatype.com/artifact/rocks.earlyeffect/sbt-zipx_sbt2_3)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**The build describes its own CI.** zipx is an sbt 2.x plugin (Scala 3) that generates a GitHub Actions workflow directly from your sbt build graph: no hand-maintained YAML, no module list to keep in sync, no per-module command strings to copy-paste.
+**The build describes its own CI.** zipx is an sbt 2.x plugin (Scala 3). You keep writing `build.sbt`. zipx generates a GitHub Actions workflow from that graph, so you do not maintain a second copy in YAML: no hand-maintained job lists, no module names to copy-paste.
 
-You declare modules and `dependsOn` once in `build.sbt`. zipx introspects that graph and emits a workflow that:
+You declare modules and `dependsOn` once. zipx emits a workflow that:
 
 - **defaults to Aggregate mode** (few sbt sessions: `sbt test`, one publish/release job);
 - **offers Layer and Graph modes** for dependency-ordered waves or per-module fan-out (affected-only PRs, matrix isolation);
@@ -46,13 +46,23 @@ Resolve order: explicit `zipxActions` → pin file when present → jar defaults
 validated, so a typo'd key or an unpinned ref fails the build naming the line instead of silently reverting that pin to
 the jar default. Full guide: **Action pins** on the docs site.
 
+### Keeping versions current
+
+Library and plugin versions live in a Scala catalog (`project/ZipxVersions.scala`). Bump them locally, then open a PR:
+
+```
+sbt zipxDepUpdate
+```
+
+Pins that are not Maven (CDN URL plus checksum, tarballs, vendored files) use `sbt zipxPinUpdate`. Full loop: **Dependency updates** on the docs site.
+
 ### Scala Steward (optional)
 
 ```scala
 zipxScalaSteward := true
 ```
 
-Generates `.github/workflows/zipx-scala-steward.yml` (weekly + manual). Enable **Allow GitHub Actions to create and approve pull requests** on the repo/org. See **Dependency updates**.
+Generates `.github/workflows/zipx-scala-steward.yml` (weekly + manual) if you still want a bot that opens catalog PRs. Enable **Allow GitHub Actions to create and approve pull requests** on the repo/org. You do not need this; `zipxDepUpdate` is the catalog path.
 
 ## Docs
 
@@ -70,7 +80,7 @@ What's covered:
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate `test` via Testcontainers)
 - **Action pins** (pin file, Dependabot, `zipxActionsPull`, sync workflow)
-- **Dependency updates** (Scala Steward opt-in), **Versions** (typed catalog, `zipxDepUpdate`), and **Pin feeds**
+- **Dependency updates** (local `zipxDepUpdate` / `zipxPinUpdate`, then you open the PR), **Versions**, and **Pin feeds**
 - Docker and multi-target deploy
 - `ZipxCentral` / `ZipxDocs` packs
 - Settings reference and dogfood notes

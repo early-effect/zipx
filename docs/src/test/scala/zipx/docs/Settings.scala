@@ -9,10 +9,12 @@ object Settings extends DocSpecSuite:
 
   def doc = page("Settings")(
     md"""
-All settings have sensible derived defaults. Write them as **bare settings** (no `ThisBuild /`).
+You can skip this reference until you need a knob. Defaults are enough for Aggregate test + publish.
+
+Write settings **without** `ThisBuild /`. zipx reads them from the root project (sbt 2).
 
 A typed setting (`WorkflowName`, `JdkVersion`, `RunnerOs`, …) checks its literal where you write it; the `String`-typed
-task settings below are checked at `zipxWorkflowGenerate` instead, for a reason worth knowing. See **Validation**.
+task settings below are checked at `zipxWorkflowGenerate` instead. See **Validation**.
 """,
     section("Build-level")(
       md"""
@@ -86,7 +88,8 @@ Pins Dependabot never sees (CDN + sha256, tarball tags, vendor files). Full guid
 
 `zipxPinFeeds` registers feeds; `zipxPinPrGate` is All / Introduced / Off. The PR job is builtin `Capability.pinCheck`.
 Scheduled apply and snapshot submit are companion workflows, not `ci.yml`. Local `zipxPinUpdate` lists outdated pins
-and applies only after approval (`yes`, or an interactive `y`), including alert-only feeds.
+and applies only after approval (`yes`, or an interactive `y`), including alert-only feeds. Then you commit and open
+the PR.
 """
     ),
     section("Versions catalog")(
@@ -95,7 +98,8 @@ Typed `Lib` / `Plugin` rows in `project/ZipxVersions.scala`. Full guide: **Versi
 
 `zipxVersions` is the catalog; `zipxCheckDeps` fails generate when `libraryDependencies` contain a GAV that is not a
 `Lib` row. `zipxWorkflowGenerate` writes `project/plugins.sbt` and `project/build.properties`. Local `zipxDepUpdate`
-rewrites version literals in `zipxVersionsFile`.
+rewrites version literals in `zipxVersionsFile`. Then you commit and open the PR. After a plugin, sbt, or Scala bump,
+`reload` and generate so those files match.
 """
     ),
   )

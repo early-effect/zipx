@@ -15,9 +15,10 @@ object Versions extends DocSpecSuite:
 
   def doc = page("Versions")(
     md"""
-Scala Steward's hard part is rewriting `build.sbt`. zipx makes apply trivial: one typed catalog, generated
-`project/plugins.sbt` / `project/build.properties`, and `zipxDepUpdate` that only rewrites version literals in that
-file.
+One Scala file lists the library and plugin versions this build may use. You pick rows in `build.sbt`. Generate writes
+`project/plugins.sbt` and `project/build.properties` so those files stay in sync. When something is stale, run
+`zipxDepUpdate`, say yes, commit, and open a pull request. That is the bump path. See **Dependency updates** for the
+full local loop.
 
 ```scala
 // project/ZipxVersions.scala
@@ -71,14 +72,23 @@ default true). This repo sets `zipxEmitSelf := false` because dogfood loads zipx
     ),
     section("Local update")(
       md"""
+There is no weekly zipx job that opens a catalog PR. You bump locally, then you open the PR.
+
 ```text
-sbt zipxDepUpdate             # list, then prompt
+sbt zipxDepUpdate             # list, then prompt Apply N catalog update(s)? [y/N]
 sbt "zipxDepUpdate yes"       # rewrite constructors in zipxVersionsFile
 sbt "zipxDepUpdate dry-run"
 ```
 
-Lookup is Maven Central metadata (then the sbt plugin repo). Apply rewrites `Lib("g", "a", "from")` /
-`Plugin("g", "a", "from")` only. `.mod` copies share the parent version literal.
+Lookup is Maven Central metadata (then the sbt plugin repo). `yes` applies **every** listed bump. With no terminal, a
+bare command lists and stops.
+
+The catalog file lives under `project/`, so it is part of the build definition. After a rewrite, `reload` (or a fresh
+sbt) before you generate. If a `Plugin`, `zipxSbt`, or `zipxScala` version moved, run `zipxWorkflowGenerate` and commit
+`plugins.sbt` / `build.properties` too. Then test, commit, open a PR.
+
+Apply rewrites `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` only. `.mod` copies share the parent version
+literal.
 """,
       exampleValue {
         val src   = """val zio = Lib("dev.zio", "zio", "2.1.26")

@@ -12,7 +12,10 @@ object Validation extends DocSpecSuite:
 
   def doc = page("Validation")(
     md"""
-zipx checks a lot, and *when* it checks is as much of the design as *what*. Three moments, earliest first:
+zipx fails early: a bad name fails compile or `zipxWorkflowGenerate`, not a green CI run that did the wrong thing. The
+rest of this page is the catalog of checks.
+
+Three moments, earliest first:
 
 ```mermaid
 flowchart LR

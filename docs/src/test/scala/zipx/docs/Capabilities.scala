@@ -11,13 +11,13 @@ object Capabilities extends DocSpecSuite:
 
   def doc = page("Capabilities")(
     md"""
-A **capability** is a pipeline stage. Built-ins default to **Aggregate**; Graph/Layer variants are explicit
-constructors. Test, publish, and docker are built-in; packs add paved Central / GitHub Packages / docs Pages / AWS
-login; you can also invent stages (see **Custom capabilities**).
+A **capability** is something CI should do: run tests, publish a library, build a docker image, deploy.
 
-Capabilities decide *what* runs. Execution mode and **Matrix collapse** decide *how many* Actions jobs appear for that
-stage. Bootstrap and AWS login always go through in-repo composites so the workflow YAML stays short (see **Overview**
-and **Action pins**).
+You already get test and publish. Add a pack when you want Maven Central, GitHub Pages, or AWS (see **Packs**). You
+can invent extra stages later (**Custom capabilities**).
+
+Execution mode and **Matrix collapse** decide how many GitHub jobs appear for a stage. Stay on Aggregate and you get
+one job per stage. Graph and Layer are opt-in; ignore them until one job is not enough.
 """,
     section("Built-ins")(
       md"""

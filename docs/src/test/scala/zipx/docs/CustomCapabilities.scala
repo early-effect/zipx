@@ -12,6 +12,9 @@ object CustomCapabilities extends DocSpecSuite:
 
   def doc = page("Custom capabilities")(
     md"""
+Skip until the built-in test / publish / docker jobs are not enough. This page is how you add a format check, or any
+other sbt task, as its own CI job.
+
 `zipxCapabilities` is append-able: any sbt task becomes a CI stage. Beyond the built-ins you mainly use
 `Capability.once` / `Capability.steps` / `Capability.custom`, or the typed `zipxTasks` / `cmd` helpers from the plugin.
 """,

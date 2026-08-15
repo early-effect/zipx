@@ -408,8 +408,11 @@ object MatrixCollapsePage extends DocSpec:
 
   def doc = page("Matrix collapse")(
     md"""
-**Matrix collapse** folds Graph module siblings (or Aggregate/Layer target siblings) into one GitHub Actions job with
-`strategy.matrix`, so the Actions UI shows one expandable node instead of a busy DAG.
+Skip until Graph (or many deploy environments) makes the GitHub Actions UI noisy. **Auto** is already on; you do not
+set this to get started.
+
+**Matrix collapse** folds look-alike jobs into one GitHub Actions job with `strategy.matrix`, so the UI shows one
+expandable node instead of a busy graph.
 
 Default is **Auto**. Modes:
 

@@ -13,9 +13,10 @@ object Verify extends DocSpecSuite:
 
   def doc = page("Verify")(
     md"""
-Verify is the test/build phase. Aggregate defaults to a root Once job; Layer and Graph use per-module (or per-wave)
-commands. Two settings configure the command for **all** modes. Path-based job skipping lives on the **Affected**
-page (Graph only, fail-open handoff, concurrency).
+Verify is the test job. Skip the rest of this page unless you need to change the test command or force a clean.
+
+On sbt 2, plain `sbt test` can skip suites it thinks are unaffected. zipx defaults to `testFull` so CI actually runs
+every suite. Path-based job skipping (only run jobs this PR touched) lives on **Affected**, and only in Graph mode.
 """,
     section("Test task and optional clean")(
       md"""

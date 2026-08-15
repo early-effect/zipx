@@ -17,9 +17,11 @@ object JobConditions extends DocSpecSuite:
 
   def doc = page("Job conditions")(
     md"""
-[[JobCondition]] is a typed AST for optional job `if:` filters (fork repo, PR label, branch, repo var, …).
-[[Gate]] is still the timeline (`Always` vs `OnReleaseTag`). The planner **ANDs** Gate clauses with capability and
-target conditions.
+Skip until you need a job to run only on some PRs (forks, labels, branches). Most jobs use the default timeline:
+tests always, publish on a version tag.
+
+[[JobCondition]] is a typed AST for optional job `if:` filters. [[Gate]] is still the timeline (`Always` vs
+`OnReleaseTag`). The planner **ANDs** Gate clauses with capability and target conditions.
 
 ```mermaid
 flowchart TD

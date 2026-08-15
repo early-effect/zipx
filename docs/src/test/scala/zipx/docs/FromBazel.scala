@@ -11,16 +11,15 @@ object FromBazel extends DocSpecSuite:
 
   def doc = page("From Bazel")(
     md"""
-If you adopted Bazel because sbt CI felt unsafe or slow, that impulse was understandable. Many teams found peace in
-hermeticity talk and remote cache, then discovered a quieter cost: a **second graph** in BUILD files while Scala
-engineers still thought in modules and `dependsOn`.
+Skip unless you are leaving Bazel. If you adopted Bazel because sbt CI felt unsafe or slow, that impulse was
+understandable. Many teams found peace in hermeticity talk and remote cache, then discovered a quieter cost: a
+**second graph** in BUILD files while Scala engineers still thought in modules and `dependsOn`.
 
-zipx is not Bazel-parity, and it does not ask you to pretend the second graph never happened. It offers a **different
-strategy** for teams that already have the truth in sbt: one graph, generated CI, content-addressed reuse. Keep the
-vocabulary you learned; leave the duplicate edges behind.
+zipx is not Bazel-parity. It offers a **different strategy** for teams that already have the truth in sbt: one graph,
+generated CI, content-addressed reuse. Keep the vocabulary you learned; leave the duplicate edges behind.
 
-For the broader recovery story (disconnected CI and acceleration layers), see **Why zipx**. For shared digests across
-laptops, see **Remote cache for teams**.
+For the broader story (hand-written YAML and cache products), see **Why zipx**. For shared digests across laptops, see
+**Remote cache for teams**.
 """,
     section("Shared vocabulary, kinder boundaries")(
       md"""

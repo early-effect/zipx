@@ -5,23 +5,17 @@ import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zio.test.*
 
-/** Aggregate, Layer, and Graph: the main CI-cost lever. */
+/** Aggregate, Layer, and Graph: stay on Aggregate until you have a reason not to. */
 object ExecutionModes extends DocSpecSuite:
 
   def doc = page("Execution modes")(
     md"""
-**This is the main CI cost and isolation lever.** Aggregate is not "rebuild the world in one job." On sbt 2.x, a root
-`.aggregate` `sbt test` already parallelizes independent subprojects, incrementally recompiles only invalidated
-sources, and reruns only suites that failed, are new, or transitively depend on recompiled code (including code in
-another project). Task results are content-addressed and **survive JVM restarts**: sbt's machine-wide cache, plus
-zipx's **epoch-keyed** CI restore (`zipxCacheEpoch`), means a cold runner still hits prior task/test results across
-pushes in the same epoch. Remote cache backends push that reuse across machines. You get a large share of "don't redo
-unaffected work" from **one Aggregate job**, without paying for N runners. Pair that with a CI-hydrated remote cache
-so teammate laptops share the same digests (see **Remote cache for teams**).
+**Stay on Aggregate unless you have a reason not to.** That is the default: one test job, one publish job. It is
+enough for most libraries and for many multi-module repos.
 
-Graph mode buys a different kind of selectivity: path-based **affected** gating, per-module `needs`, Scala matrix
-isolation, and independent logs/statuses. Pick Graph when the **workflow** needs those boundaries, not merely to avoid
-compile/test work that sbt (and the restored/remote cache) can already skip.
+GitHub Actions charges per job and per minute. More jobs means more YAML to review and more checks to keep green.
+Aggregate is how zipx keeps CI cheaper and calmer. Escalate to Layer or Graph only when the **workflow** needs extra
+boundaries (ordered waves, per-module status, path-based skipping). Those modes are documented below.
 
 | Mode | Test / publish / docker | Deploy | Best for |
 |---|---|---|---|
@@ -29,6 +23,22 @@ compile/test work that sbt (and the restored/remote cache) can already skip.
 | **Layer** | 1 per toposort wave | **1 per wave × Target** (Aggregate-by-target per wave) | Ordered waves without N JVMs; per-env approval without Graph's module×target cost |
 | **Graph** | 1 per module (± matrix / targets) | 1 per module × Target | Per-module / multi-env boundaries; path gating; matrices |
 """,
+    section("Why one job is not slow")(
+      md"""
+Aggregate is not "rebuild the world in one job." On sbt 2.x, a root `.aggregate` `sbt test` already parallelizes
+independent subprojects, incrementally recompiles only invalidated sources, and reruns only suites that failed, are
+new, or transitively depend on recompiled code (including code in another project). Task results are content-addressed
+and **survive JVM restarts**: sbt's machine-wide cache, plus zipx's **epoch-keyed** CI restore (`zipxCacheEpoch`),
+means a cold runner still hits prior task/test results across pushes in the same epoch. Remote cache backends push
+that reuse across machines. You get a large share of "don't redo unaffected work" from **one Aggregate job**, without
+paying for N runners. Pair that with a CI-hydrated remote cache so teammate laptops share the same digests (see
+**Remote cache for teams**).
+
+Graph mode buys a different kind of selectivity: path-based **affected** gating, per-module `needs`, Scala matrix
+isolation, and independent logs/statuses. Pick Graph when the **workflow** needs those boundaries, not merely to avoid
+compile/test work that sbt (and the restored/remote cache) can already skip.
+"""
+    ),
     section("Two kinds of affected")(
       md"""
 sbt and zipx answer different questions:

@@ -8,6 +8,8 @@ object Developing extends DocSpecSuite:
 
   def doc = page("Developing")(
     md"""
+This page is for people hacking on **zipx itself**, not for adopting it in your repo. Start at **Quick start**.
+
 The **root** build loads zipx from **source** via a meta-build mirror (`project/dogfood.sbt`), not via `publishLocal`.
 """,
     section("Dogfood layout")(

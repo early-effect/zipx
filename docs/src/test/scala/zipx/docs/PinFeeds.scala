@@ -20,44 +20,43 @@ object PinFeeds extends DocSpecSuite:
 
   def doc = page("Pin feeds")(
     md"""
-Dependabot sees SHA-pinned GitHub Actions. Scala Steward sees Maven GAVs. Neither sees a `spliceLibs`-shaped pin
-(CDN URL + sha256, a GitHub tarball tag, a vendor file). **Pin feeds** are the machine for everything else.
+Skip until you pin something that is not a Maven library and not a GitHub Action: a CDN URL plus a checksum, a
+tarball tag, a file you vendor into the repo.
+
+GitHub's Dependabot can bump SHA-pinned Actions in generated workflows. Library and plugin versions live in the
+catalog (`Lib` / `Plugin`, bumped with `zipxDepUpdate`). **Pin feeds** are the machine for the rest.
 
 zipx owns topology and Ignore / Report / Update policy. The build owns inventory, version strategy, lookup, and apply.
-zipx does not depend on sbt-splice; the first real feed lives in that repo.
 """,
     section("Why a feed")(
       md"""
-A wrapper that vendors JS bytes has no `package.json`. Dependabot never opens a PR when `lib-a` gets a CVE. A third
-one-off bot would repeat the Steward/Dependabot split badly. A feed is the same split those two already use: zipx
-schedules and gates; the build knows how to name and rewrite the pin.
+A repo that vendors JS bytes has no `package.json`. Dependabot never opens a PR when `lib-a` gets a CVE. A third
+one-off bot would repeat the catalog and Dependabot split badly. A feed is the same split: zipx schedules and gates;
+the build knows how to name and rewrite the pin.
 """
     ),
     section("Who owns what")(
       md"""
 ```mermaid
 flowchart LR
-  subgraph zipxOwns [zipx owns]
-    Cap["Capability.pinCheck"]
-    WF[scheduled companion]
-    Snap[snapshot companion]
-    Pol[PinAction and PinPrGate]
+  subgraph z [zipx]
+    direction TB
+    z1[schedule and gate]
+    z2[Ignore, Report, Update]
+    z3[query OSV]
   end
-  subgraph feedOwns [feed owns]
-    Inv[inventory]
-    VS[VersionStrategy]
-    Look[lookup and apply]
-    Purl[PURL naming]
+  subgraph f [your feed]
+    direction TB
+    f1[list the pins]
+    f2[lookup latest]
+    f3[apply the bump]
+    f4[name a PURL]
   end
-  Build[consumer build.sbt] --> feedOwns
-  Build --> Cap
-  feedOwns --> Engine[PinEngine]
-  zipxOwns --> Engine
 ```
 
-Outdated ("is there a newer version?") is the feed's lookup plus a `VersionStrategy` (`npm` or `exact`). Advisory
-("does this version have a CVE?") is a PURL the feed names and OSV zipx queries. Apply is always the feed: zipx never
-edits a CDN URL itself.
+Three questions, split that way. **Outdated** (is there a newer version?) is the feed's lookup plus a `VersionStrategy`
+(`npm` or `exact`). **Advisory** (does this version have a CVE?) is a PURL the feed names and OSV zipx queries.
+**Apply** is always the feed: zipx never edits a CDN URL itself. Jobs and companion files are the next section.
 """
     ),
     section("What runs where")(
@@ -66,20 +65,21 @@ edits a CDN URL itself.
 flowchart TD
   PR[pull_request] --> Cap["ci.yml job pin-check"]
   Cap --> PrTask["sbt zipxPinCheckPr"]
-  Cron[weekly plus dispatch] --> Comp["zipx-pin-check.yml"]
+  Sched[scheduled plus dispatch] --> Comp["zipx-pin-check.yml"]
   Comp --> Check["sbt zipxPinCheck"]
   Push[push to default branch] --> Snap["zipx-pin-snapshot.yml"]
   Snap --> Submit["sbt zipxPinSubmit"]
 ```
 
-The PR job is a builtin **Once** capability (`Capability.pinCheck`). Cron cannot live on `ci.yml` or it would weekly-run
-test and publish. Snapshot submit is `contents: write` and must not run on a PR (that pollutes the Security tab).
+The PR job is a builtin **Once** capability (`Capability.pinCheck`). Cron cannot live on `ci.yml` or it would also run
+test and publish on that schedule. Snapshot submit is `contents: write` and must not run on a PR (that pollutes the
+Security tab).
 """
     ),
     section("Register a feed, alert-only")(
       md"""
-Conservative defaults: `outdated = Ignore`, `advisory = Report`, `submitSnapshot = false`. That is the wrapper-friendly
-policy: do not auto-bump, do fail a PR that pins a known CVE.
+Conservative defaults: `outdated = Ignore`, `advisory = Report`, `submitSnapshot = false`. Do not auto-bump; do fail a
+PR that pins a known CVE.
 
 ```scala
 zipxPinFeeds += PinFeed(
@@ -160,8 +160,14 @@ Public-ecosystem PURLs (`pkg:npm/...`, `pkg:maven/...`) are the ones the gate is
     ),
     section("Scheduled outdated / Update")(
       md"""
-`.github/workflows/zipx-pin-check.yml` is weekly plus `workflow_dispatch`. `sbt zipxPinCheck` runs lookup + OSV.
-`Update` applies through the feed and opens one PR (`zipx/pin-updates`). The `pin-check` capability never applies.
+`.github/workflows/zipx-pin-check.yml` is scheduled plus `workflow_dispatch` (default Sunday 00:00 UTC).
+`sbt zipxPinCheck` runs lookup + OSV.
+When some feed uses `Update`, the companion is `contents: write` and `pull-requests: write`, checks out with
+`GITHUB_TOKEN`, applies through the feed, and `gh pr create`s `zipx/pin-updates` as `github-actions[bot]`. Alert-only
+stays `contents: read` and never opens a PR. The `pin-check` capability never applies.
+
+**Required repo/org setting** (same as Steward, only needed for `Update`): [Allow GitHub Actions to create and
+approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).
 """,
       exampleValue {
         PinCheckWorkflow.render(ActionPins.Defaults, "21", "ubuntu-latest", hasUpdate = true).yaml
@@ -170,14 +176,16 @@ Public-ecosystem PURLs (`pkg:npm/...`, `pkg:maven/...`) are the ones the gate is
           yaml.contains("workflow_dispatch"),
           yaml.contains("sbt zipxPinCheck"),
           yaml.contains("zipx/pin-updates") || yaml.contains("gh pr create"),
+          yaml.contains("contents: write") || yaml.contains("contents:write"),
+          yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write"),
           yaml.indexOf(ActionPins.Defaults.checkout.unwrap) < yaml.indexOf("sbt zipxPinCheck"),
         )
       ),
     ),
     section("Local update with approval")(
       md"""
-Alert-only is the default (`outdated = Ignore`), so the scheduled companion will not rewrite pins. Before a PR you can
-still bump locally, with eyes on:
+The usual path is local, then **you** open the PR. Alert-only is the default (`outdated = Ignore`), so the scheduled
+job will not rewrite pins for you. See **Dependency updates** for the same loop next to catalog bumps.
 
 ```text
 sbt zipxPinUpdate           # list, then prompt Apply N pin update(s)? [y/N]
@@ -185,8 +193,9 @@ sbt "zipxPinUpdate yes"     # apply every listed bump (scripts)
 sbt "zipxPinUpdate dry-run" # list only
 ```
 
-`zipxPinUpdate` always looks up latest, ignoring `PinAction`. Apply still goes through the feed (version and hash
-together). With no TTY, a bare `zipxPinUpdate` lists and stops; pass `yes` to apply. This is not a CI job.
+`zipxPinUpdate` always looks up latest, even when the feed is alert-only. Apply still goes through the feed (version
+and hash together). `yes` applies every listed bump. With no terminal, a bare command lists and stops. This is not a
+CI job: after apply, commit and open a pull request yourself.
 """,
       exampleValue {
         PinEngine
@@ -221,23 +230,22 @@ Snapshot never runs on a PR.
         )
       ),
     ),
-    section("Two ecosystems in one wrapper repo")(
+    section("Maven is the versions catalog")(
       md"""
 ```mermaid
 flowchart LR
-  subgraph scalaSide [Scala]
-    St[zipxScalaSteward]
+  subgraph maven [Maven and sbt]
+    Cat[ZipxVersions]
+    Loc[zipxDepUpdate]
   end
-  subgraph jsSide [JS pins]
+  subgraph other [no Maven coordinate]
     Pf[PinFeed]
   end
-  Repo[wrapper repo] --> St
-  Repo --> Pf
 ```
 
-Scala.js, ZIO, the wrapper artifact: Scala Steward. JS bytes with no `package.json`: a pin feed. sbt-splice is the
-first real feed, implemented in that repo, not here. zipx core tests use synthetic ids (`lib-a` / `1.2.3`), never a
-named CDN library.
+You own library and plugin versions in `project/ZipxVersions.scala`. Bump them locally with `zipxDepUpdate`, then open
+a PR; see **Versions** and **Dependency updates**. A pin feed is only for pins that have no Maven coordinate: a CDN
+URL plus a checksum, a tarball tag, a file you vendor into the repo.
 """
     ),
   )

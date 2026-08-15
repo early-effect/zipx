@@ -11,18 +11,20 @@ object RemoteCacheForTeams extends DocSpecSuite:
 
   def doc = page("Remote cache for teams")(
     md"""
-**CI should make local builds faster, not only green checks.** On sbt 2.x, task and test results are content-addressed
-and remote-ready. When zipx CI runs `sbt test` (or publish) against a shared remote cache, it **hydrates** digests for
-the commits your team already built. The next laptop (or the next PR job) downloads those results instead of
-recompiling and retesting the same bytecode.
+Skip until CI is green and you want local builds to reuse what CI already compiled. **CI should make local builds
+faster, not only green checks.**
 
-That reverses a familiar monorepo bruise: every morning you pull a dozen teammates' changes and spend the first hour
-building *their* code. With a CI-hydrated cache, most of that work is already a hit. See
+On sbt 2.x, task and test results are content-addressed and remote-ready. When zipx CI runs `sbt test` (or publish)
+against a shared remote cache, it **hydrates** digests for the commits your team already built. The next laptop (or
+the next PR job) downloads those results instead of recompiling and retesting the same bytecode.
+
+That reverses a familiar bruise: every morning you pull a dozen teammates' changes and spend the first hour building
+*their* code. With a CI-hydrated cache, most of that work is already a hit. See
 [sbt's caching overview](https://www.scala-sbt.org/2.x/docs/en/concepts/caching.html) for the pure-function mental
 model; here is the zipx / team angle.
 
-Remote cache is necessary but not the whole recovery. Topology (jobs, `needs`, gates) still comes from the sbt graph.
-A cache product alone can leave disconnected CI as a second source of truth (see **Why zipx**). We want both: shared
+Remote cache is not a substitute for generated CI. Topology (jobs, order, gates) still comes from the sbt graph. A
+cache product alone can leave hand-written YAML as a second source of truth (see **Why zipx**). We want both: shared
 digests *and* an honest graph.
 """,
     section("What we claim / what we do not")(

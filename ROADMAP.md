@@ -72,8 +72,8 @@ snapshots pollute the Security tab). Local `zipxPinUpdate` lists outdated pins a
 
 Typed `Lib` / `Plugin` rows in `project/ZipxVersions.scala`. `zipxWorkflowGenerate` writes `project/plugins.sbt` and
 `project/build.properties`; `zipxCheckDeps` fails generate when `libraryDependencies` contain a GAV that is not a `Lib`
-row. Local `zipxDepUpdate` looks up Maven metadata and rewrites constructors after approval. Scala Steward stays the CI
-bot. Not an M12 item.
+row. Local `zipxDepUpdate` looks up Maven metadata and rewrites constructors after approval. You own the catalog;
+Scala Steward is optional leftover automation, not required. Not an M12 item.
 
 ### Design guardrails
 

@@ -11,11 +11,13 @@ object Caching extends DocSpecSuite:
 
   def doc = page("Caching")(
     md"""
-sbt 2.x caches task results **across JVM runs** (content-addressed, machine-wide; remote backends also share declared
-outputs). That is why Aggregate stays cheap on a cold CI runner: zipx restores the cache before `sbt test`, keyed by a
-**commit-stable epoch** (`zipxCacheEpoch`, default `CacheEpoch.GitTags()`). Every push within a PR reuses prior hits;
-cutting a release tag rolls the epoch **without regenerating** `ci.yml`. Remote backends make the same story stronger
-across machines, including **developer laptops** when CI hydrates a shared store (see **Remote cache for teams**).
+zipx restores sbt's cache on the CI runner so the test job does not start from zero every time. You can ignore the
+knobs on this page until CI feels slow.
+
+sbt 2 caches task results **across JVM runs**. zipx restores that cache before `sbt test`, keyed by a **commit-stable
+epoch** (`zipxCacheEpoch`, default `CacheEpoch.GitTags()`). Every push within a PR reuses prior hits; cutting a
+release tag rolls the epoch **without regenerating** `ci.yml`. Remote backends share the same hits across machines,
+including developer laptops when CI hydrates a shared store (see **Remote cache for teams**).
 This pairs with [`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci).
 
 ```mermaid

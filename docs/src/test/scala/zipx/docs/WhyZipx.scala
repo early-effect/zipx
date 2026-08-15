@@ -6,25 +6,26 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zio.test.*
 
-/** Positioning hub: strategy and ergonomics, not Bazel-parity or another cache appliance. */
+/** Positioning: one sbt graph, generated Actions, no second YAML copy. */
 object WhyZipx extends DocSpecSuite:
 
   def doc = page("Why zipx")(
     md"""
-If your team has lived through hand-maintained CI matrices, a second BUILD graph, or a cache product that made
-**tasks** faster while **humans** still juggled two sources of truth: you are in the right place.
+Hand-written GitHub Actions YAML is a second copy of your build: module lists, job order, JDK setup. It drifts. zipx
+generates that YAML from `build.sbt` so CI stays honest without you learning a second language.
 
-zipx is not “almost Bazel,” and it is not another acceleration appliance bolted onto an opaque build. It is a gentler
-path home: **one sbt graph** becomes generated GitHub Actions, with sbt 2’s content-addressed cache along for the ride.
-Speed follows. The headline is **ergonomics**: fewer things to read, sync, and apologize for in review.
+If you are new to CI, **Quick start** is enough. Come back here when you want the "why," or when you already maintain
+a painful workflow.
 
-When you are ready for the migration stories, see **From Bazel**, **Caching**, and **Remote cache for teams**. Live
-Put/Get is proven by `RemoteCacheItSpec` (same `RemoteCacheProof` pins as the YAML examples here).
+If your team has lived through hand-maintained job lists, a second BUILD graph, or a cache product that made **tasks**
+faster while **humans** still juggled two sources of truth: the rest of this page is the recovery story.
+
+When you are ready for those migration stories, see **From Bazel**, **Caching**, and **Remote cache for teams**.
 """,
     section("Three paths, one that heals")(
       md"""
 Most teams we meet are somewhere on this triangle. None of the first two are foolish; they were reasonable responses
-to real pain. zipx is the recovery path that keeps your Scala mental model intact.
+to real pain. zipx is the path that keeps your Scala mental model: one `build.sbt`, generated CI.
 
 ```mermaid
 flowchart TD

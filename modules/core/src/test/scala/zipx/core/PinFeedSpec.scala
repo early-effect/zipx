@@ -341,7 +341,7 @@ object PinFeedSpec extends ZIOSpecDefault:
           PinFeeds.emitSnapshot(snap),
         )
       },
-      test("check companion always has weekly cron, dispatch, and checkout before sbt") {
+      test("check companion always has a schedule, dispatch, and checkout before sbt") {
         check(Gen.boolean) { hasUpdate =>
           val yaml       = PinCheckWorkflow.render(ActionPins.Defaults, "21", "ubuntu-latest", hasUpdate).yaml
           val checkoutAt = yaml.indexOf(ActionPins.Defaults.checkout.unwrap)
@@ -352,6 +352,8 @@ object PinFeedSpec extends ZIOSpecDefault:
             checkoutAt >= 0,
             sbtAt > checkoutAt,
             hasUpdate == yaml.contains("gh pr create"),
+            hasUpdate == (yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write")),
+            hasUpdate == yaml.contains("secrets.GITHUB_TOKEN"),
           )
         }
       },

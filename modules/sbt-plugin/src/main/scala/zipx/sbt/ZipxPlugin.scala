@@ -943,7 +943,7 @@ object ZipxPlugin extends AutoPlugin:
           case "yes" | "--yes"         => true
           case "dry-run" | "--dry-run" => false
           case ""                      =>
-            confirmPinUpdates(bumps.size) match
+            confirmUpdates(bumps.size, "pin update(s)") match
               case None =>
                 log.info("zipx: no TTY; pass 'yes' to apply, or 'dry-run' to list only.")
                 false
@@ -958,9 +958,9 @@ object ZipxPlugin extends AutoPlugin:
     }
 
   /** `Some(true)` if the operator confirmed, `Some(false)` if they declined, `None` if there is no console to ask. */
-  private def confirmPinUpdates(n: Int): Option[Boolean] =
+  private def confirmUpdates(n: Int, what: String): Option[Boolean] =
     Option(System.console()).map { console =>
-      val line = Option(console.readLine(s"Apply $n pin update(s)? [y/N] ")).getOrElse("").trim
+      val line = Option(console.readLine(s"Apply $n $what? [y/N] ")).getOrElse("").trim
       line.equalsIgnoreCase("y") || line.equalsIgnoreCase("yes")
     }
 
@@ -1257,7 +1257,7 @@ object ZipxPlugin extends AutoPlugin:
             case "yes" | "--yes"         => true
             case "dry-run" | "--dry-run" => false
             case ""                      =>
-              confirmPinUpdates(bumps.size) match
+              confirmUpdates(bumps.size, "catalog update(s)") match
                 case None =>
                   log.info("zipx: no TTY; pass 'yes' to apply, or 'dry-run' to list only.")
                   false

@@ -42,17 +42,14 @@ object BuildSite extends DocsSite:
     branded.copy(
       clientScript = Some("assets/client.js"),
       summaryMarkdown = Some(
-        s"""**zipx** generates GitHub Actions from your real sbt graph. Aggregate-first works for libraries *and*
-multi-service monorepos; Layer/Graph when you need waves, per-module isolation, or multi-environment deploys.
+        s"""**zipx** generates GitHub Actions from your sbt build. You keep writing `build.sbt`. zipx writes the
+workflow, so you do not maintain a second copy in YAML.
 
-Typed capabilities cover test, Central, GitHub Packages, docs Pages, docker, deploy, and stages you invent. Generated
-CI stays reviewable by default: in-repo composites (`.github/actions/zipx-*`) parameterize JDK/sbt/cache bootstrap and
-AWS login (checkout remains a prior workflow step), and
-`MatrixCollapse.Auto` folds safe Graph / target fan-out into one matrix job. SHA-pinned actions, affected-only Graph
-PRs, commit-stable caching, and `zipxWorkflowCheck` keep the committed YAML honest.
+Day one is Aggregate: one test job, a publish job on a version tag. Add the plugin, run `zipxWorkflowGenerate`, commit,
+open a PR. `zipxWorkflowCheck` fails the PR if you forgot to regenerate.
 
-If you have maintained a second copy of the build (disconnected CI or a restated Bazel graph), start with **Why zipx**:
-a kinder path back to one honest graph. The power is for every Scala team on Actions, and especially monorepos.
+Later pages cover extra jobs (Graph, docker, deploy), packs (Central, Pages, AWS), and version bumps. Skip them until
+you need them. If you already maintain painful CI YAML, **Why zipx** is the recovery story.
 
 Guide: Why zipx → Quick start → Execution modes → Matrix collapse → Capabilities → Custom capabilities → Composing sbt
 commands → Shell and steps → Verify → Affected → Caching → Remote cache for teams → From Bazel → Action pins →
