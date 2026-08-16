@@ -52,3 +52,4 @@ jobs:
           git commit -m "ci: zipx version updates"
           git push -u origin HEAD
           gh pr create --title "ci: zipx version updates" --body "Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate." --head zipx/version-updates || true
+
