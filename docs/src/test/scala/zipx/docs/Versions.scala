@@ -207,7 +207,8 @@ The catalog file lives under `project/`, so it is part of the build definition. 
 fresh sbt) before you generate. The scheduled job starts a new sbt for `zipxCatalogGenerate`, so it does not need
 `reload`. If a `Plugin`, `zipxSbt`, `zipxScala`, or Action version moved, catalog generate rewrites `plugins.sbt` /
 `build.properties` / composites / `zipx-ci.env`. It does not rewrite `.github/workflows/` (`GITHUB_TOKEN` cannot push
-those files). Use `zipxWorkflowGenerate` when `ci.yml` itself must move. See **Dependency updates**.
+those files). Nested example YAML can still land on the PR via `zipxVersionUpdatesExtraSteps`. Use
+`zipxWorkflowGenerate` when root `ci.yml` itself must move. See **Dependency updates**.
 
 Apply rewrites `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` and
 `Action("owner/repo", "from", sha = "…")` so version and git SHA move together. `.mod` copies share the parent version

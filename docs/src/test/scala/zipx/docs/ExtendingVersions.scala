@@ -260,6 +260,14 @@ and keeps the loaded version. The PR they open is still `plugins.sbt`:
         )
       ),
     ),
+    section("Nested example on the catalog PR")(
+      md"""
+If this plugin repo has a nested consumer example whose generated `ci.yml` must track Action peels, set
+`zipxVersionUpdatesExtraSteps`: `publishLocal` the in-dev plugin, then `zipxWorkflowGenerate` in that tree. Nested
+`.github/workflows/` is not repo-root, so the bot can commit it. Root `ci.yml` still needs a human generate. Full
+recipe: **Dependency updates**.
+"""
+    ),
   )
 
   private def bundleCatalogPrDiff =
