@@ -156,7 +156,7 @@ object ZipxSettings:
       SettingName("zipxVersionUpdates"),
       true,
       SettingPurpose(
-        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, applies zipxDepUpdate / zipxActionUpdate / zipxPinUpdate, zipxCatalogGenerate, opens zipx/version-updates-$GITHUB_RUN_ID labeled clean. Commits everything except .github/workflows. Default true. false deletes the companion."
+        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, applies zipxDepUpdate / zipxActionUpdate / zipxPinUpdate, zipxCatalogGenerate, opens zipx/version-updates-$GITHUB_RUN_ID labeled clean. Commits everything except repo-root .github/workflows. Nested extra generate is zipxVersionUpdatesExtraSteps. Default true. false deletes the companion."
       ),
       Build,
     )
@@ -167,6 +167,16 @@ object ZipxSettings:
       VersionUpdatesWorkflow.DefaultSchedule,
       SettingPurpose(
         "Cron for zipx-version-updates.yml. Default Sunday 00:00 UTC. Use Cron.daily / Cron.weekly / Cron.raw."
+      ),
+      Build,
+    )
+
+  val versionUpdatesExtraSteps: SettingDef[Seq[zipx.workflow.Step]] =
+    SettingDef.setting(
+      SettingName("zipxVersionUpdatesExtraSteps"),
+      Seq.empty,
+      SettingPurpose(
+        "Extra steps on the version-updates companion after zipxCatalogGenerate and before opening the PR (default empty). Nested example generate belongs here: examples/monorepo/.github/workflows/ is not repo-root, so GITHUB_TOKEN can commit that ci.yml."
       ),
       Build,
     )
@@ -581,6 +591,7 @@ object ZipxSettings:
     leftoverSteward,
     versionUpdates,
     versionUpdatesSchedule,
+    versionUpdatesExtraSteps,
     pinFeeds,
     pinPrGate,
     preRelease,

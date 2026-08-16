@@ -185,8 +185,9 @@ drops that catalog line and keeps the loaded version.
       md"""
 The scheduled companion `.github/workflows/zipx-version-updates.yml` (`zipxVersionUpdates`, default true) applies
 `zipxDepUpdate yes`, `zipxActionUpdate yes`, and `zipxPinUpdate yes`, then `zipxCatalogGenerate` (not workflow YAML),
-and opens `zipx/version-updates-${'$'}GITHUB_RUN_ID` (labeled `clean`). That PR is these constructor hunks. You can run the
-same apply locally:
+and opens `zipx/version-updates-${'$'}GITHUB_RUN_ID` (labeled `clean`). That PR is these constructor hunks. If
+`zipxWorkflowCheck` fails on `ci.yml`, the PR body names that branch and the `sbt zipxWorkflowGenerate` / `git` commands
+to push workflow YAML onto it (the bot cannot). You can run the same apply locally:
 
 ```text
 sbt zipxDepUpdate             # list, then prompt Apply N catalog update(s)? [y/N]

@@ -43,6 +43,18 @@ jobs:
           sbt "zipxPinUpdate yes"
           sbt zipxCatalogGenerate
 
+      - name: Publish zipx locally
+        run: |
+          set -euo pipefail
+          sbt 'publishLocal; zipxWriteVersion'
+      - name: Generate example workflow
+        run: |
+          set -euo pipefail
+          test -f "../../target/zipx-version.txt"
+          ZIPX_VERSION=$(cat "../../target/zipx-version.txt")
+          echo "Generating examples/monorepo against zipx $ZIPX_VERSION"
+          sbt "-Dzipx.version=$ZIPX_VERSION" 'zipxWorkflowGenerate'
+        working-directory: examples/monorepo
       - name: Open update PR
         run: |
           if [ -z "$(git status --porcelain)" ]; then
@@ -60,5 +72,25 @@ jobs:
           git commit -m "ci: zipx version updates"
           git push -u origin HEAD
           gh label create clean --force --description "zipx: Verify runs cleanFull" || true
-          gh pr create --title "ci: zipx version updates" --body "Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate." --head "zipx/version-updates-${GITHUB_RUN_ID}" --label clean || true
+          cat > /tmp/zipx-pr-body.md <<EOF
+          Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate.
+
+          ## Repo-root workflow YAML is not in this PR
+
+          The bot cannot push repo-root .github/workflows/ (GITHUB_TOKEN has no workflows permission). Composites under .github/actions/ are already in this commit. Nested example YAML (examples/monorepo/.github/, including that tree's ci.yml) is also in this commit when the companion regenerated it.
+
+          If zipxWorkflowCheck fails on repo-root ci.yml (typical after an Action pin bump, especially checkout), regenerate workflows on this PR branch and push. Do not commit those files to main.
+
+          From a clone of this repo:
+
+              git fetch origin zipx/version-updates-${GITHUB_RUN_ID}
+              git checkout zipx/version-updates-${GITHUB_RUN_ID}
+              sbt zipxWorkflowGenerate
+              git add .github/workflows
+              git commit -m "ci: regenerate workflows"
+              git push origin zipx/version-updates-${GITHUB_RUN_ID}
+
+          The PR branch is zipx/version-updates-${GITHUB_RUN_ID}.
+          EOF
+          gh pr create --title "ci: zipx version updates" --body-file /tmp/zipx-pr-body.md --head "zipx/version-updates-${GITHUB_RUN_ID}" --label clean || true
 

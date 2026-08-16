@@ -2,7 +2,8 @@ package zipx.core
 
 import neotype.unwrap
 import zipx.core.Rendered.yaml
-import zipx.workflow.ActionRef
+import zipx.shell.{Exec, Script, Word}
+import zipx.workflow.{ActionRef, Step}
 import zio.test.*
 
 object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
@@ -30,8 +31,11 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
       val actionAt   = yaml.indexOf("zipxActionUpdate yes")
       val pinAt      = yaml.indexOf("zipxPinUpdate yes")
       val genAt      = yaml.indexOf("zipxCatalogGenerate", pinAt)
+      val applyAt    = yaml.indexOf("Apply catalog updates")
+      val openAt     = yaml.indexOf("Open update PR")
       val addAt      = yaml.indexOf(":!.github/workflows")
-      val prAt       = yaml.indexOf("gh pr create", addAt)
+      val hintAt     = yaml.indexOf("sbt zipxWorkflowGenerate", openAt)
+      val prAt       = yaml.indexOf("gh pr create", hintAt)
       assertTrue(
         yaml.contains("workflow_dispatch"),
         yaml.contains("cron:") && (yaml.contains("0 0 * * 0") || yaml.contains("\"0 0 * * 0\"")),
@@ -41,7 +45,14 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         !yaml.contains("git add -A"),
         yaml.contains("git add --all"),
         yaml.contains("sbt zipxCatalogGenerate"),
-        yaml.indexOf("zipxWorkflowGenerate") == yaml.lastIndexOf("zipxWorkflowGenerate"),
+        yaml.contains("--body-file"),
+        yaml.contains("git fetch origin zipx/version-updates-${GITHUB_RUN_ID}"),
+        yaml.contains("git checkout zipx/version-updates-${GITHUB_RUN_ID}"),
+        yaml.contains("git add .github/workflows"),
+        yaml.contains("git push origin zipx/version-updates-${GITHUB_RUN_ID}"),
+        // Apply runs catalog generate only. The workflow-generate string after Open update PR is the PR-body hint
+        // (the generated-file header is the other mention), never a companion apply step.
+        hintAt > openAt,
         !yaml.contains(ActionPins.Defaults.checkout.unwrap),
         yaml.contains("zipx/version-updates-${GITHUB_RUN_ID}"),
         yaml.contains("gh label create"),
@@ -55,8 +66,30 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         actionAt > depAt,
         pinAt > actionAt,
         genAt > pinAt,
-        addAt > genAt,
-        prAt > addAt,
+        applyAt >= 0,
+        openAt > applyAt,
+        addAt > openAt,
+        hintAt > addAt,
+        prAt > hintAt,
+      )
+    },
+    test("extra steps run after catalog generate and can regenerate a nested example") {
+      val extra = List(
+        Step
+          .run(Script.strict(Exec("echo", Word.quoted("nested"))))
+          .named("Generate example workflow")
+          .in("examples/monorepo")
+          .build
+      )
+      val yaml    = VersionUpdatesWorkflow.render(ActionPins.Defaults, extraSteps = extra).yaml
+      val applyAt = yaml.indexOf("Apply catalog updates")
+      val extraAt = yaml.indexOf("Generate example workflow")
+      val openAt  = yaml.indexOf("Open update PR")
+      assertTrue(
+        extraAt > applyAt,
+        extraAt < openAt,
+        yaml.contains("working-directory: examples/monorepo") || yaml.contains("working-directory:"),
+        yaml.contains("zipxCatalogGenerate"),
       )
     },
   )
