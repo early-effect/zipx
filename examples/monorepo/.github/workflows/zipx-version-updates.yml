@@ -63,11 +63,11 @@ jobs:
           cat > /tmp/zipx-pr-body.md <<EOF
           Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate.
 
-          ## Workflow YAML is not in this PR
+          ## Repo-root workflow YAML is not in this PR
 
-          The bot cannot push .github/workflows/ (GITHUB_TOKEN has no workflows permission). Composites under .github/actions/ are already in this commit.
+          The bot cannot push repo-root .github/workflows/ (GITHUB_TOKEN has no workflows permission). Composites under .github/actions/ are already in this commit. Nested example YAML (examples/monorepo/.github/, including that tree's ci.yml) is also in this commit when the companion regenerated it.
 
-          If zipxWorkflowCheck fails on ci.yml (typical after an Action pin bump, especially checkout), regenerate workflows on this PR branch and push. Do not commit those files to main.
+          If zipxWorkflowCheck fails on repo-root ci.yml (typical after an Action pin bump, especially checkout), regenerate workflows on this PR branch and push. Do not commit those files to main.
 
           From a clone of this repo:
 
