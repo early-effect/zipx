@@ -1,0 +1,6 @@
+# Same JVM flags as the zipx repo root .sbtopts. This example is its own sbt build.
+
+-J-XX:+IgnoreUnrecognizedVMOptions
+-J--add-opens=java.base/sun.misc=ALL-UNNAMED
+-J--sun-misc-unsafe-memory-access=allow
+-J--enable-native-access=ALL-UNNAMED

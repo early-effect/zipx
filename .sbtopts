@@ -1,6 +1,12 @@
-# JVM options for sbt to suppress warnings from transitive dependencies we cannot fix:
-# - sun.misc.Unsafe::objectFieldOffset called by scala.runtime.LazyVals$ (sbt-launch)
-# - java.lang.System::load called by com.sun.jna.Native (JNA used by sbt)
+# JVM options for sbt. These cannot be fixed in our sources:
+# - JDK 24+ JEP 498: scala.runtime.LazyVals$ still calls sun.misc.Unsafe::objectFieldOffset
+#   (Scala 3.8 uses VarHandles for new code; sbt-launch and older jars still hit LazyVals$).
+# - JNA: java.lang.System::load from com.sun.jna.Native
+#
+# IgnoreUnrecognizedVMOptions keeps this file loadable on JDK 21, which does not know
+# --sun-misc-unsafe-memory-access. Put it first.
 
+-J-XX:+IgnoreUnrecognizedVMOptions
 -J--add-opens=java.base/sun.misc=ALL-UNNAMED
+-J--sun-misc-unsafe-memory-access=allow
 -J--enable-native-access=ALL-UNNAMED

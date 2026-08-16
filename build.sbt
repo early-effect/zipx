@@ -169,7 +169,9 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     // JVM args for the sbt subprocess that runs scripted tests: suppress Unsafe/JNA warnings.
     scriptedLaunchOpts ++= Seq(
       "-Xmx1024m",
+      "-XX:+IgnoreUnrecognizedVMOptions",
       "--add-opens=java.base/sun.misc=ALL-UNNAMED",
+      "--sun-misc-unsafe-memory-access=allow",
       "--enable-native-access=ALL-UNNAMED",
       s"-Dplugin.version=${version.value}",
     ),

@@ -154,7 +154,8 @@ one file, mechanically applied, checked.
     ),
     section("Generated plugins.sbt")(
       md"""
-`zipxWorkflowGenerate` writes `project/plugins.sbt`. The file has three layers:
+`zipxCatalogGenerate` and `zipxWorkflowGenerate` write `project/plugins.sbt` (catalog generate does not write workflow
+YAML). The file has three layers:
 
 1. Loaded sbt-zipx (`zipxEmitSelf`, default true). This repo sets `zipxEmitSelf := false` because dogfood loads zipx
    from source. The [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) consumer
@@ -183,8 +184,8 @@ drops that catalog line and keeps the loaded version.
     section("Catalog update")(
       md"""
 The scheduled companion `.github/workflows/zipx-version-updates.yml` (`zipxVersionUpdates`, default true) applies
-`zipxDepUpdate yes`, `zipxActionUpdate yes`, and `zipxPinUpdate yes`, regenerates, and opens `zipx/version-updates`.
-That PR is these constructor hunks. You can run the same apply locally:
+`zipxDepUpdate yes`, `zipxActionUpdate yes`, and `zipxPinUpdate yes`, then `zipxCatalogGenerate` (not workflow YAML),
+and opens `zipx/version-updates`. That PR is these constructor hunks. You can run the same apply locally:
 
 ```text
 sbt zipxDepUpdate             # list, then prompt Apply N catalog update(s)? [y/N]
@@ -200,9 +201,10 @@ Lookup is Maven Central metadata (then the sbt plugin repo) for `Lib` / `Plugin`
 SHA peel. `yes` applies **every** listed bump. With no terminal, a bare command lists and stops.
 
 The catalog file lives under `project/`, so it is part of the build definition. After a local rewrite, `reload` (or a
-fresh sbt) before you generate. The scheduled job starts a new sbt for generate, so it does not need `reload`. If a
-`Plugin`, `zipxSbt`, `zipxScala`, or `Action` version moved, generate also rewrites `plugins.sbt` / `build.properties`
-(and workflows).
+fresh sbt) before you generate. The scheduled job starts a new sbt for `zipxCatalogGenerate`, so it does not need
+`reload`. If a `Plugin`, `zipxSbt`, `zipxScala`, or Action version moved, catalog generate rewrites `plugins.sbt` /
+`build.properties` / composites / `zipx-ci.env`. It does not rewrite `.github/workflows/` (`GITHUB_TOKEN` cannot push
+those files). Use `zipxWorkflowGenerate` when `ci.yml` itself must move. See **Dependency updates**.
 
 Apply rewrites `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` and
 `Action("owner/repo", "from", sha = "…")` so version and git SHA move together. `.mod` copies share the parent version

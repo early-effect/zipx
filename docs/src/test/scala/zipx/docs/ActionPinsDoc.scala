@@ -11,7 +11,8 @@ object ActionPinsDoc extends DocSpecSuite:
   def doc = page("Action pins")(
     md"""
 Skip this page at first. zipx already pins third-party GitHub Actions to **full commit SHAs** (not floating `@v4`
-tags) in the generated workflow, so a moved tag cannot change what CI runs. Version labels appear as trailing comments:
+tags) in `ci.yml` and in composites, so a moved tag cannot change what CI runs. Version labels appear as trailing
+comments:
 
 ```yaml
 - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,7 +63,9 @@ val checkout = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825d
 
 Apply rewrites the canonical constructor so version and sha move together. `zipxActionUpdate` looks up GitHub
 releases (tags if there are none), peels the tag to a commit SHA, and queries OSV (`pkg:github/owner/repo@version`).
-Never write a floating `@v4` into the catalog or into `uses:`.
+Never write a floating `@v4` into the catalog or into `ci.yml` `uses:`. The version-updates companion is the one
+exception: checkout is a major tag (`actions/checkout@v7`) because `uses:` cannot be an expression and `GITHUB_TOKEN`
+cannot push workflow SHA edits. Java and sbt pins still move in `zipx-sbt-setup`. See **Dependency updates**.
 
 ```
 sbt zipxActionUpdate             # list, then prompt
@@ -70,7 +73,7 @@ sbt "zipxActionUpdate yes"       # rewrite constructors
 sbt "zipxActionUpdate dry-run"
 ```
 
-After apply: `reload`, then `sbt zipxWorkflowGenerate`, then `git add .github/workflows/ci.yml .github/actions/`.
+After apply: `reload`, then `sbt zipxCatalogGenerate` (composites, `plugins.sbt`, `zipx-ci.env`). Use `sbt zipxWorkflowGenerate` when `ci.yml` itself must move (checkout SHA, job graph).
 
 If there are no Action rows, the command prints constructors to paste (jar Defaults compared to GitHub). `yes` with no
 rows refuses.
@@ -231,8 +234,8 @@ In the zipx repository, `Action` vals in `project/ZipxVersions.scala` are the ed
 bootstrap so a missing field still has a pin). That YAML lives in the jar / `target/`, not as something you commit
 and edit. `ActionPins.Defaults` loads the classpath resource at runtime.
 
-Release dogfood: the scheduled companion applies `zipxActionUpdate yes` and generate. Locally: `sbt zipxActionUpdate yes` →
-`reload` → `zipxWorkflowGenerate` → compile/publish. A zipx release is how consumers on jar defaults move.
+Release dogfood: the scheduled companion applies `zipxActionUpdate yes` and `zipxCatalogGenerate`. Locally: `sbt zipxActionUpdate yes` →
+`reload` → `zipxCatalogGenerate` (and `zipxWorkflowGenerate` if `ci.yml` must move) → compile/publish. A zipx release is how consumers on jar defaults move.
 
 A `github-actions` Dependabot ecosystem is leftover, not the ladder.
 """
@@ -245,6 +248,7 @@ A `github-actions` Dependabot ecosystem is leftover, not the ladder.
 | `zipxActionsPath` | legacy path we **refuse** when the file is still on disk |
 | `zipxActions` | explicit `ActionPins` override (escape hatch) |
 | `zipxActionUpdate` | GitHub releases + SHA peel + OSV; rewrite constructors after `yes` |
+| `zipxCatalogGenerate` | write composites, `plugins.sbt`, `zipx-ci.env` (not workflow YAML) |
 | `zipxWorkflowGenerate` / `zipxWorkflowCheck` | write / verify `ci.yml` |
 
 Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`,

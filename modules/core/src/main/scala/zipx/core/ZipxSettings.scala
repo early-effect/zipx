@@ -156,7 +156,7 @@ object ZipxSettings:
       SettingName("zipxVersionUpdates"),
       true,
       SettingPurpose(
-        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, applies zipxDepUpdate / zipxActionUpdate / zipxPinUpdate, opens zipx/version-updates. Default true. false deletes the companion."
+        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, applies zipxDepUpdate / zipxActionUpdate / zipxPinUpdate, zipxCatalogGenerate, opens zipx/version-updates. Commits everything except .github/workflows. Default true. false deletes the companion."
       ),
       Build,
     )
@@ -466,6 +466,14 @@ object ZipxSettings:
       SettingPurpose("Print the dependency-ordered publish layers (contracted publish chain)."),
     )
 
+  val catalogGenerate: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxCatalogGenerate"),
+      SettingPurpose(
+        "Write project/plugins.sbt, project/build.properties, project/zipx-ci.env, and .github/actions composites. Does not write .github/workflows."
+      ),
+    )
+
   val workflowGenerate: SettingDef[Unit] =
     SettingDef.task(
       SettingName("zipxWorkflowGenerate"),
@@ -604,6 +612,7 @@ object ZipxSettings:
   )
 
   val tasks: List[SettingDef[?]] = List(
+    catalogGenerate,
     workflowGenerate,
     workflowCheck,
     advisoryCheck,

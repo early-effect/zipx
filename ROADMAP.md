@@ -75,7 +75,7 @@ Typed `Lib` / `Plugin` / `Pin` / `Action` rows in `project/ZipxVersions.scala`. 
 the build, not a whole-file regen); generate writes `plugins.sbt` / `build.properties`; `zipxCheckDeps` fails generate
 when `libraryDependencies` contain a GAV that is not a `Lib` row. A `Pin` with no matching `PinFeed` fails generate.
 Default `zipxVersionUpdates` emits `.github/workflows/zipx-version-updates.yml`: schedule plus dispatch, `zipxDepUpdate yes` /
-`zipxActionUpdate yes` / `zipxPinUpdate yes`, generate, `gh pr create` on `zipx/version-updates`. Local `zipxDepUpdate` / `zipxPinUpdate` /
+`zipxActionUpdate yes` / `zipxPinUpdate yes`, `zipxCatalogGenerate` (not workflow YAML; `GITHUB_TOKEN` cannot push `.github/workflows`), `gh pr create` on `zipx/version-updates`. Local `zipxDepUpdate` / `zipxPinUpdate` /
 `zipxActionUpdate` are the same apply. Pin policy (lookup, OSV, Update) still lives on `PinFeed`. ZipxVersions is required;
 leftover `zipx-scala-steward.yml` fails generate. Not an M12 item.
 

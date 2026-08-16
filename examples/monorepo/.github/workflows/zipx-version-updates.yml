@@ -14,22 +14,33 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: "true"
-      - name: Setup JDK
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - name: Load zipx CI params
+        id: zipx-ci
+        run: |
+          set -euo pipefail
+          . project/zipx-ci.env
+          echo "java-version=$ZIPX_JAVA_VERSION" >> "$GITHUB_OUTPUT"
+          echo "runner-os=$ZIPX_RUNNER_OS" >> "$GITHUB_OUTPUT"
+
+      - name: zipx sbt setup
+        uses: ./.github/actions/zipx-sbt-setup
         with:
-          distribution: temurin
-          java-version: "21"
-      - uses: sbt/setup-sbt@5ed7fa239084076151f66fa1dc45d4363b2dfee5 # v1.5.7
+          java-version: ${{ steps.zipx-ci.outputs.java-version }}
+          runner-os: ${{ steps.zipx-ci.outputs.runner-os }}
+          cache-key-suffix: version-updates
+          node-version: ""
+          sbt-disk-cache: "false"
+          local-cache: "false"
       - name: Apply catalog updates
         run: |
           sbt "zipxDepUpdate yes"
           sbt "zipxActionUpdate yes"
           sbt "zipxPinUpdate yes"
-          sbt zipxWorkflowGenerate
+          sbt zipxCatalogGenerate
 
       - name: Open update PR
         run: |
@@ -40,7 +51,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B zipx/version-updates
-          git add -A
+          git add --all -- . ":!.github/workflows"
+          if [ -z "$(git diff --cached --name-only)" ]; then
+            echo "No catalog updates to commit."
+            exit 0
+          fi
           git commit -m "ci: zipx version updates"
           git push -u origin HEAD
           gh pr create --title "ci: zipx version updates" --body "Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate." --head zipx/version-updates || true

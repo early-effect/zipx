@@ -3,6 +3,7 @@
 > zipxWorkflowGenerate
 $ exists .github/workflows/ci.yml
 $ exists .github/workflows/zipx-version-updates.yml
+$ exists project/zipx-ci.env
 > assertGraph
 # Freshly generated file must pass the check (determinism / idempotence).
 > zipxWorkflowCheck
