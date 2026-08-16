@@ -27,11 +27,6 @@ object ZipxPlugin extends AutoPlugin:
     val Cron = zipx.workflow.Cron
     type DayOfWeek = zipx.workflow.DayOfWeek
     val DayOfWeek = zipx.workflow.DayOfWeek
-    type StewardGroup = zipx.core.StewardGroup
-    val StewardGroup = zipx.core.StewardGroup
-    type StewardFilter = zipx.core.StewardFilter
-    val StewardFilter      = zipx.core.StewardFilter
-    val ScalaStewardConfig = zipx.core.ScalaStewardConfig
 
     type PinFeed = zipx.core.PinFeed
     val PinFeed = zipx.core.PinFeed
@@ -75,6 +70,16 @@ object ZipxPlugin extends AutoPlugin:
     type PinMaterialize = zipx.core.PinMaterialize
     type AsPins[A]      = zipx.core.AsPins[A]
     val AsPins = zipx.core.AsPins
+    type AsActions[A] = zipx.core.AsActions[A]
+    val AsActions = zipx.core.AsActions
+    type Action = zipx.core.Action
+    val Action = zipx.core.Action
+    type ZipxVerify = zipx.core.ZipxVerify
+    val ZipxVerify = zipx.core.ZipxVerify
+    type VerifyOpt = zipx.core.VerifyOpt
+    val VerifyOpt = zipx.core.VerifyOpt
+    type LeftoverOpt = zipx.core.LeftoverOpt
+    val LeftoverOpt = zipx.core.LeftoverOpt
 
     type Capability = zipx.core.Capability
     val Capability = zipx.core.Capability
@@ -355,9 +360,9 @@ object ZipxPlugin extends AutoPlugin:
     val zipxReleaseTagPattern = settingKey[String](ZipxSettings.releaseTagPattern.description)
     val zipxActions           = settingKey[ActionPins](ZipxSettings.actions.description)
     val zipxActionsPath       = settingKey[String](ZipxSettings.actionsPath.description)
-    val zipxDependabotSync    = settingKey[Boolean](ZipxSettings.dependabotSync.description)
-    val zipxScalaSteward      = settingKey[Boolean](ZipxSettings.scalaSteward.description)
-    val zipxStewardGrouping   = settingKey[Seq[StewardGroup]](ZipxSettings.stewardGrouping.description)
+    val zipxActionRows        = settingKey[Seq[Action]](ZipxSettings.actionRows.description)
+    val zipxVerify            = settingKey[ZipxVerify](ZipxSettings.verify.description)
+    val zipxLeftoverSteward   = settingKey[LeftoverOpt](ZipxSettings.leftoverSteward.description)
     val zipxWorkflowDispatch  = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
     val zipxCiRelevant        = settingKey[Boolean](ZipxSettings.ciRelevant.description)
     val zipxPublish           = settingKey[Option[Boolean]](ZipxSettings.publish.description)
@@ -395,7 +400,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxPublishOrder     = taskKey[Unit](ZipxSettings.publishOrder.description)
     val zipxWorkflowGenerate = taskKey[Unit](ZipxSettings.workflowGenerate.description)
     val zipxWorkflowCheck    = taskKey[Unit](ZipxSettings.workflowCheck.description)
-    val zipxActionsPull      = taskKey[Unit](ZipxSettings.actionsPull.description)
+    val zipxAdvisoryCheck    = taskKey[Unit](ZipxSettings.advisoryCheck.description)
     val zipxAffectedModules  = inputKey[Unit](ZipxSettings.affectedModules.description)
     val zipxPinCheck         = taskKey[Unit](ZipxSettings.pinCheck.description)
     val zipxPinCheckPr       = taskKey[Unit](ZipxSettings.pinCheckPr.description)
@@ -403,6 +408,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxPinInventory     = taskKey[Unit](ZipxSettings.pinInventory.description)
     val zipxPinUpdate        = inputKey[Unit](ZipxSettings.pinUpdate.description)
     val zipxDepUpdate        = inputKey[Unit](ZipxSettings.depUpdate.description)
+    val zipxActionUpdate     = inputKey[Unit](ZipxSettings.actionUpdate.description)
   end autoImport
 
   import autoImport.*
@@ -435,9 +441,9 @@ object ZipxPlugin extends AutoPlugin:
     zipxVerifyCleanLabel         := Some("clean"),
     zipxActions                  := ActionPins.Defaults,
     zipxActionsPath              := ActionPinFile.DefaultPath,
-    zipxDependabotSync           := false,
-    zipxScalaSteward             := false,
-    zipxStewardGrouping          := ScalaStewardConfig.Defaults,
+    zipxActionRows               := Seq.empty,
+    zipxVerify                   := ZipxVerify.Strict,
+    zipxLeftoverSteward          := LeftoverOpt.Fail,
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
     zipxVersions                 := Seq.empty,
@@ -498,10 +504,8 @@ object ZipxPlugin extends AutoPlugin:
         )
         .value
     },
-    zipxWorkflowCheck := checkTask.value,
-    zipxActionsPull   := Def.uncached {
-      actionsPullTask.value
-    },
+    zipxWorkflowCheck   := checkTask.value,
+    zipxAdvisoryCheck   := Def.uncached { advisoryCheckTask.value },
     zipxAffectedModules := affectedModulesTask.evaluated,
     zipxPinCheck        := Def.uncached { pinCheckTask.value },
     zipxPinCheckPr      := Def.uncached { pinCheckPrTask.value },
@@ -509,6 +513,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxPinInventory    := Def.uncached { pinInventoryTask.value },
     zipxPinUpdate       := pinUpdateTask.evaluated,
     zipxDepUpdate       := depUpdateTask.evaluated,
+    zipxActionUpdate    := actionUpdateTask.evaluated,
   )
 
   /** An aggregator is a container rather than a testable module, so it is CI-irrelevant by default. Plain settings, so
@@ -651,10 +656,8 @@ object ZipxPlugin extends AutoPlugin:
     )
   }
 
-  /** A pin file that is present but unreadable fails the build through [[orFail]] rather than falling back to
-    * `Defaults`. The fallback is what made a typo'd key silently revert a deliberately held-back pin to the version
-    * baked into the zipx jar. An *absent* file still falls back, since that is the documented way to take the jar
-    * defaults.
+  /** Explicit `zipxActions` (≠ Defaults) wins. Else overlay jar Defaults with catalog Action rows. A committed pin YAML
+    * is leftover input and fails.
     */
   private def resolveActionPins(extracted: Extracted, root: File): ActionPins =
     val setting        = readBuildSetting(extracted, zipxActions, ActionPins.Defaults)
@@ -662,29 +665,47 @@ object ZipxPlugin extends AutoPlugin:
     if userOverrodeIt then setting
     else
       val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
-      if rel.isEmpty then ActionPins.Defaults
-      else ActionPinFile.loadOption((root / rel).toPath).fold(ActionPins.Defaults)(orFail)
+      if rel.nonEmpty && (root / rel).exists then
+        val parsed = ActionPinFile.load((root / rel).toPath).getOrElse(ActionPins.Defaults)
+        sys.error(ZipxCatalog.leftoverPinFileError(rel, parsed))
+      val rows = readBuildSetting(extracted, zipxActionRows, Seq.empty)
+      orFail(ActionPins.overlay(ActionPins.Defaults, rows))
+  end resolveActionPins
 
-  /** Clean prefixes come from [[PlanConfig.verifyClean]] rather than from `verifyTask`, so the command string here is
-    * only the task.
-    */
   private def builtinCapabilities(
       graph: ModuleGraph,
       verifyTask: SbtCommand,
-      feeds: Seq[PinFeed],
-      gate: PinPrGate,
+      verify: ZipxVerify,
   ): List[Capability] =
     val test =
       Capability.once(name = Capability.TestName, command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
-    val base       = List(test, Capability.publish)
-    val withDocker = if graph.nodes.exists(_.docker) then base :+ Capability.docker else base
-    if PinFeeds.emitPrGate(feeds, gate) then
-      val pin =
-        val cap = Capability.pinCheck(CapabilityTasks.of(zipxPinCheckPr))
-        if gate == PinPrGate.Introduced then cap.withExtraSteps(PinCheck.fetchBaseSha) else cap
-      withDocker :+ pin
-    else withDocker
+    val fmt = verifyGate(
+      verify.fmt,
+      Capability.FmtName,
+      "fmt",
+      SbtCommand.unsafeTask("scalafmtCheckAll"),
+    )
+    val wfCheck = verifyGate(
+      verify.workflowCheck,
+      Capability.WorkflowCheckName,
+      "workflow-check",
+      CapabilityTasks.of(zipxWorkflowCheck),
+    )
+    val adv = verifyGate(
+      verify.advisories,
+      Capability.AdvisoriesName,
+      "advisories",
+      CapabilityTasks.of(zipxAdvisoryCheck),
+    )
+    val base = List(test, fmt, wfCheck, adv, Capability.publish)
+    if graph.nodes.exists(_.docker) then base :+ Capability.docker else base
   end builtinCapabilities
+
+  private def verifyGate(opt: VerifyOpt, name: CapabilityName, gate: String, command: SbtCommand): Capability =
+    opt match
+      case VerifyOpt.On =>
+        Capability.once(name = name, command = command, phase = Phase.Verify, gate = Gate.Always)
+      case VerifyOpt.Skip(reason) => Capability.skipOnce(name, gate, reason)
 
   /** The one place a zipx failure value becomes a thrown error. The libraries below report failures as `Either` and
     * never throw; sbt's task contract is the opposite, a task fails by throwing. This is the seam, and it lives here so
@@ -705,6 +726,19 @@ object ZipxPlugin extends AutoPlugin:
       extracted.getOpt(r / commands).toList.flatten.flatMap(_.nameOption)
     }
     (fromState ++ fromProjects).toSet
+
+  private def checkFmtPlugin(verify: ZipxVerify, extracted: Extracted): Unit =
+    verify.fmt match
+      case VerifyOpt.Skip(_) => ()
+      case VerifyOpt.On      =>
+        val coords = readBuildSetting(extracted, zipxVersions, Seq.empty)
+        val hasFmt = ZipxCatalog.plugins(coords).exists(p => (p.artifact: String) == "sbt-scalafmt")
+        if !hasFmt then
+          sys.error(
+            """zipx: zipxVerify.fmt is On but ZipxVersions has no Plugin("org.scalameta", "sbt-scalafmt", "…"). """ +
+              """Add that row, or zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("reason")), then sbt zipxWorkflowGenerate."""
+          )
+  end checkFmtPlugin
 
   /** Fail generate/check when a capability declares a command name sbt does not know (aliases, `sonaRelease`, …). */
   private def checkCommandNames(
@@ -732,7 +766,10 @@ object ZipxPlugin extends AutoPlugin:
             }
             .mkString(", ")
           sys.error(
-            s"zipx: unknown sbt command name(s): $hint. Add the plugin/alias that defines them, or set zipxCheckCommandNames := false"
+            s"zipx: unknown sbt command name(s): $hint. Add the plugin/alias that defines them. " +
+              (if missing.contains("scalafmtCheckAll") then
+                 """Missing scalafmtCheckAll: add Plugin("org.scalameta", "sbt-scalafmt", "…") to ZipxVersions (or zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("reason"))), then sbt zipxWorkflowGenerate."""
+               else "Or set zipxCheckCommandNames := false")
           )
         end if
       end if
@@ -756,9 +793,9 @@ object ZipxPlugin extends AutoPlugin:
     val extracted    = Project.extract(st)
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
     val verifyTask   = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
-    val feeds        = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
-    val gate         = readBuildSetting(extracted, zipxPinPrGate, PinPrGate.All)
-    val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask, feeds, gate), userCaps.toList)
+    val verify       = orFail(ZipxVerify.validate(readBuildSetting(extracted, zipxVerify, ZipxVerify.Strict)))
+    val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask, verify), userCaps.toList)
+    checkFmtPlugin(verify, extracted)
     checkCommandNames(capabilities, st, extracted)
     val yaml = orFail(Render.render(Planner.plan(graph, capabilities, cfg)))
     ActionPinFile.annotateUses(yaml, cfg.actions)
@@ -772,8 +809,7 @@ object ZipxPlugin extends AutoPlugin:
     log.info(s"zipx wrote ${out.getPath}")
     warnRawFragments.value
     writeCompositeActions.value
-    writeSyncWorkflowIfEnabled.value
-    writeStewardWorkflowIfEnabled.value
+    checkLeftoverSteward(Project.extract(state.value), (LocalRootProject / baseDirectory).value, streams.value.log)
     writePinWorkflowsIfEnabled.value
     writeCatalogIfEnabled.value
   }
@@ -800,67 +836,25 @@ object ZipxPlugin extends AutoPlugin:
     val extracted    = Project.extract(state.value)
     val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
     val verifyTask   = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
-    val feeds        = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
-    val gate         = readBuildSetting(extracted, zipxPinPrGate, PinPrGate.All)
-    val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask, feeds, gate), userCaps.toList)
+    val verify       = orFail(ZipxVerify.validate(readBuildSetting(extracted, zipxVerify, ZipxVerify.Strict)))
+    val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask, verify), userCaps.toList)
     Steps.rawWarnings(capabilities, cfg).foreach(w => log.warn(s"zipx: $w"))
     MatrixCollapse.warnings(capabilities, graph, cfg).foreach(w => log.warn(s"zipx: $w"))
   }
 
-  private def writeSyncWorkflowIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
-    val extracted = Project.extract(state.value)
-    val enabled   = readBuildSetting(extracted, zipxDependabotSync, false)
-    val root      = (LocalRootProject / baseDirectory).value
-    val syncFile  = root / ActionPinsSyncWorkflow.DefaultPath
-    if enabled then
-      val cfg        = planConfig.value
-      val actionsRel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath)
-      val wfRel      = readBuildSetting(extracted, zipxWorkflowPath, ".github/workflows/ci.yml")
-      val body       = orFail(
-        ActionPinsSyncWorkflow.render(
-          cfg.actions,
-          cfg.javaVersion,
-          cfg.runnerOs,
-          actionsRel,
-          wfRel,
-        )
+  private def checkLeftoverSteward(extracted: Extracted, root: File, log: Logger): Unit =
+    val opt   = orFail(LeftoverOpt.validate(readBuildSetting(extracted, zipxLeftoverSteward, LeftoverOpt.Fail)))
+    val found =
+      List(LeftoverOpt.WorkflowPath, LeftoverOpt.GithubConfPath, LeftoverOpt.RepoConfPath).filter(p =>
+        (root / p).exists
       )
-      IO.write(syncFile, body)
-      streams.value.log.info(s"zipx wrote ${syncFile.getPath}")
-    end if
-  }
-
-  /** Shared by generate and check, so the two cannot disagree about whether the config file should exist. */
-  private def stewardGrouping(extracted: Extracted): Option[String] =
-    val groups = readBuildSetting(extracted, zipxStewardGrouping, ScalaStewardConfig.Defaults).toList
-    Option.when(groups.nonEmpty)(ScalaStewardConfig.render(groups))
-
-  private def writeStewardWorkflowIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
-    val extracted   = Project.extract(state.value)
-    val enabled     = readBuildSetting(extracted, zipxScalaSteward, false)
-    val root        = (LocalRootProject / baseDirectory).value
-    val stewardFile = root / ScalaStewardWorkflow.DefaultPath
-    if enabled then
-      val cfg        = planConfig.value
-      val log        = streams.value.log
-      val maybeConf  = stewardGrouping(extracted)
-      val configPath = maybeConf.map(_ => ScalaStewardWorkflow.DefaultConfigPath)
-      warnDeadRepoRootStewardGrouping(root, log)
-      maybeConf.foreach { conf =>
-        val confFile = root / ScalaStewardWorkflow.DefaultConfigPath
-        IO.write(confFile, conf)
-        log.info(s"zipx wrote ${confFile.getPath}")
-      }
-      val body = orFail(ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs, configPath = configPath))
-      IO.write(stewardFile, body)
-      log.info(s"zipx wrote ${stewardFile.getPath}")
-    end if
-  }
-
-  private def warnDeadRepoRootStewardGrouping(root: File, log: Logger): Unit =
-    val repoConf = root / ".scala-steward.conf"
-    if repoConf.exists && ScalaStewardConfig.repoRootGroupingIsDead(IO.read(repoConf)) then
-      log.warn(s"zipx: ${ScalaStewardConfig.RepoRootGroupingWarning}")
+    if found.nonEmpty then
+      opt match
+        case LeftoverOpt.Fail =>
+          sys.error(s"zipx: ${LeftoverOpt.leftoverMessage(found, None)}")
+        case LeftoverOpt.Warn(reason) =>
+          log.warn(s"zipx: ${LeftoverOpt.leftoverMessage(found, Some(reason))}")
+  end checkLeftoverSteward
 
   private def writePinWorkflowsIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
@@ -1035,34 +1029,6 @@ object ZipxPlugin extends AutoPlugin:
     orFail(PinInventory.parse(IO.read(jsonFile)))
   end inventoryAtBase
 
-  private def actionsPullTask: Def.Initialize[Task[Unit]] = Def.task {
-    val log       = streams.value.log
-    val extracted = Project.extract(state.value)
-    val root      = (LocalRootProject / baseDirectory).value
-    val wfFile    = workflowFile.value
-    if !wfFile.exists then sys.error(s"${wfFile.getPath} does not exist; nothing to pull from.")
-    val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
-    if rel.isEmpty then sys.error("zipxActionsPath is empty; refuse to pull pins without a pin file path.")
-    val pinPath = (root / rel).toPath
-    // A pull rewrites the pin file, so both reads fail loudly: overwriting a file zipx could not read would launder the
-    // unreadable line away, and a workflow whose `uses:` is not a valid ref is exactly what must not be pulled in.
-    val base        = ActionPinFile.loadOption(pinPath).fold(ActionPins.Defaults)(orFail)
-    val wfYaml      = IO.read(wfFile)
-    val actionYamls =
-      ZipxComposites.artifacts(base, planConfig.value.cacheEpoch).toOption.toList.flatMap(_.keys).flatMap { rel =>
-        val f = root / rel
-        if f.exists then Some(IO.read(f)) else None
-      }
-    val pulled = orFail(
-      actionYamls.foldLeft[Either[String, ActionPins]](ActionPinFile.pullFromWorkflow(wfYaml, base)) { (acc, yaml) =>
-        acc.flatMap(pins => ActionPinFile.pullFromWorkflow(yaml, pins))
-      }
-    )
-    ActionPinFile.write(pinPath, pulled)
-    log.info(s"zipx wrote ${pinPath}")
-    writeGeneratedWorkflows.value
-  }
-
   /** A user capability whose `name` matches a built-in *replaces* it, so supplying a multi-registry `docker` capability
     * yields one set of `docker-<module>` jobs rather than duplicates.
     */
@@ -1130,50 +1096,7 @@ object ZipxPlugin extends AutoPlugin:
       streams.value.log.info(s"zipx: ${file.getPath} is up to date.")
     }
     val extracted = Project.extract(state.value)
-    if readBuildSetting(extracted, zipxDependabotSync, false) then
-      val syncFile     = root / ActionPinsSyncWorkflow.DefaultPath
-      val actionsRel   = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath)
-      val wfRel        = readBuildSetting(extracted, zipxWorkflowPath, ".github/workflows/ci.yml")
-      val expectedSync = orFail(
-        ActionPinsSyncWorkflow.render(
-          cfg.actions,
-          cfg.javaVersion,
-          cfg.runnerOs,
-          actionsRel,
-          wfRel,
-        )
-      )
-      val actualSync = if syncFile.exists then IO.read(syncFile) else ""
-      if actualSync != expectedSync then
-        sys.error(
-          s"${syncFile.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
-        )
-      streams.value.log.info(s"zipx: ${syncFile.getPath} is up to date.")
-    end if
-    if readBuildSetting(extracted, zipxScalaSteward, false) then
-      val stewardFile = root / ScalaStewardWorkflow.DefaultPath
-      val maybeConf   = stewardGrouping(extracted)
-      val configPath  = maybeConf.map(_ => ScalaStewardWorkflow.DefaultConfigPath)
-      warnDeadRepoRootStewardGrouping(root, streams.value.log)
-      // Checked before the workflow itself: the Steward action ignores a missing config at the default path silently,
-      // so this drift check is the only thing that catches it.
-      maybeConf.foreach { expectedConf =>
-        val confFile   = root / ScalaStewardWorkflow.DefaultConfigPath
-        val actualConf = if confFile.exists then IO.read(confFile) else ""
-        if actualConf != expectedConf then
-          sys.error(
-            s"${confFile.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
-          )
-        streams.value.log.info(s"zipx: ${confFile.getPath} is up to date.")
-      }
-      val expectedSteward = orFail(ScalaStewardWorkflow.render(cfg.actions, cfg.runnerOs, configPath = configPath))
-      val actualSteward   = if stewardFile.exists then IO.read(stewardFile) else ""
-      if actualSteward != expectedSteward then
-        sys.error(
-          s"${stewardFile.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result."
-        )
-      streams.value.log.info(s"zipx: ${stewardFile.getPath} is up to date.")
-    end if
+    checkLeftoverSteward(extracted, root, streams.value.log)
     checkPinWorkflows(root, cfg, extracted, streams.value.log)
     validateCatalog(extracted, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
@@ -1322,6 +1245,123 @@ object ZipxPlugin extends AutoPlugin:
         end if
       end if
     }
+
+  private def actionUpdateTask: Def.Initialize[InputTask[Unit]] =
+    Def.inputTask {
+      val arg       = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+      val extracted = Project.extract(state.value)
+      val rows      = readBuildSetting(extracted, zipxActionRows, Seq.empty)
+      val log       = streams.value.log
+      val gh        = GitHubActionLookup()
+      val osv       = OsvAdvisorySource()
+      def lookup(action: Action): Either[String, Option[(String, String)]] =
+        gh.latest(action.name).map {
+          _.flatMap { rel =>
+            rel.sha.map(sha => (rel.tag, sha))
+          }
+        }
+      if rows.isEmpty then
+        val constructors = ZipxCatalog.catalogActionConstructors(ActionPins.Defaults)
+        log.info(
+          s"zipx: no Action vals in ZipxVersions. Paste these constructors (jar Defaults), then sbt \"zipxActionUpdate yes\":\n$constructors"
+        )
+        if arg == "yes" || arg == "--yes" then
+          sys.error(
+            "zipx: zipxActionUpdate yes with no Action rows refuses. Paste constructors into ZipxVersions first."
+          )
+      else
+        val bumps = orFail(ZipxCatalog.outdatedActions(rows, lookup))
+        bumps.foreach { b =>
+          AdvisoryCheck.githubPurl(b.action.name, b.toVersion) match
+            case Left(err)   => log.warn(err)
+            case Right(purl) =>
+              osv.advisories(purl, b.toVersion).foreach { ads =>
+                ads.foreach { a =>
+                  log.warn(
+                    AdvisoryCheck
+                      .findingMessage("Action", b.action.name, b.action.version, a, "sbt \"zipxActionUpdate yes\"")
+                  )
+                }
+              }
+        }
+        log.info(s"zipx action update:\n${ZipxCatalog.formatActionBumps(bumps)}")
+        if bumps.isEmpty then ()
+        else
+          val applyNow = arg match
+            case "yes" | "--yes"         => true
+            case "dry-run" | "--dry-run" => false
+            case ""                      =>
+              confirmUpdates(bumps.size, "Action update(s)") match
+                case None =>
+                  log.info("zipx: no TTY; pass 'yes' to apply, or 'dry-run' to list only.")
+                  false
+                case Some(ok) => ok
+            case other =>
+              sys.error(s"zipx: unknown zipxActionUpdate argument '$other' (yes or dry-run)")
+          if applyNow then
+            val rel  = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
+            val file = (LocalRootProject / baseDirectory).value / rel
+            if !file.exists then sys.error(s"zipx: catalog file ${file.getPath} is missing")
+            val next = orFail(ZipxCatalog.applyActionBumps(IO.read(file), bumps))
+            IO.write(file, next)
+            log.info(s"zipx: wrote ${file.getPath}. reload, then sbt zipxWorkflowGenerate.")
+          else log.info("zipx: no Action updates applied")
+        end if
+      end if
+    }
+
+  private def advisoryCheckTask: Def.Initialize[Task[Unit]] = Def.task {
+    val extracted = Project.extract(state.value)
+    val log       = streams.value.log
+    val osv       = OsvAdvisorySource()
+    val coords    = readBuildSetting(extracted, zipxVersions, Seq.empty)
+    val pins      = resolveActionPins(extracted, (LocalRootProject / baseDirectory).value)
+    val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val pinRows   = readBuildSetting(extracted, zipxPins, Seq.empty)
+    val gate      = readBuildSetting(extracted, zipxPinPrGate, PinPrGate.All)
+    val findings  = List.newBuilder[String]
+    ZipxCatalog.libs(coords).foreach { lib =>
+      AdvisoryCheck.mavenPurl(lib) match
+        case Left(err)   => findings += err
+        case Right(purl) =>
+          osv.advisories(purl, lib.version).foreach { ads =>
+            ads.foreach { a =>
+              findings += AdvisoryCheck.findingMessage(
+                "Lib",
+                s"${lib.group}:${lib.artifact}",
+                lib.version,
+                a,
+                "sbt \"zipxDepUpdate yes\"",
+              )
+            }
+          }
+    }
+    AdvisoryCheck.actionQueries(pins).foreach {
+      case Left(err)                => findings += err
+      case Right((name, ver, purl)) =>
+        osv.advisories(purl, ver).foreach { ads =>
+          ads.foreach { a =>
+            findings += AdvisoryCheck.findingMessage("Action", name, ver, a, "sbt \"zipxActionUpdate yes\"")
+          }
+        }
+    }
+    if feeds.nonEmpty then
+      val root = (LocalRootProject / baseDirectory).value
+      val base =
+        if gate == PinPrGate.Introduced then
+          sys.env.get(PinCheck.BaseShaEnv).filter(_.nonEmpty) match
+            case Some(sha) => inventoryAtBase(root, sha, log)
+            case None      => Map.empty
+        else Map.empty
+      val report = orFail(PinEngine.prGate(feeds, pinRows, osv, if base.isEmpty then PinPrGate.All else gate, base))
+      log.info(PinEngine.summary(report))
+      if report.failsJob then findings += "zipx: pin advisory findings. Run sbt \"zipxPinUpdate yes\"."
+    end if
+    val listed = findings.result()
+    listed.foreach(msg => log.error(msg))
+    if listed.nonEmpty then sys.error(listed.head)
+    log.info("zipx: no advisory findings")
+  }
 
   /** `zipxAffectedModules <base-ref>`. Writes the ids to a fixed `target/zipx-affected.json` rather than stdout because
     * the generated `affected` job reads the file, which keeps sbt's log lines out of `GITHUB_OUTPUT`. The path is built

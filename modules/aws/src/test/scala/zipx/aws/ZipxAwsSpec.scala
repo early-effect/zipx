@@ -80,46 +80,29 @@ object ZipxAwsSpec extends ZIOSpecDefault:
         )
       },
     ),
-    suite("the action is an extra pin, so pinning it needs no zipx release")(
-      test("with no pin file entry, the pack's own SHA-pinned fallback is used") {
+    suite("the action is an extra pin looked up by prefix")(
+      test("with no catalog row, the pack's own SHA-pinned fallback is used") {
         assertTrue(
           ZipxAws.credentialsAction(ActionPins.Defaults) == ZipxAws.DefaultCredentialsAction,
           ZipxAws.DefaultCredentialsAction.unwrap.startsWith("aws-actions/configure-aws-credentials@"),
-          // A fallback that is itself unpinned would defeat the point; ActionRef refuses one, but assert it anyway
-          // since this is the one ref a consumer never writes.
           ZipxAws.DefaultCredentialsAction.unwrap.length > "aws-actions/configure-aws-credentials@".length + 20,
         )
       },
-      test("an extra: pin in the consumer's file wins") {
+      test("a catalog Action row whose name is the prefix wins") {
+        val action = Action(
+          "aws-actions/configure-aws-credentials",
+          "v6.9.9",
+          sha = "1111111111111111111111111111111111111111",
+        )
+        val pins   = ActionPins.overlay(ActionPins.Defaults, List(action)).toOption.get
         val bumped = ActionRef("aws-actions/configure-aws-credentials@1111111111111111111111111111111111111111")
-        val pins   = ZipxAws.withCredentialsPin(ActionPins.Defaults, bumped, Some("v6.9.9"))
         val step   = ZipxAws.oidcLoginSteps(stepContext(pins)).head
         val yaml   = ZipxComposites.renderAwsLogin(pins).toOption.get
         assertTrue(
           ZipxAws.credentialsAction(pins) == bumped,
-          // Nested uses lives in the generated composite, not on the workflow step.
           step.uses.contains(ZipxComposites.AwsLoginRef),
           yaml.contains(bumped.unwrap),
           pins.extraVersion(ZipxAws.CredentialsPinKey).contains("v6.9.9"),
-        )
-      },
-      test("the pin round-trips through the committed file format") {
-        val bumped = ActionRef("aws-actions/configure-aws-credentials@1111111111111111111111111111111111111111")
-        val pins   = ZipxAws.withCredentialsPin(ActionPins.Defaults, bumped, Some("v6.9.9"))
-        val text   = ActionPinFile.render(pins)
-        assertTrue(
-          text.contains("extra:"),
-          text.contains(s"  ${ZipxAws.CredentialsPinKey}: ${bumped.unwrap} # v6.9.9"),
-          ActionPinFile.parse(text).map(ZipxAws.credentialsAction) == Right(bumped),
-        )
-      },
-      test("zipxActionsPull bumps the key once it exists, since Dependabot edits the workflow") {
-        val bumped = "aws-actions/configure-aws-credentials@2222222222222222222222222222222222222222"
-        val base   = ZipxAws.withCredentialsPin(ActionPins.Defaults, ZipxAws.DefaultCredentialsAction, Some("v6.2.3"))
-        val pulled = ActionPinFile.pullFromWorkflow(s"      - uses: $bumped # v6.9.9\n", base)
-        assertTrue(
-          pulled.map(_.extraRef(ZipxAws.CredentialsPinKey).map(_.unwrap)) == Right(Some(bumped)),
-          pulled.map(_.extraVersion(ZipxAws.CredentialsPinKey)) == Right(Some("v6.9.9")),
         )
       },
     ),

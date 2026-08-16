@@ -260,15 +260,19 @@ there when mangling is what you want, and it truncates to the registry's limit r
 
 `aws-actions/configure-aws-credentials` is an **extra** pin (see **Action pins**), not a typed field, because zipx's own
 planner never emits it: it arrives through this pack, so pinning it must not wait on a zipx release. The pack carries a
-SHA-pinned fallback, and `.github/zipx/action-pins.yml` takes ownership of the version:
+SHA-pinned fallback. Add catalog rows to take ownership:
 
-```yaml
-extra:
-  configureAwsCredentials: aws-actions/configure-aws-credentials@<sha> # v6.2.3
-  amazonEcrLogin: aws-actions/amazon-ecr-login@<sha> # v2.1.6
+```scala
+val awsCredentials = Action(
+  "aws-actions/configure-aws-credentials",
+  "v6.2.3",
+  sha = "<40-hex>",
+)
+val ecrLogin = Action("aws-actions/amazon-ecr-login", "v2.1.6", sha = "<40-hex>")
 ```
 
-Once the key is present, `zipxActionsPull` bumps it from a Dependabot edit to the workflow like any other pin.
+`zipxActionUpdate` bumps them like any other Action. Overlay keys extra by `owner/repo`, and the pack looks up by that
+prefix.
 """,
     ),
   )

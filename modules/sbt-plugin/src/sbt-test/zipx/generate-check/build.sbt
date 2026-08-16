@@ -3,6 +3,7 @@ scalaVersion := "3.8.4"
 version      := "1.0.0-ci"
 // Keep Fixed so scripted asserts stay on a literal epoch (default is now GitTags at runtime).
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 // Scripted asserts name per-module jobs and literal module paths; keep Graph expanded here.
 // (Product default is MatrixCollapse.Auto; Auto is covered in core MatrixCollapseSpec.)
 zipxMatrixCollapse := Map(
@@ -92,6 +93,19 @@ val assertGraph = taskKey[Unit]("assert the graph and generated workflow are cor
 assertGraph := {
   val wf      = (LocalRootProject / baseDirectory).value / ".github" / "workflows" / "ci.yml"
   val content = IO.read(wf)
+  // Default Verify jobs run in parallel with Graph test (no needs between them).
+  assert(content.contains("fmt:"), "missing fmt verify job")
+  assert(content.contains("zipx: skipping fmt:"), "Skip fmt should still emit the job")
+  assert(content.contains("workflow-check:"), "missing workflow-check job")
+  assert(content.contains("advisories:"), "missing advisories job")
+  assert(
+    content.contains("zipxWorkflowCheck") || content.contains("zipxWorkflowCheck'"),
+    "workflow-check should run zipxWorkflowCheck",
+  )
+  assert(
+    content.contains("zipxAdvisoryCheck") || content.contains("zipxAdvisoryCheck'"),
+    "advisories should run zipxAdvisoryCheck",
+  )
   // Test jobs for every real module; the aggregating root gets no job.
   assert(content.contains("test-schema:"), "missing test-schema job")
   assert(content.contains("test-service:"), "missing test-service job")

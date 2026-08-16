@@ -1,6 +1,7 @@
 MyVersions.settings
 version        := "1.0.0-ci"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 
 lazy val root = (project in file("."))
   .settings(publish / skip := true)
@@ -34,9 +35,12 @@ assertPinFeeds := {
   val ci    = IO.read(root / ".github" / "workflows" / "ci.yml")
   val check = IO.read(root / ".github" / "workflows" / "zipx-pin-check.yml")
   val snap  = IO.read(root / ".github" / "workflows" / "zipx-pin-snapshot.yml")
-  assert(ci.contains("pin-check:"), "ci.yml should contain the pin-check job")
-  assert(ci.contains("zipxPinCheckPr") || ci.contains("zipxPinCheckPr'"), "pin-check should run zipxPinCheckPr")
-  assert(ci.contains("pull_request"), "pin-check should be pull_request gated")
+  assert(ci.contains("advisories:"), "ci.yml should contain the advisories job")
+  assert(
+    ci.contains("zipxAdvisoryCheck") || ci.contains("zipxAdvisoryCheck'"),
+    "advisories should run zipxAdvisoryCheck (pin OSV folds in here)",
+  )
+  assert(!ci.contains("pin-check:"), "pin-check must not be a second advisory job")
   assert(check.contains("workflow_dispatch"), "pin-check companion should allow dispatch")
   assert(check.contains("sbt zipxPinCheck"), "pin-check companion should run zipxPinCheck")
   assert(snap.contains("sbt zipxPinSubmit"), "snapshot companion should run zipxPinSubmit")

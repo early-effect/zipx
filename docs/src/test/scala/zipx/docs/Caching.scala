@@ -124,8 +124,8 @@ epoch-keyed `actions/cache`.
       md"""
 Generated workflows use **commit-SHA pins** (not floating `@v4` tags), with `# vX.Y.Z` comments for readability.
 
-Prefer `.github/zipx/action-pins.yml` (Dependabot-friendly) over pasting SHAs into `build.sbt`. Full guide:
-**Action pins** (resolve order, Dependabot, `zipxActionsPull`, sync workflow, jar defaults).
+Catalog `Action` vals overlay jar defaults. Full guide: **Action pins** (overlay, `zipxActionUpdate`, leftover YAML,
+jar defaults from the last zipx compile).
 """
     ),
   )

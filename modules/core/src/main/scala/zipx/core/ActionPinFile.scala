@@ -9,8 +9,7 @@ import scala.util.matching.Regex
 /** Read/write [[ActionPins]] as `.github/zipx/action-pins.yml` (flat `key: owner/action@sha # vX.Y.Z` lines, plus one
   * indented `extra:` block for pins zipx has no typed field for).
   *
-  * This is intentionally not a workflow file: it lives outside `.github/workflows/` and is named so Dependabot and
-  * humans do not confuse it with generated CI YAML.
+  * Jar / generate output, not an editable source. Catalog [[Action]] rows in ZipxVersions are what you edit.
   *
   * This is the boundary where a pin becomes an [[zipx.workflow.ActionRef]], so [[parse]] returns an `Either` rather
   * than silently keeping whatever it managed to read. A line it cannot use is a *reported* failure, because the
@@ -24,9 +23,8 @@ object ActionPinFile:
   val ResourceName: String = "zipx/action-pins.yml"
 
   private val Header: String =
-    """# zipx GitHub Action SHA pins (not a workflow).
-      |# Source of truth for generated `uses:` refs. Prefer Dependabot + `sbt zipxActionsPull`
-      |# (or the zipx-action-pins-sync workflow) over editing by hand.
+    """# zipx GitHub Action SHA pins (not a workflow). Generated from ZipxVersions Action rows.
+      |# Not an editable source. Do not commit this file under .github/zipx/.
       |# Docs: https://www.earlyeffect.rocks/zipx/ (Action pins)
       |""".stripMargin
 
@@ -75,7 +73,7 @@ object ActionPinFile:
     * rather than an unrelated action to skip.
     */
   private def namesAction(ref: String, field: ActionPins.Field): Boolean =
-    ref == field.prefix || ref.startsWith(field.prefix + "@")
+    ActionPins.namesPrefix(ref, field.prefix)
 
   /** Every line must be a pin, the `extra:` block header, a comment, or blank. The five ways a line is rejected, in the
     * order they are checked:
@@ -204,9 +202,9 @@ object ActionPinFile:
 
   /** `None` when the resource is absent, which is how [[ActionPins.Defaults]] falls back to its bootstrap pins.
     *
-    * A resource that is present but unparseable is also `None`: it is generated from this repo's own committed pin file
-    * by `resourceGenerators`, so a failure here is a zipx build defect, not a user's to report, and the bootstrap pins
-    * are a truthful answer either way.
+    * A resource that is present but unparseable is also `None`: it is generated from this repo's ZipxVersions Action
+    * rows by `resourceGenerators`, so a failure here is a zipx build defect, not a user's to report, and the bootstrap
+    * pins are a truthful answer either way.
     */
   def loadResource(
       name: String = ResourceName,

@@ -21,7 +21,7 @@ Three moments, earliest first:
 flowchart LR
   Lit[a literal name, tag or command] --> Compile([compile error in your build])
   Run[a value assembled at runtime] --> Either([an Either you carry])
-  Cfg[settings · capabilities · pin file] --> Gen([zipxWorkflowGenerate fails])
+  Cfg[settings · capabilities · catalog] --> Gen([zipxWorkflowGenerate fails])
   Job[the sbt command · the secret's value] --> Push([the runner, on push])
   class Lit,Run,Cfg,Job warn
   class Compile,Either,Gen,Push happy
@@ -84,7 +84,7 @@ See **Composing sbt commands**.
     ),
     section("Generate time: everything assembled from more than one file")(
       md"""
-A build's CI config is spread across `build.sbt`, `project/*.scala`, packs, and the pin file. Nothing checked at a
+A build's CI config is spread across `build.sbt`, `project/*.scala`, and packs. Nothing checked at a
 literal can see the *combination*, so [[zipx.core.Planner]] checks that, and `zipxWorkflowGenerate` fails rather than
 writing a file:
 
@@ -98,11 +98,10 @@ writing a file:
 | `ModuleGraph.make` | a dependency cycle, or two modules with one id |
 | `ModuleId.make` on every sbt project id | a project id sbt allows and a GitHub job id does not |
 | `Step.validate` / `YamlPrinter.problem` at render | a hand-built step, or content YAML would mangle |
-| `ActionPinFile.parse` | a typo'd pin key, an unpinned ref, a key naming a different action |
+| `Action` constructor / leftover pin YAML | a short SHA, a leftover `.github/zipx/action-pins.yml`, a duplicate Action name |
 
-The last one has a deliberate asymmetry worth knowing: a pin file that is *present* must be readable in full, so a bad
-line fails the build rather than falling back to the jar pin for that field. An *absent* file still falls back silently,
-because that is the documented default. See **Action pins**.
+A leftover pin YAML fails generate with the `Action(...)` vals to paste. Catalog rows overlay jar defaults. See
+**Action pins**.
 """,
       exampleValue {
         val a       = Capability.publish.copy(name = CapabilityName("a"), needsCapabilities = List(CapabilityName("b")))

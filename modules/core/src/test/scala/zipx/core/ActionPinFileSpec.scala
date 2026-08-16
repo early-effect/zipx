@@ -3,7 +3,7 @@ package zipx.core
 import neotype.unwrap
 import zio.test.*
 import zipx.workflow.ActionRef
-import java.nio.file.{Files, Path, Paths}
+import java.nio.file.{Files, Path}
 
 /** The pin file is the one place a `uses:` value enters zipx as untrusted text, so it gets the whole negative surface.
   *
@@ -32,8 +32,8 @@ object ActionPinFileSpec extends ZIOSpecDefault:
       patch <- Gen.int(0, 99)
     yield s"v$major.$minor.$patch"
 
-  /** Valid pins by construction: every field gets its own prefix and a fresh SHA, so a generated file is one a real
-    * `zipxActionsPull` could have written. Versions are all-or-nothing per file, matching `render`'s two branches.
+  /** Valid pins by construction: every field gets its own prefix and a fresh SHA. Versions are all-or-nothing per file,
+    * matching `render`'s two branches. The YAML is jar/generate output, not an editable source.
     */
   private val gPins: Gen[Any, ActionPins] =
     for
@@ -114,8 +114,6 @@ object ActionPinFileSpec extends ZIOSpecDefault:
     "a pin with no version"      -> "checkout: actions/checkout@abc123",
   )
 
-  private val committedPinFile: Path = Paths.get(".github", "zipx", "action-pins.yml")
-
   def spec = suite("ActionPinFile")(
     suite("Field is the single source of truth")(
       test("every Field reads and writes its own pin, so no field can be missed") {
@@ -157,20 +155,15 @@ object ActionPinFileSpec extends ZIOSpecDefault:
         val pins = ActionPinFile.parse("checkout: actions/checkout@abc123\n")
         assertTrue(
           pins.map(_.checkout) == Right(ActionRef("actions/checkout@abc123")),
-          pins.map(_.scalaSteward) == Right(ActionPins.Bootstrap.scalaSteward),
+          pins.map(_.downloadArtifact) == Right(ActionPins.Bootstrap.downloadArtifact),
         )
       },
       test("the whitespace and comment forms a hand-edited file actually contains") {
         assertTrue(acceptances.forall { case (_, text) => ActionPinFile.parse(text).isRight })
       },
-      test("the actual committed .github/zipx/action-pins.yml, and its own render") {
-        // The strongest guard against over-strictness: whatever this repo ships must parse, and the pins it yields
-        // must be the ones `Defaults` already loaded from the same text on the classpath.
-        val committed = ActionPinFile.load(committedPinFile)
+      test("render of Defaults round-trips through parse") {
         assertTrue(
-          Files.isRegularFile(committedPinFile),
-          committed == Right(ActionPins.Defaults),
-          ActionPinFile.parse(ActionPinFile.render(ActionPins.Defaults)) == Right(ActionPins.Defaults),
+          ActionPinFile.parse(ActionPinFile.render(ActionPins.Defaults)) == Right(ActionPins.Defaults)
         )
       },
     ),
@@ -187,12 +180,14 @@ object ActionPinFileSpec extends ZIOSpecDefault:
         )
       },
       test("the reported line number is the bad line's, not the first line's") {
-        // Header (4 lines) + one good pin, so the bad line is line 6. A fold that forgot to carry the index would
-        // report 1 here and still pass the single-line test above.
-        val text = s"$header\n$goodPin\nsetup-jav: actions/setup-java@abc123\n"
+        // Comments plus one good pin, then a typo. A fold that forgot to carry the index would report 1 here and
+        // still pass the single-line test above. Line count is derived so a Header edit cannot stale the number.
+        val bad  = "setup-jav: actions/setup-java@abc123"
+        val text = s"$header\n$goodPin\n$bad\n"
+        val n    = text.linesIterator.toList.indexWhere(_ == bad) + 1
         assertTrue(
-          text.linesIterator.length == 6,
-          ActionPinFile.parse(text).swap.exists(_.contains(s"${ActionPinFile.DefaultPath}:6:")),
+          n > 1,
+          ActionPinFile.parse(text).swap.exists(_.contains(s"${ActionPinFile.DefaultPath}:$n:")),
         )
       },
       test("an unknown key's message lists the legal keys, so the typo is fixable from the error alone") {

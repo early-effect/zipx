@@ -90,9 +90,10 @@ lazy val service = project.settings(MyVersions.service)""",
         ),
         CodeSnippet(
           "Action pins (optional)",
-          """# Prefer .github/zipx/action-pins.yml + Dependabot; see Action pins docs
-zipxDependabotSync := true
-sbt zipxActionsPull   # after Dependabot bumps workflow uses:""",
+          """# Action vals in ZipxVersions; see Action pins docs
+sbt "zipxActionUpdate yes"
+sbt reload
+sbt zipxWorkflowGenerate""",
         ),
       ),
       brand = Some(

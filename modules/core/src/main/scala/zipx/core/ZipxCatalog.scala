@@ -1,5 +1,6 @@
 package zipx.core
 
+import neotype.unwrap
 import scala.quoted.*
 
 /** Render and check the typed versions catalog; rewrite version literals in the catalog source. */
@@ -142,6 +143,68 @@ object ZipxCatalog:
       }
     }
 
+  /** Canonical `Action("owner/repo", "vX.Y.Z", sha = "…")` as catalog apply rewrites it. */
+  def actionConstructor(action: Action): String =
+    s"""Action("${action.name}", "${action.version}", sha = "${action.sha}")"""
+
+  def applyActionBumps(source: String, bumps: List[ActionBump]): Either[String, String] =
+    bumps.foldLeft[Either[String, String]](Right(source)) { (accE, bump) =>
+      accE.flatMap { src =>
+        val from = actionConstructor(bump.action)
+        bump.action.bumped(bump.toVersion, bump.toSha).flatMap { next =>
+          val to = actionConstructor(next)
+          if src.contains(from) then Right(src.replace(from, to))
+          else
+            Left(
+              s"zipx: catalog has no Action constructor for '${bump.action.name}' ${bump.action.version}. " +
+                s"Paste ${actionConstructor(bump.action)} into project/ZipxVersions.scala, then sbt \"zipxActionUpdate yes\"."
+            )
+        }
+      }
+    }
+
+  def formatActionBumps(bumps: List[ActionBump]): String =
+    if bumps.isEmpty then "no outdated Action pins"
+    else
+      bumps
+        .map(b => s"- Action ${b.action.name}: ${b.action.version} -> ${b.toVersion} (${b.bump})")
+        .mkString("\n")
+
+  def outdatedActions(
+      rows: Seq[Action],
+      lookup: Action => Either[String, Option[(String, String)]],
+  ): Either[String, List[ActionBump]] =
+    rows.foldLeft[Either[String, List[ActionBump]]](Right(Nil)) { (accE, action) =>
+      accE.flatMap { acc =>
+        lookup(action).map { latest =>
+          latest.fold(acc) { (toVer, toSha) =>
+            val kind = GitHubActionMeta.classify(action.version, toVer)
+            if kind == BumpKind.None && toSha == (action.sha: String) then acc
+            else if kind == BumpKind.None && toSha != (action.sha: String) then
+              acc :+ ActionBump(action, BumpKind.Patch, toVer, toSha)
+            else acc :+ ActionBump(action, kind, toVer, toSha)
+          }
+        }
+      }
+    }
+
+  def catalogActionConstructors(pins: ActionPins): String =
+    ActionPins.Field.values
+      .map { f =>
+        val ref = pins.field(f).unwrap
+        val sha = ref.split('@').lastOption.getOrElse(ref)
+        val ver = pins.version(f).getOrElse("v0")
+        s"""  val ${f.key} = Action("${f.prefix}", "$ver", sha = "$sha")"""
+      }
+      .mkString("\n")
+
+  def leftoverPinFileError(path: String, pins: ActionPins): String =
+    s"""zipx: $path is leftover input. Action pins live in project/ZipxVersions.scala. Delete $path and paste:
+       |
+       |${catalogActionConstructors(pins)}
+       |
+       |Then sbt reload and sbt zipxWorkflowGenerate.""".stripMargin
+
   def unknownPinFeeds(feeds: Seq[PinFeed], pins: Seq[Pin]): Option[String] =
     val orphans = PinFeeds.orphanPins(feeds, pins)
     Option.when(orphans.nonEmpty) {
@@ -160,6 +223,10 @@ object ZipxCatalog:
   /** Every val on `catalog` whose type has an [[AsPins]] given. Same walk as [[coordsOf]]. */
   inline def pinsOf[A](inline catalog: A): Seq[Pin] =
     ${ pinsOfImpl[A]('catalog) }
+
+  /** Every val on `catalog` whose type has an [[AsActions]] given. Same walk as [[coordsOf]]. */
+  inline def actionsOf[A](inline catalog: A): Seq[Action] =
+    ${ actionsOfImpl[A]('catalog) }
 
   private def coordsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[ZipxCoord]] =
     import quotes.reflect.*
@@ -186,6 +253,19 @@ object ZipxCatalog:
     }
     if parts.isEmpty then '{ Seq.empty[Pin] } else '{ ${ Expr.ofList(parts) }.flatten }
   end pinsOfImpl
+
+  private def actionsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[Action]] =
+    import quotes.reflect.*
+    val parts = catalogValParts[A](catalog).flatMap { (sym, mt) =>
+      mt.asType match
+        case '[t] =>
+          Expr.summon[AsActions[t]].map { tc =>
+            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
+            '{ $tc.actions($field) }
+          }
+    }
+    if parts.isEmpty then '{ Seq.empty[Action] } else '{ ${ Expr.ofList(parts) }.flatten }
+  end actionsOfImpl
 
   private def catalogValParts[A: Type](_catalog: Expr[A])(using
       Quotes

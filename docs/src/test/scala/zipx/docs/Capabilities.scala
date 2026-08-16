@@ -13,8 +13,8 @@ object Capabilities extends DocSpecSuite:
     md"""
 A **capability** is something CI should do: run tests, publish a library, build a docker image, deploy.
 
-You already get test and publish. Add a pack when you want Maven Central, GitHub Pages, or AWS (see **Packs**). You
-can invent extra stages later (**Custom capabilities**).
+You already get test, fmt, workflow-check, and advisories (parallel Verify), plus publish. Add a pack when you want
+Maven Central, GitHub Pages, or AWS (see **Packs**). You can invent extra stages later (**Custom capabilities**).
 
 Execution mode and **Matrix collapse** decide how many GitHub jobs appear for a stage. Stay on Aggregate and you get
 one job per stage. Graph and Layer are opt-in; ignore them until one job is not enough.
@@ -24,9 +24,15 @@ one job per stage. Graph and Layer are opt-in; ignore them until one job is not 
 | Capability | Default mode | Runs | Participates | Phase | Gate |
 |---|---|---|---|---|---|
 | **test** | Aggregate (Once) | root `zipxTestTask` | whole build (`.aggregate`) | Verify | always |
-| **pin-check** | Once | `zipxPinCheckPr` | when `zipxPinFeeds` warrants it | Verify | `pull_request` |
+| **fmt** | Once | `scalafmtCheckAll` | whole build | Verify | always (`zipxVerify.fmt`) |
+| **workflow-check** | Once | `zipxWorkflowCheck` | whole build | Verify | always (`zipxVerify.workflowCheck`) |
+| **advisories** | Once | `zipxAdvisoryCheck` | whole build | Verify | always (`zipxVerify.advisories`) |
 | **publish** | Aggregate | `+?<module>/<publishTask>` (joined) | modules that publish | Publish | release tag |
 | **docker** | Aggregate | `<module>/Docker/publish` (joined) | `DockerPlugin` modules | Publish | release tag |
+
+Verify jobs have empty `needs` versus each other (GitHub runs them in parallel). Pin-feed OSV folds into **advisories**
+when feeds are present. `Capability.pinCheck` remains if you want a dedicated job; see **Pin feeds**. Skip a gate with
+`VerifyOpt.Skip(reason)` (the job still emits). See **Verify**.
 
 Use `testGraph` / `publishGraph` / `dockerGraph` for one-job-per-module. Use `*Layers` for wave scheduling. Use
 `testJoined` if Aggregate must join `<module>/<testTask>` instead of a root task. Packs (`ZipxCentral.release`,

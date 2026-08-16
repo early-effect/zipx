@@ -104,7 +104,7 @@ object ZipxSettings:
       SettingName("zipxActions"),
       ActionPins.Defaults,
       SettingPurpose(
-        "Hash-pinned GitHub Actions (checkout, setup-java, setup-sbt, cache). Override for one-offs; prefer the pin file."
+        "Hash-pinned GitHub Actions. Override for one-offs; catalog Action vals overlay jar Defaults. See Action pins."
       ),
       Build,
     )
@@ -114,37 +114,37 @@ object ZipxSettings:
       SettingName("zipxActionsPath"),
       ActionPinFile.DefaultPath,
       SettingPurpose(
-        "Path to the action-pins YAML relative to the build root (default .github/zipx/action-pins.yml). Empty disables file loading."
+        "Legacy pin YAML path. If this file exists, generate fails (paste Action vals). Not an input."
       ),
       Build,
     )
 
-  val dependabotSync: SettingDef[Boolean] =
+  val actionRows: SettingDef[Seq[Action]] =
     SettingDef.setting(
-      SettingName("zipxDependabotSync"),
-      false,
+      SettingName("zipxActionRows"),
+      Seq.empty,
       SettingPurpose(
-        "When true, also generate .github/workflows/zipx-action-pins-sync.yml to sync Dependabot SHA bumps into the pin file."
+        "Action rows collected from the ZipxVersions object (every Action val). Overlay onto ActionPins.Defaults."
       ),
       Build,
     )
 
-  val scalaSteward: SettingDef[Boolean] =
+  val verify: SettingDef[ZipxVerify] =
     SettingDef.setting(
-      SettingName("zipxScalaSteward"),
-      false,
+      SettingName("zipxVerify"),
+      ZipxVerify.Strict,
       SettingPurpose(
-        "When true, also generate .github/workflows/zipx-scala-steward.yml (weekly Scala Steward via GITHUB_TOKEN)."
+        "Parallel Verify gates: fmt, workflow-check, advisories. Default Strict (all On). Skip(reason) still emits the job."
       ),
       Build,
     )
 
-  val stewardGrouping: SettingDef[Seq[StewardGroup]] =
+  val leftoverSteward: SettingDef[LeftoverOpt] =
     SettingDef.setting(
-      SettingName("zipxStewardGrouping"),
-      ScalaStewardConfig.Defaults,
+      SettingName("zipxLeftoverSteward"),
+      LeftoverOpt.Fail,
       SettingPurpose(
-        "Scala Steward pullRequests.grouping written to .github/.scala-steward.conf so updates land in a few PRs instead of one each (default ScalaStewardConfig.Defaults). Empty disables the config file. Set it here, not in the repo's .scala-steward.conf: this list is matched first and ends in a catch-all."
+        "If zipx-scala-steward.yml is on disk: Fail generate/check (default) or Warn(reason). Does not generate a bot workflow."
       ),
       Build,
     )
@@ -164,7 +164,7 @@ object ZipxSettings:
       SettingName("zipxPinPrGate"),
       PinPrGate.All,
       SettingPurpose(
-        "PR advisory merge gate: All (default, fail on any current pin above min-severity), Introduced (only new or version-changed vs the PR base), or Off (disable the builtin pin-check job)."
+        "PR pin-feed advisory gate inside zipxAdvisoryCheck: All (default), Introduced (new or version-changed vs the PR base), or Off (skip pin OSV; ZipxVerify.advisories Skip turns the whole job off)."
       ),
       Build,
     )
@@ -456,10 +456,20 @@ object ZipxSettings:
       SettingPurpose("Verify the checked-in workflow matches what the build would generate."),
     )
 
-  val actionsPull: SettingDef[Unit] =
+  val advisoryCheck: SettingDef[Unit] =
     SettingDef.task(
-      SettingName("zipxActionsPull"),
-      SettingPurpose("Pull uses: SHA pins from the generated workflow into the action-pins file, then regenerate."),
+      SettingName("zipxAdvisoryCheck"),
+      SettingPurpose(
+        "OSV on catalog Libs, Action pins, and Pin vals. Fails on findings at or above min-severity. See Verify."
+      ),
+    )
+
+  val actionUpdate: SettingDef[Unit] =
+    SettingDef.input(
+      SettingName("zipxActionUpdate"),
+      SettingPurpose(
+        "Local Action pin bumps: GitHub releases + SHA peel + OSV. Rewrites Action constructors after yes. dry-run lists only."
+      ),
     )
 
   val affectedModules: SettingDef[Unit] =
@@ -526,9 +536,9 @@ object ZipxSettings:
     matrixCollapse,
     actions,
     actionsPath,
-    dependabotSync,
-    scalaSteward,
-    stewardGrouping,
+    actionRows,
+    verify,
+    leftoverSteward,
     pinFeeds,
     pinPrGate,
     versions,
@@ -572,7 +582,7 @@ object ZipxSettings:
   val tasks: List[SettingDef[?]] = List(
     workflowGenerate,
     workflowCheck,
-    actionsPull,
+    advisoryCheck,
     graph,
     publishOrder,
     affectedModules,
@@ -582,6 +592,7 @@ object ZipxSettings:
     pinInventory,
     pinUpdate,
     depUpdate,
+    actionUpdate,
   )
 
   /** Every public catalog entry, in docs-friendly order. */

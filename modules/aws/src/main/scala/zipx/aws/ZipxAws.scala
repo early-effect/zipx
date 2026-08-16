@@ -58,17 +58,12 @@ object ZipxAws:
     * through a pack, so pinning it must not require a zipx release. The cost is stated in `ActionPins`: an extra pin's
     * ref is checked for being pinned, not for naming this particular action.
     */
-  val CredentialsPinKey: String = ZipxComposites.CredentialsPinKey
+  val CredentialsPinKey: String = "aws-actions/configure-aws-credentials"
 
-  /** Used when the consumer's pin file has no [[CredentialsPinKey]] entry. A literal, so its shape is checked while
-    * this file compiles, and a SHA rather than `@v6` so the fallback is not itself an unpinned action.
+  /** Used when the consumer has no catalog `Action` row for [[CredentialsPinKey]]. A literal, so its shape is checked
+    * while this file compiles, and a SHA rather than a floating tag so the fallback is not itself an unpinned action.
     *
-    * Add the pin to `.github/zipx/action-pins.yml` to take ownership of the version:
-    *
-    * {{{
-    * extra:
-    *   configureAwsCredentials: aws-actions/configure-aws-credentials@<sha> # v6.2.3
-    * }}}
+    * Add an `Action` catalog row for [[CredentialsPinKey]] to ZipxVersions to take ownership of the version.
     */
   val DefaultCredentialsAction: ActionRef =
     ActionRef("aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c")
@@ -77,11 +72,9 @@ object ZipxAws:
     * [[DefaultCredentialsAction]].
     */
   def credentialsAction(pins: ActionPins): ActionRef =
-    pins.extraRef(CredentialsPinKey).getOrElse(DefaultCredentialsAction)
+    pins.extraByPrefix(CredentialsPinKey).getOrElse(DefaultCredentialsAction)
 
-  /** `.github/zipx/action-pins.yml` with this pack's action pinned, for a build that sets `zipxActions` directly rather
-    * than committing the entry.
-    */
+  /** Catalog overlay with this pack's action pinned. */
   def withCredentialsPin(pins: ActionPins, ref: ActionRef, version: Option[String] = None): ActionPins =
     pins.withExtra(CredentialsPinKey, ref, version)
 
@@ -100,13 +93,13 @@ object ZipxAws:
   }
 
   /** The pin key and fallback for `aws-actions/amazon-ecr-login`, on the same terms as [[CredentialsPinKey]]. */
-  val EcrLoginPinKey: String = ZipxComposites.EcrLoginPinKey
+  val EcrLoginPinKey: String = "aws-actions/amazon-ecr-login"
 
   val DefaultEcrLoginAction: ActionRef =
     ActionRef("aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64")
 
   def ecrLoginAction(pins: ActionPins): ActionRef =
-    pins.extraRef(EcrLoginPinKey).getOrElse(DefaultEcrLoginAction)
+    pins.extraByPrefix(EcrLoginPinKey).getOrElse(DefaultEcrLoginAction)
 
   /** [[oidcLoginSteps]] followed by an ECR docker login. Required for any push that uses the docker CLI, including
     * sbt-native-packager's `Docker / publish`.

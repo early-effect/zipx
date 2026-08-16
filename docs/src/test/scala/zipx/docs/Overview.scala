@@ -71,12 +71,20 @@ lazy val root = (project in file("."))
 Generated Aggregate jobs (live output from the planner):
 """,
       exampleValue {
-        DocsRender.jobs("test", "publish")(Capability.test, Capability.publish)
+        DocsRender.jobs("test", "fmt", "workflow-check", "advisories", "publish")(
+          Capability.test,
+          Capability.once(Capability.FmtName, SbtCommand.unsafeCommand("scalafmtCheckAll")),
+          Capability.once(Capability.WorkflowCheckName, SbtCommand.unsafeTask("zipxWorkflowCheck")),
+          Capability.once(Capability.AdvisoriesName, SbtCommand.unsafeTask("zipxAdvisoryCheck")),
+          Capability.publish,
+        )
       }.assert(yaml =>
         assertTrue(
           yaml.contains("test:"),
+          yaml.contains("fmt:"),
+          yaml.contains("workflow-check:"),
+          yaml.contains("advisories:"),
           yaml.contains("publish:"),
-          yaml.contains("run: sbt 'test'"),
           yaml.contains("startsWith(github.ref, 'refs/tags/v')"),
         )
       ),

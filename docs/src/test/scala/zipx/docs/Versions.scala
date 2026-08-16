@@ -15,9 +15,9 @@ object Versions extends DocSpecSuite:
 
   def doc = page("Versions")(
     md"""
-Extend `ZipxVersions`. Drop `MyVersions.settings` at the top of `build.sbt`. Every `Lib` / `Plugin` / `Pin` **val** is a
-catalog row; zipx collects them. You do not write a second `coords` list. Each module picks a group. That is the catalog:
-one object, not version strings copied through `build.sbt` and `plugins.sbt`.
+Extend `ZipxVersions`. Drop `MyVersions.settings` at the top of `build.sbt`. Every `Lib` / `Plugin` / `Pin` / `Action`
+**val** is a catalog row; zipx collects them. You do not write a second `coords` list. Each module picks a group. That
+is the catalog: one object, not version strings copied through `build.sbt` and `plugins.sbt`.
 
 ```scala
 // project/ZipxVersions.scala
@@ -31,6 +31,7 @@ object MyVersions extends ZipxVersions:
   val slf4j               = Lib("org.slf4j", "slf4j-simple", "2.0.18").java
   val scalafmt            = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
   val preact              = Pin("cdn", "preact", "10.26.4", sha256 = "sha256-abc", purl = "pkg:npm/preact@10.26.4")
+  val checkout            = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
 
   def libraries = library(zio, zioTest)
   def client    = library(zio)
@@ -47,19 +48,21 @@ lazy val service = project.settings(MyVersions.service)
 ```
 
 `.sbt` files get plugin autoImport for free. Scala sources under `project/` import `zipx.*` and extend the trait. The
-object name is yours. `settings` is a bare sbt 2 common setting (`scalaVersion`, `zipxVersions`, `zipxPins`, `zipxCheckDeps`).
+object name is yours. `settings` is a bare sbt 2 common setting (`scalaVersion`, `zipxVersions`, `zipxPins`,
+`zipxActionRows`, `zipxCheckDeps`).
 No `ThisBuild /`. Named groups (`libraries`, `client`, `service`) are `def`s on your object that *select* rows; a service
 is not a zipx type. `cross`, `deps`, `library`, and `moduleID` are the other paved methods. Override `crossScala` for
 2.13 + 3.
 
-When a row is stale, `zipxDepUpdate` (Maven) or `zipxPinUpdate` (`Pin` vals), say yes, commit, open a pull request.
-Generate writes `project/plugins.sbt` and `project/build.properties`. See **Dependency updates** for the full local loop.
+When a row is stale, `zipxDepUpdate` (Maven), `zipxPinUpdate` (`Pin` vals), or `zipxActionUpdate` (`Action` vals), say
+yes, commit, open a pull request. Generate writes `project/plugins.sbt` and `project/build.properties`. See
+**Dependency updates** for the full local loop.
 """,
     section("Every val is a row")(
       md"""
-zipx collects every val whose type has an `AsCoords` or `AsPins` given. `Lib` and `Plugin` share `AsCoords`; `Pin` has
-`AsPins`. A `def` is not a val, so it is not a row. That is why groups are `def libraries = library(zio)`: selection, not
-a second copy of the coordinate.
+zipx collects every val whose type has an `AsCoords`, `AsPins`, or `AsActions` given. `Lib` and `Plugin` share
+`AsCoords`; `Pin` has `AsPins`; `Action` has `AsActions`. A `def` is not a val, so it is not a row. That is why groups
+are `def libraries = library(zio)`: selection, not a second copy of the coordinate.
 
 | On the object | Catalog row? |
 |---|---|
@@ -68,6 +71,7 @@ a second copy of the coordinate.
 | `val coursier = Lib(...).java.excluding(...)` | yes (excludes live on the row) |
 | `val scalafmt = Plugin(...)` | yes (generate writes `plugins.sbt`) |
 | `val preact = Pin("cdn", "preact", …)` | yes (`zipxPins`; apply rewrites version, sha256, and purl together) |
+| `val checkout = Action("actions/checkout", …, sha = …)` | yes (`zipxActionRows`; apply rewrites version and git SHA together) |
 | `val sbt` / `val scala` | no (`SbtVersion` / `ScalaVersion` are not Maven coordinates) |
 | `def service = library(zio, slf4j)` | no (picks rows for a module) |
 | `val libs = List(zio)` | no (a list has no `AsCoords` given; do not add one for `List`) |
@@ -184,16 +188,21 @@ There is no weekly zipx job that opens a catalog PR. You bump locally, then you 
 sbt zipxDepUpdate             # list, then prompt Apply N catalog update(s)? [y/N]
 sbt "zipxDepUpdate yes"       # rewrite constructors in zipxVersionsFile
 sbt "zipxDepUpdate dry-run"
+
+sbt zipxActionUpdate
+sbt "zipxActionUpdate yes"
+sbt "zipxActionUpdate dry-run"
 ```
 
-Lookup is Maven Central metadata (then the sbt plugin repo). `yes` applies **every** listed bump. With no terminal, a
-bare command lists and stops.
+Lookup is Maven Central metadata (then the sbt plugin repo) for `Lib` / `Plugin`. Actions use the GitHub API plus a
+SHA peel. `yes` applies **every** listed bump. With no terminal, a bare command lists and stops.
 
 The catalog file lives under `project/`, so it is part of the build definition. After a rewrite, `reload` (or a fresh
-sbt) before you generate. If a `Plugin`, `zipxSbt`, or `zipxScala` version moved, run `zipxWorkflowGenerate` and commit
-`plugins.sbt` / `build.properties` too. Then test, commit, open a PR.
+sbt) before you generate. If a `Plugin`, `zipxSbt`, `zipxScala`, or `Action` version moved, run `zipxWorkflowGenerate`
+and commit `plugins.sbt` / `build.properties` (and workflows) too. Then test, commit, open a PR.
 
-Apply rewrites `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` only. `.mod` copies share the parent version
+Apply rewrites `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` and
+`Action("owner/repo", "from", sha = "…")` so version and git SHA move together. `.mod` copies share the parent version
 literal. The PR you open is that one file:
 """,
       example {
@@ -216,6 +225,20 @@ val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
           !text.contains("2.6.2"),
         )
       ),
+      example {
+        catalogActionPrDiff
+      }.assert(_ =>
+        val src =
+          """val checkout = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
+"""
+        val action = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
+        val bump   = ActionBump(action, BumpKind.Minor, "v8.0.0", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        val text   = ZipxCatalog.applyActionBumps(src, List(bump)).yaml
+        assertTrue(
+          text.contains("""Action("actions/checkout", "v8.0.0", sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")"""),
+          !text.contains("v7.0.1"),
+        )
+      ),
     ),
   )
 
@@ -227,5 +250,18 @@ val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
       DocDiff.line(DocDiff.Kind.Ctx, """  val zioTest  = zio.mod("zio-test").test"""),
       DocDiff.line(DocDiff.Kind.Del, """  val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")"""),
       DocDiff.line(DocDiff.Kind.Add, """  val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.3")"""),
+    )
+
+  private def catalogActionPrDiff =
+    DocDiff.panel("project/ZipxVersions.scala")(
+      DocDiff.line(DocDiff.Kind.Meta, "@@ object MyVersions extends ZipxVersions"),
+      DocDiff.line(
+        DocDiff.Kind.Del,
+        """  val checkout = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")""",
+      ),
+      DocDiff.line(
+        DocDiff.Kind.Add,
+        """  val checkout = Action("actions/checkout", "v8.0.0", sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")""",
+      ),
     )
 end Versions

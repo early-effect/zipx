@@ -24,17 +24,17 @@ object PinFeeds extends DocSpecSuite:
 Skip until you pin something that is not a Maven library and not a GitHub Action: a CDN URL plus a checksum, a
 tarball tag, a file you vendor into the repo.
 
-GitHub's Dependabot can bump SHA-pinned Actions in generated workflows. Library and plugin versions live in the
-catalog as `Lib` / `Plugin`. **Pins live in that same catalog** as `Pin` vals. A pin feed is only lookup and policy
-(Ignore / Report / Update), plus optional `materialize` for extra files.
+GitHub Actions live in the catalog as `Action` vals (`zipxActionUpdate`). Library and plugin versions live as `Lib` /
+`Plugin`. **Pins live in that same catalog** as `Pin` vals. A pin feed is only lookup and policy (Ignore / Report /
+Update), plus optional `materialize` for extra files.
 
 zipx owns topology, OSV, and the catalog rewrite. The feed looks up the next version and checksum.
 """,
     section("Why a feed")(
       md"""
 A repo that vendors JS bytes has no `package.json`. Dependabot never opens a PR when `lib-a` gets a CVE. A third
-one-off bot would repeat the catalog and Dependabot split badly. A feed is the same split: zipx schedules, gates, and
-rewrites `Pin(...)` in `project/ZipxVersions.scala`; the feed knows how to talk to jsDelivr / npm / tags.
+one-off bot would repeat the catalog split badly. A feed is the same split: zipx schedules, gates, and rewrites
+`Pin(...)` in `project/ZipxVersions.scala`; the feed knows how to talk to jsDelivr / npm / tags.
 """
     ),
     section("Who owns what")(
@@ -68,16 +68,17 @@ and purl together). `materialize` is only for extra files, such as vendored JS b
       md"""
 ```mermaid
 flowchart TD
-  PR[pull_request] --> Cap["ci.yml job pin-check"]
-  Cap --> PrTask["sbt zipxPinCheckPr"]
+  PR[pull_request] --> Cap["ci.yml job advisories"]
+  Cap --> PrTask["sbt zipxAdvisoryCheck"]
   Sched[scheduled plus dispatch] --> Comp["zipx-pin-check.yml"]
   Comp --> Check["sbt zipxPinCheck"]
   Push[push to default branch] --> Snap["zipx-pin-snapshot.yml"]
   Snap --> Submit["sbt zipxPinSubmit"]
 ```
 
-The PR job is a builtin **Once** capability (`Capability.pinCheck`). Cron cannot live on `ci.yml` or it would also run
-test and publish on that schedule. Snapshot submit is `contents: write` and must not run on a PR (that pollutes the
+Pin OSV on a PR folds into the builtin **advisories** job (`zipxAdvisoryCheck`), so zipx does not emit two advisory
+jobs. Cron cannot live on `ci.yml` or it would also run test and publish on that schedule. Snapshot submit is
+`contents: write` and must not run on a PR (that pollutes the
 Security tab).
 """
     ),
@@ -123,24 +124,27 @@ zipxPinFeeds += PinFeed(
     ),
     section("PR gate")(
       md"""
-When `zipxPinFeeds` is non-empty, some feed has `advisory != Ignore`, and `zipxPinPrGate != Off`, zipx injects
-`Capability.pinCheck` the same way it injects test/publish. Same-name replace works: extraSteps, condition,
-`needsCapabilities`. Default is **parallel**: pin-check does not `needs` test. To fail-closed even when only `test` is
-a required check:
+When `zipxPinFeeds` is non-empty, some feed has `advisory != Ignore`, and `zipxPinPrGate != Off`, pin OSV runs inside
+`zipxAdvisoryCheck` (the **advisories** job). Same-name replace still works if you add `Capability.pinCheck` yourself.
+Default is **parallel**: advisories does not `needs` test. To fail-closed even when only `test` is a required check:
 
 ```scala
-zipxCapabilities += Capability.test.copy(needsCapabilities = List(Capability.PinCheckName))
+zipxCapabilities += Capability.test.copy(needsCapabilities = List(Capability.AdvisoriesName))
 ```
+
+`zipxVerify := ZipxVerify.Strict.copy(advisories = VerifyOpt.Skip("reason"))` skips the whole job, including pin OSV.
 """,
       exampleValue {
-        DocsRender.jobs("pin-check", "test")(Capability.pinCheck(), Capability.test)
+        DocsRender.jobs("advisories", "test")(
+          Capability.once(Capability.AdvisoriesName, SbtCommand.unsafeTask("zipxAdvisoryCheck")),
+          Capability.test,
+        )
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("pin-check:"),
-          yaml.contains("pull_request"),
-          yaml.contains("zipxPinCheckPr"),
+          yaml.contains("advisories:"),
+          yaml.contains("zipxAdvisoryCheck"),
           yaml.contains("test:"),
-          !yaml.contains("- pin-check"),
+          !yaml.contains("- advisories"),
         )
       ),
     ),
@@ -183,7 +187,7 @@ When some feed uses `Update`, the companion is `contents: write` and `pull-reque
 as `github-actions[bot]`. Alert-only stays `contents: read` and never opens a PR. The `pin-check` capability never
 applies.
 
-**Required repo/org setting** (same as Steward, only needed for `Update`): [Allow GitHub Actions to create and
+**Required repo/org setting** (only needed for `Update`): [Allow GitHub Actions to create and
 approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).
 """,
       exampleValue {

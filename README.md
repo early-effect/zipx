@@ -16,7 +16,7 @@ You declare modules and `dependsOn` once. zipx emits a workflow that:
 - **deploys to multiple environments** with GitHub Environment approval (targets fan out; modules can batch);
 - **extends with custom capabilities**: lint gates, multi-registry pushes, stages you invent in Scala;
 - **checks itself in CI**: a committed workflow that drifts from the build fails the build;
-- **pins GitHub Actions to commit SHAs**, with an optional pin file + Dependabot sync so consumers can bump actions without waiting on a zipx release.
+- **pins GitHub Actions to commit SHAs**, with catalog `Action` vals so you can bump them without waiting on a zipx release.
 
 ## Quick start
 
@@ -32,25 +32,17 @@ sbt zipxWorkflowGenerate
 git add .github/workflows/ci.yml && git commit -m "ci: generate with zipx"
 ```
 
-Defaults are Aggregate: one root `testFull` job (sbt 2's full suite, not `testQuick`) and one publish job (plus docker when any module enables `DockerPlugin`). Write bare settings in `build.sbt` (no `ThisBuild /`); e.g. `zipxTestTask := zipxTasks.of(testFull)` is the plugin default and any module can override it.
+Defaults are Aggregate: parallel Verify jobs (`testFull`, `fmt`, `workflow-check`, `advisories`) and one publish job (plus docker when any module enables `DockerPlugin`). Write bare settings in `build.sbt` (no `ThisBuild /`); e.g. `zipxTestTask := zipxTasks.of(testFull)` is the plugin default and any module can override it.
 
-### Action pins (optional)
+### Action pins
 
-Generated `uses:` lines are SHA-pinned (with `# vX.Y.Z` comments). To track upstream action releases ahead of a zipx upgrade:
-
-1. Commit [`.github/zipx/action-pins.yml`](.github/zipx/action-pins.yml) (this repo’s format is the reference)
-2. Enable Dependabot for `github-actions` (see [`.github/dependabot.yml`](.github/dependabot.yml))
-3. On Dependabot PRs run `sbt zipxActionsPull`, **or** set `zipxDependabotSync := true` so zipx also generates `.github/workflows/zipx-action-pins-sync.yml`
-
-Resolve order: explicit `zipxActions` → pin file when present → jar defaults. Every line of a present pin file is
-validated, so a typo'd key or an unpinned ref fails the build naming the line instead of silently reverting that pin to
-the jar default. Full guide: **Action pins** on the docs site.
+Generated `uses:` lines are SHA-pinned (with `# vX.Y.Z` comments). Jar defaults ship in the plugin. To track upstream action releases ahead of a zipx upgrade, add `Action` vals to `project/ZipxVersions.scala` and run `sbt "zipxActionUpdate yes"`, then `reload` and `zipxWorkflowGenerate`. A leftover `.github/zipx/action-pins.yml` fails generate (paste the constructors). A `github-actions` Dependabot ecosystem is not needed. Full guide: **Action pins** on the docs site.
 
 ### Keeping versions current
 
 Extend `ZipxVersions` in `project/ZipxVersions.scala`, then drop `MyVersions.settings` in `build.sbt`. Every `Lib` /
-`Plugin` val is a catalog row; you do not list them again. Each module picks a group. Typed values, not regex over the
-build. Other plugins extend the same trait. Full guide: **Versions** on the docs site.
+`Plugin` / `Action` val is a catalog row; you do not list them again. Each module picks a group. Typed values, not regex
+over the build. Other plugins extend the same trait. Full guide: **Versions** on the docs site.
 
 ```scala
 import zipx.*
@@ -71,18 +63,11 @@ Bump locally, then open a PR:
 
 ```
 sbt zipxDepUpdate
+sbt zipxActionUpdate
 ```
 
 Pins that are not Maven (CDN URL plus checksum, tarballs, vendored files) use `sbt zipxPinUpdate`. Full loop:
 **Dependency updates** on the docs site.
-
-### Scala Steward (optional)
-
-```scala
-zipxScalaSteward := true
-```
-
-Generates `.github/workflows/zipx-scala-steward.yml` (weekly + manual) if you still want a bot that opens catalog PRs. Enable **Allow GitHub Actions to create and approve pull requests** on the repo/org. You do not need this; `zipxDepUpdate` is the catalog path.
 
 ## Docs
 
@@ -99,8 +84,8 @@ What's covered:
 - Built-in **capabilities**, **custom capabilities**, and **composing sbt commands** (`zipxTasks`, `thenOnce`, `ZipxCentral.release`)
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate `test` via Testcontainers)
-- **Action pins** (pin file, Dependabot, `zipxActionsPull`, sync workflow)
-- **Dependency updates** (local `zipxDepUpdate` / `zipxPinUpdate`, then you open the PR) and **Pin feeds**
+- **Action pins** (catalog `Action` vals, `zipxActionUpdate`, jar defaults)
+- **Dependency updates** (local `zipxDepUpdate` / `zipxPinUpdate` / `zipxActionUpdate`, then you open the PR) and **Pin feeds**
 - Docker and multi-target deploy
 - `ZipxCentral` / `ZipxDocs` packs
 - Settings reference and dogfood notes

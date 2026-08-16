@@ -1,0 +1,17 @@
+# Catalog Action val overlays jar defaults; apply rewrites version and sha together.
+> zipxWorkflowGenerate
+$ exists .github/workflows/ci.yml
+> assertActionPins
+> assertActionRewrite
+> reload
+> zipxWorkflowGenerate
+> assertActionRewritten
+# A leftover pin YAML is leftover input and must fail generate.
+$ exec mkdir -p .github/zipx
+$ exec cp leftover.yml .github/zipx/action-pins.yml
+-> zipxWorkflowGenerate
+# Leftover Scala Steward YAML fails generate by default (not a dual pin source).
+$ exec rm -f .github/zipx/action-pins.yml
+$ exec mkdir -p .github/workflows
+$ exec touch .github/workflows/zipx-scala-steward.yml
+-> zipxWorkflowGenerate

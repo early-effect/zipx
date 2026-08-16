@@ -1,4 +1,4 @@
-# Catalog Pin vals: generate emits pin-check on ci.yml plus both companions.
+# Catalog Pin vals: generate folds pin OSV into advisories on ci.yml plus both companions.
 > zipxWorkflowGenerate
 $ exists .github/workflows/ci.yml
 $ exists .github/workflows/zipx-pin-check.yml

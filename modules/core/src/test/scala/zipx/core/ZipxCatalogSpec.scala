@@ -1,5 +1,6 @@
 package zipx.core
 
+import neotype.unwrap
 import zio.test.*
 
 object ZipxCatalogSpec extends ZIOSpecDefault:
@@ -248,6 +249,77 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
         )
       val ids = Sample.coords.map(c => c.artifact: String)
       assertTrue(ids == List("from-trait", "runtime", "sbt-acme"))
+    },
+    test("actionsOf collects Action vals and skips Lib") {
+      trait Catalog:
+        inline def actions: Seq[Action] = ZipxCatalog.actionsOf[this.type](this)
+      object Sample extends Catalog:
+        val zio      = Lib("dev.zio", "zio", "2.1.26")
+        val checkout = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
+      assertTrue(Sample.actions.map(_.name) == List("actions/checkout"))
+    },
+    test("applyActionBumps rewrites version and sha together") {
+      val src =
+        """val checkout = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
+          |val zio      = Lib("dev.zio", "zio", "2.1.26")
+          |""".stripMargin
+      val action = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
+      val bump   = ActionBump(action, BumpKind.Minor, "v8.0.0", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+      ZipxCatalog.applyActionBumps(src, List(bump)) match
+        case Left(err)  => assertTrue(err.isEmpty)
+        case Right(out) =>
+          assertTrue(
+            out.contains("""Action("actions/checkout", "v8.0.0", sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")"""),
+            out.contains("""Lib("dev.zio", "zio", "2.1.26")"""),
+            !out.contains("v7.0.1"),
+          )
+    },
+    test("applyActionBumps is Left when the constructor is missing") {
+      val action = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
+      val bump   = ActionBump(action, BumpKind.Patch, "v7.0.2", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+      ZipxCatalog.applyActionBumps("val zio = Lib(\"dev.zio\", \"zio\", \"2.1.26\")\n", List(bump)) match
+        case Left(err) =>
+          assertTrue(err.contains("no Action constructor"), err.contains("zipxActionUpdate yes"))
+        case Right(_) => assertTrue(false)
+    },
+    test("leftover pin file error names constructors and generate") {
+      val err = ZipxCatalog.leftoverPinFileError(ActionPinFile.DefaultPath, ActionPins.Bootstrap)
+      assertTrue(
+        err.contains("Action(\"actions/checkout\""),
+        err.contains("zipxWorkflowGenerate"),
+        err.contains(ActionPinFile.DefaultPath),
+      )
+    },
+    test("overlay updates a Field by prefix and extra by name") {
+      val checkout = Action("actions/checkout", "v9.0.0", sha = "cccccccccccccccccccccccccccccccccccccccc")
+      val aws      = Action(
+        "aws-actions/configure-aws-credentials",
+        "v6.9.9",
+        sha = "1111111111111111111111111111111111111111",
+      )
+      ActionPins.overlay(ActionPins.Bootstrap, List(checkout, aws)) match
+        case Left(err)   => assertTrue(err.isEmpty)
+        case Right(pins) =>
+          assertTrue(
+            pins.checkout.unwrap.endsWith("cccccccccccccccccccccccccccccccccccccccc"),
+            pins.version(ActionPins.Field.Checkout).contains("v9.0.0"),
+            pins.extraByPrefix("aws-actions/configure-aws-credentials").exists(_.unwrap.contains("11111111")),
+          )
+    },
+    test("overlay refuses a duplicate Action name") {
+      val a = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
+      val b = Action("actions/checkout", "v8.0.0", sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+      ActionPins.overlay(ActionPins.Bootstrap, List(a, b)) match
+        case Left(err) => assertTrue(err.contains("duplicate Action name"), err.contains("actions/checkout"))
+        case Right(_)  => assertTrue(false)
+    },
+    test("Action.make refuses a short SHA and a name with @") {
+      assertTrue(
+        Action.make("actions/checkout", "v7.0.1", "abc").left.exists(_.contains("40 hex")),
+        Action.make("actions/checkout@v7", "v7.0.1", "3d3c42e5aac5ba805825da76410c181273ba90b1").isLeft,
+        Action.make("", "v7.0.1", "3d3c42e5aac5ba805825da76410c181273ba90b1").isLeft,
+        Action.make("actions/checkout", "v7.0.1", "3d3c42e5aac5ba805825da76410c181273ba90b1").isRight,
+      )
     },
   )
 end ZipxCatalogSpec

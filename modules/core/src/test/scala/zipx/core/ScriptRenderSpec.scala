@@ -7,29 +7,6 @@ import zipx.workflow.Step
 object ScriptRenderSpec extends ZIOSpecDefault:
 
   def spec = suite("migrated scripts render byte-identically to their pre-DSL strings")(
-    test("the action-pins sync commit script") {
-      val step = ActionPinsSyncWorkflow
-        .plan(ActionPins.Defaults, javaVersion = "25", runnerOs = "ubuntu-latest")
-        .fold(error => throw AssertionError(s"unexpected plan failure: $error"), identity)
-        .jobs("sync")
-        .steps
-        .find(_.name.contains("Commit pin file and workflows"))
-        .getOrElse(throw AssertionError("commit step missing"))
-      assertTrue(
-        step.run.contains(
-          """if [ -z "$(git status --porcelain '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml' '.github/actions/zipx-sbt-setup/action.yml' '.github/actions/zipx-aws-login/action.yml')" ]; then
-            |  echo "No pin/workflow changes to commit."
-            |  exit 0
-            |fi
-            |git config user.name "github-actions[bot]"
-            |git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            |git add '.github/zipx/action-pins.yml' '.github/workflows/ci.yml' '.github/workflows/zipx-action-pins-sync.yml' '.github/actions/zipx-sbt-setup/action.yml' '.github/actions/zipx-aws-login/action.yml'
-            |git commit -m "ci: sync zipx action pins from Dependabot"
-            |git push
-            |""".stripMargin
-        )
-      )
-    },
     test("the git-tags cache-epoch resolver, the acid test") {
       assertTrue(
         CacheEpoch.gitTagsResolveScript() ==
@@ -186,19 +163,6 @@ object ScriptRenderSpec extends ZIOSpecDefault:
         checkoutIdx >= 0,
         setupIdx == checkoutIdx + 1,
         steps(setupIdx).`with`.get("cache-epoch").contains("1.2.3-ci"),
-      )
-    },
-    test("a path containing a single quote is reported as a value rather than escaped around") {
-      val bad = ActionPinsSyncWorkflow.plan(
-        ActionPins.Defaults,
-        javaVersion = "25",
-        runnerOs = "ubuntu-latest",
-        actionsPath = ".github/it's-a-trap.yml",
-      )
-      assertTrue(
-        bad.isLeft,
-        bad.left.exists(_.contains("it's-a-trap.yml")),
-        bad.left.exists(_.contains("single quote")),
       )
     },
   )

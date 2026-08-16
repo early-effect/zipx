@@ -12,41 +12,44 @@ object CustomCapabilities extends DocSpecSuite:
 
   def doc = page("Custom capabilities")(
     md"""
-Skip until the built-in test / publish / docker jobs are not enough. This page is how you add a format check, or any
-other sbt task, as its own CI job.
+Skip until the built-in test / fmt / workflow-check / advisories / publish / docker jobs are not enough. This page is
+how you add another lint job, or any other sbt task, as its own CI job.
 
 `zipxCapabilities` is append-able: any sbt task becomes a CI stage. Beyond the built-ins you mainly use
 `Capability.once` / `Capability.steps` / `Capability.custom`, or the typed `zipxTasks` / `cmd` helpers from the plugin.
 """,
     section("Once gates")(
       md"""
-`Capability.once` emits a **single build-wide job** (not per module), e.g. format/lint that every test job waits on:
+`Capability.once` emits a **single build-wide job** (not per module). Builtin **fmt** is already a parallel Verify
+Once (`scalafmtCheckAll`); do not add another fmt and make test wait on it. Use Once for a *different* lint, or to
+replace the builtin command:
 
 A capability's name becomes a `jobs.<job_id>` key, so it is a `CapabilityName` rather than a bare `String`: a literal is
 checked where you write it, and naming the `val` once is what lets a dependent capability refer to it without repeating
 the string.
 
 ```scala
-val Fmt = CapabilityName("fmt")
-zipxCapabilities += zipxTasks.once(Fmt, scalafmtCheckAll)
-zipxCapabilities += Capability.test.copy(needsCapabilities = List(Fmt))
-// or Layers: Capability.testLayers.copy(needsCapabilities = List(Fmt))
+val Lint = CapabilityName("lint")
+zipxCapabilities += zipxTasks.once(Lint, lintAll)
+// optional: make test wait on it
+zipxCapabilities += Capability.test.copy(needsCapabilities = List(Lint))
 ```
 
-The builtin PR pin-check job is also Once (`Capability.pinCheck`, job id `pin-check`). See **Pin feeds**.
+To skip builtin fmt out loud instead of replacing it: `zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("reason"))`.
+See **Verify**.
 """,
       exampleValue {
-        val fmt = CapabilityName("fmt")
-        DocsRender.jobs("fmt", "test")(
-          Capability.once(fmt, SbtCommand.unsafeTask("scalafmtCheckAll")),
-          Capability.test.copy(needsCapabilities = List(fmt)),
+        val lint = CapabilityName("lint")
+        DocsRender.jobs("lint", "test")(
+          Capability.once(lint, SbtCommand.unsafeTask("lintAll")),
+          Capability.test.copy(needsCapabilities = List(lint)),
         )
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("fmt:"),
-          yaml.contains("scalafmtCheckAll"),
+          yaml.contains("lint:"),
+          yaml.contains("lintAll"),
           yaml.contains("test:"),
-          yaml.contains("- fmt"),
+          yaml.contains("- lint"),
         )
       ),
     ),
@@ -239,7 +242,7 @@ not parsed as sbt syntax. For the common "one task" case, the plugin's `zipxTask
 
 ```scala
 val promote = taskKey[Unit]("promote the image")
-zipxCapabilities += zipxTasks.once(CapabilityName("fmt"), scalafmtCheckAll)
+zipxCapabilities += zipxTasks.once(CapabilityName("lint"), lintAll)
 zipxCapabilities += zipxTasks.deploy(_.id == "service", promote, targets)
 zipxCapabilities += zipxTasks.deployGraph(_.id == "service", promote, targets)
 ```

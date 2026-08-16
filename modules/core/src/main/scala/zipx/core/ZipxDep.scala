@@ -1,6 +1,7 @@
 package zipx.core
 
 import neotype.Subtype
+import scala.annotation.targetName
 
 /** Maven / sbt group id (`dev.zio`). */
 type GroupId = GroupId.Type
@@ -77,6 +78,24 @@ object AsPins:
   def apply[A](using ev: AsPins[A]): AsPins[A] = ev
 
   given ofPin: AsPins[Pin] = p => Seq(p)
+
+/** How a catalog val becomes GitHub Action rows. [[Action]] has one given; a plugin bundle adds its own. */
+trait AsActions[A]:
+  def actions(value: A): Seq[Action]
+
+object AsActions:
+  def apply[A](using ev: AsActions[A]): AsActions[A] = ev
+
+  given ofAction: AsActions[Action] = a => Seq(a)
+
+/** A full git commit SHA (40 hex). Stricter than [[zipx.workflow.ActionRef]], which still allows tags. */
+type GitSha = GitSha.Type
+object GitSha extends Subtype[String]:
+  inline val Hex40 = "[0-9a-fA-F]{40}"
+
+  override inline def validate(input: String): Boolean | String =
+    if input.matches(Hex40) then true
+    else s"a git SHA must be 40 hex characters, got '$input'"
 
 final case class Lib(
     group: GroupId,
@@ -170,3 +189,40 @@ object Pin:
       Option.when(purl.nonEmpty)(Purl(purl)),
     )
 end Pin
+
+/** A GitHub Action catalog row: `owner/repo` (or `owner/repo/path`), a version label, and a full commit SHA. */
+final case class Action(name: String, version: DepVersion, sha: GitSha):
+  def current: String = version: String
+
+  def toRef: Either[String, zipx.workflow.ActionRef] =
+    zipx.workflow.ActionRef.make(s"$name@${sha: String}")
+
+  def bumped(toVersion: String, toSha: String): Either[String, Action] =
+    Action.make(name, toVersion, toSha)
+end Action
+
+object Action:
+  /** Catalog literal. `sha` is named so apply rewrites version and SHA together.
+    *
+    * `@targetName` because `DepVersion` / `GitSha` erase to `String` and would clash with the case-class apply. `new`
+    * so this does not recurse into itself (same arity as the case-class apply; `Lib` / `Plugin` pass extra defaults
+    * instead).
+    */
+  @targetName("fromLiterals")
+  inline def apply(inline name: String, inline version: String, inline sha: String): Action =
+    new Action(name, DepVersion(version), GitSha(sha))
+
+  def make(name: String, version: String, sha: String): Either[String, Action] =
+    val trimmed = name.trim
+    if trimmed.isEmpty || trimmed.contains('@') then
+      Left(s"zipx: Action name must be owner/repo or owner/repo/path, got '$name'")
+    else
+      for
+        ver  <- DepVersion.make(version)
+        gsha <- GitSha.make(sha)
+        _    <- zipx.workflow.ActionRef.make(s"$trimmed@$sha")
+      yield new Action(trimmed, ver, gsha)
+  end make
+end Action
+
+final case class ActionBump(action: Action, bump: BumpKind, toVersion: String, toSha: String)

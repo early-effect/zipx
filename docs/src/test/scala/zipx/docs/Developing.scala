@@ -31,7 +31,7 @@ source). The amber path is the publishable `plugin` project for Central and scri
 
 - `project/meta-{workflow,core,central,plugin}` compile the same `modules/*/src/main/scala` trees
 - Shared versions for the **main** build live in [`project/ZipxVersions.scala`](https://github.com/early-effect/zipx/blob/main/project/ZipxVersions.scala)
-  (`Lib` / `Plugin`). The meta-build cannot import those types, so dogfood ModuleIDs stay in
+  (`Lib` / `Plugin` / `Action`). The meta-build cannot import those types, so dogfood ModuleIDs stay in
   [`project/Dependencies.scala`](https://github.com/early-effect/zipx/blob/main/project/Dependencies.scala)
 - `project/*.sbt` cannot see `project/*.scala` directly (sbt layering).
   [`project/project/build.sbt`](https://github.com/early-effect/zipx/blob/main/project/project/build.sbt)
@@ -40,16 +40,16 @@ source). The amber path is the publishable `plugin` project for Central and scri
 **After changing** sources under `modules/{workflow,core,central,sbt-plugin}`: `reload`, then `zipxWorkflowGenerate` if
 planner output changed.
 
-**Action pins:** edit [`.github/zipx/action-pins.yml`](https://github.com/early-effect/zipx/blob/main/.github/zipx/action-pins.yml)
-(not under `workflows/`), then regenerate. Or let Dependabot bump workflow `uses:` and run `sbt zipxActionsPull`
-(dogfood enables `zipxDependabotSync := true` for the automatic sync workflow). Published jar defaults embed this
-pin file via `resourceGenerators`. See the **Action pins** docs page.
+**Action pins:** add or bump `Action` vals in [`project/ZipxVersions.scala`](https://github.com/early-effect/zipx/blob/main/project/ZipxVersions.scala)
+(same file as `Lib` / `Plugin`), then `sbt "zipxActionUpdate yes"`, `reload`, and `zipxWorkflowGenerate`. Published jar
+defaults embed those rows via `resourceGenerators` (YAML in the jar, not a committed pin file). See the **Action pins**
+docs page.
 
 **When adding a library or sbt plugin:** add a `Lib` / `Plugin` **val** in `project/ZipxVersions.scala` and select it
 with `ZipxVersions.deps` (or a named group). You do not list it a second time. If the meta-build dogfood mirror also
 needs it, add the same version to `project/Dependencies.scala`. `sbt zipxWorkflowGenerate` rewrites
 `project/plugins.sbt` and `project/build.properties`. `zipxCheckDeps` fails generate if a `libraryDependencies` GAV is
-not in the catalog.
+not in the catalog. **When adding a GitHub Action pin:** an `Action` val in the same file; bump with `zipxActionUpdate`.
 
 **When adding a mirrored module:** add a `meta*` project in `project/dogfood.sbt`, create `project/meta-<name>/`, and
 wire `dependsOn` like the existing chain.

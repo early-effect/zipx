@@ -3,10 +3,9 @@ package zipx.docs
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
-import zipx.workflow.ActionRef
 import zio.test.*
 
-/** GitHub Action SHA pins, the pin file, Dependabot, and sync. */
+/** GitHub Action SHA pins as catalog rows. YAML is generate/jar output, never an input. */
 object ActionPinsDoc extends DocSpecSuite:
 
   def doc = page("Action pins")(
@@ -19,11 +18,8 @@ tags) in the generated workflow, so a moved tag cannot change what CI runs. Vers
 ```
 
 Jar defaults ship in the plugin. Come back when you want to bump those Actions **without** waiting for a zipx release:
-a small pin file plus optional Dependabot, the same path this repository uses.
-
-`zipxWorkflowGenerate` also writes in-repo **composite actions** under `.github/actions/zipx-*` (JDK/sbt/cache
-bootstrap, AWS login when you use those packs). Commit them alongside `ci.yml`; `zipxWorkflowCheck` drifts both.
-Checkout is a prior workflow step so GitHub can resolve local `uses: ./…` from the workspace.
+add `Action` vals to `project/ZipxVersions.scala` and run `zipxActionUpdate`. There is no pin YAML to edit, and a
+`github-actions` Dependabot ecosystem is not needed.
 """,
     section("Resolve order")(
       md"""
@@ -31,118 +27,108 @@ When generating a workflow, zipx picks pins in this order:
 
 ```mermaid
 flowchart TD
-  Start[Generate workflow] --> Explicit{zipxActions != Defaults?}
+  Start[Generate workflow] --> Leftover{committed action-pins.yml?}
+  Leftover -->|yes| Fail[Fail: paste Action vals]
+  Leftover -->|no| Explicit{zipxActions != Defaults?}
   Explicit -->|yes| UseExplicit[Use zipxActions]
-  Explicit -->|no| File{pin file exists?}
-  File -->|yes| UseFile[Use action-pins.yml]
-  File -->|no| UseJar[ActionPins.Defaults]
-  class Start,Explicit,File warn
-  class UseExplicit warn
-  class UseFile,UseJar happy
+  Explicit -->|no| Overlay[Defaults plus catalog Action rows]
+  class Start,Leftover,Explicit warn
+  class Fail warn
+  class UseExplicit,Overlay happy
 ```
 
-1. **`zipxActions`**: only when set *away from* `ActionPins.Defaults` (one-off / escape hatch in `build.sbt`)
-2. **Pin file**: if `zipxActionsPath` points at an existing file (default `.github/zipx/action-pins.yml`)
-3. **`ActionPins.Defaults`**: embedded classpath resource from the zipx release you depend on
+1. **Leftover pin YAML:** if `.github/zipx/action-pins.yml` is still on disk, generate **fails** and prints the
+   `Action(...)` rows to paste. Dual source is not allowed.
+2. **`zipxActions`:** only when set *away from* `ActionPins.Defaults` (one-off / escape hatch in `build.sbt`)
+3. **Catalog overlay:** `ActionPins.Defaults` (jar) plus every `Action` val in ZipxVersions. A row whose name is a
+   field prefix (`actions/checkout`) updates that field. Any other name is `extra`, keyed by `owner/repo`.
 
-Empty `zipxActionsPath := ""` disables file loading so you always use jar defaults (or an explicit `zipxActions`).
+No `Action` vals still means jar defaults. Upgrade zipx to take new default SHAs. This repository lists every
+zipx-emitted Action so `zipxActionUpdate` can bump them before a release.
 """
     ),
-    section("The pin file")(
+    section("Catalog rows")(
       md"""
-**Path:** `.github/zipx/action-pins.yml` (configurable via `zipxActionsPath`).
+`Action` is a catalog type next to `Lib` / `Plugin` / `Pin`. A git commit SHA is not a content checksum: do not reuse
+`Pin` for Actions.
 
-This is **not** a workflow. It lives outside `.github/workflows/` and is named so it is not confused with
-`ci.yml`. Flat keys match `ActionPins` fields; values are `owner/action@sha` with an optional `# vX.Y.Z` comment:
-
-```yaml
-# zipx GitHub Action SHA pins (not a workflow).
-checkout: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-setupJava: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
-setupSbt: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
-cache: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-uploadArtifact: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-downloadArtifact: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+```scala
+val checkout = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
 ```
 
-After editing the pin file (or syncing from Dependabot):
+- `name` is `owner/repo` or `owner/repo/path` (the `uses:` prefix).
+- `version` is the label stamped as `# vX.Y.Z`.
+- `sha` is a **full 40-hex commit SHA** at construction. Combined `name@sha` must be a valid `ActionRef`.
+
+Apply rewrites the canonical constructor so version and sha move together. `zipxActionUpdate` looks up GitHub
+releases (tags if there are none), peels the tag to a commit SHA, and queries OSV (`pkg:github/owner/repo@version`).
+Never write a floating `@v4` into the catalog or into `uses:`.
 
 ```
-sbt zipxWorkflowGenerate
-git add .github/zipx/action-pins.yml .github/workflows/ci.yml .github/actions/
+sbt zipxActionUpdate             # list, then prompt
+sbt "zipxActionUpdate yes"       # rewrite constructors
+sbt "zipxActionUpdate dry-run"
 ```
 
-If `zipxDependabotSync := true`, also commit `.github/workflows/zipx-action-pins-sync.yml` when it changes.
+After apply: `reload`, then `sbt zipxWorkflowGenerate`, then `git add .github/workflows/ci.yml .github/actions/`.
+
+If there are no Action rows, the command prints constructors to paste (jar Defaults compared to GitHub). `yes` with no
+rows refuses.
 """,
       exampleValue {
-        val text =
-          """checkout: actions/checkout@abc123 # v9.0.0
-            |setupSbt: sbt/setup-sbt@def456 # v1.9.9
+        val src =
+          """val checkout = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
             |""".stripMargin
-        ActionPinFile.parse(text).map(ActionPinFile.render)
-      }.assert(yaml =>
+        val action = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
+        val bump   = ActionBump(action, BumpKind.Minor, "v8.0.0", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        ZipxCatalog.applyActionBumps(src, List(bump))
+      }.assert(out =>
         assertTrue(
-          yaml.exists(_.contains("checkout: actions/checkout@abc123 # v9.0.0")),
-          yaml.exists(_.contains("setupSbt: sbt/setup-sbt@def456 # v1.9.9")),
+          out.exists(
+            _.contains("""Action("actions/checkout", "v8.0.0", sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")""")
+          ),
+          !out.exists(_.contains("v7.0.1")),
         )
       ),
     ),
-    section("Pins for actions zipx does not emit (`extra:`)")(
+    section("Pins for actions zipx does not emit")(
       md"""
-The flat keys above are the actions **zipx itself** writes into a workflow, one per `ActionPins` field. An action *you*
-reach through `extraSteps`, a custom capability, or a published pack has no field, and waiting for a zipx release to
-get one would be absurd. Those go in an indented `extra:` block, keyed by whatever name you like:
-
-```yaml
-checkout: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-extra:
-  configure-aws-credentials: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d13d67 # v6.0.0
-```
-
-In Scala, `withExtra` puts one there and `extraRef` reads it back, which is how a pack writes a step whose pin the
-consumer can bump without a zipx upgrade:
+Typed fields are the actions **zipx itself** writes. An action *you* reach through `extraSteps`, a custom capability,
+or a published pack has no field. Those are `Action` vals whose name is not a field prefix; overlay puts them in
+`extra`, keyed by `owner/repo`. Packs look up by prefix (`aws-actions/configure-aws-credentials`), not a YAML key.
 
 ```scala
-zipxActions := ActionPins.Defaults.withExtra(
-  "configure-aws-credentials",
-  ActionRef("aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d13d67"),
-  Some("v6.0.0"),
+val awsCredentials = Action(
+  "aws-actions/configure-aws-credentials",
+  "v6.0.0",
+  sha = "b47578312673ae6fa5b5096b330d9fbac3d13d67",
 )
 ```
 
-**A typed field and an extra pin are not interchangeable, and the difference is what gets checked:**
+In Scala, `zipxActions := ActionPins.Defaults.copy(...)` / `.withExtra` is the one-off hatch. Prefer a catalog row.
 
-| | typed field (`checkout:`) | `extra:` pin |
+**A typed field and an extra pin are not interchangeable:**
+
+| | typed field | extra (non-field `Action` name) |
 |---|---|---|
 | For | an action zipx emits | an action your steps or a pack emit |
-| Key | one of a closed set; a typo is refused | any identifier you choose |
+| Key | closed set of prefixes | `owner/repo` |
 | Ref must be pinned | yes | yes |
-| Ref must name the *right* action | yes, via the field's known prefix | **no**, there is no prefix to compare against |
-| Adding one | a zipx release | a line in your pin file |
+| Ref must name the *right* action | yes, via the field's known prefix | **no** prefix check beyond the name you wrote |
 
-The row that matters is the fourth. `checkout: evil/malware@<sha>` is refused because `checkout:` is known to mean
-`actions/checkout`; `myaction: evil/malware@<sha>` cannot be, because `myaction` means whatever you decided. That
-weaker guarantee is the price of not needing a release, so prefer a typed field for anything zipx emits.
-
-`zipxActionsPull` bumps an extra pin whose **key already exists**, matching on the `owner/action` part of the ref. It
-never invents a key for an action it has not seen before: pinning a new action is a deliberate act by whoever wrote the
-step, and a guessed key would be one more thing to rename later.
+`checkout` as `evil/malware@<sha>` is refused because that field may only name `actions/checkout`.
 """,
       exampleValue {
-        val text =
-          s"""checkout: actions/checkout@abc123 # v9.0.0
-             |extra:
-             |  configure-aws-credentials: aws-actions/configure-aws-credentials@def456 # v6.0.0
-             |""".stripMargin
-        ActionPinFile.parse(text)
+        val aws = Action(
+          "aws-actions/configure-aws-credentials",
+          "v6.0.0",
+          sha = "b47578312673ae6fa5b5096b330d9fbac3d13d67",
+        )
+        ActionPins.overlay(ActionPins.Defaults, List(aws))
       }.assert(pins =>
         assertTrue(
-          pins.map(_.extraRef("configure-aws-credentials")) ==
-            Right(Some(ActionRef("aws-actions/configure-aws-credentials@def456"))),
-          pins.exists(_.extraVersion("configure-aws-credentials").contains("v6.0.0")),
-          // The same file re-rendered is the same file: extra pins sort by key, so a Map's iteration order cannot
-          // produce a spurious diff on the next generate.
-          pins.map(ActionPinFile.render).flatMap(ActionPinFile.parse) == pins,
+          pins.toOption.flatMap(_.extraByPrefix("aws-actions/configure-aws-credentials")).nonEmpty,
+          pins.exists(_.extraVersion("aws-actions/configure-aws-credentials").contains("v6.0.0")),
         )
       ),
     ),
@@ -190,33 +176,25 @@ adopting this changes only the capability that asked:
         )
       ),
     ),
-    section("A line zipx cannot read fails the build")(
+    section("Leftover pin YAML")(
       md"""
-`ActionPinFile.parse` returns an `Either`, and `zipxWorkflowGenerate` turns a `Left` into a build error naming the
-line. A pin file that is *present* must be wholly readable; only an *absent* file falls back to jar defaults.
+Nothing under `.github/zipx/` is an editable source. If a committed `.github/zipx/action-pins.yml` is still present
+(old consumer or this repo before the catalog), generate fails with the `Action(...)` vals to paste. No silent dual
+source.
 
-That matters because the fallback used to be silent. A key with a typo in it (`setup-jav:`) simply did not match, so
-the field quietly reverted to the SHA baked into the zipx jar, undoing a pin the repo had deliberately held back. Four
-things are refused, and the error names the file, the line number, and the line:
-
-| The line | Why |
-|---|---|
-| `setup-jav: actions/setup-java@<sha>` | not a pin, a comment, or blank |
-| `setupJava2: actions/setup-java@<sha>` | `setupJava2` is not an `ActionPins` field (the message lists the ones that are) |
-| `checkout: actions/checkout` | no `@ref`: an unpinned action is the risk this file exists to remove |
-| `checkout: evil/malware@<sha>` | a valid ref, but `checkout:` may only name `actions/checkout` |
-
-The last is the one a shape check alone misses, and the reason a `uses:` value is an
-[[zipx.workflow.ActionRef]] everywhere rather than a `String`: the pin file is where an action ref becomes typed, and
-after that no step, job or reusable-workflow call can carry an unvalidated one.
+```
+zipx: .github/zipx/action-pins.yml is leftover input. Action pins live in project/ZipxVersions.scala. Delete …
+  val checkout = Action("actions/checkout", "v7.0.1", sha = "…")
+Then sbt reload and sbt zipxWorkflowGenerate.
+```
 """,
       exampleValue {
-        ActionPinFile.parse("checkout: actions/checkout\n")
-      }.assert(result =>
+        ZipxCatalog.leftoverPinFileError(ActionPinFile.DefaultPath, ActionPins.Defaults)
+      }.assert(err =>
         assertTrue(
-          result.isLeft,
-          result.swap.exists(_.contains(".github/zipx/action-pins.yml:1:")),
-          result.swap.exists(_.contains("@ref")),
+          err.contains("Action(\"actions/checkout\""),
+          err.contains("zipxWorkflowGenerate"),
+          err.contains(ActionPinFile.DefaultPath),
         )
       ),
     ),
@@ -224,64 +202,14 @@ after that no step, job or reusable-workflow call can carry an unvalidated one.
       md"""
 | Goal | What to do |
 |---|---|
-| Stay on zipx release defaults | No pin file; upgrade `sbt-zipx` when we bump pins |
-| Track actions with low friction | Commit `.github/zipx/action-pins.yml`; enable Dependabot; run `sbt zipxActionsPull` on bump PRs |
-| Fully hands-off | `zipxDependabotSync := true` (generates the sync workflow) + Dependabot |
+| Stay on zipx release defaults | No Action vals; upgrade `sbt-zipx` when we bump pins |
+| Track actions | `Action` vals in ZipxVersions; `sbt "zipxActionUpdate yes"`; reload; generate |
 | One-off exotic pin | `zipxActions := ActionPins.Defaults.copy(...)` in `build.sbt` |
-"""
-    ),
-    section("Dependabot")(
-      md"""
-Dependabot's `github-actions` ecosystem only sees `uses:` in workflow / composite-action YAML, not Scala and not the
-pin file directly. That is fine: it bumps SHAs (and `# vX.Y.Z` comments) in the generated workflow. You then **pull**
-those bumps back into the pin file so `zipxWorkflowCheck` stays green.
-
-Minimal Dependabot config:
-
-```yaml
-# .github/dependabot.yml
-version: 2
-updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      github-actions:
-        patterns:
-          - "*"
-```
-
-**Manual sync on a Dependabot PR:**
-
-```
-sbt zipxActionsPull
-# updates the pin file from ci.yml and .github/actions/**/action.yml, then regenerates
-git add .github/zipx/action-pins.yml .github/workflows/ .github/actions/
-```
-
-`zipxActionsPull` refuses to run if `zipxActionsPath` is empty (nowhere to write).
-"""
-    ),
-    section("Automatic sync workflow")(
-      md"""
-```scala
-zipxDependabotSync := true
-```
-
-Then `zipxWorkflowGenerate` / `zipxWorkflowCheck` also maintain
-`.github/workflows/zipx-action-pins-sync.yml` (separate from `ci.yml`). On Dependabot PRs that workflow:
-
-1. checks out the PR branch
-2. runs `sbt zipxActionsPull`
-3. commits and pushes pin-file + workflow updates when anything changed
-
-zipx itself dogfoods this (`zipxDependabotSync := true` in the root build).
 """
     ),
     section("build.sbt escape hatch")(
       md"""
-Prefer the pin file for ongoing SHA tracking. Use `zipxActions` only for temporary or exotic overrides:
+Prefer catalog rows for ongoing SHA tracking. Use `zipxActions` only for temporary or exotic overrides:
 
 ```scala
 zipxActions := ActionPins.Defaults.copy(
@@ -293,32 +221,35 @@ The `ActionRef(...)` wrapper is not ceremony: it is validated while your `build.
 `ActionRef("sbt/setup-sbt")` is a compile error naming the missing `@ref` rather than an unpinned action in `ci.yml`.
 For a ref your build computes rather than writes out, `ActionRef.make(...)` returns an `Either` instead.
 
-An explicit `zipxActions` that differs from `ActionPins.Defaults` **wins over** the pin file. Setting
-`zipxActions := ActionPins.Defaults` (or leaving the default) lets the pin file take effect when present.
+An explicit `zipxActions` that differs from `ActionPins.Defaults` **wins over** catalog rows.
 """
     ),
     section("How jar defaults stay honest")(
       md"""
-In the zipx repository, `.github/zipx/action-pins.yml` is the editable source of truth. At compile time,
-`resourceGenerators` copies it onto the `zipx-core` classpath as `zipx/action-pins.yml`.
-`ActionPins.Defaults` loads that resource, so a published zipx release ships the same pins this repo dogfoods.
+In the zipx repository, `Action` vals in `project/ZipxVersions.scala` are the editable source. At compile time,
+`resourceGenerators` **renders** `zipx/action-pins.yml` into the `zipx-core` jar from those rows (overlay onto
+bootstrap so a missing field still has a pin). That YAML lives in the jar / `target/`, not as something you commit
+and edit. `ActionPins.Defaults` loads the classpath resource at runtime.
 
-Consumer repos without a pin file get those jar defaults until they add their own file or upgrade zipx.
+Release dogfood: `sbt zipxActionUpdate yes` (rewrites ZipxVersions) → `reload` → `zipxWorkflowGenerate` →
+compile/publish. A zipx release is how consumers on jar defaults move.
+
+A `github-actions` Dependabot ecosystem is leftover, not the ladder.
 """
     ),
     section("Settings and tasks")(
       md"""
 | Setting / task | Role |
 |---|---|
-| `zipxActionsPath` | pin file path (default `.github/zipx/action-pins.yml`; `""` disables) |
-| `zipxActions` | explicit `ActionPins` override (escape hatch); `.withExtra(key, ref)` for an action zipx does not emit |
-| `zipxDependabotSync` | also generate `zipx-action-pins-sync.yml` |
-| `zipxActionsPull` | workflow `uses:` → pin file → regenerate |
-| `zipxWorkflowGenerate` / `zipxWorkflowCheck` | write / verify `ci.yml` (and sync workflow when enabled) |
+| `zipxActionRows` | collected `Action` vals (from `MyVersions.settings`) |
+| `zipxActionsPath` | legacy path we **refuse** when the file is still on disk |
+| `zipxActions` | explicit `ActionPins` override (escape hatch) |
+| `zipxActionUpdate` | GitHub releases + SHA peel + OSV; rewrite constructors after `yes` |
+| `zipxWorkflowGenerate` / `zipxWorkflowCheck` | write / verify `ci.yml` |
 
 Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`,
-`actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, `scala-steward-org/scala-steward-action`.
-Anything else your steps use goes in the `extra:` block.
+`actions/cache`, `actions/upload-artifact`, `actions/download-artifact`. Anything else your steps use is an extra
+`Action` val.
 
 Pins that are not GitHub Actions (CDN + sha256, tarball tags, vendor files) are **Pin feeds**, a different machine.
 See **Pin feeds** and **Dependency updates**.

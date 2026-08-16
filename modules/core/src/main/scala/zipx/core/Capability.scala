@@ -397,11 +397,14 @@ object Capability:
     * in `needsCapabilities` to depend on one, and a default argument cannot be a bare literal now that the parameter is
     * a [[CapabilityName]].
     */
-  val TestName: CapabilityName     = CapabilityName("test")
-  val PublishName: CapabilityName  = CapabilityName("publish")
-  val DockerName: CapabilityName   = CapabilityName("docker")
-  val DeployName: CapabilityName   = CapabilityName("deploy")
-  val PinCheckName: CapabilityName = CapabilityName("pin-check")
+  val TestName: CapabilityName          = CapabilityName("test")
+  val PublishName: CapabilityName       = CapabilityName("publish")
+  val DockerName: CapabilityName        = CapabilityName("docker")
+  val DeployName: CapabilityName        = CapabilityName("deploy")
+  val PinCheckName: CapabilityName      = CapabilityName("pin-check")
+  val FmtName: CapabilityName           = CapabilityName("fmt")
+  val WorkflowCheckName: CapabilityName = CapabilityName("workflow-check")
+  val AdvisoriesName: CapabilityName    = CapabilityName("advisories")
 
   private def testBody(scope: CapabilityScope, matrixed: Boolean): Capability = Capability(
     name = TestName,
@@ -447,6 +450,21 @@ object Capability:
       gate = Gate.Always,
       condition = Some(JobCondition.eventIs("pull_request")),
       env = Map(PinCheck.BaseShaEnv -> EnvValue.typed(Expr.github("event.pull_request.base.sha"))),
+    )
+
+  /** A Verify Once job that prints `zipx: skipping <gate>: <reason>` and exits 0. The check name stays on the PR. */
+  def skipOnce(name: CapabilityName, gate: String, reason: String): Capability =
+    Capability.steps(
+      name = name,
+      steps = _ =>
+        List(
+          Step(
+            name = Some(s"skip $gate"),
+            run = Some(s"echo 'zipx: skipping $gate: $reason'"),
+          )
+        ),
+      phase = Phase.Verify,
+      gate = Gate.Always,
     )
 
   /** One root sbt task, mirroring sbt's own `.aggregate`. `zipxTestTask` overrides the task and `zipxVerifyClean`

@@ -208,12 +208,10 @@ object RenderSpec extends ZIOSpecDefault:
     },
     test("schedule cron expressions render under on.schedule") {
       val wf = Workflow(
-        name = "Scala Steward",
+        name = "Pin check",
         on = Triggers(schedule = List(Cron.weekly(DayOfWeek.Sunday)), workflowDispatch = true),
         jobs = ListMap(
-          "scala-steward" -> Job(steps =
-            List(Step(uses = Some(ActionRef("scala-steward-org/scala-steward-action@v2"))))
-          )
+          "pin-check" -> Job(steps = List(Step(uses = Some(ActionRef("actions/checkout@v4")))))
         ),
       )
       val out = Render.render(wf).yaml
