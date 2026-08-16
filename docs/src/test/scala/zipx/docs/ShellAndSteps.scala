@@ -215,6 +215,9 @@ Step.uses("aws-actions/configure-aws-credentials@v6")   // @ref checked at compi
   .build
 ```
 
+`ActionRef` treats any `@ref` as pinned (`@v6` compiles; `actions/checkout` without `@` does not). zipx-generated
+`uses:` and catalog `Action` rows use a **full 40-hex commit SHA**. Prefer that in `extraSteps` too; see **Action pins**.
+
 `build` is total: it returns a `Step` and has nothing to report. The closing end is `Step.validate`, which runs during
 rendering and catches a step that was hand-built or decoded around the builder, naming the offending step. Validation
 lives there rather than in a constructor because a `Step` is also a *decode* target, and validating on construction
@@ -351,7 +354,8 @@ telling you to use the `Make` sibling. That is the one surprise worth naming: it
 The rules cover what the shell and GitHub actually do, not just the convenient cases: no `'` inside `'…'` (it cannot be
 escaped, so there is nothing to escape it *with*); no `}` inside `$${…}` (it closes the expansion early); no leading tab
 on a script line (YAML block-scalar indentation must be spaces); an `ExitCode` is 0 to 255 (the shell truncates modulo
-256); file descriptors are single digits; `uses:` refuses an unpinned `owner/repo`; a secret name may be `GITHUB_TOKEN`
+256); file descriptors are single digits; `uses:` refuses an unpinned `owner/repo` (`@v5` is enough for ActionRef; zipx
+emits full SHAs); a secret name may be `GITHUB_TOKEN`
 but not otherwise `GITHUB_`-prefixed, checked case-insensitively because GitHub matches names that way.
 """,
       exampleValue {

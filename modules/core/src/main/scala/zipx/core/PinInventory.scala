@@ -5,15 +5,16 @@ object PinInventory:
 
   val RelPath: String = "target/zipx-pin-inventory.json"
 
-  def render(feeds: Seq[PinFeed]): String =
+  def render(feeds: Seq[PinFeed], pins: Seq[Pin]): String =
     val items = feeds
       .map { feed =>
-        val pins = feed.inventory
+        val feedPins = PinFeeds
+          .inventory(feed, pins)
           .map { pin =>
             s"""{"id":"${PinSnapshot.escape(pin.id)}","current":"${PinSnapshot.escape(pin.current)}"}"""
           }
           .mkString(",")
-        s"""{"name":"${PinSnapshot.escape(feed.name)}","pins":[$pins]}"""
+        s"""{"name":"${PinSnapshot.escape(feed.name)}","pins":[$feedPins]}"""
       }
       .mkString(",")
     s"""{"feeds":[$items]}"""

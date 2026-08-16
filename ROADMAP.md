@@ -26,7 +26,7 @@ Live behavior is documented in Specular (`docs/`), not here. Git history records
 - **Scope:** whole pipeline (test → build → library publish → docker-image publish on the sbt-native-packager paved path).
 - **Workflow generation:** own GHA AST + deterministic YAML + check task (not sbt-github-actions' single-matrix model).
 - **Caching:** `CacheBackend` abstraction (local or remote).
-- **Action pins:** SHA pins; editable source `.github/zipx/action-pins.yml`; typed fields plus `extra:` for pack/consumer actions.
+- **Action pins:** SHA pins; editable source is ZipxVersions `Action` vals. YAML is jar/generate output, never an input.
 - **Secrets:** zipx renders secret *references*; packs name org secrets. Values never enter the plugin.
 - **Extension language:** Scala (`Capability`, `Steps`, `Expr`, packs), not external YAML soup. Raw escape hatches stay typed and generate-time warned.
 - **Refuse rather than drop:** a field the planner cannot honor fails generate with an explaining error.
@@ -61,19 +61,21 @@ env injection, target fan-out, cache wiring. Semantics live in Scala packs on th
 
 ### Pin feeds
 
-Issue [#105](https://github.com/early-effect/zipx/issues/105). Typed `PinFeed` so zipx owns topology and Ignore / Report
-/ Update policy, while the build owns inventory, lookup, and apply. Deliberate divergence from the issue letter: the PR
-advisory merge gate is a builtin Once capability (`Capability.pinCheck` on `ci.yml`) so `needsCapabilities` can actually
-ensure a merge. Scheduled outdated/apply and snapshot submit stay companion workflows (cron is not a `Gate`; PR
-snapshots pollute the Security tab). Local `zipxPinUpdate` lists outdated pins and applies only after approval, ignoring
-`PinAction` so alert-only feeds can still bump before a PR. Not an M12 item. First consumer feed is sbt-splice, in that repo.
+Issue [#105](https://github.com/early-effect/zipx/issues/105). Typed `PinFeed` so zipx owns topology, Ignore / Report /
+Update policy, OSV, and catalog rewrite. Inventory is catalog `Pin` vals (`zipxPins`), not a list on the feed. Lookup
+returns a `PinCandidate` (version plus checksum / PURL). Optional `materialize` writes extra files after the catalog
+rewrite. The PR advisory merge gate folds into the builtin **advisories** job (`zipxAdvisoryCheck`). Scheduled outdated/apply and snapshot
+submit stay companion workflows (cron is not a `Gate`; PR snapshots pollute the Security tab). Local
+`zipxPinUpdate` lists outdated pins and rewrites `Pin(...)` after approval, ignoring `PinAction` so alert-only feeds can
+still bump before a PR. Not an M12 item. First consumer feed is sbt-splice, in that repo.
 
 ### Versions catalog
 
-Typed `Lib` / `Plugin` rows in `project/ZipxVersions.scala`. Apply rewrites those constructors (not a regex over the
-build); generate writes `plugins.sbt` / `build.properties`; `zipxCheckDeps` fails generate when `libraryDependencies`
-contain a GAV that is not a `Lib` row. Local `zipxDepUpdate` looks up Maven metadata after approval. You own the
-catalog; Scala Steward is optional leftover automation, not required. Not an M12 item.
+Typed `Lib` / `Plugin` / `Pin` / `Action` rows in `project/ZipxVersions.scala`. Apply rewrites those constructors (not a regex over
+the build, not a whole-file regen); generate writes `plugins.sbt` / `build.properties`; `zipxCheckDeps` fails generate
+when `libraryDependencies` contain a GAV that is not a `Lib` row. A `Pin` with no matching `PinFeed` fails generate.
+Local `zipxDepUpdate` / `zipxPinUpdate` / `zipxActionUpdate` look up after approval. Pin policy (lookup, OSV, Update)
+still lives on `PinFeed`. ZipxVersions is required; there is no leftover bot for the catalog. Not an M12 item.
 
 ### Design guardrails
 

@@ -10,8 +10,9 @@ object ExecutionModes extends DocSpecSuite:
 
   def doc = page("Execution modes")(
     md"""
-**Stay on Aggregate unless you have a reason not to.** That is the default: one test job, one publish job. It is
-enough for most libraries and for many multi-module repos.
+**Stay on Aggregate unless you have a reason not to.** That is the default: one root `test` job, parallel Once gates
+(`fmt`, `workflow-check`, `advisories`), and one publish job. It is enough for most libraries and for many
+multi-module repos.
 
 GitHub Actions charges per job and per minute. More jobs means more YAML to review and more checks to keep green.
 Aggregate is how zipx keeps CI cheaper and calmer. Escalate to Layer or Graph only when the **workflow** needs extra
@@ -19,20 +20,20 @@ boundaries (ordered waves, per-module status, path-based skipping). Those modes 
 
 | Mode | Test / publish / docker | Deploy | Best for |
 |---|---|---|---|
-| **Aggregate** (default) | 1 per stage (Verify = root `sbt test`) | **1 per Target** (modules batched) | Most repos, including multi-service monorepos: one stage, still incremental |
+| **Aggregate** (default) | 1 test job + parallel Once gates; 1 publish / docker | **1 per Target** (modules batched) | Most repos, including multi-service monorepos: one stage, still incremental |
 | **Layer** | 1 per toposort wave | **1 per wave × Target** (Aggregate-by-target per wave) | Ordered waves without N JVMs; per-env approval without Graph's module×target cost |
 | **Graph** | 1 per module (± matrix / targets) | 1 per module × Target | Per-module / multi-env boundaries; path gating; matrices |
 """,
     section("Why one job is not slow")(
       md"""
-Aggregate is not "rebuild the world in one job." On sbt 2.x, a root `.aggregate` `sbt test` already parallelizes
-independent subprojects, incrementally recompiles only invalidated sources, and reruns only suites that failed, are
-new, or transitively depend on recompiled code (including code in another project). Task results are content-addressed
+Aggregate is not "rebuild the world in one job." On sbt 2.x, a root `.aggregate` session already parallelizes
+independent subprojects and incrementally recompiles only invalidated sources (Zinc). Task results are content-addressed
 and **survive JVM restarts**: sbt's machine-wide cache, plus zipx's **epoch-keyed** CI restore (`zipxCacheEpoch`),
-means a cold runner still hits prior task/test results across pushes in the same epoch. Remote cache backends push
-that reuse across machines. You get a large share of "don't redo unaffected work" from **one Aggregate job**, without
-paying for N runners. Pair that with a CI-hydrated remote cache so teammate laptops share the same digests (see
-**Remote cache for teams**).
+means a cold runner still hits prior compile results across pushes in the same epoch. Remote cache backends push
+that reuse across machines. The plugin default is `testFull`, so CI still runs every suite; Zinc and the task cache
+are what skip compile (and a whole-task cache hit can skip redo). You get a large share of "don't redo unaffected
+work" from **one Aggregate job**, without paying for N runners. Pair that with a CI-hydrated remote cache so teammate
+laptops share the same digests (see **Remote cache for teams**).
 
 Graph mode buys a different kind of selectivity: path-based **affected** gating, per-module `needs`, Scala matrix
 isolation, and independent logs/statuses. Pick Graph when the **workflow** needs those boundaries, not merely to avoid
@@ -46,8 +47,8 @@ sbt and zipx answer different questions:
 ```mermaid
 flowchart TD
   Change[PR changes leaf module client] --> A1[Aggregate · one test job starts]
-  A1 --> A2[Zinc + incremental test · epoch or remote cache]
-  A2 --> A3([fewer compiles and suites · same job still green])
+  A1 --> A2[Zinc + task cache · epoch or remote cache]
+  A2 --> A3([fewer compiles · testFull still runs suites])
   A3 -.->|or Graph| G1[Graph · affected setup]
   G1 --> G2[skip jobs outside · reverse-dep closure]
   G2 --> G3([fewer GHA jobs · per-module status])
@@ -57,15 +58,13 @@ flowchart TD
 
 | Layer | Question | Who decides |
 |---|---|---|
-| **sbt 2 (inside Aggregate)** | Which sources and test suites need work, given cached task digests? | Incremental compiler + incremental `test` + cross-run task cache |
+| **sbt 2 (inside Aggregate)** | Which sources need work, given cached task digests? | Incremental compiler + cross-run task cache (Verify default is `testFull`, so suites still run) |
 | **zipx Graph** | Which GitHub jobs should run at all for *this* PR diff? | `git diff` → owning module → reverse-dep closure |
 
-Aggregate always starts the stage command (one root `test` job). That is fine: after zipx restores the epoch cache
-(or a remote cache hits), sbt may compile almost nothing and rerun almost no suites even on a cold JVM. Graph can
-skip entire module jobs when their reverse-dep closure is untouched, and it can show a green check per module. Use
-[`testFull`](https://www.scala-sbt.org/2.x/docs/en/reference/sbt-test.html) (`zipxTestTask := zipxTasks.of(testFull)`, the
-plugin default) when CI must
-run every suite every time, uncached. See **Caching** and **Affected** (fail-open handoff, who is gated).
+Aggregate always starts the stage command (one root test job). After zipx restores the epoch cache (or a remote cache
+hits), sbt may compile almost nothing. The plugin default is `zipxTestTask := zipxTasks.of(testFull)`, so CI still runs
+every suite; Zinc is what skips compile. Graph can skip entire module jobs when their reverse-dep closure is
+untouched, and it can show a green check per module. See **Caching** and **Affected** (fail-open handoff, who is gated).
 """
     ),
     section("When to use which")(
@@ -107,7 +106,7 @@ same job parallelism, one expandable matrix node. That is a presentation opt-in,
     section("API cheat sheet")(
       md"""
 ```scala
-Capability.test          // Once: root zipxTestTask (default "test")
+Capability.test          // Once: root zipxTestTask (plugin default testFull)
 Capability.testJoined    // Aggregate escape hatch: join module/<testTask>
 Capability.publish
 Capability.docker
@@ -131,7 +130,9 @@ zipxCapabilities += Capability.test        // one root job
 // or
 zipxCapabilities += Capability.testGraph   // one job per module
 ```
-""",
+
+The plugin's builtin test job uses `zipxTestTask` (default `testFull`). Planner snippets below call core
+`Capability.test` / `testGraph`, so the YAML shows `sbt 'test'` / `schema/test`.""",
       exampleValue {
         DocsRender.jobs("test")(Capability.test) + "\n---\n" +
           DocsRender.jobs("test-schema", "test-api", "test-service")(Capability.testGraph)
@@ -161,7 +162,7 @@ For a 4-module library with cross-Scala and release publish (leaf-only PR vs ful
 
 | Mode | Typical PR shape | What you pay for |
 |---|---|---|
-| **Aggregate** | ~2 sbt starts (`test` + optional gates) | JVM start; cache hits skip suites |
+| **Aggregate** | ~5 sbt starts (test + fmt + workflow-check + advisories + optional publish) | JVM start; cache hits skip compiles |
 | **Graph (full)** | N modules × Scala matrix + affected setup | Isolation, matrices, per-module status |
 | **Graph (affected leaf)** | setup + closure jobs only | Same isolation, fewer runners when the diff is narrow |
 

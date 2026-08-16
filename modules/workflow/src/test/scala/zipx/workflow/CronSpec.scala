@@ -5,7 +5,7 @@ import zio.test.*
 object CronSpec extends ZIOSpecDefault:
 
   def spec = suite("Cron")(
-    test("weekly Sunday midnight renders Steward's default cron") {
+    test("weekly Sunday midnight renders the default weekly cron") {
       assertTrue(Cron.weekly(DayOfWeek.Sunday).render == "0 0 * * 0")
     },
     test("weekly Monday 6:30 UTC") {

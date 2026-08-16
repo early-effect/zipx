@@ -1,11 +1,11 @@
-# Fake file-backed pin feed: generate emits pin-check on ci.yml plus both companions.
+# Catalog Pin vals: generate folds pin OSV into advisories on ci.yml plus both companions.
 > zipxWorkflowGenerate
 $ exists .github/workflows/ci.yml
 $ exists .github/workflows/zipx-pin-check.yml
 $ exists .github/workflows/zipx-pin-snapshot.yml
 > assertPinFeeds
 > zipxWorkflowCheck
-# Local update with approval: dry-run lists only; yes applies through the feed.
+# Local update: dry-run lists only; yes rewrites the Pin constructor then materializes.
 > zipxPinUpdate dry-run
 $ absent applied.txt
 > zipxPinUpdate yes

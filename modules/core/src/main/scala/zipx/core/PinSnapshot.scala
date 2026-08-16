@@ -7,6 +7,7 @@ object PinSnapshot:
 
   def render(
       feeds: Seq[PinFeed],
+      pins: Seq[Pin],
       sha: String,
       ref: String,
       jobId: String,
@@ -14,7 +15,7 @@ object PinSnapshot:
       detectorVersion: String,
   ): String =
     val manifests = feeds
-      .map(feed => feed.name -> feed.inventory.filter(_.purl.isDefined))
+      .map(feed => feed.name -> PinFeeds.inventory(feed, pins).filter(_.purl.isDefined))
       .filter(_._2.nonEmpty)
     val manifestJson =
       if manifests.isEmpty then "{}"

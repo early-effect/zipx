@@ -46,9 +46,10 @@ object BuildSite extends DocsSite:
         s"""**zipx** generates GitHub Actions from your sbt build. You keep writing `build.sbt`. zipx writes the
 workflow, so you do not maintain a second copy in YAML.
 
-Day one is Aggregate: one test job, a publish job on a version tag. Add the plugin, run `zipxWorkflowGenerate`, commit,
-open a PR. `zipxWorkflowCheck` fails the PR if you forgot to regenerate. Versions live in a `ZipxVersions` catalog you
-extend (`Lib` / `Plugin` vals, no second list); drop `MyVersions.settings` in `build.sbt`.
+Day one is Aggregate: parallel Verify (`test`, `fmt`, `workflow-check`, `advisories`) and a publish job on a version
+tag. Add the plugin, run `zipxWorkflowGenerate`, commit, open a PR. `zipxWorkflowCheck` fails the PR if you forgot to
+regenerate. Versions live in a `ZipxVersions` catalog you extend (`Lib` / `Plugin` / `Pin` / `Action` vals, no second
+list); drop `MyVersions.settings` in `build.sbt`.
 
 Later pages cover extra jobs (Graph, docker, deploy), packs (Central, Pages, AWS), and the local bump loop. Skip them
 until you need them. **Extending Versions** is for sbt plugins that sit on zipx (splice, a company catalog). If you
@@ -90,9 +91,10 @@ lazy val service = project.settings(MyVersions.service)""",
         ),
         CodeSnippet(
           "Action pins (optional)",
-          """# Prefer .github/zipx/action-pins.yml + Dependabot; see Action pins docs
-zipxDependabotSync := true
-sbt zipxActionsPull   # after Dependabot bumps workflow uses:""",
+          """# Action vals in ZipxVersions; see Action pins docs
+sbt "zipxActionUpdate yes"
+sbt reload
+sbt zipxWorkflowGenerate""",
         ),
       ),
       brand = Some(

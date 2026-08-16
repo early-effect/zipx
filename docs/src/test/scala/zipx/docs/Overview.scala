@@ -21,9 +21,9 @@ GitHub Actions is GitHub's CI: a workflow file under `.github/workflows/` that r
 when you push or open a pull request. Hand-writing that file means listing modules, job order, and JDK setup again.
 zipx generates it from the build you already have.
 
-**Day one:** add the plugin, run `zipxWorkflowGenerate`, commit the files, open a PR. Defaults give you one test job
-and a publish job that runs when you push a version tag. You do not need YAML, job matrices, or GitHub's `needs:`
-graph. See **Quick start**.
+**Day one:** add the plugin, run `zipxWorkflowGenerate`, commit the files, open a PR. Defaults give you parallel Verify
+jobs (`test`, `fmt`, `workflow-check`, `advisories`) and a publish job that runs when you push a version tag. You do
+not write YAML, job matrices, or a hand-maintained `needs:` graph. See **Quick start**.
 """,
     section("The everyday loop")(
       md"""
@@ -50,8 +50,9 @@ instead of shipping a stale workflow. That is the whole honesty story.
     ),
     section("Default Aggregate shape")(
       md"""
-For a typical library, defaults are enough: one **test** job and one **publish** job. Optional packs replace the
-built-in publish with a paved Central release (or add GitHub Packages alongside it).
+For a typical library, defaults are enough: parallel Verify jobs (`test`, `fmt`, `workflow-check`, `advisories`) and
+one **publish** job. Optional packs replace the built-in publish with a paved Central release (or add GitHub Packages
+alongside it).
 
 ```scala
 // project/plugins.sbt
@@ -71,12 +72,20 @@ lazy val root = (project in file("."))
 Generated Aggregate jobs (live output from the planner):
 """,
       exampleValue {
-        DocsRender.jobs("test", "publish")(Capability.test, Capability.publish)
+        DocsRender.jobs("test", "fmt", "workflow-check", "advisories", "publish")(
+          Capability.test,
+          Capability.once(Capability.FmtName, SbtCommand.unsafeCommand("scalafmtCheckAll")),
+          Capability.once(Capability.WorkflowCheckName, SbtCommand.unsafeTask("zipxWorkflowCheck")),
+          Capability.once(Capability.AdvisoriesName, SbtCommand.unsafeTask("zipxAdvisoryCheck")),
+          Capability.publish,
+        )
       }.assert(yaml =>
         assertTrue(
           yaml.contains("test:"),
+          yaml.contains("fmt:"),
+          yaml.contains("workflow-check:"),
+          yaml.contains("advisories:"),
           yaml.contains("publish:"),
-          yaml.contains("run: sbt 'test'"),
           yaml.contains("startsWith(github.ref, 'refs/tags/v')"),
         )
       ),
@@ -90,15 +99,15 @@ forgotten `needs:` between jobs.
 
 ### Libraries skip a separate release workflow
 
-Even a small library gets one root test job and a publish job gated on a version tag (or `ZipxCentral.release` /
+Even a small library gets parallel Verify plus a publish job gated on a version tag (or `ZipxCentral.release` /
 `ZipxGitHubPackages`). Docs Pages when you want them. Fork gates are Scala, not pasted `if:` strings.
 
 ### Versions you can actually bump
 
-Extend `ZipxVersions`, drop `MyVersions.settings`. Every `Lib` / `Plugin` val is a catalog row (you do not list them
-again); each module picks a group (`libraries`, `client`, `service`). zipx rewrites those constructors, generates
-`plugins.sbt`, and fails generate if you sneak a raw coordinate in. Other plugins extend the same trait. See
-**Versions**.
+Extend `ZipxVersions`, drop `MyVersions.settings`. Every `Lib` / `Plugin` / `Pin` / `Action` val is a catalog row
+(you do not list them again); each module picks a group (`libraries`, `client`, `service`). zipx rewrites those
+constructors, generates `plugins.sbt`, and fails generate if you sneak a raw coordinate in. Other plugins extend the
+same trait. See **Versions**.
 
 ```scala
 import zipx.*
@@ -124,8 +133,8 @@ Generated CI is meant to be reviewed, not only executed. Two defaults keep the f
 - **`MatrixCollapse.Auto`** folds look-alike jobs into one GitHub matrix when that is safe. Stay on Aggregate and you
   may never notice this; see **Matrix collapse** if Graph makes the Actions UI noisy.
 
-On this repository's dogfood `ci.yml` that cut about **290 → 164** lines; the `examples/monorepo` sample went about
-**786 → 307** lines.
+This repository's dogfood `ci.yml` is about **266** lines; the `examples/monorepo` sample is about **406**. Both stay
+reviewable because setup lives in composites and look-alike Graph jobs collapse under Auto.
 """
     ),
     section("One graph, generated CI")(
@@ -213,20 +222,20 @@ Fuller recovery framing (including Bazel as a second graph): **Why zipx** and **
     ),
     section("What it derives")(
       md"""
-A map of later pages. On day one you can ignore everything except Aggregate test + publish.
+A map of later pages. On day one you can ignore everything except Aggregate Verify + publish.
 
 | Surface | What you get |
 |---|---|
-| **Execution modes** | **Aggregate** (default): one root test job. **Layer** / **Graph** only when you need waves or per-module jobs |
+| **Execution modes** | **Aggregate** (default): one root test job plus parallel Once gates. **Layer** / **Graph** only when you need waves or per-module jobs |
 | **Matrix collapse** | **Auto** by default; skip until Graph makes the Actions UI noisy |
 | **Composites** | `.github/actions/zipx-sbt-setup` (and `zipx-aws-login` if you use AWS packs) |
 | **Capabilities** | Built-in test / publish / docker / deploy; packs for Central, Packages, docs, AWS |
 | **Ordering and gates** | Publish on a version tag; deploy destinations are never skipped by path |
 | **Affected** | Graph only: skip jobs this PR did not touch |
 | **Caching** | Restore sbt's cache on the runner so test does not start from zero |
-| **Action pins** | Exact Action commits in the generated YAML; skip until you bump them yourself |
+| **Action pins** | Exact Action commits in the generated YAML; catalog rows when you want to bump without a zipx release |
 | **Pin feeds** | Pins that are not Maven and not Actions; see **Pin feeds** |
-| **Versions** | `Lib` / `Plugin` vals on a `ZipxVersions` object; `MyVersions.settings`; bump with `zipxDepUpdate` |
+| **Versions** | `Lib` / `Plugin` / `Pin` / `Action` vals on a `ZipxVersions` object; `MyVersions.settings`; bump locally |
 | **Extending Versions** | For sbt plugins that sit on zipx (splice, a company catalog); skip unless you write one |
 | **Job conditions** | Optional extra `if:` (fork, label, …). Skip until you need one |
 | **Validation** | Generate fails instead of emitting a broken workflow |

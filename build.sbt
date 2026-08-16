@@ -84,8 +84,6 @@ lazy val root = (project in file("."))
     },
     zipxJavaVersion      := JdkVersion("25"),
     zipxWorkflowDispatch := true,
-    zipxDependabotSync   := true,
-    zipxScalaSteward     := true,
     zipxEmitSelf         := false,
   )
 
@@ -115,13 +113,13 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name        := "zipx-core",
     description := "Pure planner: module graph, capabilities, EnvValue, ModuleGraph => Workflow",
-    // Embed `.github/zipx/action-pins.yml` so ActionPins.Defaults matches dogfood / published pins.
+    // Embed ActionPins.Defaults from ZipxVersions Action rows (jar resource, not a committed pin file).
     Compile / resourceGenerators += Def.task {
-      val repo = (LocalRootProject / baseDirectory).value
-      val src  = repo / ".github" / "zipx" / "action-pins.yml"
       val out  = (Compile / resourceManaged).value / "zipx" / "action-pins.yml"
-      if (!src.exists) sys.error(s"Missing action pin file: ${src.getPath}")
-      IO.copyFile(src, out)
+      val pins = zipx.core.ActionPins
+        .overlay(zipx.core.ActionPins(), V.actions)
+        .fold(err => sys.error(err), identity)
+      IO.write(out, zipx.core.ActionPinFile.render(pins))
       Seq(out)
     }.taskValue,
     // Live remote-cache proof (plain Testcontainers, saferis-style). Fixture sbt runs in an sbt
@@ -160,6 +158,9 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     scalacOptions ++= V.commonScalacOptions,
     publishMavenStyle    := true,
     pomIncludeRepository := { _ => false },
+    libraryDependencies ++= V.zioDeps,
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+    Test / mainClass := None,
     // Bundle the remote-cache transport so consumers need one addSbtPlugin line. RemoteCachePlugin triggers on
     // AllRequirements but is a no-op until Global/remoteCache is set (which zipx does only from the CI env).
     addSbtPlugin(V.remoteCachePlugin),

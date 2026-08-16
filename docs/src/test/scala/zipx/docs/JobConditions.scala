@@ -267,7 +267,7 @@ zipxCapabilities += Capability
   .copy(
     extraSteps = _ => List(
       Step
-        .uses("aws-actions/configure-aws-credentials@v6")
+        .uses("aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c")
         .named("Login to registry")
         .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
         .build

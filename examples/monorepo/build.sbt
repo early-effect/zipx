@@ -86,16 +86,13 @@ lazy val root = (project in file("."))
     ),
   )
 
-// Format gate, then Layer-mode test/publish (dependency-ordered waves, few sbt sessions).
+// Format is a builtin Verify job (parallel with test). Layer-mode test/publish
+// (dependency-ordered waves, few sbt sessions).
 // Deploy stays Aggregate-by-target (one job per staging/prod; modules batched). Multi-registry
 // docker below is a single Aggregate job: the registries are destinations of one image build, not
 // separate environments.
-// `Fmt` is named once and referred to twice: a capability name is a validated `CapabilityName` (it becomes the
-// `jobs.fmt` key), so naming the val is also how the dependent capability avoids repeating the literal.
-val Fmt = CapabilityName("fmt")
-zipxCapabilities += zipxTasks.once(Fmt, scalafmtCheckAll)
 zipxCapabilities ++= Seq(
-  Capability.testLayers.copy(needsCapabilities = List(Fmt)),
+  Capability.testLayers,
   Capability.publishLayers,
 )
 

@@ -100,6 +100,33 @@ private[core] object MiniJson:
     end if
   end stringField
 
+  def boolField(obj: String, key: String): Option[Boolean] =
+    rawField(obj, key).flatMap {
+      case v if v.startsWith("true")  => Some(true)
+      case v if v.startsWith("false") => Some(false)
+      case _                          => None
+    }
+
+  def objectField(obj: String, key: String): Option[String] =
+    rawField(obj, key).flatMap { v =>
+      if v.startsWith("{") then balanced(v, 0, '{', '}').toOption else None
+    }
+
+  private def rawField(obj: String, key: String): Option[String] =
+    val needle = s"\"$key\""
+    val idx    = obj.indexOf(needle)
+    if idx < 0 then None
+    else
+      val colon = obj.indexOf(':', idx + needle.length)
+      if colon < 0 then None
+      else
+        var i = colon + 1
+        while i < obj.length && obj.charAt(i).isWhitespace do i += 1
+        if i >= obj.length then None
+        else Some(obj.substring(i))
+    end if
+  end rawField
+
   private def unescape(s: String): String =
     val out = StringBuilder(s.length)
     var i   = 0

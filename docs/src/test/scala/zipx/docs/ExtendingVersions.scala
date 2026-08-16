@@ -26,15 +26,18 @@ object ExtendingVersions extends DocSpecSuite:
 
   def doc = page("Extending Versions")(
     md"""
-Skip unless you are writing an **sbt plugin that sits on zipx** (splice, a company catalog, CDN pins). Consumers stay
-on **Versions**: they extend `ZipxVersions`, drop `MyVersions.settings`, and write `Lib` / `Plugin` vals.
+Skip unless you are writing an **sbt plugin that sits on zipx** (a company catalog, CDN or vendor pins; sbt-splice is
+one). Consumers stay on **Versions**: they extend `ZipxVersions`, drop `MyVersions.settings`, and write `Lib` /
+`Plugin` / `Pin` / `Action` vals.
 
 Two jobs. They are not the same hook.
 
 1. **Emit your plugin line** into generated `project/plugins.sbt` from the version on the classpath (`zipxSelfPlugins` /
    `ZipxSelf.emit`). Consumers should not duplicate that GAV in `ZipxVersions`.
-2. **Optionally** put your libraries in the consumer catalog (`Lib` vals on a subtype, or `AsCoords` on a bundle). That
-   is the Maven-row story below.
+2. **Optionally** put your libraries, pins, and Actions in the consumer catalog (`Lib` / `Pin` / `Action` vals on a
+   subtype, or `AsCoords` / `AsPins` / `AsActions` on a bundle). That is the row story below. A plugin that ships a
+   `PinFeed` (lookup plus optional `materialize`) does **not** ship the inventory: the consumer repo owns which version
+   is pinned.
 """,
     section("Emit your plugin line")(
       md"""
@@ -73,24 +76,29 @@ Generate writes zipx first, then your line, then the consumer's catalog plugins:
     ),
     section("Your libraries in that same catalog")(
       md"""
-Collection is a typeclass, `AsCoords`. `Lib` and `Plugin` share one given (`A <: ZipxCoord`). You add a given for your
-own type, or you put `Lib` / `Plugin` vals on a `ZipxVersions` subtype. There is no second `coords` list for the
-consumer to keep in sync. Do not put *your* plugin GAV on that subtype if you already emit it; that catalog line is
-dropped.
+Collection is a typeclass, `AsCoords` / `AsPins` / `AsActions`. `Lib` and `Plugin` share `AsCoords` (`A <: ZipxCoord`).
+`Pin` has `AsPins`. `Action` has `AsActions`. You add a given for your own type, or you put `Lib` / `Plugin` / `Pin` /
+`Action` vals on a `ZipxVersions` subtype. There is no second `coords` list for the consumer to keep in sync. Do not
+put *your* plugin GAV on that subtype if you already emit it; that catalog line is dropped.
 """
     ),
     section("Two paths")(
       md"""
-**Path 1: `Lib` / `Plugin` vals on your subtype.** Inherited fields are collected. The consumer writes
+**Path 1: `Lib` / `Plugin` / `Pin` / `Action` vals on your subtype.** Inherited fields are collected. The consumer writes
 `object MyVersions extends SpliceVersions` and your vals are rows.
 
 ```scala
 trait SpliceVersions extends ZipxVersions:
   val spliceRuntime = Lib("rocks.earlyeffect", "splice-core", "1.0.0")
+  val preact        = Pin("cdn", "preact", "10.26.4", sha256 = "sha256-abc", purl = "pkg:npm/preact@10.26.4")
+  inline override def settings = super.settings ++ spliceCdnFeed
 ```
 
+The consumer still owns those `Pin` vals (or copies them). You ship the feed, not a second inventory list.
+
 **Path 2: a bundle type with `given AsCoords[YourType]`.** Put the given on the companion so the catalog file does not
-import extra machinery. Collection summons it the same way it summons `Lib`.
+import extra machinery. Collection summons it the same way it summons `Lib`. CDN bundles use `given AsPins` the same
+way; Action bundles use `given AsActions`.
 
 ```scala
 final case class SpliceLibs(runtime: Lib)
@@ -107,14 +115,16 @@ trait SpliceVersions extends ZipxVersions:
 Do **not** add `given AsCoords[List[Lib]]`. That would collect every helper list on the consumer object. Own a named
 type.
 
-Keep `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` constructors in `project/ZipxVersions.scala`. `zipxDepUpdate`
-rewrites those literals; it does not know about `SpliceLibs("1.0.0")`.
+Keep `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` / `Pin("feed", "id", "from", …)` /
+`Action("owner/repo", "from", sha = …)` constructors in `project/ZipxVersions.scala`. `zipxDepUpdate`, `zipxPinUpdate`,
+and `zipxActionUpdate` rewrite those literals; they do not know about `SpliceLibs("1.0.0")`. Maven, pin, and self-emit
+hunks are below.
 """
     ),
     section("What collection sees")(
       md"""
-`coordsOf` walks vals on the concrete object (`this.type`). A `def` is skipped. `SbtVersion` / `ScalaVersion` have no
-given. A parent-trait `Lib` val and a bundle val both become rows:
+`coordsOf` / `pinsOf` walk vals on the concrete object (`this.type`). A `def` is skipped. `SbtVersion` / `ScalaVersion`
+have no given. A parent-trait `Lib` val and a bundle val both become rows:
 """,
       exampleValue {
         Sample.coords.map(c => s"${c.group}:${c.artifact}").sorted.mkString("\n")
@@ -156,7 +166,8 @@ The consumer still writes one line in `build.sbt`: `MyVersions.settings`.
       md"""
 The consumer compiles `project/ZipxVersions.scala` with your plugin and sbt-zipx on the meta classpath. Put the trait,
 the bundle, and the given in a package they can `import` (`import splice.*`, plus `import zipx.*` for `ZipxVersions` /
-`AsCoords`). The given on the bundle companion is found without a further import.
+`AsCoords` / `AsPins` / `AsActions` / `Pin` / `Action`). The given on the bundle companion is found without a further
+import.
 
 Do not name a package `sbt`. On sbt 2 that shadows `_root_.sbt` and the plugin will not compile. zipx keeps catalog
 types in `package zipx` for the same reason.
@@ -164,10 +175,16 @@ types in `package zipx` for the same reason.
     ),
     section("Apply still rewrites constructors")(
       md"""
-Flattening into `zipxVersions` is what check and `zipxDepUpdate` lookup see. Apply is still a constructor rewrite in
-the catalog source. A bundle that stores only a version string will list as stale and then not rewrite.
+Flattening into `zipxVersions` / `zipxPins` is what check and lookup see. Apply is still a constructor rewrite in the
+catalog source. Nested `Lib(...)` / `Plugin(...)` / `Pin(...)` literals inside a bundle are what move. A bundle that
+stores only a version string will list as stale and then not rewrite.
+
+A Path 1 `Lib` / `Plugin` val on your subtype looks like **Versions**. Path 2 is the same rewrite, with your type
+around the constructor. Sibling constructors in that bundle stay put. Pins are the next section.
 """,
-      exampleValue {
+      example {
+        bundleCatalogPrDiff
+      }.assert(_ =>
         val src   = """val acme = AcmeBundle(
   Lib("com.acme", "acme-core", "1.2.3"),
   Plugin("com.acme", "sbt-acme", "1.2.3"),
@@ -176,13 +193,115 @@ the catalog source. A bundle that stores only a version string will list as stal
         val bumps = List(
           DepBump(Lib("com.acme", "acme-core", "1.2.3"), BumpKind.Patch, "1.2.4")
         )
-        ZipxCatalog.applyBumps(src, bumps).yaml
-      }.assert(text =>
+        val text = ZipxCatalog.applyBumps(src, bumps).yaml
         assertTrue(
           text.contains("""Lib("com.acme", "acme-core", "1.2.4")"""),
           text.contains("""Plugin("com.acme", "sbt-acme", "1.2.3")"""),
         )
       ),
     ),
+    section("Custom pins")(
+      md"""
+You ship the `PinFeed` (lookup, policy, optional `materialize`). The consumer writes the `Pin` vals, on your
+`ZipxVersions` subtype or inside an `AsPins` bundle. Apply still rewrites those `Pin(...)` constructors: version,
+sha256, and purl together. Maven rows stay put. Your own `addSbtPlugin` line stays put.
+
+A `given AsPins` bundle is the same rewrite: the `Pin(...)` literal inside the case class, not `CdnPins("1.2.4")`.
+
+If `materialize` writes a vendored file, that second path is in the same PR. zipx does not regex that file; your feed
+wrote it. Policy and local `zipxPinUpdate` are **Pin feeds**.
+""",
+      example {
+        DocDiff.stack(customPinCatalogDiff, customPinVendorDiff)
+      }.assert(_ =>
+        val src   = """val widget = Pin("cdn", "widget", "1.2.3", sha256 = "abc", purl = "pkg:npm/widget@1.2.3")
+val acme   = Lib("com.acme", "acme-core", "1.2.3")
+"""
+        val pin   = Pin("cdn", "widget", "1.2.3", sha256 = "abc", purl = "pkg:npm/widget@1.2.3")
+        val bumps = List(
+          PinBump(pin, BumpKind.Patch, PinCandidate("1.2.4", Some("def"), Some(Purl("pkg:npm/widget@1.2.4"))))
+        )
+        val text = ZipxCatalog.applyPinBumps(src, bumps).yaml
+        assertTrue(
+          text.contains("""Pin("cdn", "widget", "1.2.4", sha256 = "def", purl = "pkg:npm/widget@1.2.4")"""),
+          text.contains("""Lib("com.acme", "acme-core", "1.2.3")"""),
+          !text.contains("pkg:npm/widget@1.2.3"),
+        )
+      ),
+    ),
+    section("Your plugin line is a different file")(
+      md"""
+`ZipxSelf.emit` writes *your* GAV into generated `project/plugins.sbt` from the JAR on the classpath. That version is
+not a `Plugin` val. `zipxDepUpdate` will not rewrite it. When you publish `sbt-splice` 1.1.0, the consumer loads that
+plugin and generate rewrites the `addSbtPlugin` line. `project/ZipxVersions.scala` does not change.
+
+If they also wrote `Plugin("rocks.earlyeffect", "sbt-splice", …)` on `ZipxVersions`, generate drops that catalog line
+and keeps the loaded version. The PR they open is still `plugins.sbt`:
+""",
+      example {
+        selfEmitPrDiff
+      }.assert(_ =>
+        val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
+        val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
+        val before   = ZipxCatalog.renderPlugins(
+          List(scalafmt),
+          self = List(zipx, Plugin("rocks.earlyeffect", "sbt-splice", "1.0.0")),
+        )
+        val after = ZipxCatalog.renderPlugins(
+          List(scalafmt),
+          self = List(zipx, Plugin("rocks.earlyeffect", "sbt-splice", "1.1.0")),
+        )
+        assertTrue(
+          before.contains("""addSbtPlugin("rocks.earlyeffect" % "sbt-splice" % "1.0.0")"""),
+          after.contains("""addSbtPlugin("rocks.earlyeffect" % "sbt-splice" % "1.1.0")"""),
+          after.contains("""addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "0.5.1")"""),
+          after.contains("""addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")"""),
+          !after.contains("""% "sbt-splice" % "1.0.0""""),
+        )
+      ),
+    ),
   )
+
+  private def bundleCatalogPrDiff =
+    DocDiff.panel("project/ZipxVersions.scala")(
+      DocDiff.line(DocDiff.Kind.Meta, "@@ object MyVersions extends AcmeVersions"),
+      DocDiff.line(DocDiff.Kind.Ctx, "  val acme = AcmeBundle("),
+      DocDiff.line(DocDiff.Kind.Del, """    Lib("com.acme", "acme-core", "1.2.3"),"""),
+      DocDiff.line(DocDiff.Kind.Add, """    Lib("com.acme", "acme-core", "1.2.4"),"""),
+      DocDiff.line(DocDiff.Kind.Ctx, """    Plugin("com.acme", "sbt-acme", "1.2.3"),"""),
+      DocDiff.line(DocDiff.Kind.Ctx, "  )"),
+    )
+
+  private def customPinCatalogDiff =
+    DocDiff.panel("project/ZipxVersions.scala")(
+      DocDiff.line(DocDiff.Kind.Meta, "@@ object MyVersions extends CdnVersions"),
+      DocDiff.line(DocDiff.Kind.Ctx, "  val widget = Pin("),
+      DocDiff.line(DocDiff.Kind.Ctx, "    \"cdn\","),
+      DocDiff.line(DocDiff.Kind.Ctx, "    \"widget\","),
+      DocDiff.line(DocDiff.Kind.Del, "    \"1.2.3\","),
+      DocDiff.line(DocDiff.Kind.Add, "    \"1.2.4\","),
+      DocDiff.line(DocDiff.Kind.Del, "    sha256 = \"abc\","),
+      DocDiff.line(DocDiff.Kind.Add, "    sha256 = \"def\","),
+      DocDiff.line(DocDiff.Kind.Del, "    purl = \"pkg:npm/widget@1.2.3\","),
+      DocDiff.line(DocDiff.Kind.Add, "    purl = \"pkg:npm/widget@1.2.4\","),
+      DocDiff.line(DocDiff.Kind.Ctx, "  )"),
+      DocDiff.line(DocDiff.Kind.Ctx, """  val acme   = Lib("com.acme", "acme-core", "1.2.3")"""),
+    )
+
+  private def customPinVendorDiff =
+    DocDiff.panel("vendor/widget.js")(
+      DocDiff.line(DocDiff.Kind.Meta, "@@ materialize wrote this file"),
+      DocDiff.line(DocDiff.Kind.Del, "/*! widget 1.2.3 */"),
+      DocDiff.line(DocDiff.Kind.Add, "/*! widget 1.2.4 */"),
+      DocDiff.line(DocDiff.Kind.Ctx, "(function(){ /* vendored bytes */ })();"),
+    )
+
+  private def selfEmitPrDiff =
+    DocDiff.panel("project/plugins.sbt")(
+      DocDiff.line(DocDiff.Kind.Meta, "@@ generated plugins.sbt"),
+      DocDiff.line(DocDiff.Kind.Ctx, """addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "0.5.1")"""),
+      DocDiff.line(DocDiff.Kind.Del, """addSbtPlugin("rocks.earlyeffect" % "sbt-splice" % "1.0.0")"""),
+      DocDiff.line(DocDiff.Kind.Add, """addSbtPlugin("rocks.earlyeffect" % "sbt-splice" % "1.1.0")"""),
+      DocDiff.line(DocDiff.Kind.Ctx, """addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")"""),
+    )
 end ExtendingVersions

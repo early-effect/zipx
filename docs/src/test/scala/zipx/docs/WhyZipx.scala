@@ -55,10 +55,11 @@ CI YAML is not the only second copy. Scala versions usually live as `"org" %% "n
 tools search the repo with regex. That is how most of the ecosystem still works, and it is why dependency PRs feel
 brittle.
 
-zipx keeps `Lib` / `Plugin` vals in one object you extend from `ZipxVersions`. Every val is a catalog row; there is no
-second list to keep in sync. `MyVersions.settings` is the usual sbt wiring (`scalaVersion`, catalog keys,
-`zipxCheckDeps`). Apply rewrites those constructors. Generate owns `plugins.sbt`. A raw coordinate that is not in the
-catalog fails generate. Other plugins extend the same trait. See **Versions**. Plugin authors: **Extending Versions**.
+zipx keeps `Lib` / `Plugin` / `Pin` / `Action` vals in one object you extend from `ZipxVersions`. Every val is a catalog
+row; there is no second list to keep in sync. `MyVersions.settings` is the usual sbt wiring (`scalaVersion`, catalog
+keys, `zipxCheckDeps`). Apply rewrites those constructors. Generate owns `plugins.sbt`. A raw coordinate that is not in
+the catalog fails generate. Other plugins extend the same trait. See **Versions**. Plugin authors: **Extending
+Versions**.
 
 ```scala
 import zipx.*
@@ -96,9 +97,9 @@ module” meant a scavenger hunt.
 not archaeology: short jobs that call local composites, matrix collapse when safe, and named packs instead of pasted
 secret/step soup.
 
-Default Aggregate Verify is **one** calm job (`test`), not one job per module. Reach for Graph when the **workflow**
-needs isolation, not when you are only trying to make caching feel less lonely. `MatrixCollapse.Auto` keeps Graph /
-multi-target fan-out readable when legs are isomorphic.
+Default Aggregate Verify is a handful of **build-wide** jobs (`test`, `fmt`, `workflow-check`, `advisories`), not one
+job per module. Reach for Graph when the **workflow** needs isolation, not when you are only trying to make caching
+feel less lonely. `MatrixCollapse.Auto` keeps Graph / multi-target fan-out readable when legs are isomorphic.
 """,
       exampleValue {
         val aggregate = DocsRender.body(Capability.test, Capability.publish)

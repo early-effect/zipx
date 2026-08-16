@@ -1,5 +1,6 @@
 package zipx.core
 
+import neotype.unwrap
 import scala.quoted.*
 
 /** Render and check the typed versions catalog; rewrite version literals in the catalog source. */
@@ -114,6 +115,103 @@ object ZipxCatalog:
   def constructorCall(ctor: String, group: String, artifact: String, version: String): String =
     s"""$ctor("$group", "$artifact", "$version")"""
 
+  /** Canonical `Pin("feed", "id", "ver", sha256 = "...", purl = "...")` as catalog apply rewrites it. */
+  def pinConstructor(pin: Pin): String =
+    val extras = List(
+      pin.sha256.map(s => s"""sha256 = "$s""""),
+      pin.purl.map(p => s"""purl = "${p: String}""""),
+    ).flatten
+    val extra = if extras.isEmpty then "" else extras.mkString(", ", ", ", "")
+    s"""Pin("${pin.feed}", "${pin.id}", "${pin.version}"$extra)"""
+
+  /** Rewrite [[Pin]] constructors. Missing constructor is Left, not a silent skip. */
+  def applyPinBumps(source: String, bumps: List[PinBump]): Either[String, String] =
+    applyAppliedPins(source, bumps.map(_.applied))
+
+  def applyAppliedPins(source: String, items: List[AppliedPin]): Either[String, String] =
+    items.foldLeft[Either[String, String]](Right(source)) { (accE, item) =>
+      accE.flatMap { src =>
+        val from = pinConstructor(item.pin)
+        item.pin.bumped(item.candidate).flatMap { next =>
+          val to = pinConstructor(next)
+          if src.contains(from) then Right(src.replace(from, to))
+          else
+            Left(
+              s"zipx: catalog has no Pin constructor for '${item.pin.feed}' '${item.pin.id}' ${item.pin.version}"
+            )
+        }
+      }
+    }
+
+  /** Canonical `Action("owner/repo", "vX.Y.Z", sha = "…")` as catalog apply rewrites it. */
+  def actionConstructor(action: Action): String =
+    s"""Action("${action.name}", "${action.version}", sha = "${action.sha}")"""
+
+  def applyActionBumps(source: String, bumps: List[ActionBump]): Either[String, String] =
+    bumps.foldLeft[Either[String, String]](Right(source)) { (accE, bump) =>
+      accE.flatMap { src =>
+        val from = actionConstructor(bump.action)
+        bump.action.bumped(bump.toVersion, bump.toSha).flatMap { next =>
+          val to = actionConstructor(next)
+          if src.contains(from) then Right(src.replace(from, to))
+          else
+            Left(
+              s"zipx: catalog has no Action constructor for '${bump.action.name}' ${bump.action.version}. " +
+                s"Paste ${actionConstructor(bump.action)} into project/ZipxVersions.scala, then sbt \"zipxActionUpdate yes\"."
+            )
+        }
+      }
+    }
+
+  def formatActionBumps(bumps: List[ActionBump]): String =
+    if bumps.isEmpty then "no outdated Action pins"
+    else
+      bumps
+        .map(b => s"- Action ${b.action.name}: ${b.action.version} -> ${b.toVersion} (${b.bump})")
+        .mkString("\n")
+
+  def outdatedActions(
+      rows: Seq[Action],
+      lookup: Action => Either[String, Option[(String, String)]],
+  ): Either[String, List[ActionBump]] =
+    rows.foldLeft[Either[String, List[ActionBump]]](Right(Nil)) { (accE, action) =>
+      accE.flatMap { acc =>
+        lookup(action).map { latest =>
+          latest.fold(acc) { (toVer, toSha) =>
+            val kind = GitHubActionMeta.classify(action.version, toVer)
+            if kind == BumpKind.None && toSha == (action.sha: String) then acc
+            else if kind == BumpKind.None && toSha != (action.sha: String) then
+              acc :+ ActionBump(action, BumpKind.Patch, toVer, toSha)
+            else acc :+ ActionBump(action, kind, toVer, toSha)
+          }
+        }
+      }
+    }
+
+  def catalogActionConstructors(pins: ActionPins): String =
+    ActionPins.Field.values
+      .map { f =>
+        val ref = pins.field(f).unwrap
+        val sha = ref.split('@').lastOption.getOrElse(ref)
+        val ver = pins.version(f).getOrElse("v0")
+        s"""  val ${f.key} = Action("${f.prefix}", "$ver", sha = "$sha")"""
+      }
+      .mkString("\n")
+
+  def leftoverPinFileError(path: String, pins: ActionPins): String =
+    s"""zipx: $path is leftover input. Action pins live in project/ZipxVersions.scala. Delete $path and paste:
+       |
+       |${catalogActionConstructors(pins)}
+       |
+       |Then sbt reload and sbt zipxWorkflowGenerate.""".stripMargin
+
+  def unknownPinFeeds(feeds: Seq[PinFeed], pins: Seq[Pin]): Option[String] =
+    val orphans = PinFeeds.orphanPins(feeds, pins)
+    Option.when(orphans.nonEmpty) {
+      val listed = orphans.map(p => s"'${p.feed}' '${p.id}'").mkString(", ")
+      s"zipx: Pin val(s) have no matching zipxPinFeeds entry: $listed. Add a PinFeed or drop the Pin."
+    }
+
   /** Every val on `catalog` whose type has an [[AsCoords]] given. Pass `[this.type]` from a trait so expansion sees the
     * concrete object. `Lib` / `Plugin` share one given; lists, `SbtVersion`, `ScalaVersion`, and named groups have
     * none, so they are skipped. `def` members are not vals: they are skipped. Rows come out in source declaration order
@@ -122,7 +220,54 @@ object ZipxCatalog:
   inline def coordsOf[A](inline catalog: A): Seq[ZipxCoord] =
     ${ coordsOfImpl[A]('catalog) }
 
+  /** Every val on `catalog` whose type has an [[AsPins]] given. Same walk as [[coordsOf]]. */
+  inline def pinsOf[A](inline catalog: A): Seq[Pin] =
+    ${ pinsOfImpl[A]('catalog) }
+
+  /** Every val on `catalog` whose type has an [[AsActions]] given. Same walk as [[coordsOf]]. */
+  inline def actionsOf[A](inline catalog: A): Seq[Action] =
+    ${ actionsOfImpl[A]('catalog) }
+
   private def coordsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[ZipxCoord]] =
+    import quotes.reflect.*
+    val parts = catalogValParts[A].flatMap { (sym, mt) =>
+      mt.asType match
+        case '[t] =>
+          Expr.summon[AsCoords[t]].map { tc =>
+            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
+            '{ $tc.coords($field) }
+          }
+    }
+    if parts.isEmpty then '{ Seq.empty[ZipxCoord] } else '{ ${ Expr.ofList(parts) }.flatten }
+  end coordsOfImpl
+
+  private def pinsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[Pin]] =
+    import quotes.reflect.*
+    val parts = catalogValParts[A].flatMap { (sym, mt) =>
+      mt.asType match
+        case '[t] =>
+          Expr.summon[AsPins[t]].map { tc =>
+            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
+            '{ $tc.pins($field) }
+          }
+    }
+    if parts.isEmpty then '{ Seq.empty[Pin] } else '{ ${ Expr.ofList(parts) }.flatten }
+  end pinsOfImpl
+
+  private def actionsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[Action]] =
+    import quotes.reflect.*
+    val parts = catalogValParts[A].flatMap { (sym, mt) =>
+      mt.asType match
+        case '[t] =>
+          Expr.summon[AsActions[t]].map { tc =>
+            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
+            '{ $tc.actions($field) }
+          }
+    }
+    if parts.isEmpty then '{ Seq.empty[Action] } else '{ ${ Expr.ofList(parts) }.flatten }
+  end actionsOfImpl
+
+  private def catalogValParts[A: Type](using Quotes): List[(quotes.reflect.Symbol, quotes.reflect.TypeRepr)] =
     import quotes.reflect.*
 
     def skipClass(cls: Symbol): Boolean =
@@ -148,18 +293,11 @@ object ZipxCatalog:
       fromTree.getOrElse(cls.declaredFields.filterNot(_.flags.is(Flags.Synthetic)))
     end valsInSourceOrder
 
-    val tpe   = TypeRepr.of[A].dealias
-    val parts = tpe.baseClasses.filterNot(skipClass).reverse.flatMap(valsInSourceOrder).distinct.flatMap { sym =>
-      val mt = tpe.memberType(sym).widen.dealias
-      mt.asType match
-        case '[t] =>
-          Expr.summon[AsCoords[t]].map { tc =>
-            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
-            '{ $tc.coords($field) }
-          }
+    val tpe = TypeRepr.of[A].dealias
+    tpe.baseClasses.filterNot(skipClass).reverse.flatMap(valsInSourceOrder).distinct.map { sym =>
+      (sym, tpe.memberType(sym).widen.dealias)
     }
-    if parts.isEmpty then '{ Seq.empty[ZipxCoord] } else '{ ${ Expr.ofList(parts) }.flatten }
-  end coordsOfImpl
+  end catalogValParts
 
   private def renderExclude(ex: ZipxExclude): String =
     ex.artifact match

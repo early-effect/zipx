@@ -11,11 +11,16 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
     test("catalog covers keys that previously drifted from the Settings docs") {
       assertTrue(
         ZipxSettings.names.contains("zipxAffectedDeploy"),
-        ZipxSettings.names.contains("zipxStewardGrouping"),
+        ZipxSettings.names.contains("zipxActionRows"),
+        ZipxSettings.names.contains("zipxVerify"),
+        ZipxSettings.names.contains("zipxActionUpdate"),
+        ZipxSettings.names.contains("zipxLeftoverSteward"),
+        ZipxSettings.names.contains("zipxAdvisoryCheck"),
         ZipxSettings.names.contains("zipxMatrixCollapse"),
         ZipxSettings.names.contains("zipxPinUpdate"),
         ZipxSettings.names.contains("zipxDepUpdate"),
         ZipxSettings.names.contains("zipxVersions"),
+        ZipxSettings.names.contains("zipxPins"),
         ZipxSettings.names.contains("zipxCheckDeps"),
         ZipxSettings.names.contains("zipxEmitSelf"),
         ZipxSettings.names.contains("zipxSelfPlugins"),

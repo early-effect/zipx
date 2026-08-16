@@ -1,6 +1,7 @@
 MyVersions.settings
 version        := "1.0.0-ci"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 zipxSelfPlugins += Plugin("com.acme", "sbt-acme", "9.9.9")
 
 libraryDependencies ++= MyVersions.deps(MyVersions.zio)

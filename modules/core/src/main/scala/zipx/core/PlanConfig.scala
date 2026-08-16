@@ -106,8 +106,8 @@ end PlanText
   *   how [[CacheBackend.LocalDir]] picks its commit-stable cache namespace: mid-PR commits share hits and a release tag
   *   rolls the namespace. Prefer the runtime-tag default so keys stay fresh without regenerating the workflow.
   * @param actions
-  *   prefer `.github/zipx/action-pins.yml` (see [[ActionPinFile]]) over setting this; [[ActionPins.Defaults]] are the
-  *   pins embedded in the zipx release jar.
+  *   catalog [[Action]] rows overlay [[ActionPins.Defaults]]; set this only for a one-off hatch. YAML is jar/generate
+  *   output, not an input.
   * @param skipMergedPrPush
   *   skips Verify on a branch push whose commit already belongs to a PR merged into that branch, so tests do not run
   *   twice after a merge. Direct pushes still run, as do PRs, tags and `workflow_dispatch`.

@@ -25,15 +25,15 @@ object PinFeedSpec extends ZIOSpecDefault:
   private def purlFor(id: String): Purl =
     Purl.make(s"pkg:npm/$id").fold(err => throw AssertionError(err), identity)
 
-  private def pin(id: String, ver: String, named: Boolean = true): PinnedDep =
-    PinnedDep(id, ver, Option.when(named)(purlFor(id)))
+  private def pin(id: String, ver: String, named: Boolean = true, feedName: PinFeedName = cdn): Pin =
+    val version = DepVersion.make(ver).fold(err => throw AssertionError(err), identity)
+    Pin(feedName, id, version, None, Option.when(named)(purlFor(id)))
 
   private def feed(
-      inventory: List[PinnedDep],
       outdated: PinAction = PinAction.Ignore,
       advisory: PinAction = PinAction.Report,
       lookup: PinLookup = _ => Right(None),
-      apply: PinApply = (_, _) => Right(()),
+      materialize: PinMaterialize = (_, _) => Right(()),
       minSeverity: AdvisorySeverity = AdvisorySeverity.Low,
       submitSnapshot: Boolean = false,
       name: PinFeedName = cdn,
@@ -41,15 +41,16 @@ object PinFeedSpec extends ZIOSpecDefault:
   ): PinFeed =
     PinFeed(
       name = name,
-      inventory = inventory,
       classify = classify,
       lookup = lookup,
-      apply = apply,
+      materialize = materialize,
       outdated = outdated,
       advisory = advisory,
       submitSnapshot = submitSnapshot,
       minSeverity = minSeverity,
     )
+
+  private def cand(version: String): PinCandidate = PinCandidate(version)
 
   private def source(hits: Map[String, List[Advisory]]): AdvisorySource =
     (purl, _) => Right(hits.getOrElse(purl, Nil))
@@ -81,7 +82,7 @@ object PinFeedSpec extends ZIOSpecDefault:
   private val gSeverity: Gen[Any, AdvisorySeverity] =
     Gen.elements(AdvisorySeverity.Low, AdvisorySeverity.Moderate, AdvisorySeverity.High, AdvisorySeverity.Critical)
 
-  private val gInventory: Gen[Any, List[PinnedDep]] =
+  private val gInventory: Gen[Any, List[Pin]] =
     for
       ids     <- Gen.listOfBounded(1, 4)(gId).map(_.distinct).filter(_.nonEmpty)
       named   <- Gen.listOfN(ids.size)(Gen.boolean)
@@ -90,19 +91,18 @@ object PinFeedSpec extends ZIOSpecDefault:
 
   def spec = suite("PinFeed")(
     suite("PinAction")(
-      test("Ignore and Report never call apply; Update calls it only on matching outdated pins") {
+      test("Ignore and Report never apply; Update records matching outdated pins without materializing") {
         check(gInventory, gAction, gStable) { (inventory, action, candidate) =>
-          val applied = mutable.ListBuffer.empty[String]
-          val latest  = inventory.map(p => p.id -> candidate).toMap
-          val f       = feed(
-            inventory,
+          val materialized = mutable.ListBuffer.empty[String]
+          val latest       = inventory.map(p => p.id -> candidate).toMap
+          val f            = feed(
             outdated = action,
             advisory = PinAction.Ignore,
-            lookup = p => Right(latest.get(p.id)),
-            apply = (p, _) =>
-              applied += p.id; Right(()),
+            lookup = p => Right(latest.get(p.id).map(cand)),
+            materialize = (p, _) =>
+              materialized += p.id; Right(()),
           )
-          val report   = PinEngine.scheduled(List(f), source(Map.empty))
+          val report   = PinEngine.scheduled(List(f), inventory, source(Map.empty))
           val matching =
             inventory.filter(p => f.classify.classify(p.current, candidate) != BumpKind.None).map(_.id).toSet
           report match
@@ -110,28 +110,24 @@ object PinFeedSpec extends ZIOSpecDefault:
             case Right(r)  =>
               action match
                 case PinAction.Ignore | PinAction.Report =>
-                  assertTrue(applied.isEmpty, r.applied.isEmpty)
+                  assertTrue(materialized.isEmpty, r.applied.isEmpty)
                 case PinAction.Update =>
-                  assertTrue(applied.toSet == matching)
+                  assertTrue(materialized.isEmpty, r.applied.map(_.pin.id).toSet == matching)
         }
       },
-      test("advisory Update calls apply only on pins with a hit and a newer candidate") {
+      test("advisory Update records applied only on pins with a hit and a newer candidate") {
         check(gInventory.filter(_.exists(_.purl.isDefined)), gStable) { (inventory, candidate) =>
-          val applied = mutable.ListBuffer.empty[String]
-          val named   = inventory.filter(_.purl.isDefined)
-          val hits = named.map(p => (p.purl.get: String) -> List(Advisory("GHSA-a", AdvisorySeverity.High, "x"))).toMap
-          val f    = feed(
-            inventory,
+          val named = inventory.filter(_.purl.isDefined)
+          val hits  = named.map(p => (p.purl.get: String) -> List(Advisory("GHSA-a", AdvisorySeverity.High, "x"))).toMap
+          val f     = feed(
             advisory = PinAction.Update,
-            lookup = _ => Right(Some(candidate)),
-            apply = (p, _) =>
-              applied += p.id; Right(()),
+            lookup = _ => Right(Some(cand(candidate))),
           )
-          val report = PinEngine.scheduled(List(f), source(hits))
+          val report = PinEngine.scheduled(List(f), inventory, source(hits))
           val expect = named.filter(p => p.current != candidate).map(_.id).toSet
           report match
             case Left(_)  => assertTrue(false)
-            case Right(_) => assertTrue(applied.toSet == expect)
+            case Right(r) => assertTrue(r.applied.map(_.pin.id).toSet == expect)
         }
       },
     ),
@@ -141,12 +137,12 @@ object PinFeedSpec extends ZIOSpecDefault:
           val named = current.filter(_.purl.isDefined)
           val hits  =
             named.map(p => (p.purl.get: String) -> List(Advisory("GHSA-a", AdvisorySeverity.High, "x"))).toMap
-          val f        = feed(current)
+          val f        = feed()
           val src      = source(hits)
-          val base     = Map(cdn -> baseInv)
-          val all      = PinEngine.prGate(List(f), src, PinPrGate.All, base)
-          val intro    = PinEngine.prGate(List(f), src, PinPrGate.Introduced, base)
-          val off      = PinEngine.prGate(List(f), src, PinPrGate.Off, base)
+          val base     = Map(cdn -> baseInv.map(_.toPinnedDep))
+          val all      = PinEngine.prGate(List(f), current, src, PinPrGate.All, base)
+          val intro    = PinEngine.prGate(List(f), current, src, PinPrGate.Introduced, base)
+          val off      = PinEngine.prGate(List(f), current, src, PinPrGate.Off, base)
           val baseById = baseInv.map(p => p.id -> p.current).toMap
           (all, intro, off) match
             case (Right(a), Right(i), Right(o)) =>
@@ -165,13 +161,13 @@ object PinFeedSpec extends ZIOSpecDefault:
         }
       },
       test("Off and empty feeds omit the builtin") {
-        val f = feed(List(pin("lib-a", "1.2.3")))
+        val f = feed()
         assertTrue(
           !PinFeeds.emitPrGate(Nil, PinPrGate.All),
           !PinFeeds.emitPrGate(List(f), PinPrGate.Off),
           PinFeeds.emitPrGate(List(f), PinPrGate.All),
           PinFeeds.emitPrGate(List(f), PinPrGate.Introduced),
-          !PinFeeds.emitPrGate(List(feed(List(pin("lib-a", "1.2.3")), advisory = PinAction.Ignore)), PinPrGate.All),
+          !PinFeeds.emitPrGate(List(feed(advisory = PinAction.Ignore)), PinPrGate.All),
         )
       },
     ),
@@ -184,8 +180,8 @@ object PinFeedSpec extends ZIOSpecDefault:
             (p.purl.get: String) -> List(Advisory("GHSA-a", AdvisorySeverity.High, "x"))
           }.toMap
           val src = source(hits)
-          val a   = PinEngine.prGate(List(feed(inventory, minSeverity = lo)), src, PinPrGate.All)
-          val b   = PinEngine.prGate(List(feed(inventory, minSeverity = hi)), src, PinPrGate.All)
+          val a   = PinEngine.prGate(List(feed(minSeverity = lo)), inventory, src, PinPrGate.All)
+          val b   = PinEngine.prGate(List(feed(minSeverity = hi)), inventory, src, PinPrGate.All)
           (a, b) match
             case (Right(lower), Right(higher)) =>
               val lowerIds  = lower.findings.map(_.pin.id).toSet
@@ -199,28 +195,27 @@ object PinFeedSpec extends ZIOSpecDefault:
       test("empty vulns is not a finding, including a private PURL") {
         val named = pin("lib-a", "1.2.3")
         val priv  = pin("internal", "1.0.0")
-        val f     = feed(List(named, priv))
-        PinEngine.prGate(List(f), source(Map.empty), PinPrGate.All) match
+        val f     = feed()
+        PinEngine.prGate(List(f), List(named, priv), source(Map.empty), PinPrGate.All) match
           case Left(_)  => assertTrue(false)
           case Right(r) =>
             assertTrue(r.findings.isEmpty, r.scanned == 2, r.skipped == 0, !r.failsJob)
       },
       test("no PURL is skip; all-private inventory is a successful no-op") {
-        val f = feed(List(pin("vendor", "1.0.0", named = false), pin("blob", "2.0.0", named = false)))
-        PinEngine.prGate(List(f), failingSource, PinPrGate.All) match
+        val pins = List(pin("vendor", "1.0.0", named = false), pin("blob", "2.0.0", named = false))
+        PinEngine.prGate(List(feed()), pins, failingSource, PinPrGate.All) match
           case Left(_)  => assertTrue(false)
           case Right(r) =>
             assertTrue(r.skipped == 2, r.scanned == 0, r.findings.isEmpty, !r.failsJob)
       },
       test("injected OSV failure is Left, never a green empty report") {
-        val f = feed(List(pin("lib-a", "1.2.3")))
-        PinEngine.prGate(List(f), failingSource, PinPrGate.All) match
+        PinEngine.prGate(List(feed()), List(pin("lib-a", "1.2.3")), failingSource, PinPrGate.All) match
           case Left(err) => assertTrue(err.contains("osv"))
           case Right(_)  => assertTrue(false)
       },
       test("injected lookup failure is Left") {
-        val f = feed(List(pin("lib-a", "1.2.3")), outdated = PinAction.Report, lookup = _ => Left("lookup: down"))
-        PinEngine.scheduled(List(f), source(Map.empty)) match
+        val f = feed(outdated = PinAction.Report, lookup = _ => Left("lookup: down"))
+        PinEngine.scheduled(List(f), List(pin("lib-a", "1.2.3")), source(Map.empty)) match
           case Left(err) => assertTrue(err.contains("lookup"))
           case Right(_)  => assertTrue(false)
       },
@@ -274,8 +269,9 @@ object PinFeedSpec extends ZIOSpecDefault:
     suite("Snapshot")(
       test("every pin with a PURL appears; pins without a PURL are omitted") {
         check(gInventory) { inventory =>
-          val f       = feed(inventory, submitSnapshot = true)
-          val json    = PinSnapshot.render(List(f), "abc", "refs/heads/main", "1", "2020-01-01T00:00:00Z", "0.1.0")
+          val f    = feed(submitSnapshot = true)
+          val json =
+            PinSnapshot.render(List(f), inventory, "abc", "refs/heads/main", "1", "2020-01-01T00:00:00Z", "0.1.0")
           val named   = inventory.filter(_.purl.isDefined)
           val unnamed = inventory.filter(_.purl.isEmpty)
           assertTrue(
@@ -286,10 +282,12 @@ object PinFeedSpec extends ZIOSpecDefault:
         }
       },
       test("multi-feed merge is a union of manifests; correlator is stable") {
-        val a     = feed(List(pin("lib-a", "1.0.0")), name = PinFeedName("cdn"))
-        val b     = feed(List(pin("lib-b", "2.0.0")), name = PinFeedName("vendor"))
-        val json  = PinSnapshot.render(List(a, b), "sha", "refs/heads/main", "9", "t", "0.1.0")
-        val again = PinSnapshot.render(List(a, b), "other", "refs/heads/dev", "8", "t2", "0.2.0")
+        val aPins = List(pin("lib-a", "1.0.0", feedName = PinFeedName("cdn")))
+        val bPins = List(pin("lib-b", "2.0.0", feedName = PinFeedName("vendor")))
+        val a     = feed(name = PinFeedName("cdn"))
+        val b     = feed(name = PinFeedName("vendor"))
+        val json  = PinSnapshot.render(List(a, b), aPins ++ bPins, "sha", "refs/heads/main", "9", "t", "0.1.0")
+        val again = PinSnapshot.render(List(a, b), aPins ++ bPins, "other", "refs/heads/dev", "8", "t2", "0.2.0")
         assertTrue(
           json.contains("\"cdn\""),
           json.contains("\"vendor\""),
@@ -301,8 +299,8 @@ object PinFeedSpec extends ZIOSpecDefault:
       },
       test("inventory round-trip") {
         check(gInventory) { inventory =>
-          val f    = feed(inventory)
-          val json = PinInventory.render(List(f))
+          val f    = feed()
+          val json = PinInventory.render(List(f), inventory)
           PinInventory.parse(json) match
             case Left(_)  => assertTrue(false)
             case Right(m) =>
@@ -332,8 +330,8 @@ object PinFeedSpec extends ZIOSpecDefault:
     suite("Companions")(
       test("empty feeds emit no companions; submitSnapshot false omits snapshot") {
         val none  = Seq.empty[PinFeed]
-        val alert = List(feed(List(pin("lib-a", "1.2.3"))))
-        val snap  = List(feed(List(pin("lib-a", "1.2.3")), submitSnapshot = true))
+        val alert = List(feed())
+        val snap  = List(feed(submitSnapshot = true))
         assertTrue(
           !PinFeeds.emitCompanions(none),
           PinFeeds.emitCompanions(alert),
@@ -371,57 +369,55 @@ object PinFeedSpec extends ZIOSpecDefault:
       },
     ),
     suite("local outdated with approval")(
-      test("outdated ignores PinAction and never calls apply") {
+      test("outdated ignores PinAction and never materializes") {
         check(gInventory, gAction, gStable) { (inventory, action, candidate) =>
-          val applied = mutable.ListBuffer.empty[String]
-          val latest  = inventory.map(p => p.id -> candidate).toMap
-          val f       = feed(
-            inventory,
+          val materialized = mutable.ListBuffer.empty[String]
+          val latest       = inventory.map(p => p.id -> candidate).toMap
+          val f            = feed(
             outdated = action,
-            lookup = p => Right(latest.get(p.id)),
-            apply = (p, _) =>
-              applied += p.id; Right(()),
+            lookup = p => Right(latest.get(p.id).map(cand)),
+            materialize = (p, _) =>
+              materialized += p.id; Right(()),
           )
           val expect =
             inventory.filter(p => f.classify.classify(p.current, candidate) != BumpKind.None).map(_.id).toSet
-          PinEngine.outdated(List(f)) match
+          PinEngine.outdated(List(f), inventory) match
             case Left(err)    => assertTrue(err.isEmpty)
             case Right(bumps) =>
-              assertTrue(applied.isEmpty, bumps.map(_.pin.id).toSet == expect)
+              assertTrue(materialized.isEmpty, bumps.map(_.pin.id).toSet == expect)
         }
       },
-      test("applyBumps calls apply only on the listed set") {
+      test("materialize runs only on the listed set") {
         check(gInventory.filter(_.sizeIs >= 2)) { inventory =>
-          val applied = mutable.ListBuffer.empty[String]
-          val f       = feed(
-            inventory,
-            lookup = _ => Right(Some("99.0.0")),
-            apply = (p, _) =>
-              applied += p.id; Right(()),
+          val materialized = mutable.ListBuffer.empty[String]
+          val f            = feed(
+            lookup = _ => Right(Some(cand("99.0.0"))),
+            materialize = (p, _) =>
+              materialized += p.id; Right(()),
           )
-          PinEngine.outdated(List(f)).flatMap { bumps =>
+          PinEngine.outdated(List(f), inventory).flatMap { bumps =>
             val chosen = bumps.take(1)
-            PinEngine.applyBumps(List(f), chosen).map(_ -> chosen)
+            PinEngine.materialize(List(f), chosen.map(_.applied)).map(_ -> chosen)
           } match
             case Left(err)                    => assertTrue(err.isEmpty)
             case Right((appliedPins, chosen)) =>
               assertTrue(
-                applied.toSet == chosen.map(_.pin.id).toSet,
+                materialized.toSet == chosen.map(_.pin.id).toSet,
                 appliedPins.map(_.pin.id) == chosen.map(_.pin.id),
                 chosen.size == 1,
-                applied.size == 1,
+                materialized.size == 1,
               )
           end match
         }
       },
-      test("applyBumps is Left when the feed is not in the list") {
-        val bump = PinBump(PinFeedName("other"), pin("lib-a", "1.2.3"), BumpKind.Patch, "1.2.4")
-        PinEngine.applyBumps(List(feed(List(pin("lib-a", "1.2.3")))), List(bump)) match
+      test("materialize is Left when the feed is not in the list") {
+        val item = AppliedPin(pin("lib-a", "1.2.3", feedName = PinFeedName("other")), cand("1.2.4"))
+        PinEngine.materialize(List(feed()), List(item)) match
           case Left(err) => assertTrue(err.contains("unknown pin feed"))
           case Right(_)  => assertTrue(false)
       },
       test("formatBumps names feed, id, and versions") {
-        val bumps = List(PinBump(cdn, pin("lib-a", "1.2.3"), BumpKind.Patch, "1.2.4"))
+        val bumps = List(PinBump(pin("lib-a", "1.2.3"), BumpKind.Patch, cand("1.2.4")))
         val text  = PinEngine.formatBumps(bumps)
         assertTrue(
           text.contains("cdn"),

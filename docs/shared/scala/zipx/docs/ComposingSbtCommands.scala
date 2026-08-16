@@ -162,7 +162,7 @@ Green is the paved path. Red is the escape hatch: raw text is warned at generate
 
 ```scala
 zipxCapabilities ++= Seq(
-  zipxTasks.once(CapabilityName("fmt"), scalafmtCheckAll),
+  zipxTasks.once(CapabilityName("lint"), lintAll),  // extra Once; builtin fmt is already parallel Verify
   Capability.testGraph,
   ZipxCentral.release.withCondition(upstream),
 )

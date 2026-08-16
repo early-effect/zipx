@@ -3,21 +3,20 @@ package zipx.core
 import neotype.unwrap
 import zio.test.*
 import zipx.workflow.ActionRef
-import java.nio.file.{Files, Path, Paths}
+import java.nio.file.Files
 
-/** The pin file is the one place a `uses:` value enters zipx as untrusted text, so it gets the whole negative surface.
+/** Internal Action-pin YAML: jar resource, leftover-file parse, and `# vX.Y.Z` stamps on generated `uses:`.
   *
-  * The point of the negative tests is not that a bad line is refused: it is that it is refused *loudly*. Before `parse`
-  * returned an `Either`, every case in `rejections` below silently fell back to the pin baked into the zipx jar, which
-  * is how a deliberately held-back pin reverted itself on the next `zipxWorkflowGenerate`.
+  * Not an editable source. Catalog [[Action]] vals are what you edit. This codec still has to refuse bad YAML *loudly*:
+  * before `parse` returned an `Either`, every case in `rejections` silently fell back to the jar bootstrap pin.
   */
-object ActionPinFileSpec extends ZIOSpecDefault:
+object ActionPinsYamlSpec extends ZIOSpecDefault:
 
   private val keys: List[String] = ActionPins.Field.values.toList.map(_.key)
 
   /** `ActionRef("…")` only takes a literal, and every ref built here is assembled from a [[ActionPins.Field.prefix]]
     * and a generated SHA. `make` rather than `unsafeMake`, so a generator that starts producing garbage fails here
-    * instead of quietly handing `parse` a ref no real pin file could contain.
+    * instead of quietly handing `parse` a ref no leftover YAML or jar resource could contain.
     */
   private def ref(text: String): ActionRef =
     ActionRef.make(text).fold(error => throw AssertionError(s"test built an invalid ref: $error"), identity)
@@ -32,8 +31,8 @@ object ActionPinFileSpec extends ZIOSpecDefault:
       patch <- Gen.int(0, 99)
     yield s"v$major.$minor.$patch"
 
-  /** Valid pins by construction: every field gets its own prefix and a fresh SHA, so a generated file is one a real
-    * `zipxActionsPull` could have written. Versions are all-or-nothing per file, matching `render`'s two branches.
+  /** Valid pins by construction: every field gets its own prefix and a fresh SHA. Versions are all-or-nothing per
+    * render, matching `render`'s two branches.
     */
   private val gPins: Gen[Any, ActionPins] =
     for
@@ -101,8 +100,8 @@ object ActionPinFileSpec extends ZIOSpecDefault:
     "an empty @ref"          -> "checkout: actions/checkout@",
   )
 
-  /** Forms the committed file and hand edits legitimately contain. Over-strictness would break real builds, so these
-    * are as load-bearing as the negatives.
+  /** Forms leftover YAML and the jar resource legitimately contain. Over-strictness would refuse a file generate is
+    * trying to diagnose, so these are as load-bearing as the negatives.
     */
   private val acceptances: List[(String, String)] = List(
     "a comment and a blank line" -> s"# a note\n\n$goodPin\n",
@@ -114,9 +113,7 @@ object ActionPinFileSpec extends ZIOSpecDefault:
     "a pin with no version"      -> "checkout: actions/checkout@abc123",
   )
 
-  private val committedPinFile: Path = Paths.get(".github", "zipx", "action-pins.yml")
-
-  def spec = suite("ActionPinFile")(
+  def spec = suite("Action pins YAML")(
     suite("Field is the single source of truth")(
       test("every Field reads and writes its own pin, so no field can be missed") {
         val stamped = ActionPins.Field.values.foldLeft(ActionPins.Bootstrap) { (pins, field) =>
@@ -128,7 +125,7 @@ object ActionPinFileSpec extends ZIOSpecDefault:
           ActionPins.Field.values.map(_.prefix).distinct.length == ActionPins.Field.values.length,
         )
       },
-      test("rendered line order is Field declaration order, which is the committed pin file's order") {
+      test("rendered line order is Field declaration order (jar resource and leftover YAML)") {
         val rendered = ActionPinFile
           .render(ActionPins.Defaults)
           .linesIterator
@@ -137,8 +134,8 @@ object ActionPinFileSpec extends ZIOSpecDefault:
         assertTrue(rendered == keys)
       },
     ),
-    suite("accepts")(
-      test("a pin file with version comments") {
+    suite("parse leftover YAML and the jar resource")(
+      test("YAML with version comments") {
         val pins = ActionPinFile.parse(
           """
             |checkout: actions/checkout@abc123 # v7.0.1
@@ -152,25 +149,20 @@ object ActionPinFileSpec extends ZIOSpecDefault:
           pins.exists(_.versions.get("setupSbt").contains("v1.5.2")),
         )
       },
-      test("a field the file omits keeps the bootstrap pin rather than failing") {
-        // The one silent fallback that survives: an *absent* line is not an error, so a partial file is usable.
+      test("a field the YAML omits keeps the bootstrap pin rather than failing") {
+        // The one silent fallback that survives: an *absent* line is not an error, so partial leftover YAML is usable.
         val pins = ActionPinFile.parse("checkout: actions/checkout@abc123\n")
         assertTrue(
           pins.map(_.checkout) == Right(ActionRef("actions/checkout@abc123")),
-          pins.map(_.scalaSteward) == Right(ActionPins.Bootstrap.scalaSteward),
+          pins.map(_.downloadArtifact) == Right(ActionPins.Bootstrap.downloadArtifact),
         )
       },
-      test("the whitespace and comment forms a hand-edited file actually contains") {
+      test("the whitespace and comment forms leftover YAML may still contain") {
         assertTrue(acceptances.forall { case (_, text) => ActionPinFile.parse(text).isRight })
       },
-      test("the actual committed .github/zipx/action-pins.yml, and its own render") {
-        // The strongest guard against over-strictness: whatever this repo ships must parse, and the pins it yields
-        // must be the ones `Defaults` already loaded from the same text on the classpath.
-        val committed = ActionPinFile.load(committedPinFile)
+      test("render of Defaults round-trips through parse") {
         assertTrue(
-          Files.isRegularFile(committedPinFile),
-          committed == Right(ActionPins.Defaults),
-          ActionPinFile.parse(ActionPinFile.render(ActionPins.Defaults)) == Right(ActionPins.Defaults),
+          ActionPinFile.parse(ActionPinFile.render(ActionPins.Defaults)) == Right(ActionPins.Defaults)
         )
       },
     ),
@@ -187,12 +179,14 @@ object ActionPinFileSpec extends ZIOSpecDefault:
         )
       },
       test("the reported line number is the bad line's, not the first line's") {
-        // Header (4 lines) + one good pin, so the bad line is line 6. A fold that forgot to carry the index would
-        // report 1 here and still pass the single-line test above.
-        val text = s"$header\n$goodPin\nsetup-jav: actions/setup-java@abc123\n"
+        // Comments plus one good pin, then a typo. A fold that forgot to carry the index would report 1 here and
+        // still pass the single-line test above. Line count is derived so a Header edit cannot stale the number.
+        val bad  = "setup-jav: actions/setup-java@abc123"
+        val text = s"$header\n$goodPin\n$bad\n"
+        val n    = text.linesIterator.toList.indexWhere(_ == bad) + 1
         assertTrue(
-          text.linesIterator.length == 6,
-          ActionPinFile.parse(text).swap.exists(_.contains(s"${ActionPinFile.DefaultPath}:6:")),
+          n > 1,
+          ActionPinFile.parse(text).swap.exists(_.contains(s"${ActionPinFile.DefaultPath}:$n:")),
         )
       },
       test("an unknown key's message lists the legal keys, so the typo is fixable from the error alone") {
@@ -216,7 +210,7 @@ object ActionPinFileSpec extends ZIOSpecDefault:
           assertTrue(ActionPinFile.parse(ActionPinFile.render(pins)) == Right(pins))
         }
       },
-      test("one malformed line refuses the whole file, whichever field it is") {
+      test("one malformed line refuses the whole YAML, whichever field it is") {
         // #59's claim as a property: no field may fall back to the jar default because its line was unreadable.
         check(gPins, gField) { (pins, broken) =>
           val text = ActionPinFile
@@ -330,7 +324,7 @@ object ActionPinFileSpec extends ZIOSpecDefault:
         )
       },
     ),
-    suite("pullFromWorkflow")(
+    suite("pullFromWorkflow (internal, not generate)")(
       test("extracts uses pins and their version comments") {
         val yaml =
           """
@@ -353,14 +347,14 @@ object ActionPinFileSpec extends ZIOSpecDefault:
         assertTrue(ActionPinFile.pullFromWorkflow(yaml, ActionPins.Defaults) == Right(ActionPins.Defaults))
       },
       test("refuses a known action whose ref a rewrite left invalid") {
-        // The case a silent pull would launder into the pin file: the prefix is one zipx pins, the ref is not usable.
+        // The case a silent pull would launder into the YAML codec: the prefix is one zipx pins, the ref is not usable.
         val yaml = "      - uses: actions/checkout\n"
         assertTrue(
           ActionPinFile.pullFromWorkflow(yaml, ActionPins.Defaults).isLeft,
           ActionPinFile.pullFromWorkflow(yaml, ActionPins.Defaults).swap.exists(_.contains("@ref")),
         )
       },
-      test("a pulled workflow round-trips back through the pin file") {
+      test("a pulled workflow round-trips back through render/parse") {
         check(gPins) { pins =>
           val yaml   = ActionPins.Field.values.toList.map(f => s"      - uses: ${pins.field(f).unwrap}").mkString("\n")
           val pulled = ActionPinFile.pullFromWorkflow(yaml, ActionPins.Defaults)
@@ -384,14 +378,14 @@ object ActionPinFileSpec extends ZIOSpecDefault:
         )
       }
     ),
-    suite("on disk")(
+    suite("leftover file on disk (generate refuses)")(
       test("write and loadOption round-trip") {
         val dir  = Files.createTempDirectory("zipx-pins")
         val path = dir.resolve("action-pins.yml")
         ActionPinFile.write(path, ActionPins.Defaults)
         assertTrue(ActionPinFile.loadOption(path) == Some(Right(ActionPins.Defaults)))
       },
-      test("an absent file is None but a present-but-bad file is Some(Left), which is what lets the plugin fail") {
+      test("absent is None; present-but-bad is Some(Left), so generate can fail") {
         val dir  = Files.createTempDirectory("zipx-pins")
         val bad  = dir.resolve("action-pins.yml")
         val gone = dir.resolve("nope.yml")
@@ -401,13 +395,15 @@ object ActionPinFileSpec extends ZIOSpecDefault:
           ActionPinFile.loadOption(bad).exists(_.isLeft),
         )
       },
+    ),
+    suite("jar resource")(
       test("an absent classpath resource is None, and Defaults falls back to the bootstrap pins") {
         assertTrue(
           ActionPinFile.loadResource("zipx/does-not-exist.yml").isEmpty,
           ActionPinFile.loadResource().isDefined,
           ActionPins.Defaults.checkout.unwrap.startsWith(ActionPins.Field.Checkout.prefix + "@"),
         )
-      },
+      }
     ),
   )
-end ActionPinFileSpec
+end ActionPinsYamlSpec

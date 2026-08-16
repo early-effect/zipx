@@ -4,12 +4,19 @@ enum PinSignal:
   case Outdated(bump: BumpKind, candidate: String)
   case AdvisoryHit(advisories: List[Advisory])
 
-final case class PinFinding(feed: PinFeedName, pin: PinnedDep, signal: PinSignal)
+final case class PinFinding(feed: PinFeedName, pin: Pin, signal: PinSignal)
 
-final case class AppliedPin(feed: PinFeedName, pin: PinnedDep, to: String)
+final case class AppliedPin(pin: Pin, candidate: PinCandidate):
+  def feed: PinFeedName = pin.feed
+  def to: String        = candidate.version
 
 /** A proposed version bump from [[PinEngine.outdated]], independent of [[PinAction]]. */
-final case class PinBump(feed: PinFeedName, pin: PinnedDep, bump: BumpKind, to: String)
+final case class PinBump(pin: Pin, bump: BumpKind, candidate: PinCandidate):
+  def feed: PinFeedName = pin.feed
+  def from: String      = pin.current
+  def to: String        = candidate.version
+
+  def applied: AppliedPin = AppliedPin(pin, candidate)
 
 final case class PinReport(
     scanned: Int,
@@ -21,17 +28,20 @@ final case class PinReport(
 
 object PinEngine:
 
-  /** Scheduled path: lookup + classify for outdated, OSV for advisories, apply only under [[PinAction.Update]]. */
-  def scheduled(feeds: Seq[PinFeed], source: AdvisorySource): Either[String, PinReport] =
+  /** Scheduled path: lookup + classify for outdated, OSV for advisories. Update records applied pins; catalog rewrite
+    * and [[PinFeed.materialize]] happen in the plugin after this returns.
+    */
+  def scheduled(feeds: Seq[PinFeed], pins: Seq[Pin], source: AdvisorySource): Either[String, PinReport] =
     feeds
       .foldLeft[Either[String, Accum]](Right(Accum.empty)) { (accE, feed) =>
-        accE.flatMap(acc => scheduledFeed(feed, source, acc))
+        accE.flatMap(acc => scheduledFeed(feed, pins, source, acc))
       }
       .map(_.report)
 
   /** PR path: OSV only. Never looks up latest and never applies. */
   def prGate(
       feeds: Seq[PinFeed],
+      pins: Seq[Pin],
       source: AdvisorySource,
       gate: PinPrGate,
       base: Map[PinFeedName, List[PinnedDep]] = Map.empty,
@@ -40,36 +50,38 @@ object PinEngine:
     else
       feeds
         .foldLeft[Either[String, Accum]](Right(Accum.empty)) { (accE, feed) =>
-          accE.flatMap(acc => prFeed(feed, source, gate, base.getOrElse(feed.name, Nil), acc))
+          accE.flatMap(acc => prFeed(feed, pins, source, gate, base.getOrElse(feed.name, Nil), acc))
         }
         .map(_.report)
 
   /** Lookup + classify every pin, ignoring [[PinAction]]. Local `zipxPinUpdate` uses this so alert-only feeds can still
     * bump with approval.
     */
-  def outdated(feeds: Seq[PinFeed]): Either[String, List[PinBump]] =
+  def outdated(feeds: Seq[PinFeed], pins: Seq[Pin]): Either[String, List[PinBump]] =
     feeds.foldLeft[Either[String, List[PinBump]]](Right(Nil)) { (accE, feed) =>
-      accE.flatMap(acc => outdatedFeed(feed, acc))
+      accE.flatMap(acc => outdatedFeed(feed, pins, acc))
     }
 
-  /** Apply a previously listed set of bumps. Never looks up; never applies a pin that is not in `bumps`. */
-  def applyBumps(feeds: Seq[PinFeed], bumps: List[PinBump]): Either[String, List[AppliedPin]] =
+  /** Call [[PinFeed.materialize]] for a previously listed set. Never looks up; never materializes a pin that is not in
+    * `items`.
+    */
+  def materialize(feeds: Seq[PinFeed], items: List[AppliedPin]): Either[String, List[AppliedPin]] =
     val byName = feeds.map(f => f.name -> f).toMap
-    bumps.foldLeft[Either[String, List[AppliedPin]]](Right(Nil)) { (accE, bump) =>
+    items.foldLeft[Either[String, List[AppliedPin]]](Right(Nil)) { (accE, item) =>
       accE.flatMap { acc =>
-        byName.get(bump.feed) match
-          case None       => Left(s"unknown pin feed '${bump.feed}'")
+        byName.get(item.feed) match
+          case None       => Left(s"unknown pin feed '${item.feed}'")
           case Some(feed) =>
-            feed.apply(bump.pin, bump.to).map(_ => acc :+ AppliedPin(feed.name, bump.pin, bump.to))
+            feed.materialize(item.pin, item.candidate).map(_ => acc :+ item)
       }
     }
-  end applyBumps
+  end materialize
 
   def formatBumps(bumps: List[PinBump]): String =
     if bumps.isEmpty then "no outdated pins"
     else
       bumps
-        .map(b => s"- ${b.feed} ${b.pin.id}: ${b.pin.current} -> ${b.to} (${b.bump})")
+        .map(b => s"- ${b.feed} ${b.pin.id}: ${b.from} -> ${b.to} (${b.bump})")
         .mkString("\n")
 
   def summary(report: PinReport): String =
@@ -107,16 +119,19 @@ $findingLines
   private object Accum:
     val empty: Accum = Accum(0, 0, Nil, Nil)
 
-  private def outdatedFeed(feed: PinFeed, acc: List[PinBump]): Either[String, List[PinBump]] =
-    feed.inventory.foldLeft[Either[String, List[PinBump]]](Right(acc)) { (accE, pin) =>
+  private def targetCandidate(feed: PinFeed, candidate: PinCandidate): PinCandidate =
+    val ver = feed.classify.latestStable(List(candidate.version)).getOrElse(candidate.version)
+    candidate.copy(version = ver)
+
+  private def outdatedFeed(feed: PinFeed, pins: Seq[Pin], acc: List[PinBump]): Either[String, List[PinBump]] =
+    PinFeeds.inventory(feed, pins).foldLeft[Either[String, List[PinBump]]](Right(acc)) { (accE, pin) =>
       accE.flatMap { bumps =>
         feed.lookup(pin).map { latest =>
           latest
             .flatMap { candidate =>
-              val kind = feed.classify.classify(pin.current, candidate)
+              val kind = feed.classify.classify(pin.current, candidate.version)
               Option.when(kind != BumpKind.None) {
-                val to = feed.classify.latestStable(List(candidate)).getOrElse(candidate)
-                PinBump(feed.name, pin, kind, to)
+                PinBump(pin, kind, targetCandidate(feed, candidate))
               }
             }
             .fold(bumps)(bumps :+ _)
@@ -124,14 +139,19 @@ $findingLines
       }
     }
 
-  private def scheduledFeed(feed: PinFeed, source: AdvisorySource, acc: Accum): Either[String, Accum] =
-    feed.inventory.foldLeft[Either[String, Accum]](Right(acc)) { (accE, pin) =>
+  private def scheduledFeed(
+      feed: PinFeed,
+      pins: Seq[Pin],
+      source: AdvisorySource,
+      acc: Accum,
+  ): Either[String, Accum] =
+    PinFeeds.inventory(feed, pins).foldLeft[Either[String, Accum]](Right(acc)) { (accE, pin) =>
       accE.flatMap(a => scheduledPin(feed, pin, source, a))
     }
 
   private def scheduledPin(
       feed: PinFeed,
-      pin: PinnedDep,
+      pin: Pin,
       source: AdvisorySource,
       acc: Accum,
   ): Either[String, Accum] =
@@ -142,6 +162,7 @@ $findingLines
 
   private def prFeed(
       feed: PinFeed,
+      pins: Seq[Pin],
       source: AdvisorySource,
       gate: PinPrGate,
       base: List[PinnedDep],
@@ -150,7 +171,7 @@ $findingLines
     if feed.advisory == PinAction.Ignore then Right(acc)
     else
       val baseById = base.map(p => p.id -> p.current).toMap
-      feed.inventory.foldLeft[Either[String, Accum]](Right(acc)) { (accE, pin) =>
+      PinFeeds.inventory(feed, pins).foldLeft[Either[String, Accum]](Right(acc)) { (accE, pin) =>
         accE.flatMap { a =>
           val changed = !baseById.contains(pin.id) || baseById(pin.id) != pin.current
           val include = gate == PinPrGate.All || changed
@@ -159,32 +180,31 @@ $findingLines
         }
       }
 
-  private def handleOutdated(feed: PinFeed, pin: PinnedDep, acc: Accum): Either[String, Accum] =
+  private def handleOutdated(feed: PinFeed, pin: Pin, acc: Accum): Either[String, Accum] =
     feed.outdated match
       case PinAction.Ignore => Right(acc)
       case action           =>
         for
           latest <- feed.lookup(pin)
-          bump = latest.map(c => feed.classify.classify(pin.current, c) -> c)
+          bump = latest.map(c => feed.classify.classify(pin.current, c.version) -> c)
           next <- bump match
             case Some((b, candidate)) if b != BumpKind.None =>
               action match
                 case PinAction.Ignore => Right(acc)
                 case PinAction.Report =>
                   Right(
-                    acc.copy(findings = acc.findings :+ PinFinding(feed.name, pin, PinSignal.Outdated(b, candidate)))
+                    acc.copy(findings =
+                      acc.findings :+ PinFinding(feed.name, pin, PinSignal.Outdated(b, candidate.version))
+                    )
                   )
                 case PinAction.Update =>
-                  val target = feed.classify.latestStable(List(candidate)).getOrElse(candidate)
-                  feed
-                    .apply(pin, target)
-                    .map(_ => acc.copy(applied = acc.applied :+ AppliedPin(feed.name, pin, target)))
+                  Right(acc.copy(applied = acc.applied :+ AppliedPin(pin, targetCandidate(feed, candidate))))
             case _ => Right(acc)
         yield next
 
   private def handleAdvisory(
       feed: PinFeed,
-      pin: PinnedDep,
+      pin: Pin,
       source: AdvisorySource,
       acc: Accum,
       applyUpdates: Boolean,
@@ -213,14 +233,12 @@ $findingLines
                     )
                   else
                     for
-                      latest <- feed.lookup(pin)
-                      target <- latest.flatMap(c => feed.classify.latestStable(List(c)).orElse(latest)) match
-                        case Some(to) if to != pin.current =>
-                          feed.apply(pin, to).map(_ => AppliedPin(feed.name, pin, to))
-                        case _ => Right(AppliedPin(feed.name, pin, pin.current))
-                    yield
-                      if target.to == pin.current then scanned
-                      else scanned.copy(applied = scanned.applied :+ target)
+                      latest  <- feed.lookup(pin)
+                      applied <- latest.map(targetCandidate(feed, _)) match
+                        case Some(to) if to.version != pin.current =>
+                          Right(Some(AppliedPin(pin, to)))
+                        case _ => Right(None)
+                    yield applied.fold(scanned)(a => scanned.copy(applied = scanned.applied :+ a))
             end if
           }
 end PinEngine

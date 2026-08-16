@@ -1,12 +1,12 @@
 package zipx.core
 
+import neotype.unwrap
 import zipx.workflow.ActionRef
 
 /** Hash-pinned GitHub Actions used in generated workflows.
   *
-  * Editable source of truth in a repo is [[ActionPinFile.DefaultPath]] (`.github/zipx/action-pins.yml`). Published
-  * [[ActionPins.Defaults]] are that file embedded on the classpath at build time. Override via the pin file
-  * (Dependabot-friendly) or, for one-offs, `zipxActions` in `build.sbt`:
+  * Catalog [[Action]] rows in `project/ZipxVersions.scala` overlay [[ActionPins.Defaults]]. YAML is generate/jar
+  * output, never an input. Override for one-offs with `zipxActions` in `build.sbt`:
   *
   * {{{
   * zipxActions := ActionPins.Defaults.copy(
@@ -14,9 +14,9 @@ import zipx.workflow.ActionRef
   * )
   * }}}
   *
-  * Fields are [[zipx.workflow.ActionRef]], so a literal is checked while the build compiles and a pin read from the
-  * file is checked where [[ActionPinFile.parse]] reads it. A pin therefore reaches `Step.uses` with nothing left to
-  * validate, which is what makes an unpinned `uses:` unrepresentable rather than merely rejected.
+  * Fields are [[zipx.workflow.ActionRef]], so a literal is checked while the build compiles. A pin therefore reaches
+  * `Step.uses` with nothing left to validate, which is what makes an unpinned `uses:` unrepresentable rather than
+  * merely rejected.
   *
   * @param checkout
   *   `actions/checkout` pin (`owner/action@sha`).
@@ -33,19 +33,13 @@ import zipx.workflow.ActionRef
   *   `actions/upload-artifact` pin (Central staging share).
   * @param downloadArtifact
   *   `actions/download-artifact` pin (Central staging reassembly).
-  * @param scalaSteward
-  *   `scala-steward-org/scala-steward-action` pin (opt-in [[ScalaStewardWorkflow]]).
   * @param versions
   *   Optional semver labels (`v7.0.1`) keyed by field name for `# vX.Y.Z` comments on generated `uses:` lines. An extra
   *   pin's label is keyed `extra.<key>`, which no [[ActionPins.Field.key]] can collide with because a field key has no
   *   dot in it.
   * @param extra
-  *   Pins for actions zipx does not emit itself, keyed by a name the caller chooses. This is the field for an action a
-  *   *consumer* reaches through `extraSteps` or a published pack: `ZipxAws`'s `aws-actions/configure-aws-credentials`,
-  *   an org's internal action. A typed [[ActionPins.Field]] is for an action zipx emits, which is why it can carry a
-  *   [[ActionPins.Field.prefix]] and so be shape-checked against the action it claims to name; an extra pin has no
-  *   prefix, so [[ActionPinFile.parse]] can only check that its ref is pinned at all. That weaker check is the price of
-  *   not needing a zipx release to pin a new action.
+  *   Pins for actions zipx does not emit itself, keyed by the action name (`owner/repo`). Packs look up by prefix
+  *   ([[extraByPrefix]]), not a YAML `extra:` key.
   */
 final case class ActionPins(
     checkout: ActionRef = ActionPins.BootstrapCheckout,
@@ -55,7 +49,6 @@ final case class ActionPins(
     cache: ActionRef = ActionPins.BootstrapCache,
     uploadArtifact: ActionRef = ActionPins.BootstrapUploadArtifact,
     downloadArtifact: ActionRef = ActionPins.BootstrapDownloadArtifact,
-    scalaSteward: ActionRef = ActionPins.BootstrapScalaSteward,
     versions: Map[String, String] = Map.empty,
     extra: Map[String, ActionRef] = Map.empty,
 ):
@@ -69,7 +62,6 @@ final case class ActionPins(
     case Field.Cache            => cache
     case Field.UploadArtifact   => uploadArtifact
     case Field.DownloadArtifact => downloadArtifact
-    case Field.ScalaSteward     => scalaSteward
 
   def withField(f: Field, ref: ActionRef): ActionPins = f match
     case Field.Checkout         => copy(checkout = ref)
@@ -79,14 +71,12 @@ final case class ActionPins(
     case Field.Cache            => copy(cache = ref)
     case Field.UploadArtifact   => copy(uploadArtifact = ref)
     case Field.DownloadArtifact => copy(downloadArtifact = ref)
-    case Field.ScalaSteward     => copy(scalaSteward = ref)
 
   def version(f: Field): Option[String] = versions.get(f.key)
 
   /** Pins an action zipx does not emit, for a step a consumer or a pack writes.
     *
-    * `version` is the `# vX.Y.Z` label. Passing it is worth the keystrokes: without one a Dependabot reviewer sees only
-    * a SHA, and [[ActionPinFile.annotateUses]] has nothing to stamp on the generated `uses:` line.
+    * `version` is the `# vX.Y.Z` label. Key is the action name (`owner/repo`) so [[extraByPrefix]] can find it.
     */
   def withExtra(key: String, ref: ActionRef, version: Option[String] = None): ActionPins =
     copy(
@@ -100,6 +90,12 @@ final case class ActionPins(
 
   def extraVersion(key: String): Option[String] = versions.get(ActionPins.extraVersionKey(key))
 
+  /** The extra pin whose key or ref names `prefix` (`owner/repo`). */
+  def extraByPrefix(prefix: String): Option[ActionRef] =
+    extra.collectFirst {
+      case (key, ref) if key == prefix || ActionPins.namesPrefix(ref.unwrap, prefix) => ref
+    }
+
 end ActionPins
 
 object ActionPins:
@@ -112,10 +108,42 @@ object ActionPins:
   /** The pin-file block name for [[ActionPins.extra]], and the prefix of its `versions` keys. */
   private[core] val ExtraPrefix: String = "extra"
 
+  def namesPrefix(refOrName: String, prefix: String): Boolean =
+    refOrName == prefix || refOrName.startsWith(prefix + "@")
+
+  /** Overlay catalog [[Action]] rows onto jar defaults. Field prefixes update typed fields; anything else is extra
+    * keyed by name. Duplicate name or duplicate field prefix is Left.
+    */
+  def overlay(base: ActionPins, rows: Seq[Action]): Either[String, ActionPins] =
+    val dupNames = rows.groupBy(_.name).collect { case (n, xs) if xs.size > 1 => n }.toList.sorted
+    if dupNames.nonEmpty then
+      Left(
+        s"duplicate Action name '${dupNames.head}' in ZipxVersions. Keep one val per owner/repo[/path]."
+      )
+    else
+      rows.foldLeft[Either[String, ActionPins]](Right(base)) { (accE, action) =>
+        accE.flatMap(pins => overlayOne(pins, action))
+      }
+  end overlay
+
+  private def overlayOne(pins: ActionPins, action: Action): Either[String, ActionPins] =
+    action.toRef.flatMap { ref =>
+      Field.values.find(_.prefix == action.name) match
+        case Some(field) =>
+          if !namesPrefix(ref.unwrap, field.prefix) then
+            Left(s"Action '${action.name}' sha does not name ${field.prefix}")
+          else
+            Right(
+              pins.withField(field, ref).copy(versions = pins.versions.updated(field.key, action.version: String))
+            )
+        case None =>
+          Right(pins.withExtra(action.name, ref, Some(action.version: String)))
+    }
+
   /** The pins, enumerated: one case per field of [[ActionPins]].
     *
-    * Declaration order is the line order of the committed `.github/zipx/action-pins.yml`, since
-    * [[ActionPinFile.render]] folds over `Field.values`.
+    * Declaration order is the line order of rendered `zipx/action-pins.yml`, since [[ActionPinFile.render]] folds over
+    * `Field.values`.
     */
   enum Field(val key: String, val prefix: String):
     case Checkout         extends Field("checkout", "actions/checkout")
@@ -125,11 +153,9 @@ object ActionPins:
     case Cache            extends Field("cache", "actions/cache")
     case UploadArtifact   extends Field("uploadArtifact", "actions/upload-artifact")
     case DownloadArtifact extends Field("downloadArtifact", "actions/download-artifact")
-    case ScalaSteward     extends Field("scalaSteward", "scala-steward-org/scala-steward-action")
 
-  // Bootstrap fallbacks (keep in sync with `.github/zipx/action-pins.yml`). Used only when the classpath resource is
-  // missing, e.g. incomplete dogfood classpath. Prefer [[ActionPins.Defaults]] from the embedded pin file.
-  // Literals, so each one's shape is checked while this file compiles.
+  // Bootstrap fallbacks. Used only when the classpath resource is missing. Prefer [[ActionPins.Defaults]] from the
+  // embedded pin file. Literals, so each one's shape is checked while this file compiles.
   private[core] val BootstrapCheckout: ActionRef =
     ActionRef("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
   private[core] val BootstrapSetupJava: ActionRef =
@@ -144,8 +170,6 @@ object ActionPins:
     ActionRef("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a")
   private[core] val BootstrapDownloadArtifact: ActionRef =
     ActionRef("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
-  private[core] val BootstrapScalaSteward: ActionRef =
-    ActionRef("scala-steward-org/scala-steward-action@6162b21b93d4be314a61ce0462fd026630132fee")
 
   private[core] val BootstrapVersions: Map[String, String] = Map(
     Field.Checkout.key         -> "v7.0.1",
@@ -155,7 +179,6 @@ object ActionPins:
     Field.Cache.key            -> "v6.1.0",
     Field.UploadArtifact.key   -> "v7.0.1",
     Field.DownloadArtifact.key -> "v8.0.1",
-    Field.ScalaSteward.key     -> "v2.96.0",
   )
 
   private[core] val Bootstrap: ActionPins = ActionPins(
@@ -166,7 +189,6 @@ object ActionPins:
     BootstrapCache,
     BootstrapUploadArtifact,
     BootstrapDownloadArtifact,
-    BootstrapScalaSteward,
     BootstrapVersions,
   )
 
@@ -182,6 +204,5 @@ object ActionPins:
   def Cache: ActionRef            = Defaults.cache
   def UploadArtifact: ActionRef   = Defaults.uploadArtifact
   def DownloadArtifact: ActionRef = Defaults.downloadArtifact
-  def ScalaSteward: ActionRef     = Defaults.scalaSteward
 
 end ActionPins
