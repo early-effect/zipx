@@ -230,7 +230,7 @@ object ZipxCatalog:
 
   private def coordsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[ZipxCoord]] =
     import quotes.reflect.*
-    val parts = catalogValParts[A](catalog).flatMap { (sym, mt) =>
+    val parts = catalogValParts[A].flatMap { (sym, mt) =>
       mt.asType match
         case '[t] =>
           Expr.summon[AsCoords[t]].map { tc =>
@@ -243,7 +243,7 @@ object ZipxCatalog:
 
   private def pinsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[Pin]] =
     import quotes.reflect.*
-    val parts = catalogValParts[A](catalog).flatMap { (sym, mt) =>
+    val parts = catalogValParts[A].flatMap { (sym, mt) =>
       mt.asType match
         case '[t] =>
           Expr.summon[AsPins[t]].map { tc =>
@@ -256,7 +256,7 @@ object ZipxCatalog:
 
   private def actionsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[Action]] =
     import quotes.reflect.*
-    val parts = catalogValParts[A](catalog).flatMap { (sym, mt) =>
+    val parts = catalogValParts[A].flatMap { (sym, mt) =>
       mt.asType match
         case '[t] =>
           Expr.summon[AsActions[t]].map { tc =>
@@ -267,9 +267,7 @@ object ZipxCatalog:
     if parts.isEmpty then '{ Seq.empty[Action] } else '{ ${ Expr.ofList(parts) }.flatten }
   end actionsOfImpl
 
-  private def catalogValParts[A: Type](_catalog: Expr[A])(using
-      Quotes
-  ): List[(quotes.reflect.Symbol, quotes.reflect.TypeRepr)] =
+  private def catalogValParts[A: Type](using Quotes): List[(quotes.reflect.Symbol, quotes.reflect.TypeRepr)] =
     import quotes.reflect.*
 
     def skipClass(cls: Symbol): Boolean =

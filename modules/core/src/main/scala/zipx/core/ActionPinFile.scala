@@ -6,10 +6,10 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import scala.util.matching.Regex
 
-/** Read/write [[ActionPins]] as `.github/zipx/action-pins.yml` (flat `key: owner/action@sha # vX.Y.Z` lines, plus one
-  * indented `extra:` block for pins zipx has no typed field for).
+/** Internal YAML codec for [[ActionPins]]: jar resource in, leftover `.github/zipx/action-pins.yml` out as an error,
+  * `# vX.Y.Z` stamps on generated `uses:` lines. Flat `key: owner/action@sha # vX.Y.Z` plus an indented `extra:` block.
   *
-  * Jar / generate output, not an editable source. Catalog [[Action]] rows in ZipxVersions are what you edit.
+  * Not an editable source. Catalog [[Action]] rows in ZipxVersions are what you edit.
   *
   * This is the boundary where a pin becomes an [[zipx.workflow.ActionRef]], so [[parse]] returns an `Either` rather
   * than silently keeping whatever it managed to read. A line it cannot use is a *reported* failure, because the
