@@ -8,7 +8,7 @@ sbt plugin that **generates** GitHub Actions (and in-repo composites under `.git
 
 ## Verification blast radius
 
-sbt 2: always **`testFull`** for proof (`test` is `testQuick` and can skip). Prefer Metals compile-file → Metals test while iterating; use sbt for scripted, workflow generate/check, and full-module proof.
+sbt 2: always **`testFull`** for proof (`test` is `testQuick` and can skip). Prefer Metals compile-file → Metals test while iterating; use sbt for scripted, workflow generate/check, and the PR gate below.
 
 When you change **emission shape** (Planner, composites, packs, pins, MatrixCollapse), re-run every layer that asserts on rendered YAML, not only the module you edited:
 
@@ -41,4 +41,16 @@ Killing the sbt server kills `docsDev`. Restart deliberately; do not assume the 
 
 ## Format and PRs
 
-Metals format while editing; before push run `sbt scalafmtCheckAll` (pre-commit may skip under the agent sandbox) then test (as fmt could break code). No AI attribution in commits or PR text. Do not force-push `main`.
+Metals format while editing. Before every PR, drop sbt caches and run every suite on every aggregated module from a clean compile (root already `.aggregate`s shell, workflow, core, central, aws, plugin, docs, docsJS):
+
+```
+sbt "scalafmtAll; cleanFull; testFull"
+```
+
+`scalafmtAll` is the CI formatter, not Metals. `cleanFull` is sbt 2's cache clear (`clean` is outputs only). A focused `core/testFull` is iteration, not PR proof.
+
+`plugin/scripted` and `zipxWorkflowCheck` stay extra when emission or generated `.github/**` change; they are not inside `testFull`. See the blast-radius table.
+
+**Scripted / `publishLocal` on a release tag:** do not run those from `main` sitting on the last published version. Dynver then emits that same non-SNAPSHOT (e.g. `0.6.2`), ivy refuses to overwrite, and Coursier serves Maven Central. The scripted project never sees your local API (e.g. `import zipx.*` missing a brand-new `Pin`). Check out a feature branch first so dynver is unique, then `plugin/scripted`. Do not hand-delete ivy/Coursier caches as the workaround.
+
+No AI attribution in commits or PR text. Do not force-push `main`.

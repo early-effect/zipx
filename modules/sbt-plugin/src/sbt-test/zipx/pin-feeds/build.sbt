@@ -1,4 +1,4 @@
-scalaVersion   := "3.8.4"
+MyVersions.settings
 version        := "1.0.0-ci"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
 
@@ -9,11 +9,19 @@ zipxPinFeeds += {
   val dest = (LocalRootProject / baseDirectory).value / "applied.txt"
   PinFeed(
     name = PinFeedName("cdn"),
-    inventory = List(PinnedDep("lib-a", "1.2.3", Some(Purl("pkg:npm/lib-a@1.2.3")))),
     classify = VersionStrategy.npm,
-    lookup = _ => Right(Some("1.2.4")),
-    apply = { (pin, to) =>
-      IO.write(dest, s"${pin.id}=$to\n")
+    lookup = pin =>
+      Right(
+        Some(
+          PinCandidate(
+            "1.2.4",
+            sha256 = Some("cafebabe"),
+            purl = pin.purl.map(_ => Purl("pkg:npm/lib-a@1.2.4")),
+          )
+        )
+      ),
+    materialize = { (pin, to) =>
+      IO.write(dest, s"${pin.id}=${to.version}\n")
       Right(())
     },
     submitSnapshot = true,
@@ -36,8 +44,14 @@ assertPinFeeds := {
   assert(snap.indexOf("actions/checkout@") < snap.indexOf("sbt zipxPinSubmit"), "checkout before sbt on snapshot")
 }
 
-val assertPinUpdate = taskKey[Unit]("assert zipxPinUpdate yes applied the bump")
+val assertPinUpdate = taskKey[Unit]("assert zipxPinUpdate yes rewrote the catalog Pin")
 assertPinUpdate := {
-  val text = IO.read((LocalRootProject / baseDirectory).value / "applied.txt")
-  assert(text.contains("lib-a=1.2.4"), s"expected lib-a=1.2.4, got $text")
+  val catalog = IO.read((LocalRootProject / baseDirectory).value / "project" / "ZipxVersions.scala")
+  val sidecar = IO.read((LocalRootProject / baseDirectory).value / "applied.txt")
+  assert(
+    catalog.contains("""Pin("cdn", "lib-a", "1.2.4", sha256 = "cafebabe", purl = "pkg:npm/lib-a@1.2.4")"""),
+    s"expected bumped Pin constructor, got $catalog",
+  )
+  assert(!catalog.contains("1.2.3"), s"old version should be gone, got $catalog")
+  assert(sidecar.contains("lib-a=1.2.4"), s"expected lib-a=1.2.4, got $sidecar")
 }

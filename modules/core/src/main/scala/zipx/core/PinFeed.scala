@@ -31,19 +31,21 @@ object Purl extends Subtype[String]:
     if input.startsWith("pkg:") then true
     else "a PURL must start with pkg:"
 
-/** One currently pinned dependency in a feed's inventory. */
+/** One currently pinned dependency in a feed's inventory (PR-gate JSON, snapshots). */
 final case class PinnedDep(id: String, current: String, purl: Option[Purl] = None)
 
-type PinLookup = PinnedDep => Either[String, Option[String]]
-type PinApply  = (PinnedDep, String) => Either[String, Unit]
+/** Lookup result: next version plus the checksum / PURL that must move with it. */
+final case class PinCandidate(version: String, sha256: Option[String] = None, purl: Option[Purl] = None)
 
-/** Topology and policy in zipx; inventory, classify, lookup, and apply in the build. */
+type PinLookup      = Pin => Either[String, Option[PinCandidate]]
+type PinMaterialize = (Pin, PinCandidate) => Either[String, Unit]
+
+/** Topology and policy in zipx. Inventory is catalog [[Pin]] vals; catalog rewrite is zipx-owned. */
 final case class PinFeed(
     name: PinFeedName,
-    inventory: List[PinnedDep],
     classify: VersionStrategy,
     lookup: PinLookup,
-    apply: PinApply,
+    materialize: PinMaterialize = (_, _) => Right(()),
     outdated: PinAction = PinAction.Ignore,
     advisory: PinAction = PinAction.Report,
     submitSnapshot: Boolean = false,
@@ -61,4 +63,11 @@ object PinFeeds:
 
   def hasUpdate(feeds: Seq[PinFeed]): Boolean =
     feeds.exists(f => f.outdated == PinAction.Update || f.advisory == PinAction.Update)
+
+  def inventory(feed: PinFeed, pins: Seq[Pin]): List[Pin] =
+    pins.filter(_.feed == feed.name).toList
+
+  def orphanPins(feeds: Seq[PinFeed], pins: Seq[Pin]): List[Pin] =
+    val names = feeds.map(_.name).toSet
+    pins.filterNot(p => names.contains(p.feed)).toList
 end PinFeeds

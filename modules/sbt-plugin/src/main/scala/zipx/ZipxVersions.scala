@@ -3,7 +3,7 @@ package zipx
 import sbt.{Def, ModuleID, Setting}
 import sbt.Keys.{crossScalaVersions, libraryDependencies, scalaVersion}
 import zipx.plugin.ZipxDeps
-import zipx.plugin.ZipxPlugin.autoImport.{zipxCheckDeps, zipxSbt, zipxScala, zipxVersions}
+import zipx.plugin.ZipxPlugin.autoImport.{zipxCheckDeps, zipxPins, zipxSbt, zipxScala, zipxVersions}
 
 type ZipxCoord = zipx.core.ZipxCoord
 type Lib       = zipx.core.Lib
@@ -20,6 +20,7 @@ type ZipxExclude = zipx.core.ZipxExclude
 val ZipxExclude = zipx.core.ZipxExclude
 type AsCoords[A] = zipx.core.AsCoords[A]
 val AsCoords = zipx.core.AsCoords
+export zipx.core.{AsPins, Pin, PinFeedName, Purl}
 val ZipxSelf = zipx.plugin.ZipxSelf
 
 /** Catalog a build writes under `project/` and extends. `.sbt` files get plugin autoImport; this package is what those
@@ -27,8 +28,8 @@ val ZipxSelf = zipx.plugin.ZipxSelf
   *
   * Drop `MyVersions.settings` at the top of `build.sbt` for `scalaVersion` plus the zipx catalog keys. Use
   * `MyVersions.cross` on 2.13+3 modules. Per-module deps are named groups on your object (`def service = library(zio,
-  * slf4j)`), not a zipx service type. Every `Lib` / `Plugin` val is a catalog row. A plugin bundle uses the same
-  * [[AsCoords]] given.
+  * slf4j)`), not a zipx service type. Every `Lib` / `Plugin` / `Pin` val is a catalog row. A plugin bundle uses the
+  * same [[AsCoords]] / [[AsPins]] given.
   */
 trait ZipxVersions:
   def sbt: SbtVersion
@@ -40,11 +41,14 @@ trait ZipxVersions:
   /** Every val on this object whose type has an [[AsCoords]] given (`Lib`, `Plugin`, or a plugin bundle). */
   inline def coords: Seq[ZipxCoord] = zipx.core.ZipxCatalog.coordsOf[this.type](this)
 
+  /** Every val on this object whose type has an [[AsPins]] given. */
+  inline def pins: Seq[Pin] = zipx.core.ZipxCatalog.pinsOf[this.type](this)
+
   /** Drop at the top of `build.sbt`. Bare `scalaVersion` (sbt 2 common setting, no `ThisBuild`) plus the zipx catalog
-    * keys generate and `zipxCheckDeps` read. Inline so [[coords]] expands against the concrete object. Override with
-    * `inline override def settings = super.settings ++ …`.
+    * keys generate and `zipxCheckDeps` read. Inline so [[coords]] / [[pins]] expand against the concrete object.
+    * Override with `inline override def settings = super.settings ++ …`.
     */
-  inline def settings: Seq[Setting[?]] = zipx.ZipxVersions.applySettings(sbt, scala, coords)
+  inline def settings: Seq[Setting[?]] = zipx.ZipxVersions.applySettings(sbt, scala, coords, pins)
 
   /** Per-module `crossScalaVersions` from [[crossScala]]. Scala-3-only modules inherit [[settings]] and skip this. */
   def cross: Seq[Setting[?]] = Seq(
@@ -62,9 +66,15 @@ trait ZipxVersions:
 end ZipxVersions
 
 object ZipxVersions:
-  def applySettings(sbtVer: SbtVersion, scalaVer: ScalaVersion, rows: Seq[ZipxCoord]): Seq[Setting[?]] = Seq(
+  def applySettings(
+      sbtVer: SbtVersion,
+      scalaVer: ScalaVersion,
+      rows: Seq[ZipxCoord],
+      pinRows: Seq[Pin] = Nil,
+  ): Seq[Setting[?]] = Seq(
     scalaVersion  := (scalaVer: String),
     zipxVersions  := rows,
+    zipxPins      := pinRows,
     zipxSbt       := Some(sbtVer),
     zipxScala     := Some(scalaVer),
     zipxCheckDeps := true,

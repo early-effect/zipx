@@ -45,6 +45,10 @@ object ZipxPlugin extends AutoPlugin:
     val Purl = zipx.core.Purl
     type PinnedDep = zipx.core.PinnedDep
     val PinnedDep = zipx.core.PinnedDep
+    type Pin = zipx.core.Pin
+    val Pin = zipx.core.Pin
+    type PinCandidate = zipx.core.PinCandidate
+    val PinCandidate = zipx.core.PinCandidate
     type VersionStrategy = zipx.core.VersionStrategy
     val VersionStrategy = zipx.core.VersionStrategy
     type AdvisorySeverity = zipx.core.AdvisorySeverity
@@ -67,8 +71,10 @@ object ZipxPlugin extends AutoPlugin:
     val ZipxDeps    = zipx.plugin.ZipxDeps
     val ZipxCatalog = zipx.core.ZipxCatalog
     val ZipxSelf    = zipx.plugin.ZipxSelf
-    type PinLookup = zipx.core.PinLookup
-    type PinApply  = zipx.core.PinApply
+    type PinLookup      = zipx.core.PinLookup
+    type PinMaterialize = zipx.core.PinMaterialize
+    type AsPins[A]      = zipx.core.AsPins[A]
+    val AsPins = zipx.core.AsPins
 
     type Capability = zipx.core.Capability
     val Capability = zipx.core.Capability
@@ -376,6 +382,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxPinFeeds             = settingKey[Seq[PinFeed]](ZipxSettings.pinFeeds.description)
     val zipxPinPrGate            = settingKey[PinPrGate](ZipxSettings.pinPrGate.description)
     val zipxVersions             = settingKey[Seq[ZipxCoord]](ZipxSettings.versions.description)
+    val zipxPins                 = settingKey[Seq[Pin]](ZipxSettings.pins.description)
     val zipxSbt                  = settingKey[Option[SbtVersion]](ZipxSettings.sbtVersionCoord.description)
     val zipxScala                = settingKey[Option[ScalaVersion]](ZipxSettings.scalaVersionCoord.description)
     val zipxCheckDeps            = settingKey[Boolean](ZipxSettings.checkDeps.description)
@@ -434,6 +441,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
     zipxVersions                 := Seq.empty,
+    zipxPins                     := Seq.empty,
     zipxSbt                      := None,
     zipxScala                    := None,
     zipxCheckDeps                := false,
@@ -485,7 +493,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxWorkflowGenerate := Def.uncached {
       Def
         .sequential(
-          Def.task(validateCatalog(Project.extract(state.value))),
+          Def.task(validateCatalog(Project.extract(state.value), streams.value.log)),
           writeGeneratedWorkflows,
         )
         .value
@@ -903,23 +911,31 @@ object ZipxPlugin extends AutoPlugin:
   private def pinInventoryTask: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
     val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
     val root      = (LocalRootProject / baseDirectory).value
     val file      = root / PinInventory.RelPath
-    IO.write(file, PinInventory.render(feeds) + "\n")
+    IO.write(file, PinInventory.render(feeds, pins) + "\n")
     streams.value.log.info(s"zipx wrote ${file.getPath}")
   }
 
   private def pinCheckTask: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
     val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
-    val report    = orFail(PinEngine.scheduled(feeds, OsvAdvisorySource()))
+    val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
+    val report    = orFail(PinEngine.scheduled(feeds, pins, OsvAdvisorySource()))
     streams.value.log.info(PinEngine.summary(report))
+    if report.applied.nonEmpty then
+      val root = (LocalRootProject / baseDirectory).value
+      writePinCatalog(extracted, root, report.applied, streams.value.log)
+      orFail(PinEngine.materialize(feeds, report.applied))
+      streams.value.log.info(s"zipx: applied ${report.applied.size} pin update(s)")
     if report.failsJob then sys.error("zipx: pin check findings")
   }
 
   private def pinCheckPrTask: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
     val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
     val gate      = readBuildSetting(extracted, zipxPinPrGate, PinPrGate.All)
     val root      = (LocalRootProject / baseDirectory).value
     val base      =
@@ -928,7 +944,7 @@ object ZipxPlugin extends AutoPlugin:
           case None      => sys.error(s"zipx: ${PinCheck.BaseShaEnv} is required for PinPrGate.Introduced")
           case Some(sha) => inventoryAtBase(root, sha, streams.value.log)
       else Map.empty
-    val report = orFail(PinEngine.prGate(feeds, OsvAdvisorySource(), gate, base))
+    val report = orFail(PinEngine.prGate(feeds, pins, OsvAdvisorySource(), gate, base))
     streams.value.log.info(PinEngine.summary(report))
     if report.failsJob then sys.error("zipx: pin check findings")
   }
@@ -938,8 +954,9 @@ object ZipxPlugin extends AutoPlugin:
       val arg       = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
       val extracted = Project.extract(state.value)
       val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+      val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
       val log       = streams.value.log
-      val bumps     = orFail(PinEngine.outdated(feeds))
+      val bumps     = orFail(PinEngine.outdated(feeds, pins))
       log.info(s"zipx pin update:\n${PinEngine.formatBumps(bumps)}")
       if bumps.isEmpty then ()
       else
@@ -955,11 +972,28 @@ object ZipxPlugin extends AutoPlugin:
           case other =>
             sys.error(s"zipx: unknown zipxPinUpdate argument '$other' (yes or dry-run)")
         if applyNow then
-          val applied = orFail(PinEngine.applyBumps(feeds, bumps))
+          val root    = (LocalRootProject / baseDirectory).value
+          val applied = bumps.map(_.applied)
+          writePinCatalog(extracted, root, applied, log)
+          orFail(PinEngine.materialize(feeds, applied))
           log.info(s"zipx: applied ${applied.size} pin update(s)")
         else log.info("zipx: no pin updates applied")
       end if
     }
+
+  private def writePinCatalog(
+      extracted: Extracted,
+      root: File,
+      items: List[AppliedPin],
+      log: Logger,
+  ): Unit =
+    val rel  = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
+    val file = root / rel
+    if !file.exists then sys.error(s"zipx: catalog file ${file.getPath} is missing")
+    val next = orFail(ZipxCatalog.applyAppliedPins(IO.read(file), items))
+    IO.write(file, next)
+    log.info(s"zipx: wrote ${file.getPath}")
+  end writePinCatalog
 
   /** `Some(true)` if the operator confirmed, `Some(false)` if they declined, `None` if there is no console to ask. */
   private def confirmUpdates(n: Int, what: String): Option[Boolean] =
@@ -971,6 +1005,7 @@ object ZipxPlugin extends AutoPlugin:
   private def pinSubmitTask: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
     val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty).filter(_.submitSnapshot)
+    val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
     if feeds.isEmpty then streams.value.log.info("zipx: no pin feeds opted into snapshot submit")
     else
       val token = sys.env.getOrElse("GITHUB_TOKEN", sys.error("zipx: GITHUB_TOKEN is required for zipxPinSubmit"))
@@ -979,7 +1014,7 @@ object ZipxPlugin extends AutoPlugin:
       val sha   = sys.env.getOrElse("GITHUB_SHA", sys.error("zipx: GITHUB_SHA is required for zipxPinSubmit"))
       val ref   = sys.env.getOrElse("GITHUB_REF", sys.error("zipx: GITHUB_REF is required for zipxPinSubmit"))
       val jobId = sys.env.getOrElse("GITHUB_RUN_ID", "local")
-      val body  = PinSnapshot.render(feeds, sha, ref, jobId, java.time.Instant.now.toString, "zipx")
+      val body  = PinSnapshot.render(feeds, pins, sha, ref, jobId, java.time.Instant.now.toString, "zipx")
       orFail(PinSnapshot.submit(token, repo, body))
       streams.value.log.info("zipx: submitted pin snapshot")
     end if
@@ -1140,7 +1175,7 @@ object ZipxPlugin extends AutoPlugin:
       streams.value.log.info(s"zipx: ${stewardFile.getPath} is up to date.")
     end if
     checkPinWorkflows(root, cfg, extracted, streams.value.log)
-    validateCatalog(extracted)
+    validateCatalog(extracted, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
   }
 
@@ -1153,14 +1188,14 @@ object ZipxPlugin extends AutoPlugin:
   private def checkCatalog(root: File, extracted: Extracted, log: Logger): Unit =
     syncCatalogFiles(extracted, root, log, write = false)
 
-  private def validateCatalog(extracted: Extracted): Unit =
+  private def validateCatalog(extracted: Extracted, log: Logger): Unit =
+    val pins = readBuildSetting(extracted, zipxPins, Seq.empty)
+    ZipxCatalog.unknownPinFeeds(readBuildSetting(extracted, zipxPinFeeds, Seq.empty), pins).foreach(sys.error)
     val coords = readBuildSetting(extracted, zipxVersions, Seq.empty)
     val check  = readBuildSetting(extracted, zipxCheckDeps, false)
     val scalaV = readBuildSetting(extracted, zipxScala, None)
-    if check && coords.isEmpty then
-      sys.error(
-        "zipx: zipxCheckDeps is true but zipxVersions is empty. Add Lib / Plugin rows, or set zipxCheckDeps := false."
-      )
+    if check && coords.isEmpty && pins.isEmpty then
+      log.warn("zipx: zipxCheckDeps is true but zipxVersions and zipxPins are empty")
     if check then
       ZipxCatalog.scalaMismatch(declaredScalaVersion(extracted), scalaV).foreach(sys.error)
       val extra = ZipxCatalog.extraLibs(declaredGavs(extracted), coords)

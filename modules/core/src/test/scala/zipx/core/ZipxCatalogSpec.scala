@@ -171,6 +171,50 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
             out.contains("""Plugin("org.scalameta", "sbt-scalafmt", "2.7.0")"""),
           )
     },
+    test("pinsOf collects Pin vals and skips Lib, lists, and defs") {
+      trait Catalog:
+        inline def pins: Seq[Pin] = ZipxCatalog.pinsOf[this.type](this)
+      object Sample extends Catalog:
+        val zio    = Lib("dev.zio", "zio", "2.1.26")
+        val preact = Pin("cdn", "preact", "10.26.4", sha256 = "abc", purl = "pkg:npm/preact@10.26.4")
+        val htm    = Pin("cdn", "htm", "3.1.1")
+        val listed = List(preact)
+        def unused = preact
+      val ids = Sample.pins.map(_.id)
+      assertTrue(ids == List("preact", "htm"))
+    },
+    test("applyPinBumps rewrites version, sha256, and purl together") {
+      val src =
+        """val preact = Pin("cdn", "preact", "10.26.4", sha256 = "abc", purl = "pkg:npm/preact@10.26.4")
+          |val zio    = Lib("dev.zio", "zio", "2.1.26")
+          |""".stripMargin
+      val pin  = Pin("cdn", "preact", "10.26.4", sha256 = "abc", purl = "pkg:npm/preact@10.26.4")
+      val bump =
+        PinBump(pin, BumpKind.Patch, PinCandidate("10.26.5", Some("def"), Some(Purl("pkg:npm/preact@10.26.5"))))
+      ZipxCatalog.applyPinBumps(src, List(bump)) match
+        case Left(err)  => assertTrue(err.isEmpty)
+        case Right(out) =>
+          assertTrue(
+            out.contains("""Pin("cdn", "preact", "10.26.5", sha256 = "def", purl = "pkg:npm/preact@10.26.5")"""),
+            out.contains("""Lib("dev.zio", "zio", "2.1.26")"""),
+            !out.contains("10.26.4"),
+          )
+    },
+    test("applyPinBumps is Left when the constructor is missing") {
+      val pin  = Pin("cdn", "preact", "10.26.4", sha256 = "abc", purl = "pkg:npm/preact@10.26.4")
+      val bump = PinBump(pin, BumpKind.Patch, PinCandidate("10.26.5"))
+      ZipxCatalog.applyPinBumps("val zio = Lib(\"dev.zio\", \"zio\", \"2.1.26\")\n", List(bump)) match
+        case Left(err) => assertTrue(err.contains("no Pin constructor"), err.contains("preact"))
+        case Right(_)  => assertTrue(false)
+    },
+    test("unknownPinFeeds names pins whose feed is not registered") {
+      val pins  = List(Pin("cdn", "preact", "10.26.4"))
+      val feeds = Seq.empty[PinFeed]
+      assertTrue(
+        ZipxCatalog.unknownPinFeeds(feeds, pins).exists(_.contains("preact")),
+        ZipxCatalog.unknownPinFeeds(feeds, Nil).isEmpty,
+      )
+    },
     test("coordsOf collects Lib and Plugin vals and skips SbtVersion, groups, and lists") {
       trait Catalog:
         inline def coords: Seq[ZipxCoord] = ZipxCatalog.coordsOf[this.type](this)

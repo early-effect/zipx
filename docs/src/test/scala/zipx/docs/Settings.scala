@@ -86,23 +86,23 @@ field. An *absent* file still falls back silently, since that is the documented 
       md"""
 Pins Dependabot never sees (CDN + sha256, tarball tags, vendor files). Full guide: **Pin feeds**.
 
-`zipxPinFeeds` registers feeds; `zipxPinPrGate` is All / Introduced / Off. The PR job is builtin `Capability.pinCheck`.
-Scheduled apply and snapshot submit are companion workflows, not `ci.yml`. Local `zipxPinUpdate` lists outdated pins
-and applies only after approval (`yes`, or an interactive `y`), including alert-only feeds. Then you commit and open
-the PR.
+`zipxPinFeeds` registers lookup and policy; inventory is catalog `Pin` vals (`zipxPins`). `zipxPinPrGate` is All /
+Introduced / Off. The PR job is builtin `Capability.pinCheck`. Scheduled apply and snapshot submit are companion
+workflows, not `ci.yml`. Local `zipxPinUpdate` lists outdated pins and rewrites `Pin(...)` after approval (`yes`, or an
+interactive `y`), including alert-only feeds. Then you commit and open the PR.
 """
     ),
     section("Versions catalog")(
       md"""
-Typed `Lib` / `Plugin` vals. You extend `ZipxVersions` and call `MyVersions.settings`, which collects every val. You do
-not maintain a `coords` list. Excludes (`.excluding`) live on the row, not at the `libraryDependencies` use site. Loaded
-plugins that emit themselves (`zipxSelfPlugins`) write their own `plugins.sbt` line; your `Plugin` vals are the rest.
-Full guide: **Versions**. Plugin authors: **Extending Versions**.
+Typed `Lib` / `Plugin` / `Pin` vals. You extend `ZipxVersions` and call `MyVersions.settings`, which collects every val.
+You do not maintain a `coords` list. Excludes (`.excluding`) live on the row, not at the `libraryDependencies` use site.
+Loaded plugins that emit themselves (`zipxSelfPlugins`) write their own `plugins.sbt` line; your `Plugin` vals are the
+rest. Full guide: **Versions**. Plugin authors: **Extending Versions**.
 
 `settings` sets `scalaVersion` and the catalog keys. `zipxCheckDeps` fails generate when `libraryDependencies` contain a
 GAV that is not a `Lib` row. `zipxWorkflowGenerate` writes `project/plugins.sbt` and `project/build.properties`. Local
-`zipxDepUpdate` rewrites version literals in `zipxVersionsFile`. Then you commit and open the PR. After a plugin, sbt, or
-Scala bump, `reload` and generate so those files match.
+`zipxDepUpdate` / `zipxPinUpdate` rewrite constructors in `zipxVersionsFile`. Then you commit and open the PR. After a
+plugin, sbt, or Scala bump, `reload` and generate so those files match.
 """
     ),
   )

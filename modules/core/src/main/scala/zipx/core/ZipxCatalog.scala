@@ -114,6 +114,41 @@ object ZipxCatalog:
   def constructorCall(ctor: String, group: String, artifact: String, version: String): String =
     s"""$ctor("$group", "$artifact", "$version")"""
 
+  /** Canonical `Pin("feed", "id", "ver", sha256 = "...", purl = "...")` as catalog apply rewrites it. */
+  def pinConstructor(pin: Pin): String =
+    val extras = List(
+      pin.sha256.map(s => s"""sha256 = "$s""""),
+      pin.purl.map(p => s"""purl = "${p: String}""""),
+    ).flatten
+    val extra = if extras.isEmpty then "" else extras.mkString(", ", ", ", "")
+    s"""Pin("${pin.feed}", "${pin.id}", "${pin.version}"$extra)"""
+
+  /** Rewrite [[Pin]] constructors. Missing constructor is Left, not a silent skip. */
+  def applyPinBumps(source: String, bumps: List[PinBump]): Either[String, String] =
+    applyAppliedPins(source, bumps.map(_.applied))
+
+  def applyAppliedPins(source: String, items: List[AppliedPin]): Either[String, String] =
+    items.foldLeft[Either[String, String]](Right(source)) { (accE, item) =>
+      accE.flatMap { src =>
+        val from = pinConstructor(item.pin)
+        item.pin.bumped(item.candidate).flatMap { next =>
+          val to = pinConstructor(next)
+          if src.contains(from) then Right(src.replace(from, to))
+          else
+            Left(
+              s"zipx: catalog has no Pin constructor for '${item.pin.feed}' '${item.pin.id}' ${item.pin.version}"
+            )
+        }
+      }
+    }
+
+  def unknownPinFeeds(feeds: Seq[PinFeed], pins: Seq[Pin]): Option[String] =
+    val orphans = PinFeeds.orphanPins(feeds, pins)
+    Option.when(orphans.nonEmpty) {
+      val listed = orphans.map(p => s"'${p.feed}' '${p.id}'").mkString(", ")
+      s"zipx: Pin val(s) have no matching zipxPinFeeds entry: $listed. Add a PinFeed or drop the Pin."
+    }
+
   /** Every val on `catalog` whose type has an [[AsCoords]] given. Pass `[this.type]` from a trait so expansion sees the
     * concrete object. `Lib` / `Plugin` share one given; lists, `SbtVersion`, `ScalaVersion`, and named groups have
     * none, so they are skipped. `def` members are not vals: they are skipped. Rows come out in source declaration order
@@ -122,7 +157,39 @@ object ZipxCatalog:
   inline def coordsOf[A](inline catalog: A): Seq[ZipxCoord] =
     ${ coordsOfImpl[A]('catalog) }
 
+  /** Every val on `catalog` whose type has an [[AsPins]] given. Same walk as [[coordsOf]]. */
+  inline def pinsOf[A](inline catalog: A): Seq[Pin] =
+    ${ pinsOfImpl[A]('catalog) }
+
   private def coordsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[ZipxCoord]] =
+    import quotes.reflect.*
+    val parts = catalogValParts[A](catalog).flatMap { (sym, mt) =>
+      mt.asType match
+        case '[t] =>
+          Expr.summon[AsCoords[t]].map { tc =>
+            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
+            '{ $tc.coords($field) }
+          }
+    }
+    if parts.isEmpty then '{ Seq.empty[ZipxCoord] } else '{ ${ Expr.ofList(parts) }.flatten }
+  end coordsOfImpl
+
+  private def pinsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[Pin]] =
+    import quotes.reflect.*
+    val parts = catalogValParts[A](catalog).flatMap { (sym, mt) =>
+      mt.asType match
+        case '[t] =>
+          Expr.summon[AsPins[t]].map { tc =>
+            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
+            '{ $tc.pins($field) }
+          }
+    }
+    if parts.isEmpty then '{ Seq.empty[Pin] } else '{ ${ Expr.ofList(parts) }.flatten }
+  end pinsOfImpl
+
+  private def catalogValParts[A: Type](_catalog: Expr[A])(using
+      Quotes
+  ): List[(quotes.reflect.Symbol, quotes.reflect.TypeRepr)] =
     import quotes.reflect.*
 
     def skipClass(cls: Symbol): Boolean =
@@ -148,18 +215,11 @@ object ZipxCatalog:
       fromTree.getOrElse(cls.declaredFields.filterNot(_.flags.is(Flags.Synthetic)))
     end valsInSourceOrder
 
-    val tpe   = TypeRepr.of[A].dealias
-    val parts = tpe.baseClasses.filterNot(skipClass).reverse.flatMap(valsInSourceOrder).distinct.flatMap { sym =>
-      val mt = tpe.memberType(sym).widen.dealias
-      mt.asType match
-        case '[t] =>
-          Expr.summon[AsCoords[t]].map { tc =>
-            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
-            '{ $tc.coords($field) }
-          }
+    val tpe = TypeRepr.of[A].dealias
+    tpe.baseClasses.filterNot(skipClass).reverse.flatMap(valsInSourceOrder).distinct.map { sym =>
+      (sym, tpe.memberType(sym).widen.dealias)
     }
-    if parts.isEmpty then '{ Seq.empty[ZipxCoord] } else '{ ${ Expr.ofList(parts) }.flatten }
-  end coordsOfImpl
+  end catalogValParts
 
   private def renderExclude(ex: ZipxExclude): String =
     ex.artifact match

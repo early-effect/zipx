@@ -16,6 +16,7 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
         ZipxSettings.names.contains("zipxPinUpdate"),
         ZipxSettings.names.contains("zipxDepUpdate"),
         ZipxSettings.names.contains("zipxVersions"),
+        ZipxSettings.names.contains("zipxPins"),
         ZipxSettings.names.contains("zipxCheckDeps"),
         ZipxSettings.names.contains("zipxEmitSelf"),
         ZipxSettings.names.contains("zipxSelfPlugins"),

@@ -69,6 +69,15 @@ object AsCoords:
 
   given ofCoord[A <: ZipxCoord]: AsCoords[A] = a => Seq(a)
 
+/** How a catalog val becomes pin rows. [[Pin]] has one given; a plugin bundle adds its own. */
+trait AsPins[A]:
+  def pins(value: A): Seq[Pin]
+
+object AsPins:
+  def apply[A](using ev: AsPins[A]): AsPins[A] = ev
+
+  given ofPin: AsPins[Pin] = p => Seq(p)
+
 final case class Lib(
     group: GroupId,
     artifact: ArtifactId,
@@ -117,3 +126,47 @@ final case class DepBump(coord: ZipxCoord, bump: BumpKind, to: String):
     coord match
       case _: Lib    => "Lib"
       case _: Plugin => "Plugin"
+
+/** A non-Maven catalog row: CDN / checksum / vendor pin. Not a [[ZipxCoord]]. */
+final case class Pin(
+    feed: PinFeedName,
+    id: String,
+    version: DepVersion,
+    sha256: Option[String] = None,
+    purl: Option[Purl] = None,
+):
+  def current: String = version: String
+
+  def toPinnedDep: PinnedDep = PinnedDep(id, current, purl)
+
+  def bumped(candidate: PinCandidate): Either[String, Pin] =
+    DepVersion.make(candidate.version).map { ver =>
+      copy(
+        version = ver,
+        sha256 = candidate.sha256.orElse(sha256),
+        purl = candidate.purl.orElse(purl),
+      )
+    }
+end Pin
+
+object Pin:
+  /** Three-arg catalog literal. Extra args select the case-class constructor so this does not recurse. */
+  inline def apply(inline feed: String, inline id: String, inline version: String): Pin =
+    Pin(PinFeedName(feed), id, DepVersion(version), None, None)
+
+  /** Catalog literal with checksum and PURL. Empty strings become None. */
+  inline def apply(
+      inline feed: String,
+      inline id: String,
+      inline version: String,
+      inline sha256: String,
+      inline purl: String,
+  ): Pin =
+    Pin(
+      PinFeedName(feed),
+      id,
+      DepVersion(version),
+      Option.when(sha256.nonEmpty)(sha256),
+      Option.when(purl.nonEmpty)(Purl(purl)),
+    )
+end Pin

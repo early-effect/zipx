@@ -61,19 +61,22 @@ env injection, target fan-out, cache wiring. Semantics live in Scala packs on th
 
 ### Pin feeds
 
-Issue [#105](https://github.com/early-effect/zipx/issues/105). Typed `PinFeed` so zipx owns topology and Ignore / Report
-/ Update policy, while the build owns inventory, lookup, and apply. Deliberate divergence from the issue letter: the PR
-advisory merge gate is a builtin Once capability (`Capability.pinCheck` on `ci.yml`) so `needsCapabilities` can actually
-ensure a merge. Scheduled outdated/apply and snapshot submit stay companion workflows (cron is not a `Gate`; PR
-snapshots pollute the Security tab). Local `zipxPinUpdate` lists outdated pins and applies only after approval, ignoring
-`PinAction` so alert-only feeds can still bump before a PR. Not an M12 item. First consumer feed is sbt-splice, in that repo.
+Issue [#105](https://github.com/early-effect/zipx/issues/105). Typed `PinFeed` so zipx owns topology, Ignore / Report /
+Update policy, OSV, and catalog rewrite. Inventory is catalog `Pin` vals (`zipxPins`), not a list on the feed. Lookup
+returns a `PinCandidate` (version plus checksum / PURL). Optional `materialize` writes extra files after the catalog
+rewrite. Deliberate divergence from the issue letter: the PR advisory merge gate is a builtin Once capability
+(`Capability.pinCheck` on `ci.yml`) so `needsCapabilities` can actually ensure a merge. Scheduled outdated/apply and
+snapshot submit stay companion workflows (cron is not a `Gate`; PR snapshots pollute the Security tab). Local
+`zipxPinUpdate` lists outdated pins and rewrites `Pin(...)` after approval, ignoring `PinAction` so alert-only feeds can
+still bump before a PR. Not an M12 item. First consumer feed is sbt-splice, in that repo.
 
 ### Versions catalog
 
-Typed `Lib` / `Plugin` rows in `project/ZipxVersions.scala`. Apply rewrites those constructors (not a regex over the
-build); generate writes `plugins.sbt` / `build.properties`; `zipxCheckDeps` fails generate when `libraryDependencies`
-contain a GAV that is not a `Lib` row. Local `zipxDepUpdate` looks up Maven metadata after approval. You own the
-catalog; Scala Steward is optional leftover automation, not required. Not an M12 item.
+Typed `Lib` / `Plugin` / `Pin` rows in `project/ZipxVersions.scala`. Apply rewrites those constructors (not a regex over
+the build, not a whole-file regen); generate writes `plugins.sbt` / `build.properties`; `zipxCheckDeps` fails generate
+when `libraryDependencies` contain a GAV that is not a `Lib` row. A `Pin` with no matching `PinFeed` fails generate.
+Local `zipxDepUpdate` looks up Maven metadata after approval. Pin policy (lookup, OSV, Update) still lives on `PinFeed`.
+You own the catalog; Scala Steward is optional leftover automation, not required. Not an M12 item.
 
 ### Design guardrails
 

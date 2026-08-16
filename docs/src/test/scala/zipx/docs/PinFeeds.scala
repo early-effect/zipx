@@ -5,17 +5,18 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zipx.docs.DocsRender.yaml
+import zipx.docs.DocDiff.Kind
 import zio.test.*
 
-/** Pin feeds: topology and policy in zipx, inventory and apply in the build. */
+/** Pin feeds: topology and policy in zipx, inventory as catalog Pin vals. */
 object PinFeeds extends DocSpecSuite:
+
+  private val fakePin = Pin("cdn", "lib-a", "1.2.3", sha256 = "abc", purl = "pkg:npm/lib-a@1.2.3")
 
   private val fakeFeed = PinFeed(
     name = PinFeedName("cdn"),
-    inventory = List(PinnedDep("lib-a", "1.2.3", Some(Purl("pkg:npm/lib-a@1.2.3")))),
     classify = VersionStrategy.npm,
-    lookup = _ => Right(Some("1.2.4")),
-    apply = (_, _) => Right(()),
+    lookup = _ => Right(Some(PinCandidate("1.2.4", sha256 = Some("def"), purl = Some(Purl("pkg:npm/lib-a@1.2.4"))))),
   )
 
   def doc = page("Pin feeds")(
@@ -24,15 +25,16 @@ Skip until you pin something that is not a Maven library and not a GitHub Action
 tarball tag, a file you vendor into the repo.
 
 GitHub's Dependabot can bump SHA-pinned Actions in generated workflows. Library and plugin versions live in the
-catalog (`Lib` / `Plugin`, bumped with `zipxDepUpdate`). **Pin feeds** are the machine for the rest.
+catalog as `Lib` / `Plugin`. **Pins live in that same catalog** as `Pin` vals. A pin feed is only lookup and policy
+(Ignore / Report / Update), plus optional `materialize` for extra files.
 
-zipx owns topology and Ignore / Report / Update policy. The build owns inventory, version strategy, lookup, and apply.
+zipx owns topology, OSV, and the catalog rewrite. The feed looks up the next version and checksum.
 """,
     section("Why a feed")(
       md"""
 A repo that vendors JS bytes has no `package.json`. Dependabot never opens a PR when `lib-a` gets a CVE. A third
-one-off bot would repeat the catalog and Dependabot split badly. A feed is the same split: zipx schedules and gates;
-the build knows how to name and rewrite the pin.
+one-off bot would repeat the catalog and Dependabot split badly. A feed is the same split: zipx schedules, gates, and
+rewrites `Pin(...)` in `project/ZipxVersions.scala`; the feed knows how to talk to jsDelivr / npm / tags.
 """
     ),
     section("Who owns what")(
@@ -44,19 +46,22 @@ flowchart LR
     z1[schedule and gate]
     z2[Ignore, Report, Update]
     z3[query OSV]
+    z4[rewrite Pin constructors]
+  end
+  subgraph cat [catalog]
+    direction TB
+    c1["Pin vals in ZipxVersions"]
   end
   subgraph f [your feed]
     direction TB
-    f1[list the pins]
-    f2[lookup latest]
-    f3[apply the bump]
-    f4[name a PURL]
+    f1[lookup latest plus checksum]
+    f2[optional materialize]
   end
 ```
 
-Three questions, split that way. **Outdated** (is there a newer version?) is the feed's lookup plus a `VersionStrategy`
-(`npm` or `exact`). **Advisory** (does this version have a CVE?) is a PURL the feed names and OSV zipx queries.
-**Apply** is always the feed: zipx never edits a CDN URL itself. Jobs and companion files are the next section.
+Inventory is the catalog. **Outdated** is the feed's lookup plus a `VersionStrategy` (`npm` or `exact`). **Advisory**
+is a PURL on the `Pin` and OSV zipx queries. **Apply** is zipx rewriting the `Pin(...)` constructor (version, sha256,
+and purl together). `materialize` is only for extra files, such as vendored JS bytes.
 """
     ),
     section("What runs where")(
@@ -76,18 +81,29 @@ test and publish on that schedule. Snapshot submit is `contents: write` and must
 Security tab).
 """
     ),
+    section("Catalog Pin vals")(
+      md"""
+Write `Pin` next to `Lib` / `Plugin`. Keep the canonical constructor so apply can rewrite it:
+
+```scala
+// project/ZipxVersions.scala
+val preact = Pin("cdn", "preact", "10.26.4", sha256 = "sha256-abc", purl = "pkg:npm/preact@10.26.4")
+```
+
+`MyVersions.settings` collects every `Pin` val into `zipxPins`. A `Pin` whose feed name is not in `zipxPinFeeds` fails
+generate.
+"""
+    ),
     section("Register a feed, alert-only")(
       md"""
 Conservative defaults: `outdated = Ignore`, `advisory = Report`, `submitSnapshot = false`. Do not auto-bump; do fail a
-PR that pins a known CVE.
+PR that pins a known CVE. No inventory list. No apply callback.
 
 ```scala
 zipxPinFeeds += PinFeed(
   name = PinFeedName("cdn"),
-  inventory = List(PinnedDep("lib-a", "1.2.3", Some(Purl("pkg:npm/lib-a@1.2.3")))),
   classify = VersionStrategy.npm,
-  lookup = pin => lookupLatest(pin),   // the feed talks to jsDelivr / npm / tags
-  apply = (pin, to) => rewrite(pin, to),
+  lookup = pin => lookupLatest(pin),   // Right(Some(PinCandidate(version, sha256, purl)))
 )
 ```
 """,
@@ -145,7 +161,7 @@ know, ship anyway" without deleting feeds.
       md"""
 ```mermaid
 flowchart TD
-  Pin[Pinned dep] --> Purl{purl?}
+  PinRow[Pin val] --> Purl{purl?}
   Purl -->|none| Skip[skipped · not a finding]
   Purl -->|pkg:...| Osv[OSV query]
   Osv -->|empty vulns| Pass[scanned · no known advisories]
@@ -163,8 +179,9 @@ Public-ecosystem PURLs (`pkg:npm/...`, `pkg:maven/...`) are the ones the gate is
 `.github/workflows/zipx-pin-check.yml` is scheduled plus `workflow_dispatch` (default Sunday 00:00 UTC).
 `sbt zipxPinCheck` runs lookup + OSV.
 When some feed uses `Update`, the companion is `contents: write` and `pull-requests: write`, checks out with
-`GITHUB_TOKEN`, applies through the feed, and `gh pr create`s `zipx/pin-updates` as `github-actions[bot]`. Alert-only
-stays `contents: read` and never opens a PR. The `pin-check` capability never applies.
+`GITHUB_TOKEN`, rewrites `Pin(...)` in the catalog, runs optional `materialize`, and `gh pr create`s `zipx/pin-updates`
+as `github-actions[bot]`. Alert-only stays `contents: read` and never opens a PR. The `pin-check` capability never
+applies.
 
 **Required repo/org setting** (same as Steward, only needed for `Update`): [Allow GitHub Actions to create and
 approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).
@@ -182,6 +199,32 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
         )
       ),
     ),
+    section("What the Update PR looks like")(
+      md"""
+The PR always touches `project/ZipxVersions.scala`. Version, sha256, and purl move together. `Lib` / `Plugin` rows stay
+put. A vendored file appears only if the feed's `materialize` wrote one.
+
+An sbt plugin that ships the feed still sees this catalog hunk (plus that extra file). It does not also bump its own
+`addSbtPlugin` line. That split is **Extending Versions**.
+""",
+      example {
+        DocDiff.stack(catalogPinPrDiff, vendorPinPrDiff)
+      }.assert(_ =>
+        val src   = """val preact = Pin("cdn", "preact", "10.26.4", sha256 = "abc", purl = "pkg:npm/preact@10.26.4")
+val zio    = Lib("dev.zio", "zio", "2.1.26")
+"""
+        val pin   = Pin("cdn", "preact", "10.26.4", sha256 = "abc", purl = "pkg:npm/preact@10.26.4")
+        val bumps = List(
+          PinBump(pin, BumpKind.Patch, PinCandidate("10.26.5", Some("def"), Some(Purl("pkg:npm/preact@10.26.5"))))
+        )
+        val text = ZipxCatalog.applyPinBumps(src, bumps).yaml
+        assertTrue(
+          text.contains("""Pin("cdn", "preact", "10.26.5", sha256 = "def", purl = "pkg:npm/preact@10.26.5")"""),
+          text.contains("""Lib("dev.zio", "zio", "2.1.26")"""),
+          !text.contains("10.26.4"),
+        )
+      ),
+    ),
     section("Local update with approval")(
       md"""
 The usual path is local, then **you** open the PR. Alert-only is the default (`outdated = Ignore`), so the scheduled
@@ -189,17 +232,17 @@ job will not rewrite pins for you. See **Dependency updates** for the same loop 
 
 ```text
 sbt zipxPinUpdate           # list, then prompt Apply N pin update(s)? [y/N]
-sbt "zipxPinUpdate yes"     # apply every listed bump (scripts)
+sbt "zipxPinUpdate yes"     # rewrite Pin constructors, then materialize
 sbt "zipxPinUpdate dry-run" # list only
 ```
 
-`zipxPinUpdate` always looks up latest, even when the feed is alert-only. Apply still goes through the feed (version
-and hash together). `yes` applies every listed bump. With no terminal, a bare command lists and stops. This is not a
-CI job: after apply, commit and open a pull request yourself.
+`zipxPinUpdate` always looks up latest, even when the feed is alert-only. `yes` applies every listed bump. With no
+terminal, a bare command lists and stops. After apply, commit and open a pull request yourself (unless the feed is
+`Update` and CI already opened `zipx/pin-updates`).
 """,
       exampleValue {
         PinEngine
-          .outdated(List(fakeFeed))
+          .outdated(List(fakeFeed), List(fakePin))
           .map(PinEngine.formatBumps)
           .yaml
       }.assert(text =>
@@ -234,19 +277,45 @@ Snapshot never runs on a PR.
       md"""
 ```mermaid
 flowchart LR
-  subgraph maven [Maven and sbt]
-    Cat[ZipxVersions]
-    Loc[zipxDepUpdate]
+  subgraph catalog [project/ZipxVersions.scala]
+    Lib
+    Plugin
+    Pin
   end
-  subgraph other [no Maven coordinate]
-    Pf[PinFeed]
+  subgraph bump [local or Update CI]
+    Dep[zipxDepUpdate]
+    PinU[zipxPinUpdate]
   end
 ```
 
-You own library and plugin versions as `Lib` / `Plugin` vals in `project/ZipxVersions.scala`. Bump them locally with
-`zipxDepUpdate`, then open a PR; see **Versions** and **Dependency updates**. A pin feed is only for pins that have no
-Maven coordinate: a CDN URL plus a checksum, a tarball tag, a file you vendor into the repo.
+`Lib` / `Plugin` / `Pin` vals share one catalog file. `zipxDepUpdate` rewrites Maven constructors. `zipxPinUpdate`
+rewrites `Pin` constructors. A pin feed is only for pins that have no Maven coordinate: a CDN URL plus a checksum, a
+tarball tag, a file you vendor into the repo.
 """
     ),
   )
+
+  private def catalogPinPrDiff =
+    DocDiff.panel("project/ZipxVersions.scala")(
+      DocDiff.line(Kind.Meta, "@@ object MyVersions extends ZipxVersions"),
+      DocDiff.line(Kind.Ctx, "  val preact = Pin("),
+      DocDiff.line(Kind.Ctx, "    \"cdn\","),
+      DocDiff.line(Kind.Ctx, "    \"preact\","),
+      DocDiff.line(Kind.Del, "    \"10.26.4\","),
+      DocDiff.line(Kind.Add, "    \"10.26.5\","),
+      DocDiff.line(Kind.Del, "    sha256 = \"abc\","),
+      DocDiff.line(Kind.Add, "    sha256 = \"def\","),
+      DocDiff.line(Kind.Del, "    purl = \"pkg:npm/preact@10.26.4\","),
+      DocDiff.line(Kind.Add, "    purl = \"pkg:npm/preact@10.26.5\","),
+      DocDiff.line(Kind.Ctx, "  )"),
+      DocDiff.line(Kind.Ctx, "  val zio    = Lib(\"dev.zio\", \"zio\", \"2.1.26\")"),
+    )
+
+  private def vendorPinPrDiff =
+    DocDiff.panel("vendor/preact.min.js")(
+      DocDiff.line(Kind.Meta, "@@ materialize wrote this file"),
+      DocDiff.line(Kind.Del, "/*! preact 10.26.4 */"),
+      DocDiff.line(Kind.Add, "/*! preact 10.26.5 */"),
+      DocDiff.line(Kind.Ctx, "(function(){ /* vendored bytes */ })();"),
+    )
 end PinFeeds

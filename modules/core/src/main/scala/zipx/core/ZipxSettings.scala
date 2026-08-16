@@ -154,7 +154,7 @@ object ZipxSettings:
       SettingName("zipxPinFeeds"),
       Seq.empty,
       SettingPurpose(
-        "Pin feeds zipx orchestrates (CDN/sha256 pins, later Docker/JDK). Empty by default. zipx owns Ignore/Report/Update policy and OSV; each feed owns inventory, lookup, and apply. See Pin feeds."
+        "Pin feeds zipx orchestrates (CDN/sha256 pins, later Docker/JDK). Empty by default. zipx owns Ignore/Report/Update policy and OSV; inventory is catalog Pin vals. See Pin feeds."
       ),
       Build,
     )
@@ -175,6 +175,16 @@ object ZipxSettings:
       Seq.empty,
       SettingPurpose(
         "Lib / Plugin rows collected from the ZipxVersions object (every val). Empty skips catalog generate. See Versions."
+      ),
+      Build,
+    )
+
+  val pins: SettingDef[Seq[Pin]] =
+    SettingDef.setting(
+      SettingName("zipxPins"),
+      Seq.empty,
+      SettingPurpose(
+        "Pin rows collected from the ZipxVersions object (every Pin val). Inventory for zipxPinFeeds. See Pin feeds."
       ),
       Build,
     )
@@ -239,7 +249,7 @@ object ZipxSettings:
     SettingDef.setting(
       SettingName("zipxVersionsFile"),
       ZipxCatalog.DefaultVersionsFile,
-      SettingPurpose("Catalog source zipxDepUpdate rewrites (default project/ZipxVersions.scala)."),
+      SettingPurpose("Catalog source zipxDepUpdate and zipxPinUpdate rewrite (default project/ZipxVersions.scala)."),
       Build,
     )
 
@@ -494,7 +504,7 @@ object ZipxSettings:
     SettingDef.input(
       SettingName("zipxPinUpdate"),
       SettingPurpose(
-        "Local outdated pin bumps with approval: lists candidates, applies only after yes (or an interactive y). dry-run lists only. Ignores PinAction so alert-only feeds can still bump before a PR."
+        "Local outdated pin bumps with approval: lists candidates from zipxPins, rewrites Pin constructors in zipxVersionsFile after yes, then optional feed materialize. dry-run lists only. Ignores PinAction so alert-only feeds can still bump before a PR."
       ),
     )
 
@@ -522,6 +532,7 @@ object ZipxSettings:
     pinFeeds,
     pinPrGate,
     versions,
+    pins,
     sbtVersionCoord,
     scalaVersionCoord,
     checkDeps,

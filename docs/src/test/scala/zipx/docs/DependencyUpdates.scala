@@ -34,8 +34,8 @@ flowchart LR
   **Action pins**.
 - **Scala libraries and sbt plugins.** Extend `ZipxVersions`, drop `MyVersions.settings`. Every `Lib` / `Plugin` val is
   a row. You run `zipxDepUpdate`. There is no weekly zipx job that opens a catalog PR. See **Versions**.
-- **Pins that are not Maven and not Actions.** A pin feed lists them; you run `zipxPinUpdate`, or CI can open a PR if
-  you opt a feed into auto-apply. See **Pin feeds**.
+- **Pins that are not Maven and not Actions.** Same catalog: `Pin` vals. A pin feed is lookup and policy only. You run
+  `zipxPinUpdate`, or CI can open a PR if you opt a feed into `Update`. See **Pin feeds**.
 """,
     section("Before you open a PR")(
       md"""
@@ -61,9 +61,10 @@ sbt "zipxPinUpdate yes"
 sbt "zipxPinUpdate dry-run"
 ```
 
-Catalog apply rewrites version *constructors* in the catalog file only (`Lib("g", "a", "from")`), not a search across
-`build.sbt`. Pin-feed apply goes through the feed so a version and a checksum stay together. After either command,
-**you** still commit and open the PR.
+Catalog apply rewrites constructors in the catalog file only: `Lib("g", "a", "from")` / `Plugin(...)` for Maven, and
+`Pin("feed", "id", "from", sha256 = …, purl = …)` so version, checksum, and PURL stay together. Not a search across
+`build.sbt`. After either command, **you** still commit and open the PR (unless a pin feed is `Update` and CI already
+opened `zipx/pin-updates`).
 """
     ),
     section("Optional: a bot that opens catalog PRs")(
