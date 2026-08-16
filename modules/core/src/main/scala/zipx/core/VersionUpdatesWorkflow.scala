@@ -5,8 +5,8 @@ import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
 /** Scheduled catalog companion: cron + dispatch. Applies every ZipxVersions row kind (`zipxDepUpdate`,
-  * `zipxActionUpdate`, `zipxPinUpdate`), writes catalog outputs (`zipxCatalogGenerate`), and opens
-  * `zipx/version-updates`.
+  * `zipxActionUpdate`, `zipxPinUpdate`), writes catalog outputs (`zipxCatalogGenerate`), and opens a PR on
+  * `zipx/version-updates-$GITHUB_RUN_ID`.
   *
   * This workflow file is generated once and then left alone. Java and runner come from [[ZipxCiParams]]; java / sbt
   * Action pins live in `zipx-sbt-setup`. Checkout is a major tag (`actions/checkout@v7`) because `uses:` cannot be an
@@ -75,7 +75,7 @@ object VersionUpdatesWorkflow:
     Workflow(
       name = "zipx version updates",
       on = Triggers(schedule = List(schedule), workflowDispatch = true),
-      permissions = ListMap("contents" -> "write", "pull-requests" -> "write"),
+      permissions = ListMap("contents" -> "write", "pull-requests" -> "write", "issues" -> "write"),
       jobs = ListMap(
         "version-updates" -> Job(
           name = Some("Catalog version updates"),
@@ -107,7 +107,7 @@ object VersionUpdatesWorkflow:
 
   private def updatePrScript: Script =
     CompanionPr.open(
-      branch = "zipx/version-updates",
+      branchPrefix = "zipx/version-updates",
       commitMessage = "ci: zipx version updates",
       prTitle = "ci: zipx version updates",
       prBody = "Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate.",

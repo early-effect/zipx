@@ -36,6 +36,8 @@ object ZipxPlugin extends AutoPlugin:
     val PinAction = zipx.core.PinAction
     type PinPrGate = zipx.core.PinPrGate
     val PinPrGate = zipx.core.PinPrGate
+    type PreRelease = zipx.core.PreRelease
+    val PreRelease = zipx.core.PreRelease
     type Purl = zipx.core.Purl
     val Purl = zipx.core.Purl
     type PinnedDep = zipx.core.PinnedDep
@@ -388,6 +390,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxCheckCommandNames    = settingKey[Boolean](ZipxSettings.checkCommandNames.description)
     val zipxPinFeeds             = settingKey[Seq[PinFeed]](ZipxSettings.pinFeeds.description)
     val zipxPinPrGate            = settingKey[PinPrGate](ZipxSettings.pinPrGate.description)
+    val zipxPreRelease           = settingKey[PreRelease](ZipxSettings.preRelease.description)
     val zipxVersions             = settingKey[Seq[ZipxCoord]](ZipxSettings.versions.description)
     val zipxPins                 = settingKey[Seq[Pin]](ZipxSettings.pins.description)
     val zipxSbt                  = settingKey[Option[SbtVersion]](ZipxSettings.sbtVersionCoord.description)
@@ -451,6 +454,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxVersionUpdatesSchedule   := VersionUpdatesWorkflow.DefaultSchedule,
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
+    zipxPreRelease               := PreRelease.Skip,
     zipxVersions                 := Seq.empty,
     zipxPins                     := Seq.empty,
     zipxSbt                      := None,
@@ -1005,12 +1009,13 @@ object ZipxPlugin extends AutoPlugin:
 
   private def pinUpdateTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
-      val arg       = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
-      val extracted = Project.extract(state.value)
-      val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
-      val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
-      val log       = streams.value.log
-      val bumps     = orFail(PinEngine.outdated(feeds, pins))
+      val arg        = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+      val extracted  = Project.extract(state.value)
+      val feeds      = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+      val pins       = readBuildSetting(extracted, zipxPins, Seq.empty)
+      val log        = streams.value.log
+      val preRelease = readBuildSetting(extracted, zipxPreRelease, PreRelease.Skip)
+      val bumps      = orFail(PinEngine.outdated(feeds, pins, preRelease))
       log.info(s"zipx pin update:\n${PinEngine.formatBumps(bumps)}")
       if bumps.isEmpty then ()
       else
@@ -1287,9 +1292,16 @@ object ZipxPlugin extends AutoPlugin:
       val log       = streams.value.log
       if coords.isEmpty then log.info("zipx: zipxVersions is empty; nothing to update")
       else
-        val scalaBin = (LocalRootProject / scalaBinaryVersion).value
-        val sbtBin   = sbtBinaryVersion.value
-        val bumps    = orFail(ZipxCatalog.outdated(coords, c => MavenMetadata.latest(c, scalaBin, sbtBin)))
+        val scalaBin   = (LocalRootProject / scalaBinaryVersion).value
+        val sbtBin     = sbtBinaryVersion.value
+        val preRelease = readBuildSetting(extracted, zipxPreRelease, PreRelease.Skip)
+        val bumps      = orFail(
+          ZipxCatalog.outdated(
+            coords,
+            c => MavenMetadata.latest(c, scalaBin, sbtBin, preRelease),
+            preRelease = preRelease,
+          )
+        )
         log.info(s"zipx dep update:\n${ZipxCatalog.formatBumps(bumps)}")
         if bumps.isEmpty then ()
         else

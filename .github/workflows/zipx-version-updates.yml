@@ -7,6 +7,7 @@ name: zipx version updates
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 jobs:
   version-updates:
     name: Catalog version updates
@@ -50,7 +51,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B zipx/version-updates
+          git checkout -B "zipx/version-updates-${GITHUB_RUN_ID}"
           git add --all -- . ":!.github/workflows"
           if [ -z "$(git diff --cached --name-only)" ]; then
             echo "No catalog updates to commit."
@@ -58,5 +59,6 @@ jobs:
           fi
           git commit -m "ci: zipx version updates"
           git push -u origin HEAD
-          gh pr create --title "ci: zipx version updates" --body "Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate." --head zipx/version-updates || true
+          gh label create clean --force --description "zipx: Verify runs cleanFull" || true
+          gh pr create --title "ci: zipx version updates" --body "Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate." --head "zipx/version-updates-${GITHUB_RUN_ID}" --label clean || true
 

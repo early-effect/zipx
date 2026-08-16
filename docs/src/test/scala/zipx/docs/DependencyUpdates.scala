@@ -33,16 +33,17 @@ flowchart LR
   tag to a 40-hex SHA, and queries OSV. See **Action pins**.
 - **Scala libraries and sbt plugins.** `Lib` / `Plugin` vals. `zipxDepUpdate`. See **Versions**.
 - **Pins that are not Maven and not Actions.** `Pin` vals. A pin feed is lookup and policy only. `zipxPinUpdate`, or
-  CI opens `zipx/pin-updates` if you opt a feed into `Update`. See **Pin feeds**.
+  CI opens `zipx/pin-updates-${'$'}GITHUB_RUN_ID` if you opt a feed into `Update`. See **Pin feeds**.
 """,
     section("Scheduled PR")(
       md"""
 Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-updates.yml` (schedule plus
 `workflow_dispatch`). The default schedule is Sunday 00:00 UTC; set `zipxVersionUpdatesSchedule` to change it
 (`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job runs `zipxDepUpdate yes`, `zipxActionUpdate yes`,
-`zipxPinUpdate yes`, then `zipxCatalogGenerate`, and `gh pr create`s `zipx/version-updates` as `github-actions[bot]`.
-That PR is every ZipxVersions row kind: Lib / Plugin / Action / Pin constructors, plus `plugins.sbt` and composites
-when those moved.
+`zipxPinUpdate yes`, then `zipxCatalogGenerate`, and opens a PR as `github-actions[bot]`. The branch is
+`zipx/version-updates-${'$'}GITHUB_RUN_ID` so a second dispatch cannot overwrite an open PR. The PR is labeled **`clean`**,
+so Verify runs `cleanFull` (same label as a one-off human PR). That PR is every ZipxVersions row kind: Lib / Plugin /
+Action / Pin constructors, plus `plugins.sbt` and composites when those moved.
 
 **The companion never writes `.github/workflows/`.** `GITHUB_TOKEN` cannot push those files: GitHub App tokens need a
 `workflows` git permission that `permissions:` cannot grant (the same reject Scala Steward hits). The job parameterizes
@@ -72,9 +73,11 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
           yaml.contains("zipxActionUpdate yes"),
           yaml.contains("zipxPinUpdate yes"),
           yaml.contains("zipxCatalogGenerate"),
-          yaml.contains("zipx/version-updates") || yaml.contains("gh pr create"),
+          yaml.contains("zipx/version-updates-${GITHUB_RUN_ID}") || yaml.contains("gh pr create"),
           yaml.contains("contents: write") || yaml.contains("contents:write"),
           yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write"),
+          yaml.contains("issues: write") || yaml.contains("issues:write"),
+          yaml.contains("--label clean"),
           yaml.contains("./.github/actions/zipx-sbt-setup"),
           yaml.contains("project/zipx-ci.env"),
           yaml.contains("git add --all"),
@@ -114,6 +117,10 @@ sbt "zipxPinUpdate dry-run"
 Catalog apply rewrites constructors in the catalog file only: `Lib("g", "a", "from")` / `Plugin(...)` for Maven,
 `Action("owner/repo", "from", sha = …)` so version and git SHA stay together, and
 `Pin("feed", "id", "from", sha256 = …, purl = …)` so version, checksum, and PURL stay together.
+
+Lookup skips pre-releases by default (`zipxPreRelease := PreRelease.Skip`). A stable `2.0.18` does not become
+`2.1.0-alpha1`. Set `zipxPreRelease := PreRelease.Include` to list alphas. GitHub Action lookup already ignores
+prerelease releases.
 """
     ),
     section("Typed cron")(

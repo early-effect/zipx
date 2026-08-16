@@ -156,7 +156,7 @@ object ZipxSettings:
       SettingName("zipxVersionUpdates"),
       true,
       SettingPurpose(
-        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, applies zipxDepUpdate / zipxActionUpdate / zipxPinUpdate, zipxCatalogGenerate, opens zipx/version-updates. Commits everything except .github/workflows. Default true. false deletes the companion."
+        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, applies zipxDepUpdate / zipxActionUpdate / zipxPinUpdate, zipxCatalogGenerate, opens zipx/version-updates-$GITHUB_RUN_ID labeled clean. Commits everything except .github/workflows. Default true. false deletes the companion."
       ),
       Build,
     )
@@ -187,6 +187,16 @@ object ZipxSettings:
       PinPrGate.All,
       SettingPurpose(
         "PR pin-feed advisory gate inside zipxAdvisoryCheck: All (default), Introduced (new or version-changed vs the PR base), or Off (skip pin OSV; ZipxVerify.advisories Skip turns the whole job off)."
+      ),
+      Build,
+    )
+
+  val preRelease: SettingDef[PreRelease] =
+    SettingDef.setting(
+      SettingName("zipxPreRelease"),
+      PreRelease.Skip,
+      SettingPurpose(
+        "Whether zipxDepUpdate / zipxPinUpdate may list pre-releases (2.1.0-alpha1). Skip (default) stays on the last stable; Include tracks alphas. Actions already skip GitHub prereleases. The scheduled companion uses this setting."
       ),
       Build,
     )
@@ -573,6 +583,7 @@ object ZipxSettings:
     versionUpdatesSchedule,
     pinFeeds,
     pinPrGate,
+    preRelease,
     versions,
     pins,
     sbtVersionCoord,

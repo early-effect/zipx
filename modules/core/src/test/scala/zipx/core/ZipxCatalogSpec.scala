@@ -150,6 +150,23 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
             ZipxCatalog.formatBumps(Nil) == "no outdated catalog versions",
           )
     },
+    test("outdated skips a pre-release by default") {
+      val slf4j = Lib("org.slf4j", "slf4j-simple", "2.0.18")
+      ZipxCatalog.outdated(List(slf4j), _ => Right(Some("2.1.0-alpha1"))) match
+        case Left(err)    => assertTrue(err.isEmpty)
+        case Right(bumps) => assertTrue(bumps.isEmpty)
+    },
+    test("outdated lists a pre-release when Include") {
+      val slf4j = Lib("org.slf4j", "slf4j-simple", "2.0.18")
+      ZipxCatalog.outdated(List(slf4j), _ => Right(Some("2.1.0-alpha1")), preRelease = PreRelease.Include) match
+        case Left(err)    => assertTrue(err.isEmpty)
+        case Right(bumps) =>
+          assertTrue(
+            bumps.size == 1,
+            bumps.head.to == "2.1.0-alpha1",
+            bumps.head.bump == BumpKind.PreRelease,
+          )
+    },
     test("applyBumps rewrites Lib and Plugin constructors and skips .mod copies") {
       val src =
         """

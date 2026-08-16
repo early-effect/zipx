@@ -57,9 +57,13 @@ object PinEngine:
   /** Lookup + classify every pin, ignoring [[PinAction]]. Local `zipxPinUpdate` uses this so alert-only feeds can still
     * bump with approval.
     */
-  def outdated(feeds: Seq[PinFeed], pins: Seq[Pin]): Either[String, List[PinBump]] =
+  def outdated(
+      feeds: Seq[PinFeed],
+      pins: Seq[Pin],
+      preRelease: PreRelease = PreRelease.Skip,
+  ): Either[String, List[PinBump]] =
     feeds.foldLeft[Either[String, List[PinBump]]](Right(Nil)) { (accE, feed) =>
-      accE.flatMap(acc => outdatedFeed(feed, pins, acc))
+      accE.flatMap(acc => outdatedFeed(feed, pins, acc, preRelease))
     }
 
   /** Call [[PinFeed.materialize]] for a previously listed set. Never looks up; never materializes a pin that is not in
@@ -123,15 +127,23 @@ $findingLines
     val ver = feed.classify.latestStable(List(candidate.version)).getOrElse(candidate.version)
     candidate.copy(version = ver)
 
-  private def outdatedFeed(feed: PinFeed, pins: Seq[Pin], acc: List[PinBump]): Either[String, List[PinBump]] =
+  private def targetCandidate(feed: PinFeed, candidate: PinCandidate, kind: BumpKind): PinCandidate =
+    if kind == BumpKind.PreRelease then candidate else targetCandidate(feed, candidate)
+
+  private def outdatedFeed(
+      feed: PinFeed,
+      pins: Seq[Pin],
+      acc: List[PinBump],
+      preRelease: PreRelease,
+  ): Either[String, List[PinBump]] =
     PinFeeds.inventory(feed, pins).foldLeft[Either[String, List[PinBump]]](Right(acc)) { (accE, pin) =>
       accE.flatMap { bumps =>
         feed.lookup(pin).map { latest =>
           latest
             .flatMap { candidate =>
               val kind = feed.classify.classify(pin.current, candidate.version)
-              Option.when(kind != BumpKind.None) {
-                PinBump(pin, kind, targetCandidate(feed, candidate))
+              Option.when(kind != BumpKind.None && preRelease.allows(kind)) {
+                PinBump(pin, kind, targetCandidate(feed, candidate, kind))
               }
             }
             .fold(bumps)(bumps :+ _)

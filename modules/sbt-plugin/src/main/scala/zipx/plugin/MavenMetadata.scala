@@ -13,6 +13,14 @@ object MavenMetadata:
     HttpClient.newBuilder.nn.connectTimeout(Duration.ofSeconds(10)).nn.build.nn
 
   def latest(coord: ZipxCoord, scalaBin: String, sbtBin: String): Either[String, Option[String]] =
+    latest(coord, scalaBin, sbtBin, PreRelease.Skip)
+
+  def latest(
+      coord: ZipxCoord,
+      scalaBin: String,
+      sbtBin: String,
+      preRelease: PreRelease,
+  ): Either[String, Option[String]] =
     val artifact  = mavenArtifact(coord, scalaBin, sbtBin)
     val groupPath = (coord.group: String).replace('.', '/')
     val rel       = s"$groupPath/$artifact/maven-metadata.xml"
@@ -20,7 +28,8 @@ object MavenMetadata:
       s"https://repo1.maven.org/maven2/$rel",
       s"https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/$rel",
     )
-    combine(urls.map(fetchLatest))
+    combine(urls.map(url => fetchLatest(url, preRelease)))
+  end latest
 
   private[plugin] def combine(results: List[Either[String, Option[String]]]): Either[String, Option[String]] =
     results.collectFirst { case Right(Some(v)) => v } match
@@ -41,16 +50,21 @@ object MavenMetadata:
         val sbtMaj = sbtBin.takeWhile(_ != '.')
         s"${p.artifact}_sbt${sbtMaj}_$scalaBin"
 
-  private def fetchLatest(url: String): Either[String, Option[String]] =
+  private def fetchLatest(url: String, preRelease: PreRelease): Either[String, Option[String]] =
     try
       val req = HttpRequest.newBuilder(URI.create(url)).nn.timeout(Duration.ofSeconds(15)).nn.GET.nn.build.nn
       val res = Client.send(req, HttpResponse.BodyHandlers.ofString).nn
       if res.statusCode != 200 then Right(None)
-      else Right(parseLatest(Option(res.body).getOrElse("")))
+      else Right(parseLatest(Option(res.body).getOrElse(""), preRelease))
     catch case ex: Exception => Left(s"lookup $url: ${ex.getMessage}")
 
-  private[plugin] def parseLatest(xml: String): Option[String] =
+  private[plugin] def parseLatest(xml: String, preRelease: PreRelease = PreRelease.Skip): Option[String] =
     val latest  = raw"<latest>([^<]+)</latest>".r.findFirstMatchIn(xml).map(_.group(1))
     val release = raw"<release>([^<]+)</release>".r.findFirstMatchIn(xml).map(_.group(1))
-    latest.orElse(release)
+    preRelease match
+      case PreRelease.Include => latest.orElse(release)
+      case PreRelease.Skip    =>
+        release
+          .filterNot(VersionStrategy.npm.isPreRelease)
+          .orElse(latest.filterNot(VersionStrategy.npm.isPreRelease))
 end MavenMetadata

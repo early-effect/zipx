@@ -18,6 +18,8 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
         ZipxSettings.names.contains("zipxAdvisoryCheck"),
         ZipxSettings.names.contains("zipxMatrixCollapse"),
         ZipxSettings.names.contains("zipxPinUpdate"),
+        ZipxSettings.names.contains("zipxPinPrGate"),
+        ZipxSettings.names.contains("zipxPreRelease"),
         ZipxSettings.names.contains("zipxDepUpdate"),
         ZipxSettings.names.contains("zipxVersionUpdates"),
         ZipxSettings.names.contains("zipxVersionUpdatesSchedule"),

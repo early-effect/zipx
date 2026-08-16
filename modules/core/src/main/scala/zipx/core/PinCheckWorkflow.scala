@@ -43,7 +43,7 @@ object PinCheckWorkflow:
         List(checkout, setupJava, setupSbt, check, Step.run(updatePrScript).named("Open update PR").build)
       else List(checkout, setupJava, setupSbt, check)
     val permissions =
-      if hasUpdate then ListMap("contents" -> "write", "pull-requests" -> "write")
+      if hasUpdate then ListMap("contents" -> "write", "pull-requests" -> "write", "issues" -> "write")
       else ListMap("contents"              -> "read")
     Workflow(
       name = "zipx pin check",
@@ -70,7 +70,7 @@ object PinCheckWorkflow:
 
   private def updatePrScript: Script =
     CompanionPr.open(
-      branch = "zipx/pin-updates",
+      branchPrefix = "zipx/pin-updates",
       commitMessage = "ci: apply zipx pin feed updates",
       prTitle = "ci: zipx pin feed updates",
       prBody = "Applied pin feed Update policy.",

@@ -352,6 +352,9 @@ object PinFeedSpec extends ZIOSpecDefault:
             sbtAt > checkoutAt,
             hasUpdate == yaml.contains("gh pr create"),
             hasUpdate == (yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write")),
+            hasUpdate == (yaml.contains("issues: write") || yaml.contains("issues:write")),
+            hasUpdate == yaml.contains("zipx/pin-updates-${GITHUB_RUN_ID}"),
+            hasUpdate == yaml.contains("--label clean"),
             hasUpdate == yaml.contains("secrets.GITHUB_TOKEN"),
             !hasUpdate || yaml.contains(":!.github/workflows"),
           )
@@ -388,6 +391,25 @@ object PinFeedSpec extends ZIOSpecDefault:
             case Right(bumps) =>
               assertTrue(materialized.isEmpty, bumps.map(_.pin.id).toSet == expect)
         }
+      },
+      test("outdated Skip drops a pre-release candidate") {
+        val inventory = List(pin("left-pad", "1.2.3"))
+        val f         = feed(lookup = _ => Right(Some(cand("1.2.4-rc.1"))))
+        PinEngine.outdated(List(f), inventory) match
+          case Left(err)    => assertTrue(err.isEmpty)
+          case Right(bumps) => assertTrue(bumps.isEmpty)
+      },
+      test("outdated Include lists a pre-release candidate") {
+        val inventory = List(pin("left-pad", "1.2.3"))
+        val f         = feed(lookup = _ => Right(Some(cand("1.2.4-rc.1"))))
+        PinEngine.outdated(List(f), inventory, preRelease = PreRelease.Include) match
+          case Left(err)    => assertTrue(err.isEmpty)
+          case Right(bumps) =>
+            assertTrue(
+              bumps.size == 1,
+              bumps.head.to == "1.2.4-rc.1",
+              bumps.head.bump == BumpKind.PreRelease,
+            )
       },
       test("materialize runs only on the listed set") {
         check(gInventory.filter(_.sizeIs >= 2)) { inventory =>

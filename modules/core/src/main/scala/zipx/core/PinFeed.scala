@@ -24,6 +24,12 @@ enum PinPrGate:
 enum BumpKind:
   case None, Patch, Minor, Major, PreRelease
 
+/** Whether catalog / pin lookup may list a pre-release as a bump. Default [[Skip]]. */
+enum PreRelease:
+  case Skip, Include
+
+  def allows(kind: BumpKind): Boolean = this != Skip || kind != BumpKind.PreRelease
+
 /** A Package URL. Pins without one skip OSV and snapshot submit. */
 type Purl = Purl.Type
 object Purl extends Subtype[String]:
