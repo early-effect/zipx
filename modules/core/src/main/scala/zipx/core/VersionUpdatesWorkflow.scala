@@ -10,8 +10,9 @@ import scala.collection.immutable.ListMap
   *
   * This workflow file is generated once and then left alone. Java and runner come from [[ZipxCiParams]]; java / sbt
   * Action pins live in `zipx-sbt-setup`. Checkout is a major tag (`actions/checkout@v7`) because `uses:` cannot be an
-  * expression and `GITHUB_TOKEN` cannot push workflow SHA edits. [[CompanionPr]] stages everything except
-  * `.github/workflows`.
+  * expression and `GITHUB_TOKEN` cannot push workflow SHA edits. [[CompanionPr]] stages everything except repo-root
+  * `.github/workflows`. Nested trees such as `examples/monorepo/.github/workflows/` are committed when
+  * `zipxVersionUpdatesExtraSteps` regenerates them.
   */
 object VersionUpdatesWorkflow:
 
@@ -33,6 +34,7 @@ object VersionUpdatesWorkflow:
   def plan(
       checkout: ActionRef,
       schedule: Cron = DefaultSchedule,
+      extraSteps: List[Step] = Nil,
   ): Workflow =
     val checkoutStep = Step(
       uses = Some(checkout),
@@ -81,7 +83,7 @@ object VersionUpdatesWorkflow:
           name = Some("Catalog version updates"),
           runsOn = List("ubuntu-latest"),
           env = ListMap("GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}"),
-          steps = List(checkoutStep, load, setup, apply, openPr),
+          steps = List(checkoutStep, load, setup, apply) ++ extraSteps ++ List(openPr),
         )
       ),
     )
@@ -90,8 +92,9 @@ object VersionUpdatesWorkflow:
   def render(
       pins: ActionPins,
       schedule: Cron = DefaultSchedule,
+      extraSteps: List[Step] = Nil,
   ): Either[String, String] =
-    checkoutMajor(pins).flatMap(ref => Render.render(plan(ref, schedule)))
+    checkoutMajor(pins).flatMap(ref => Render.render(plan(ref, schedule, extraSteps)))
 
   private def loadParams: Script =
     Script
@@ -112,5 +115,6 @@ object VersionUpdatesWorkflow:
       prTitle = "ci: zipx version updates",
       prBody = "Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate.",
       emptyMessage = "No catalog updates to commit.",
+      workflowRegenHint = true,
     )
 end VersionUpdatesWorkflow

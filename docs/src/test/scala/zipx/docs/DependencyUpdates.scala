@@ -45,18 +45,36 @@ Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-upda
 so Verify runs `cleanFull` (same label as a one-off human PR). That PR is every ZipxVersions row kind: Lib / Plugin /
 Action / Pin constructors, plus `plugins.sbt` and composites when those moved.
 
-**The companion never writes `.github/workflows/`.** `GITHUB_TOKEN` cannot push those files: GitHub App tokens need a
-`workflows` git permission that `permissions:` cannot grant (the same reject Scala Steward hits). The job parameterizes
-instead of rewriting YAML:
+**The companion never writes repo-root `.github/workflows/`.** `GITHUB_TOKEN` cannot push those files: GitHub App
+tokens need a `workflows` git permission that `permissions:` cannot grant (the same reject Scala Steward hits). The job
+parameterizes instead of rewriting YAML:
 
 - **JDK and runner** come from `project/zipx-ci.env` at runtime.
 - **Java and sbt Action pins** live in `zipx-sbt-setup` (the bot can push `.github/actions/`).
 - **Checkout** is a major tag (`actions/checkout@v7`). `uses:` cannot be an expression, so a SHA pin would force a
-  workflow rewrite. `ci.yml` stays SHA-pinned.
-- **`git add`** excludes `.github/workflows`.
+  workflow rewrite. Root `ci.yml` stays SHA-pinned.
+- **`git add`** excludes repo-root `.github/workflows` only. Nested trees such as `examples/monorepo/.github/workflows/`
+  are staged.
 
-Generate the companion YAML once from a clone (human `zipxWorkflowGenerate`); the bot then leaves it alone. A checkout
-SHA bump in the catalog can make `zipxWorkflowCheck` fail on that PR until someone regenerates `ci.yml`.
+`zipxVersionUpdatesExtraSteps` (default empty) runs after `zipxCatalogGenerate` and before the PR opens. zipx itself
+sets this to publish the in-dev plugin and `zipxWorkflowGenerate` in `examples/monorepo`, so that example's `ci.yml` and
+composites land on the catalog PR. You do not regenerate the example by hand on every Action pin bump.
+
+Generate the companion YAML once from a clone (human `zipxWorkflowGenerate`); the bot then leaves the companion file
+alone. A checkout SHA bump in the catalog can still make root `zipxWorkflowCheck` fail. The PR body names this run's
+branch (`zipx/version-updates-${'$'}GITHUB_RUN_ID`) and the exact commands to regenerate **repo-root** workflows onto it:
+
+```text
+git fetch origin zipx/version-updates-<run-id>
+git checkout zipx/version-updates-<run-id>
+sbt zipxWorkflowGenerate
+git add .github/workflows
+git commit -m "ci: regenerate workflows"
+git push origin zipx/version-updates-<run-id>
+```
+
+Do not commit those root workflow files to `main`. Composites under `.github/actions/` (and nested example YAML) are
+already in the bot commit.
 
 `zipxVersionUpdates := false` deletes the companion.
 
@@ -83,7 +101,12 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
           yaml.contains("git add --all"),
           yaml.contains(":!.github/workflows"),
           !yaml.contains("git add -A"),
-          yaml.indexOf("zipxWorkflowGenerate") == yaml.lastIndexOf("zipxWorkflowGenerate"),
+          yaml.contains("--body-file"),
+          yaml.contains("sbt zipxWorkflowGenerate"),
+          yaml.contains("git push origin zipx/version-updates-${GITHUB_RUN_ID}"),
+          yaml.indexOf("Apply catalog updates") < yaml.indexOf("Open update PR"),
+          yaml.indexOf("sbt zipxCatalogGenerate") < yaml.indexOf("Open update PR"),
+          yaml.indexOf("sbt zipxWorkflowGenerate", yaml.indexOf("Open update PR")) > yaml.indexOf("Open update PR"),
         )
       ),
     ),

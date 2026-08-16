@@ -82,9 +82,10 @@ lazy val root = (project in file("."))
         ),
       )
     },
-    zipxJavaVersion      := JdkVersion("25"),
-    zipxWorkflowDispatch := true,
-    zipxEmitSelf         := false,
+    zipxJavaVersion                := JdkVersion("25"),
+    zipxWorkflowDispatch           := true,
+    zipxEmitSelf                   := false,
+    zipxVersionUpdatesExtraSteps   := zipx.ExampleCheck.companionSteps,
   )
 
 // Scala 3. Shell AST: no zipx concepts, no zio-blocks, usable standalone.

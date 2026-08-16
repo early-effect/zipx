@@ -367,6 +367,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxLeftoverSteward   = settingKey[LeftoverOpt](ZipxSettings.leftoverSteward.description)
     val zipxVersionUpdates    = settingKey[Boolean](ZipxSettings.versionUpdates.description)
     val zipxVersionUpdatesSchedule   = settingKey[Cron](ZipxSettings.versionUpdatesSchedule.description)
+    val zipxVersionUpdatesExtraSteps = settingKey[Seq[Step]](ZipxSettings.versionUpdatesExtraSteps.description)
     val zipxWorkflowDispatch         = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
     val zipxCiRelevant               = settingKey[Boolean](ZipxSettings.ciRelevant.description)
     val zipxPublish                  = settingKey[Option[Boolean]](ZipxSettings.publish.description)
@@ -452,6 +453,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxLeftoverSteward          := LeftoverOpt.Fail,
     zipxVersionUpdates           := true,
     zipxVersionUpdatesSchedule   := VersionUpdatesWorkflow.DefaultSchedule,
+    zipxVersionUpdatesExtraSteps := Seq.empty,
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
     zipxPreRelease               := PreRelease.Skip,
@@ -933,7 +935,8 @@ object ZipxPlugin extends AutoPlugin:
     val file      = root / rel
     if enabled then
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
-      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule))
+      val extra    = readBuildSetting(extracted, zipxVersionUpdatesExtraSteps, Seq.empty).toList
+      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra))
       writeCompanion(root, rel, body, log)
     else if file.exists then
       IO.delete(file)
@@ -946,7 +949,8 @@ object ZipxPlugin extends AutoPlugin:
     val file    = root / rel
     if enabled then
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
-      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule))
+      val extra    = readBuildSetting(extracted, zipxVersionUpdatesExtraSteps, Seq.empty).toList
+      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra))
       checkCompanion(root, rel, expected, log)
     else if file.exists then
       sys.error(
