@@ -66,6 +66,7 @@ object ZipxPlugin extends AutoPlugin:
     type ZipxVersions = zipx.ZipxVersions
     val ZipxDeps    = zipx.plugin.ZipxDeps
     val ZipxCatalog = zipx.core.ZipxCatalog
+    val ZipxSelf    = zipx.plugin.ZipxSelf
     type PinLookup = zipx.core.PinLookup
     type PinApply  = zipx.core.PinApply
 
@@ -380,6 +381,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxCheckDeps            = settingKey[Boolean](ZipxSettings.checkDeps.description)
     val zipxEmitSelf             = settingKey[Boolean](ZipxSettings.emitSelf.description)
     val zipxPluginVersion        = settingKey[Option[String]](ZipxSettings.pluginVersion.description)
+    val zipxSelfPlugins          = settingKey[Seq[Plugin]](ZipxSettings.selfPlugins.description)
     val zipxVersionsFile         = settingKey[String](ZipxSettings.versionsFile.description)
 
     val zipxGraph            = taskKey[Unit](ZipxSettings.graph.description)
@@ -437,6 +439,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxCheckDeps                := false,
     zipxEmitSelf                 := true,
     zipxPluginVersion            := None,
+    zipxSelfPlugins              := Seq.empty,
     zipxVersionsFile             := ZipxCatalog.DefaultVersionsFile,
     zipxWorkflowDispatch         := false,
   )
@@ -1171,8 +1174,8 @@ object ZipxPlugin extends AutoPlugin:
     val coords  = readBuildSetting(extracted, zipxVersions, Seq.empty)
     val sbtVer  = readBuildSetting(extracted, zipxSbt, None)
     val plugins = ZipxCatalog.plugins(coords)
-    val self    = if coords.nonEmpty then loadedZipxPlugin(extracted) else None
-    if plugins.nonEmpty || self.isDefined then
+    val self    = loadedSelfPlugins(extracted, coords.nonEmpty)
+    if plugins.nonEmpty || self.nonEmpty then
       val expected = ZipxCatalog.renderPlugins(plugins, self)
       val file     = root / ZipxCatalog.PluginsPath
       if write then
@@ -1197,6 +1200,14 @@ object ZipxPlugin extends AutoPlugin:
         log.info(s"zipx: ${file.getPath} is up to date.")
     }
   end syncCatalogFiles
+
+  private def loadedSelfPlugins(extracted: Extracted, catalogInPlay: Boolean): Seq[Plugin] =
+    if !catalogInPlay then Nil
+    else
+      val combined =
+        loadedZipxPlugin(extracted).toList ++ readBuildSetting(extracted, zipxSelfPlugins, Seq.empty)
+      ZipxCatalog.duplicateSelf(combined).foreach(sys.error)
+      combined
 
   private def loadedZipxPlugin(extracted: Extracted): Option[Plugin] =
     if !readBuildSetting(extracted, zipxEmitSelf, true) then None

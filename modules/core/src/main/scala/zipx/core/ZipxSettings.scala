@@ -225,6 +225,16 @@ object ZipxSettings:
       Build,
     )
 
+  val selfPlugins: SettingDef[Seq[Plugin]] =
+    SettingDef.setting(
+      SettingName("zipxSelfPlugins"),
+      Seq.empty,
+      SettingPurpose(
+        "Loaded sbt plugins (besides sbt-zipx) that generate writes into project/plugins.sbt from the classpath version. A plugin that sits on zipx appends with ZipxSelf.emit. See Extending Versions."
+      ),
+      Build,
+    )
+
   val versionsFile: SettingDef[String] =
     SettingDef.setting(
       SettingName("zipxVersionsFile"),
@@ -517,6 +527,7 @@ object ZipxSettings:
     checkDeps,
     emitSelf,
     pluginVersion,
+    selfPlugins,
     versionsFile,
     workflowDispatch,
     cache,

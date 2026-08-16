@@ -49,6 +49,9 @@ object ZipxExclude:
   inline def org(inline organization: String): ZipxExclude =
     ZipxExclude(GroupId(organization), None)
 
+  inline def org(inline organization: String, inline artifact: String): ZipxExclude =
+    ZipxExclude(GroupId(organization), Some(ArtifactId(artifact)))
+
 /** One row in `zipxVersions`: a library (`Lib`) or an sbt plugin (`Plugin`). */
 sealed trait ZipxCoord:
   def group: GroupId
@@ -78,6 +81,7 @@ final case class Lib(
   def test: Lib                                = copy(config = Some("test"))
   def java: Lib                                = copy(cross = Cross.Java)
   def full: Lib                                = copy(cross = Cross.Full)
+  def excluding(ex: ZipxExclude*): Lib         = copy(excludes = excludes ++ ex.toList)
 end Lib
 
 object Lib:

@@ -95,7 +95,9 @@ the PR.
     section("Versions catalog")(
       md"""
 Typed `Lib` / `Plugin` vals. You extend `ZipxVersions` and call `MyVersions.settings`, which collects every val. You do
-not maintain a `coords` list. Full guide: **Versions**. Plugin authors: **Extending Versions**.
+not maintain a `coords` list. Excludes (`.excluding`) live on the row, not at the `libraryDependencies` use site. Loaded
+plugins that emit themselves (`zipxSelfPlugins`) write their own `plugins.sbt` line; your `Plugin` vals are the rest.
+Full guide: **Versions**. Plugin authors: **Extending Versions**.
 
 `settings` sets `scalaVersion` and the catalog keys. `zipxCheckDeps` fails generate when `libraryDependencies` contain a
 GAV that is not a `Lib` row. `zipxWorkflowGenerate` writes `project/plugins.sbt` and `project/build.properties`. Local

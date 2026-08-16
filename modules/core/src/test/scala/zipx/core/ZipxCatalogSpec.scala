@@ -8,7 +8,7 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
     test("renderPlugins writes a generated header and addSbtPlugin lines") {
       val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
       val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
-      val out      = ZipxCatalog.renderPlugins(List(scalafmt), self = Some(zipx))
+      val out      = ZipxCatalog.renderPlugins(List(scalafmt), self = List(zipx))
       assertTrue(
         out.startsWith(ZipxCatalog.PluginsHeader),
         out.contains("""addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "0.5.1")"""),
@@ -18,13 +18,62 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
     },
     test("renderPlugins does not duplicate self when it is already in the catalog") {
       val zipx = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
-      val out  = ZipxCatalog.renderPlugins(List(zipx), self = Some(zipx))
+      val out  = ZipxCatalog.renderPlugins(List(zipx), self = List(zipx))
       assertTrue(out.split("sbt-zipx", -1).length == 2)
     },
     test("renderPlugins omits self when dogfooding") {
       val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
-      val out      = ZipxCatalog.renderPlugins(List(scalafmt), self = None)
+      val out      = ZipxCatalog.renderPlugins(List(scalafmt))
       assertTrue(!out.contains("sbt-zipx"), out.contains("sbt-scalafmt"))
+    },
+    test("renderPlugins writes zipx, then other self plugins, then catalog plugins") {
+      val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
+      val acme     = Plugin("com.acme", "sbt-acme", "9.9.9")
+      val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
+      val out      = ZipxCatalog.renderPlugins(List(scalafmt), self = List(zipx, acme))
+      assertTrue(
+        out.contains("""addSbtPlugin("com.acme" % "sbt-acme" % "9.9.9")"""),
+        out.indexOf("sbt-zipx") < out.indexOf("sbt-acme"),
+        out.indexOf("sbt-acme") < out.indexOf("sbt-scalafmt"),
+      )
+    },
+    test("renderPlugins drops a catalog row whose group and artifact are already self-emitted") {
+      val acmeLoaded  = Plugin("com.acme", "sbt-acme", "9.9.9")
+      val acmeCatalog = Plugin("com.acme", "sbt-acme", "0.0.1")
+      val out         = ZipxCatalog.renderPlugins(List(acmeCatalog), self = List(acmeLoaded))
+      assertTrue(
+        out.contains("""addSbtPlugin("com.acme" % "sbt-acme" % "9.9.9")"""),
+        !out.contains("0.0.1"),
+      )
+    },
+    test("Lib.excluding accumulates on a java copy") {
+      val coursier = Lib("io.get-coursier", "coursier-cache_2.13", "2.1.25-M26").java
+        .excluding(ZipxExclude.org("org.scala-lang.modules"))
+      val twice = coursier.excluding(ZipxExclude.org("com.example", "example-lib"))
+      assertTrue(
+        coursier.cross == Cross.Java,
+        coursier.excludes == List(ZipxExclude.org("org.scala-lang.modules")),
+        twice.excludes.size == 2,
+      )
+    },
+    test("duplicateSelf names the repeated group and artifact") {
+      val a = Plugin("com.acme", "sbt-acme", "1.0.0")
+      val b = Plugin("com.acme", "sbt-acme", "2.0.0")
+      assertTrue(
+        ZipxCatalog.duplicateSelf(List(a)).isEmpty,
+        ZipxCatalog.duplicateSelf(List(a, b)).exists(_.contains("com.acme % sbt-acme")),
+      )
+    },
+    test("ZipxSelf.plugin uses an explicit version and refuses when none is resolved") {
+      val from = classOf[nomanifest.Empty]
+      val ok   = ZipxSelf.plugin("com.acme", "sbt-acme", from, version = Some("1.2.3"))
+      val miss = ZipxSelf.fromVersion("com.acme", "sbt-acme", None, from.getName)
+      assertTrue(
+        ok == Right(Plugin("com.acme", "sbt-acme", "1.2.3")),
+        miss == Left(
+          s"zipx: cannot emit com.acme % sbt-acme: Implementation-Version is missing. Pass version, or set it on ${from.getName}."
+        ),
+      )
     },
     test("renderPlugins emits excludeAll for bundled plugins") {
       val remote =
