@@ -2,22 +2,22 @@ package zipx.docs
 
 import specular.*
 import specular.ziotest.DocSpecSuite
+import zipx.core.*
+import zipx.docs.DocsRender.yaml
 import zipx.workflow.{Cron, DayOfWeek}
 import zio.test.*
 
-/** Bump locally, then open a PR. Four catalog kinds; ZipxVersions is required. */
+/** Catalog bumps: scheduled PR from zipx-version-updates.yml, or the same apply locally. ZipxVersions is required. */
 object DependencyUpdates extends DocSpecSuite:
 
   def doc = page("Dependency updates")(
     md"""
-Libraries, plugins, GitHub Actions, and CDN/vendor pins go stale. zipx does not try to be a weekly bot for that.
+Libraries, plugins, and GitHub Actions go stale. zipx replaces Scala Steward and a `github-actions` Dependabot
+ecosystem: typed constructors in `project/ZipxVersions.scala`, a scheduled companion that rewrites those constructors
+and opens a PR.
 
-**ZipxVersions is required.** Versions live in typed constructors in `project/ZipxVersions.scala`. `zipxCheckDeps`
-fails undeclared GAVs. You bump locally with `zipxDepUpdate` / `zipxPinUpdate` / `zipxActionUpdate`, look at a
-constructor diff, run tests, and open the PR. That is the product. There is no weekly bot job for the catalog.
-
-A regex across `build.sbt` cannot move version with sha256 / purl / git SHA, and a string-only PR would still fail
-generate. Do not install a search-replace bot. Leftover `zipx-scala-steward.yml` fails generate (`zipxLeftoverSteward`).
+**ZipxVersions is required.** `zipxCheckDeps` fails undeclared GAVs. Leftover `zipx-scala-steward.yml` fails generate
+(`zipxLeftoverSteward`). Do not install a search-replace bot; it cannot move version with sha256 / purl / git SHA.
 
 Four catalog kinds:
 
@@ -33,21 +33,48 @@ flowchart LR
   tag to a 40-hex SHA, and queries OSV. See **Action pins**.
 - **Scala libraries and sbt plugins.** `Lib` / `Plugin` vals. `zipxDepUpdate`. See **Versions**.
 - **Pins that are not Maven and not Actions.** `Pin` vals. A pin feed is lookup and policy only. `zipxPinUpdate`, or
-  CI can open a PR if you opt a feed into `Update`. See **Pin feeds**.
+  CI opens `zipx/pin-updates` if you opt a feed into `Update`. See **Pin feeds**.
 """,
-    section("Before you open a PR")(
+    section("Scheduled PR")(
       md"""
-This is the intended loop. You do not need a dependency bot, and you do not need to know CI YAML.
+Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-updates.yml` (schedule plus
+`workflow_dispatch`). The default schedule is Sunday 00:00 UTC; set `zipxVersionUpdatesSchedule` to change it
+(`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job runs `zipxDepUpdate yes`, `zipxActionUpdate yes`,
+`zipxPinUpdate yes`, then `zipxWorkflowGenerate`, and `gh pr create`s `zipx/version-updates` as
+`github-actions[bot]`. That PR is every ZipxVersions row kind: Lib / Plugin / Action / Pin constructors, plus
+`plugins.sbt` when a plugin moved.
 
-1. **List what is stale.** In sbt: `zipxDepUpdate` for Maven, `zipxPinUpdate` for pin feeds, `zipxActionUpdate` for
-   Actions. Each prints every bump it would apply. `dry-run` lists only.
-2. **Say yes, or type `y` at the prompt.** `yes` applies every listed bump (there is no "just this one"). A bare
-   command with no terminal lists and stops; pass `yes` from a script.
-3. **Reload if the catalog file changed.** `project/ZipxVersions.scala` is part of the build definition. Leave sbt or
-   `reload` so the new versions are loaded.
-4. **Regenerate if a plugin, sbt, Scala, or Action version moved.** `sbt zipxWorkflowGenerate`, then commit
-   `plugins.sbt` / `build.properties` (and workflows if they changed). A library-only bump does not need this.
-5. **Run your tests.** Then commit and open a pull request, the same way you would for any other edit.
+`zipxVersionUpdates := false` deletes the companion.
+
+**Required repo/org setting:** [Allow GitHub Actions to create and
+approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).
+""",
+      exampleValue {
+        VersionUpdatesWorkflow.render(ActionPins.Defaults, "21", "ubuntu-latest").yaml
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("workflow_dispatch"),
+          yaml.contains("zipxDepUpdate yes"),
+          yaml.contains("zipxActionUpdate yes"),
+          yaml.contains("zipxPinUpdate yes"),
+          yaml.contains("zipxWorkflowGenerate"),
+          yaml.contains("zipx/version-updates") || yaml.contains("gh pr create"),
+          yaml.contains("contents: write") || yaml.contains("contents:write"),
+          yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write"),
+        )
+      ),
+    ),
+    section("Local apply")(
+      md"""
+The same rewrite, without waiting for the schedule. You do not need to know CI YAML.
+
+1. **List what is stale.** `zipxDepUpdate` for Maven, `zipxActionUpdate` for Actions, `zipxPinUpdate` for pin feeds.
+   `dry-run` lists only.
+2. **Say yes, or type `y` at the prompt.** `yes` applies every listed bump. A bare command with no terminal lists and
+   stops; pass `yes` from a script. Empty Action rows: `yes` is a no-op (the scheduled job stays green).
+3. **Reload if the catalog file changed.** `project/ZipxVersions.scala` is part of the build definition.
+4. **Regenerate if a plugin, sbt, Scala, or Action version moved.** `sbt zipxWorkflowGenerate`. The scheduled job
+   always generates after apply.
 
 ```text
 sbt zipxDepUpdate             # list catalog bumps, then prompt
@@ -65,9 +92,7 @@ sbt "zipxPinUpdate dry-run"
 
 Catalog apply rewrites constructors in the catalog file only: `Lib("g", "a", "from")` / `Plugin(...)` for Maven,
 `Action("owner/repo", "from", sha = …)` so version and git SHA stay together, and
-`Pin("feed", "id", "from", sha256 = …, purl = …)` so version, checksum, and PURL stay together. Not a search across
-`build.sbt`. After any of those commands, **you** still commit and open the PR (unless a pin feed is `Update` and CI
-already opened `zipx/pin-updates`).
+`Pin("feed", "id", "from", sha256 = …, purl = …)` so version, checksum, and PURL stay together.
 """
     ),
     section("Typed cron")(
@@ -82,8 +107,9 @@ Cron.hourly(minute = 45)                // 45 * * * *
 Cron.raw("0 */6 * * *")                 // escape hatch
 ```
 
-`Cron` / `DayOfWeek` are re-exported from the plugin `autoImport`. Pin-feed companions use the same Sunday weekly
-default. See **Pin feeds**.
+`Cron` / `DayOfWeek` are re-exported from the plugin `autoImport`. The version-updates companion default is
+`Cron.weekly(DayOfWeek.Sunday)`; set `zipxVersionUpdatesSchedule` to change it. Pin-feed companions use the same
+default.
 """,
       exampleValue {
         List(

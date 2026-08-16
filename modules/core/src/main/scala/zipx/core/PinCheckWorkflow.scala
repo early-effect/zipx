@@ -69,39 +69,12 @@ object PinCheckWorkflow:
     Render.render(plan(pins, javaVersion, runnerOs, hasUpdate, schedule)).map(ActionPinFile.annotateUses(_, pins))
 
   private def updatePrScript: Script =
-    Script(
-      List(
-        If(
-          ShTest.Empty(Word.dquote(Word.subst(Exec("git", Word.lit("status"), Word.lit("--porcelain"))))),
-          Block(
-            Exec("echo", Word.quoted("No pin updates to commit.")),
-            Exit(),
-          ),
-        ),
-        Exec("git", Word.lit("config"), Word.lit("user.name"), Word.quoted("github-actions[bot]")),
-        Exec(
-          "git",
-          Word.lit("config"),
-          Word.lit("user.email"),
-          Word.quoted("41898282+github-actions[bot]@users.noreply.github.com"),
-        ),
-        Exec("git", Word.lit("checkout"), Word.lit("-B"), Word.lit("zipx/pin-updates")),
-        Exec("git", Word.lit("add"), Word.lit("-A")),
-        Exec("git", Word.lit("commit"), Word.lit("-m"), Word.quoted("ci: apply zipx pin feed updates")),
-        Exec("git", Word.lit("push"), Word.lit("-u"), Word.lit("origin"), Word.lit("HEAD")),
-        Exec(
-          "gh",
-          Word.lit("pr"),
-          Word.lit("create"),
-          Word.lit("--title"),
-          Word.quoted("ci: zipx pin feed updates"),
-          Word.lit("--body"),
-          Word.quoted("Applied pin feed Update policy."),
-          Word.lit("--head"),
-          Word.lit("zipx/pin-updates"),
-        ) || Exec("true"),
-      ),
-      trailingNewline = true,
+    CompanionPr.open(
+      branch = "zipx/pin-updates",
+      commitMessage = "ci: apply zipx pin feed updates",
+      prTitle = "ci: zipx pin feed updates",
+      prBody = "Applied pin feed Update policy.",
+      emptyMessage = "No pin updates to commit.",
     )
 end PinCheckWorkflow
 

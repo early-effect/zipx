@@ -53,6 +53,14 @@ object ZipxVersions extends zipx.ZipxVersions:
     Action("actions/upload-artifact", "v7.0.1", sha = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a")
   val downloadArtifact: Action =
     Action("actions/download-artifact", "v8.0.1", sha = "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c")
+  val awsCredentials: Action =
+    Action(
+      "aws-actions/configure-aws-credentials",
+      "v6.2.3",
+      sha = "e6de054238d6b7531b4efff3b6587d9aade6a06c",
+    )
+  val ecrLogin: Action =
+    Action("aws-actions/amazon-ecr-login", "v2.1.6", sha = "d539f0932e70871a027e9d5a9d8fc38589180a64")
 
   val commonScalacOptions: Seq[String] = Seq(
     "-deprecation",

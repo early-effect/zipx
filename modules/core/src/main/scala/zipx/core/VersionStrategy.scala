@@ -1,5 +1,7 @@
 package zipx.core
 
+import scala.math.Ordering.Implicits.infixOrderingOps
+
 /** Given current and candidate versions, what kind of bump this is, and which candidate is latest stable. */
 trait VersionStrategy:
   def classify(current: String, candidate: String): BumpKind
@@ -29,6 +31,7 @@ object VersionStrategy:
     def classify(current: String, candidate: String): BumpKind =
       (parse(current), parse(candidate)) match
         case (Some(a), Some(b)) if a == b                        => BumpKind.None
+        case (Some(a), Some(b)) if b.numeric < a.numeric         => BumpKind.None
         case (Some(_), Some(b)) if b.isPre                       => BumpKind.PreRelease
         case (Some(a), Some(b)) if a.major != b.major            => BumpKind.Major
         case (Some(a), Some(b)) if a.minor != b.minor            => BumpKind.Minor

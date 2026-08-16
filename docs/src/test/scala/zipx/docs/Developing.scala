@@ -41,9 +41,9 @@ source). The amber path is the publishable `plugin` project for Central and scri
 planner output changed.
 
 **Action pins:** add or bump `Action` vals in [`project/ZipxVersions.scala`](https://github.com/early-effect/zipx/blob/main/project/ZipxVersions.scala)
-(same file as `Lib` / `Plugin`), then `sbt "zipxActionUpdate yes"`, `reload`, and `zipxWorkflowGenerate`. Published jar
-defaults embed those rows via `resourceGenerators` (YAML in the jar, not a committed pin file). See the **Action pins**
-docs page.
+(same file as `Lib` / `Plugin`). The scheduled companion applies them; locally `sbt "zipxActionUpdate yes"`, `reload`, and
+`zipxWorkflowGenerate`. Published jar defaults embed those rows via `resourceGenerators` (YAML in the jar, not a
+committed pin file). See the **Action pins** docs page.
 
 **When adding a library or sbt plugin:** add a `Lib` / `Plugin` **val** in `project/ZipxVersions.scala` and select it
 with `ZipxVersions.deps` (or a named group). You do not list it a second time. If the meta-build dogfood mirror also

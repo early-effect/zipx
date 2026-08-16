@@ -180,9 +180,11 @@ drops that catalog line and keeps the loaded version.
         )
       ),
     ),
-    section("Local update")(
+    section("Catalog update")(
       md"""
-There is no weekly zipx job that opens a catalog PR. You bump locally, then you open the PR.
+The scheduled companion `.github/workflows/zipx-version-updates.yml` (`zipxVersionUpdates`, default true) applies
+`zipxDepUpdate yes`, `zipxActionUpdate yes`, and `zipxPinUpdate yes`, regenerates, and opens `zipx/version-updates`.
+That PR is these constructor hunks. You can run the same apply locally:
 
 ```text
 sbt zipxDepUpdate             # list, then prompt Apply N catalog update(s)? [y/N]
@@ -197,13 +199,14 @@ sbt "zipxActionUpdate dry-run"
 Lookup is Maven Central metadata (then the sbt plugin repo) for `Lib` / `Plugin`. Actions use the GitHub API plus a
 SHA peel. `yes` applies **every** listed bump. With no terminal, a bare command lists and stops.
 
-The catalog file lives under `project/`, so it is part of the build definition. After a rewrite, `reload` (or a fresh
-sbt) before you generate. If a `Plugin`, `zipxSbt`, `zipxScala`, or `Action` version moved, run `zipxWorkflowGenerate`
-and commit `plugins.sbt` / `build.properties` (and workflows) too. Then test, commit, open a PR.
+The catalog file lives under `project/`, so it is part of the build definition. After a local rewrite, `reload` (or a
+fresh sbt) before you generate. The scheduled job starts a new sbt for generate, so it does not need `reload`. If a
+`Plugin`, `zipxSbt`, `zipxScala`, or `Action` version moved, generate also rewrites `plugins.sbt` / `build.properties`
+(and workflows).
 
 Apply rewrites `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` and
 `Action("owner/repo", "from", sha = "…")` so version and git SHA move together. `.mod` copies share the parent version
-literal. The PR you open is that one file:
+literal. The PR is that catalog file:
 """,
       example {
         catalogDepPrDiff

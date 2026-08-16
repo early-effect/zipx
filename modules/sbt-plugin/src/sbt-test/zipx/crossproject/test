@@ -2,6 +2,7 @@
 # synthetic `.sbt/matrix/<id>`, so `baseDir` alone maps a change under `shared/` to no module at all.
 > zipxWorkflowGenerate
 $ exists .github/workflows/ci.yml
+$ exists .github/workflows/zipx-version-updates.yml
 > assertBothRowsGetJobs
 # Real git history, so the diff genuinely succeeds and fail-open never masks a wrong answer.
 $ exec git init -q .

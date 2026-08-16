@@ -3,6 +3,7 @@
 $ exists .github/workflows/ci.yml
 $ exists .github/workflows/zipx-pin-check.yml
 $ exists .github/workflows/zipx-pin-snapshot.yml
+$ exists .github/workflows/zipx-version-updates.yml
 > assertPinFeeds
 > zipxWorkflowCheck
 # Local update: dry-run lists only; yes rewrites the Pin constructor then materializes.

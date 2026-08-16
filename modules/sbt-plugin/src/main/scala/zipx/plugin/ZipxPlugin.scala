@@ -363,19 +363,21 @@ object ZipxPlugin extends AutoPlugin:
     val zipxActionRows        = settingKey[Seq[Action]](ZipxSettings.actionRows.description)
     val zipxVerify            = settingKey[ZipxVerify](ZipxSettings.verify.description)
     val zipxLeftoverSteward   = settingKey[LeftoverOpt](ZipxSettings.leftoverSteward.description)
-    val zipxWorkflowDispatch  = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
-    val zipxCiRelevant        = settingKey[Boolean](ZipxSettings.ciRelevant.description)
-    val zipxPublish           = settingKey[Option[Boolean]](ZipxSettings.publish.description)
-    val zipxTestTask          = settingKey[SbtCommand](ZipxSettings.testTask.description)
-    val zipxPublishTask       = settingKey[SbtCommand](ZipxSettings.publishTask.description)
-    val zipxDocker            = settingKey[Boolean](ZipxSettings.docker.description)
-    val zipxVerifyClean       = settingKey[VerifyClean](ZipxSettings.verifyClean.description)
-    val zipxVerifyCleanLabel  = settingKey[Option[String]](ZipxSettings.verifyCleanLabel.description)
-    val zipxAffectedOnPR      = settingKey[Boolean](ZipxSettings.affectedOnPR.description)
-    val zipxAffectedOnPush    = settingKey[Boolean](ZipxSettings.affectedOnPush.description)
-    val zipxAffectedPublish   = settingKey[Boolean](ZipxSettings.affectedPublish.description)
-    val zipxAffectedDeploy    = settingKey[Boolean](ZipxSettings.affectedDeploy.description)
-    val zipxSkipMergedPrPush  = settingKey[Boolean](ZipxSettings.skipMergedPrPush.description)
+    val zipxVersionUpdates    = settingKey[Boolean](ZipxSettings.versionUpdates.description)
+    val zipxVersionUpdatesSchedule   = settingKey[Cron](ZipxSettings.versionUpdatesSchedule.description)
+    val zipxWorkflowDispatch         = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
+    val zipxCiRelevant               = settingKey[Boolean](ZipxSettings.ciRelevant.description)
+    val zipxPublish                  = settingKey[Option[Boolean]](ZipxSettings.publish.description)
+    val zipxTestTask                 = settingKey[SbtCommand](ZipxSettings.testTask.description)
+    val zipxPublishTask              = settingKey[SbtCommand](ZipxSettings.publishTask.description)
+    val zipxDocker                   = settingKey[Boolean](ZipxSettings.docker.description)
+    val zipxVerifyClean              = settingKey[VerifyClean](ZipxSettings.verifyClean.description)
+    val zipxVerifyCleanLabel         = settingKey[Option[String]](ZipxSettings.verifyCleanLabel.description)
+    val zipxAffectedOnPR             = settingKey[Boolean](ZipxSettings.affectedOnPR.description)
+    val zipxAffectedOnPush           = settingKey[Boolean](ZipxSettings.affectedOnPush.description)
+    val zipxAffectedPublish          = settingKey[Boolean](ZipxSettings.affectedPublish.description)
+    val zipxAffectedDeploy           = settingKey[Boolean](ZipxSettings.affectedDeploy.description)
+    val zipxSkipMergedPrPush         = settingKey[Boolean](ZipxSettings.skipMergedPrPush.description)
     val zipxCacheRehydrateOnMerge    = settingKey[Boolean](ZipxSettings.cacheRehydrateOnMerge.description)
     val zipxCacheRehydrateTask       = settingKey[SbtCommand](ZipxSettings.cacheRehydrateTask.description)
     val zipxCacheRehydrateExtraSteps =
@@ -444,6 +446,8 @@ object ZipxPlugin extends AutoPlugin:
     zipxActionRows               := Seq.empty,
     zipxVerify                   := ZipxVerify.Strict,
     zipxLeftoverSteward          := LeftoverOpt.Fail,
+    zipxVersionUpdates           := true,
+    zipxVersionUpdatesSchedule   := VersionUpdatesWorkflow.DefaultSchedule,
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
     zipxVersions                 := Seq.empty,
@@ -504,16 +508,19 @@ object ZipxPlugin extends AutoPlugin:
         )
         .value
     },
-    zipxWorkflowCheck   := checkTask.value,
-    zipxAdvisoryCheck   := Def.uncached { advisoryCheckTask.value },
-    zipxAffectedModules := affectedModulesTask.evaluated,
-    zipxPinCheck        := Def.uncached { pinCheckTask.value },
-    zipxPinCheckPr      := Def.uncached { pinCheckPrTask.value },
-    zipxPinSubmit       := Def.uncached { pinSubmitTask.value },
-    zipxPinInventory    := Def.uncached { pinInventoryTask.value },
-    zipxPinUpdate       := pinUpdateTask.evaluated,
-    zipxDepUpdate       := depUpdateTask.evaluated,
-    zipxActionUpdate    := actionUpdateTask.evaluated,
+    zipxWorkflowCheck            := checkTask.value,
+    zipxAdvisoryCheck            := Def.uncached { advisoryCheckTask.value },
+    zipxAffectedModules          := affectedModulesTask.evaluated,
+    zipxPinCheck                 := Def.uncached { pinCheckTask.value },
+    zipxPinCheckPr               := Def.uncached { pinCheckPrTask.value },
+    zipxPinSubmit                := Def.uncached { pinSubmitTask.value },
+    zipxPinInventory             := Def.uncached { pinInventoryTask.value },
+    zipxPinUpdate                := pinUpdateTask.evaluated,
+    zipxDepUpdate                := depUpdateTask.evaluated,
+    zipxActionUpdate             := actionUpdateTask.evaluated,
+    zipxDepUpdate / aggregate    := false,
+    zipxActionUpdate / aggregate := false,
+    zipxPinUpdate / aggregate    := false,
   )
 
   /** An aggregator is a container rather than a testable module, so it is CI-irrelevant by default. Plain settings, so
@@ -810,6 +817,7 @@ object ZipxPlugin extends AutoPlugin:
     writeCompositeActions.value
     checkLeftoverSteward(Project.extract(state.value), (LocalRootProject / baseDirectory).value, streams.value.log)
     writePinWorkflowsIfEnabled.value
+    writeVersionUpdatesIfEnabled.value
     writeCatalogIfEnabled.value
   }
 
@@ -888,6 +896,37 @@ object ZipxPlugin extends AutoPlugin:
         checkCompanion(root, PinSnapshotWorkflow.DefaultPath, expectedSnap, log)
     end if
   end checkPinWorkflows
+
+  private def writeVersionUpdatesIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
+    val extracted = Project.extract(state.value)
+    val enabled   = readBuildSetting(extracted, zipxVersionUpdates, true)
+    val cfg       = planConfig.value
+    val root      = (LocalRootProject / baseDirectory).value
+    val log       = streams.value.log
+    val rel       = VersionUpdatesWorkflow.DefaultPath
+    val file      = root / rel
+    if enabled then
+      val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
+      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, cfg.javaVersion, cfg.runnerOs, schedule))
+      writeCompanion(root, rel, body, log)
+    else if file.exists then
+      IO.delete(file)
+      log.info(s"zipx deleted ${file.getPath}")
+  }
+
+  private def checkVersionUpdates(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
+    val enabled = readBuildSetting(extracted, zipxVersionUpdates, true)
+    val rel     = VersionUpdatesWorkflow.DefaultPath
+    val file    = root / rel
+    if enabled then
+      val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
+      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, cfg.javaVersion, cfg.runnerOs, schedule))
+      checkCompanion(root, rel, expected, log)
+    else if file.exists then
+      sys.error(
+        s"zipx: $rel is leftover. Set zipxVersionUpdates := true or delete $rel, then sbt zipxWorkflowGenerate."
+      )
+  end checkVersionUpdates
 
   private def writeCompanion(root: File, rel: String, body: String, log: Logger): Unit =
     val file = root / rel
@@ -1097,6 +1136,7 @@ object ZipxPlugin extends AutoPlugin:
     val extracted = Project.extract(state.value)
     checkLeftoverSteward(extracted, root, streams.value.log)
     checkPinWorkflows(root, cfg, extracted, streams.value.log)
+    checkVersionUpdates(root, cfg, extracted, streams.value.log)
     validateCatalog(extracted, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
   }
@@ -1264,10 +1304,7 @@ object ZipxPlugin extends AutoPlugin:
         log.info(
           s"zipx: no Action vals in ZipxVersions. Paste these constructors (jar Defaults), then sbt \"zipxActionUpdate yes\":\n$constructors"
         )
-        if arg == "yes" || arg == "--yes" then
-          sys.error(
-            "zipx: zipxActionUpdate yes with no Action rows refuses. Paste constructors into ZipxVersions first."
-          )
+        if arg == "yes" || arg == "--yes" then log.info("zipx: no Action rows; nothing to apply.")
       else
         val bumps = orFail(ZipxCatalog.outdatedActions(rows, lookup))
         bumps.foreach { b =>

@@ -26,12 +26,12 @@ runs:
   using: composite
   steps:
     - name: Assume AWS role (OIDC)
-      uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+      uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
       with:
         role-to-assume: ${{ env[inputs.role-env] }}
         aws-region: ${{ env[inputs.region-env] }}
     - name: Log in to ECR
       if: inputs.login-ecr == 'true'
-      uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64
+      uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
       with:
         registries: ${{ env[inputs.account-env] }}

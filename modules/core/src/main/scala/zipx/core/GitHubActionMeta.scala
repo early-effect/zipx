@@ -7,26 +7,29 @@ object GitHubActionMeta:
 
   def pickLatestRelease(json: String): Either[String, Option[Release]] =
     val items = MiniJson.objects(if json.trim.startsWith("[") then json else s"[$json]")
-    val ready = items.filter { obj =>
-      !MiniJson.boolField(obj, "draft").contains(true) &&
-      !MiniJson.boolField(obj, "prerelease").contains(true)
-    }
-    Right(
-      ready.view
-        .flatMap(obj => MiniJson.stringField(obj, "tag_name").map(tag => Release(tag, None)))
-        .headOption
-    )
+    val tags  = items
+      .filter { obj =>
+        !MiniJson.boolField(obj, "draft").contains(true) &&
+        !MiniJson.boolField(obj, "prerelease").contains(true)
+      }
+      .flatMap(obj => MiniJson.stringField(obj, "tag_name"))
+      .filterNot(isPrereleaseTag)
+    Right(VersionStrategy.npm.latestStable(tags).orElse(tags.headOption).map(tag => Release(tag, None)))
   end pickLatestRelease
 
   def pickLatestTag(json: String): Either[String, Option[Release]] =
     val items = MiniJson.objects(if json.trim.startsWith("[") then json else s"[$json]")
+    val tags  = items.flatMap { obj =>
+      MiniJson.stringField(obj, "name").filterNot(isPrereleaseTag).map { tag =>
+        val sha = MiniJson.objectField(obj, "commit").flatMap(MiniJson.stringField(_, "sha"))
+        tag -> sha
+      }
+    }
     Right(
-      items.view.flatMap { obj =>
-        MiniJson.stringField(obj, "name").filterNot(isPrereleaseTag).map { tag =>
-          val sha = MiniJson.objectField(obj, "commit").flatMap(MiniJson.stringField(_, "sha"))
-          Release(tag, sha)
-        }
-      }.headOption
+      VersionStrategy.npm
+        .latestStable(tags.map(_._1))
+        .orElse(tags.headOption.map(_._1))
+        .flatMap(latest => tags.find(_._1 == latest).map { case (tag, sha) => Release(tag, sha) })
     )
   end pickLatestTag
 
