@@ -66,7 +66,6 @@ object ZipxVersions extends zipx.ZipxVersions:
     "-deprecation",
     "-feature",
     "-Wunused:all",
-    "-Xlint:-classpath",
   )
 
   def zioDeps: Seq[ModuleID]             = deps(zio, zioTest, zioTestSbt)
