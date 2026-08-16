@@ -176,7 +176,7 @@ object ZipxSettings:
       SettingName("zipxVersionUpdatesExtraSteps"),
       Seq.empty,
       SettingPurpose(
-        "Extra steps on the version-updates companion after zipxCatalogGenerate and before opening the PR (default empty). Nested example generate belongs here: examples/monorepo/.github/workflows/ is not repo-root, so GITHUB_TOKEN can commit that ci.yml."
+        "Extra steps on the version-updates companion after zipxCatalogGenerate and before opening the PR (default empty). Typical use: publishLocal an in-dev sbt plugin and zipxWorkflowGenerate a nested example. That tree's .github/workflows/ is not repo-root, so GITHUB_TOKEN can commit it."
       ),
       Build,
     )

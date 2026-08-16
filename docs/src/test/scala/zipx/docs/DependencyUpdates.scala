@@ -4,7 +4,8 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zipx.docs.DocsRender.yaml
-import zipx.workflow.{Cron, DayOfWeek}
+import zipx.shell.{Exec, Script, Word}
+import zipx.workflow.{Cron, DayOfWeek, Step}
 import zio.test.*
 
 /** Catalog bumps: scheduled PR from zipx-version-updates.yml, or the same apply locally. ZipxVersions is required. */
@@ -56,9 +57,20 @@ parameterizes instead of rewriting YAML:
 - **`git add`** excludes repo-root `.github/workflows` only. Nested trees such as `examples/monorepo/.github/workflows/`
   are staged.
 
-`zipxVersionUpdatesExtraSteps` (default empty) runs after `zipxCatalogGenerate` and before the PR opens. zipx itself
-sets this to publish the in-dev plugin and `zipxWorkflowGenerate` in `examples/monorepo`, so that example's `ci.yml` and
-composites land on the catalog PR. You do not regenerate the example by hand on every Action pin bump.
+`zipxVersionUpdatesExtraSteps` (default empty) runs after `zipxCatalogGenerate` and before the PR opens. Any zipx repo
+can set it. The usual case is an **sbt plugin** whose nested example (or scripted fixture) must see the in-dev plugin:
+`publishLocal`, then `zipxWorkflowGenerate` in that tree. Nested `.github/workflows/` is not repo-root, so
+`GITHUB_TOKEN` can commit that `ci.yml` and its composites.
+
+```scala
+zipxVersionUpdatesExtraSteps := Seq(
+  Step.run(publish).named("Publish plugin locally"),
+  Step.run(generate).named("Generate example workflow").in("examples/foo"),
+)
+```
+
+zipx dogfoods this for `examples/monorepo` (`ExampleCheck.companionSteps` in `project/`). You do not regenerate that
+example by hand on every Action pin bump.
 
 Generate the companion YAML once from a clone (human `zipxWorkflowGenerate`); the bot then leaves the companion file
 alone. A checkout SHA bump in the catalog can still make root `zipxWorkflowCheck` fail. The PR body names this run's
@@ -107,6 +119,31 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
           yaml.indexOf("Apply catalog updates") < yaml.indexOf("Open update PR"),
           yaml.indexOf("sbt zipxCatalogGenerate") < yaml.indexOf("Open update PR"),
           yaml.indexOf("sbt zipxWorkflowGenerate", yaml.indexOf("Open update PR")) > yaml.indexOf("Open update PR"),
+        )
+      ),
+      exampleValue {
+        val extra = List(
+          Step
+            .run(Script.strict(Exec("sbt", Word.squote("publishLocal"))))
+            .named("Publish plugin locally")
+            .build,
+          Step
+            .run(Script.strict(Exec("sbt", Word.squote("zipxWorkflowGenerate"))))
+            .named("Generate example workflow")
+            .in("examples/foo")
+            .build,
+        )
+        VersionUpdatesWorkflow.render(ActionPins.Defaults, extraSteps = extra).yaml
+      }.assert(yaml =>
+        val applyAt = yaml.indexOf("Apply catalog updates")
+        val pubAt   = yaml.indexOf("Publish plugin locally")
+        val genAt   = yaml.indexOf("Generate example workflow")
+        val openAt  = yaml.indexOf("Open update PR")
+        assertTrue(
+          pubAt > applyAt,
+          genAt > pubAt,
+          genAt < openAt,
+          yaml.contains("working-directory: examples/foo"),
         )
       ),
     ),
