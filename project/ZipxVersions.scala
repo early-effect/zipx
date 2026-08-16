@@ -25,10 +25,6 @@ object ZipxVersions extends zipx.ZipxVersions:
   val specularZioTest: Lib = specular.mod("specular-zio-test").test
   val specularSite: Lib    = specular.mod("specular-site").test
   val specularTheme: Lib   = specular.mod("early-effect-docs-theme").test
-  val ascent: Lib          = Lib("rocks.earlyeffect", "ascent-core", "0.3.1")
-  val ascentHtml: Lib      = ascent.mod("ascent-html")
-  val ascentJs: Lib        = ascent.mod("ascent-js")
-  val ascentCss: Lib       = ascent.mod("ascent-css")
 
   val dynverCi: Plugin       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.2")
   val scalafmt: Plugin       = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
