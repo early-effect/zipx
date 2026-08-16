@@ -7,7 +7,6 @@ name: zipx version updates
 permissions:
   contents: write
   pull-requests: write
-  workflows: write
 jobs:
   version-updates:
     name: Catalog version updates
@@ -19,12 +18,15 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: "true"
-      - name: Setup JDK
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - name: zipx sbt setup
+        uses: ./.github/actions/zipx-sbt-setup
         with:
-          distribution: temurin
           java-version: "21"
-      - uses: sbt/setup-sbt@5ed7fa239084076151f66fa1dc45d4363b2dfee5 # v1.5.7
+          runner-os: ubuntu-latest
+          cache-key-suffix: version-updates
+          node-version: ""
+          sbt-disk-cache: "false"
+          local-cache: "false"
       - name: Apply catalog updates
         run: |
           sbt "zipxDepUpdate yes"
@@ -42,7 +44,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B zipx/version-updates
           git add -A
+          git restore --staged --worktree .github/workflows
+          if [ -z "$(git diff --cached --name-only)" ]; then
+            echo "No catalog updates to commit."
+            exit 0
+          fi
           git commit -m "ci: zipx version updates"
           git push -u origin HEAD
           gh pr create --title "ci: zipx version updates" --body "Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate." --head zipx/version-updates || true
-

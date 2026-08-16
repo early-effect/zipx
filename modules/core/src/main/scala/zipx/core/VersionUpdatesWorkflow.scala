@@ -8,8 +8,8 @@ import scala.collection.immutable.ListMap
   * `zipxActionUpdate`, `zipxPinUpdate`), regenerates, and opens `zipx/version-updates`.
   *
   * Opening that PR uses `GITHUB_TOKEN` and needs the repo or org setting **Allow GitHub Actions to create and approve
-  * pull requests**. Generate rewrites workflow YAML, so the token also needs `workflows: write` or GitHub rejects the
-  * push.
+  * pull requests**. `GITHUB_TOKEN` cannot create or update `.github/workflows/` files; [[CompanionPr]] restores that
+  * directory so the push is catalog + composites, like Scala Steward. Java / sbt pins live in `zipx-sbt-setup`.
   */
 object VersionUpdatesWorkflow:
 
@@ -25,15 +25,24 @@ object VersionUpdatesWorkflow:
       runnerOs: String,
       schedule: Cron = DefaultSchedule,
   ): Workflow =
-    val setupJava = Step(
-      name = Some("Setup JDK"),
-      uses = Some(pins.setupJava),
-      `with` = ListMap("distribution" -> "temurin", "java-version" -> javaVersion),
-    )
     val checkout = Step(
       uses = Some(pins.checkout),
       `with` = ListMap("token" -> "${{ secrets.GITHUB_TOKEN }}", "persist-credentials" -> "true"),
     )
+    val setup = Step
+      .usesRef(ZipxComposites.SbtSetupRef)
+      .named("zipx sbt setup")
+      .withInputs(
+        ListMap(
+          "java-version"     -> javaVersion,
+          "runner-os"        -> runnerOs,
+          "cache-key-suffix" -> "version-updates",
+          "node-version"     -> "",
+          "sbt-disk-cache"   -> "false",
+          "local-cache"      -> "false",
+        )
+      )
+      .build
     val apply = Step
       .run(
         Script(
@@ -52,13 +61,13 @@ object VersionUpdatesWorkflow:
     Workflow(
       name = "zipx version updates",
       on = Triggers(schedule = List(schedule), workflowDispatch = true),
-      permissions = ListMap("contents" -> "write", "pull-requests" -> "write", "workflows" -> "write"),
+      permissions = ListMap("contents" -> "write", "pull-requests" -> "write"),
       jobs = ListMap(
         "version-updates" -> Job(
           name = Some("Catalog version updates"),
           runsOn = List(runnerOs),
           env = ListMap("GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}"),
-          steps = List(checkout, setupJava, Step(uses = Some(pins.setupSbt)), apply, openPr),
+          steps = List(checkout, setup, apply, openPr),
         )
       ),
     )
