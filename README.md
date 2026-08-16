@@ -85,7 +85,7 @@ What's covered:
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate Verify via Testcontainers)
 - **Action pins** (catalog `Action` vals, `zipxActionUpdate`, jar defaults)
-- **Dependency updates** (local `zipxDepUpdate` / `zipxPinUpdate` / `zipxActionUpdate`, then you open the PR) and **Pin feeds**
+- **Dependency updates** (scheduled `zipx-version-updates.yml` opens the catalog PR; local `zipxDepUpdate` / `zipxActionUpdate` / `zipxPinUpdate`) and **Pin feeds**
 - Docker and multi-target deploy
 - `ZipxCentral` / `ZipxDocs` packs
 - Settings reference and dogfood notes

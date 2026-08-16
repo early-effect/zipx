@@ -1,5 +1,7 @@
 package zipx.core
 
+import zipx.workflow.Cron
+
 /** Catalog of every public `zipx*` autoImport key. Plugin and Settings docs both consume this. */
 object ZipxSettings:
 
@@ -144,7 +146,27 @@ object ZipxSettings:
       SettingName("zipxLeftoverSteward"),
       LeftoverOpt.Fail,
       SettingPurpose(
-        "If zipx-scala-steward.yml is on disk: Fail generate/check (default) or Warn(reason). Does not generate a bot workflow."
+        "If zipx-scala-steward.yml is on disk: Fail generate/check (default) or Warn(reason). The replacement is zipx-version-updates.yml (zipxVersionUpdates)."
+      ),
+      Build,
+    )
+
+  val versionUpdates: SettingDef[Boolean] =
+    SettingDef.setting(
+      SettingName("zipxVersionUpdates"),
+      true,
+      SettingPurpose(
+        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, applies zipxDepUpdate / zipxActionUpdate / zipxPinUpdate, opens zipx/version-updates. Default true. false deletes the companion."
+      ),
+      Build,
+    )
+
+  val versionUpdatesSchedule: SettingDef[Cron] =
+    SettingDef.setting(
+      SettingName("zipxVersionUpdatesSchedule"),
+      VersionUpdatesWorkflow.DefaultSchedule,
+      SettingPurpose(
+        "Cron for zipx-version-updates.yml. Default Sunday 00:00 UTC. Use Cron.daily / Cron.weekly / Cron.raw."
       ),
       Build,
     )
@@ -468,7 +490,7 @@ object ZipxSettings:
     SettingDef.input(
       SettingName("zipxActionUpdate"),
       SettingPurpose(
-        "Local Action pin bumps: GitHub releases + SHA peel + OSV. Rewrites Action constructors after yes. dry-run lists only."
+        "Local Action pin bumps: GitHub releases + SHA peel + OSV. Rewrites Action constructors after yes. dry-run lists only. The scheduled companion runs this with yes."
       ),
     )
 
@@ -514,7 +536,7 @@ object ZipxSettings:
     SettingDef.input(
       SettingName("zipxPinUpdate"),
       SettingPurpose(
-        "Local outdated pin bumps with approval: lists candidates from zipxPins, rewrites Pin constructors in zipxVersionsFile after yes, then optional feed materialize. dry-run lists only. Ignores PinAction so alert-only feeds can still bump before a PR."
+        "Local outdated pin bumps with approval: lists candidates from zipxPins, rewrites Pin constructors in zipxVersionsFile after yes, then optional feed materialize. dry-run lists only. Ignores PinAction so alert-only feeds can still bump before a PR. The scheduled companion runs this with yes."
       ),
     )
 
@@ -522,7 +544,7 @@ object ZipxSettings:
     SettingDef.input(
       SettingName("zipxDepUpdate"),
       SettingPurpose(
-        "Local catalog bumps with approval: Coursier/Maven lookup of zipxVersions, rewrite of zipxVersionsFile after yes (or an interactive y). dry-run lists only."
+        "Local catalog bumps with approval: Coursier/Maven lookup of zipxVersions, rewrite of zipxVersionsFile after yes (or an interactive y). dry-run lists only. The scheduled companion runs this with yes."
       ),
     )
 
@@ -539,6 +561,8 @@ object ZipxSettings:
     actionRows,
     verify,
     leftoverSteward,
+    versionUpdates,
+    versionUpdatesSchedule,
     pinFeeds,
     pinPrGate,
     versions,

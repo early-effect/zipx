@@ -260,7 +260,8 @@ there when mangling is what you want, and it truncates to the registry's limit r
 
 `aws-actions/configure-aws-credentials` is an **extra** pin (see **Action pins**), not a typed field, because zipx's own
 planner never emits it: it arrives through this pack, so pinning it must not wait on a zipx release. The pack carries a
-SHA-pinned fallback. Add catalog rows to take ownership:
+SHA-pinned fallback when the jar has no extra pin. This repository lists both as catalog rows so `zipxActionUpdate`
+owns them and jar defaults ship the SHAs. A consumer overlays the same way to move ahead of a zipx release:
 
 ```scala
 val awsCredentials = Action(

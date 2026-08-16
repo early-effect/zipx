@@ -203,7 +203,7 @@ Then sbt reload and sbt zipxWorkflowGenerate.
 | Goal | What to do |
 |---|---|
 | Stay on zipx release defaults | No Action vals; upgrade `sbt-zipx` when we bump pins |
-| Track actions | `Action` vals in ZipxVersions; `sbt "zipxActionUpdate yes"`; reload; generate |
+| Track actions | `Action` vals in ZipxVersions; scheduled `zipx-version-updates.yml` (or `sbt "zipxActionUpdate yes"`; reload; generate) |
 | One-off exotic pin | `zipxActions := ActionPins.Defaults.copy(...)` in `build.sbt` |
 """
     ),
@@ -231,8 +231,8 @@ In the zipx repository, `Action` vals in `project/ZipxVersions.scala` are the ed
 bootstrap so a missing field still has a pin). That YAML lives in the jar / `target/`, not as something you commit
 and edit. `ActionPins.Defaults` loads the classpath resource at runtime.
 
-Release dogfood: `sbt zipxActionUpdate yes` (rewrites ZipxVersions) → `reload` → `zipxWorkflowGenerate` →
-compile/publish. A zipx release is how consumers on jar defaults move.
+Release dogfood: the scheduled companion applies `zipxActionUpdate yes` and generate. Locally: `sbt zipxActionUpdate yes` →
+`reload` → `zipxWorkflowGenerate` → compile/publish. A zipx release is how consumers on jar defaults move.
 
 A `github-actions` Dependabot ecosystem is leftover, not the ladder.
 """
@@ -248,7 +248,8 @@ A `github-actions` Dependabot ecosystem is leftover, not the ladder.
 | `zipxWorkflowGenerate` / `zipxWorkflowCheck` | write / verify `ci.yml` |
 
 Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`,
-`actions/cache`, `actions/upload-artifact`, `actions/download-artifact`. Anything else your steps use is an extra
+`actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, plus ZipxAws extras
+`aws-actions/configure-aws-credentials` and `aws-actions/amazon-ecr-login`. Anything else your steps use is an extra
 `Action` val.
 
 Pins that are not GitHub Actions (CDN + sha256, tarball tags, vendor files) are **Pin feeds**, a different machine.

@@ -1,6 +1,7 @@
 # Catalog Action val overlays jar defaults; apply rewrites version and sha together.
 > zipxWorkflowGenerate
 $ exists .github/workflows/ci.yml
+$ exists .github/workflows/zipx-version-updates.yml
 > assertActionPins
 > assertActionRewrite
 > reload

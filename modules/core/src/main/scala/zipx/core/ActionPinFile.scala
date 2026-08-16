@@ -36,11 +36,11 @@ object ActionPinFile:
     */
   private val ExtraBlockOpen: Regex = raw"""^${ActionPins.ExtraPrefix}\s*:\s*$$""".r
 
-  /** An indented pin inside the `extra:` block. Keys admit `-` as well, since a consumer names an extra pin after the
-    * action (`configure-aws-credentials`) rather than after a camelCase field.
+  /** An indented pin inside the `extra:` block. Keys are catalog Action names (`owner/repo`, with `-` and `/`), not
+    * camelCase field keys.
     */
   private val ExtraLine: Regex =
-    raw"""^\s+([A-Za-z][A-Za-z0-9_-]*)\s*:\s*(\S+?)(?:\s+#\s*(\S+))?\s*$$""".r
+    raw"""^\s+([A-Za-z][A-Za-z0-9_.+/-]*)\s*:\s*(\S+?)(?:\s+#\s*(\S+))?\s*$$""".r
 
   private val UsesLine: Regex =
     raw"""^\s*-?\s*uses:\s*(\S+?)(?:\s+#\s*(\S+))?\s*$$""".r

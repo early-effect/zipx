@@ -130,6 +130,7 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
           .render(ActionPins.Defaults)
           .linesIterator
           .collect { case line if !line.startsWith("#") => line.takeWhile(_ != ':') }
+          .takeWhile(_ != ActionPins.ExtraPrefix)
           .toList
         assertTrue(rendered == keys)
       },
@@ -264,6 +265,27 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
           ActionPinFile.parse(text).swap.exists(_.contains(s"${ActionPinFile.DefaultPath}:2:")),
         )
       },
+      test("catalog extra Action names with owner/repo round-trip") {
+        val pins = ActionPins
+          .overlay(
+            ActionPins(),
+            Seq(
+              Action(
+                "aws-actions/configure-aws-credentials",
+                "v6.2.3",
+                sha = "e6de054238d6b7531b4efff3b6587d9aade6a06c",
+              )
+            ),
+          )
+          .toOption
+          .get
+        val parsed = ActionPinFile.parse(ActionPinFile.render(pins))
+        assertTrue(
+          parsed.map(_.extraByPrefix("aws-actions/configure-aws-credentials")) ==
+            Right(Some(ActionRef("aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c"))),
+          parsed.map(_.extraVersion("aws-actions/configure-aws-credentials")) == Right(Some("v6.2.3")),
+        )
+      },
       test("an extra key may name any action, since there is no prefix to check it against") {
         // The documented weakening: `aws: totally/unrelated@sha` is legal where `checkout: totally/unrelated@sha`
         // is not. Worth asserting so the asymmetry is deliberate rather than an oversight.
@@ -320,7 +342,7 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
           pulled.map(_.extraRef("aws")) == Right(Some(ActionRef("acme/thing@cafebabe"))),
           pulled.exists(_.extraVersion("aws").contains("v6.1.0")),
           // No key exists for it, so guessing one would be worse than leaving it to whoever wrote the step.
-          pulled.exists(_.extra.keySet == Set("aws")),
+          pulled.exists(p => p.extra.contains("aws") && !p.extra.contains("nobody/knows")),
         )
       },
     ),
@@ -343,7 +365,7 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
         )
       },
       test("ignores an unrelated third-party action rather than refusing the workflow") {
-        val yaml = "      - uses: aws-actions/configure-aws-credentials@v6\n"
+        val yaml = "      - uses: hashicorp/setup-terraform@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         assertTrue(ActionPinFile.pullFromWorkflow(yaml, ActionPins.Defaults) == Right(ActionPins.Defaults))
       },
       test("refuses a known action whose ref a rewrite left invalid") {

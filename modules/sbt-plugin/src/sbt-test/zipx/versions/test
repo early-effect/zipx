@@ -2,6 +2,7 @@
 > zipxWorkflowGenerate
 $ exists project/plugins.sbt
 $ exists project/build.properties
+$ exists .github/workflows/zipx-version-updates.yml
 > assertVersions
 > zipxWorkflowCheck
 > zipxDepUpdate dry-run

@@ -243,6 +243,7 @@ object PinFeedSpec extends ZIOSpecDefault:
           VersionStrategy.npm.classify("1.2.3", "1.3.0") == BumpKind.Minor,
           VersionStrategy.npm.classify("1.2.3", "2.0.0") == BumpKind.Major,
           VersionStrategy.npm.classify("1.2.3", "1.2.4-rc.1") == BumpKind.PreRelease,
+          VersionStrategy.npm.classify("5.7.0", "4.9.1") == BumpKind.None,
         )
       },
       test("latestStable never returns a pre-release when any stable candidate exists") {

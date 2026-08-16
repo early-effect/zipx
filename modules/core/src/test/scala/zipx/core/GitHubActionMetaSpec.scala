@@ -14,6 +14,15 @@ object GitHubActionMetaSpec extends ZIOSpecDefault:
           |]""".stripMargin
       assertTrue(GitHubActionMeta.pickLatestRelease(json) == Right(Some(GitHubActionMeta.Release("v7.0.1", None))))
     },
+    test("pickLatestRelease takes the highest stable semver, not GitHub's date order") {
+      val json =
+        """[
+          |{"tag_name":"v4.9.1","draft":false,"prerelease":false},
+          |{"tag_name":"v5.7.0","draft":false,"prerelease":false},
+          |{"tag_name":"v3.1.0-node20","draft":false,"prerelease":false}
+          |]""".stripMargin
+      assertTrue(GitHubActionMeta.pickLatestRelease(json) == Right(Some(GitHubActionMeta.Release("v5.7.0", None))))
+    },
     test("peelSha reads a commit git ref") {
       val json = """{"object":{"sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","type":"commit"}}"""
       assertTrue(GitHubActionMeta.peelSha(json) == Right("3d3c42e5aac5ba805825da76410c181273ba90b1"))
