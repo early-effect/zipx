@@ -277,7 +277,7 @@ Snapshot never runs on a PR.
         )
       ),
     ),
-    section("Maven is the versions catalog")(
+    section("The versions catalog")(
       md"""
 ```mermaid
 flowchart LR
@@ -285,16 +285,22 @@ flowchart LR
     Lib
     Plugin
     Pin
+    Action
   end
-  subgraph bump [local or Update CI]
+  subgraph bump [local]
     Dep[zipxDepUpdate]
     PinU[zipxPinUpdate]
+    ActU[zipxActionUpdate]
   end
+  Lib --> Dep
+  Plugin --> Dep
+  Pin --> PinU
+  Action --> ActU
 ```
 
-`Lib` / `Plugin` / `Pin` vals share one catalog file. `zipxDepUpdate` rewrites Maven constructors. `zipxPinUpdate`
-rewrites `Pin` constructors. A pin feed is only for pins that have no Maven coordinate: a CDN URL plus a checksum, a
-tarball tag, a file you vendor into the repo.
+`Lib` / `Plugin` / `Pin` / `Action` vals share one catalog file. `zipxDepUpdate` rewrites Maven constructors.
+`zipxPinUpdate` rewrites `Pin` constructors. `zipxActionUpdate` rewrites `Action` constructors. A pin feed is only for
+pins that have no Maven coordinate: a CDN URL plus a checksum, a tarball tag, a file you vendor into the repo.
 """
     ),
   )

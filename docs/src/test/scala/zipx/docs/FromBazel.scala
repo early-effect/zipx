@@ -49,7 +49,7 @@ meant updating more than one world.
 | Maintenance surface | Disconnected / Bazel-shaped | zipx Aggregate |
 |---|---|---|
 | Add a library module | Edit BUILD (and usually CI) | Edit `build.sbt`; regenerate |
-| Verify shape | Often N jobs or a matrix you list | One `test` job |
+| Verify shape | Often N jobs or a matrix you list | One Aggregate `test` job plus parallel Once gates (`fmt`, `workflow-check`, `advisories`) |
 | Cache | Separate product or RBE | Same planner (`RemoteCacheProof` / ManagedRemote) |
 """,
       exampleValue {
@@ -71,7 +71,7 @@ meant updating more than one world.
       md"""
 You do not have to boil the ocean on day one:
 
-1. Add `sbt-zipx`; keep Aggregate defaults (one calm Verify job).
+1. Add `sbt-zipx`; keep Aggregate defaults (one root test job plus parallel Once gates).
 2. `zipxWorkflowGenerate` / `zipxWorkflowCheck` so drift cannot sneak back in.
 3. Opt into `ManagedRemote` or `RemoteCacheProof.sidecar` when the team is ready; measure hits (`RemoteCacheItSpec` is
    the in-repo proof).

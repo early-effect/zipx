@@ -9,7 +9,7 @@
 
 You declare modules and `dependsOn` once. zipx emits a workflow that:
 
-- **defaults to Aggregate mode** (few sbt sessions: `sbt test`, one publish/release job);
+- **defaults to Aggregate mode** (few sbt sessions: root `testFull`, parallel fmt / workflow-check / advisories, one publish/release job);
 - **offers Layer and Graph modes** for dependency-ordered waves or per-module fan-out (affected-only PRs, matrix isolation);
 - **caches sbt's build state** with a commit-stable key (local or remote);
 - **builds & publishes docker images** via sbt-native-packager when `DockerPlugin` is enabled;
@@ -83,7 +83,7 @@ What's covered:
 - **Execution modes** (Aggregate / Layer / Graph)
 - Built-in **capabilities**, **custom capabilities**, and **composing sbt commands** (`zipxTasks`, `thenOnce`, `ZipxCentral.release`)
 - Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
-- Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate `test` via Testcontainers)
+- Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate Verify via Testcontainers)
 - **Action pins** (catalog `Action` vals, `zipxActionUpdate`, jar defaults)
 - **Dependency updates** (local `zipxDepUpdate` / `zipxPinUpdate` / `zipxActionUpdate`, then you open the PR) and **Pin feeds**
 - Docker and multi-target deploy
@@ -92,7 +92,7 @@ What's covered:
 
 Runnable reference: [`examples/monorepo`](examples/monorepo). Roadmap: [ROADMAP.md](ROADMAP.md).
 
-Live remote-cache proof (Docker required): part of `sbt core/test` / Aggregate `test` (Testcontainers + sbt fixture image).
+Live remote-cache proof (Docker required): part of `sbt core/testFull` / Aggregate Verify (Testcontainers + sbt fixture image).
 
 ## License
 

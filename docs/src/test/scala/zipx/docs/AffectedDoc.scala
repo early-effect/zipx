@@ -12,8 +12,8 @@ object AffectedDoc extends DocSpecSuite:
   def doc = page("Affected")(
     md"""
 Skip this page unless you opted into **Graph** mode. **Affected** means: only run GitHub jobs for modules this PR
-touched. Aggregate (the default) does not skip jobs this way; sbt's cache skips work *inside* the one test job
-instead (see **Execution modes**).
+touched. Aggregate (the default) does not skip jobs this way; Zinc and the task cache skip compile *inside* the one
+test job instead (see **Execution modes**). Verify still defaults to `testFull`.
 
 **Graph Verify** jobs are path-gated by default. **Graph Publish** and **Graph Deploy** can be, under the
 `zipxAffectedPublish` and `zipxAffectedDeploy` opt-ins below. Aggregate and Layer jobs never are.

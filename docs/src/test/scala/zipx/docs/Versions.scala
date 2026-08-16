@@ -141,7 +141,7 @@ zipx's apply path is the opposite:
 | Usual Scala bump | zipx catalog |
 |---|---|
 | Regex / search-replace across the build | Rewrite `Lib` / `Plugin` / `Pin` constructors only |
-| A `coords` / `libs` list to keep in sync with the vals | `AsCoords` / `AsPins` on each val; `Lib` / `Plugin` share one given |
+| A `coords` / `libs` list to keep in sync with the vals | `AsCoords` / `AsPins` / `AsActions` on each val; `Lib` / `Plugin` share one given |
 | Versions copied into `plugins.sbt` by hand | Generate writes `plugins.sbt` and `build.properties` |
 | A raw `%` coordinate is invisible | `zipxCheckDeps` fails generate if `libraryDependencies` is not a `Lib` row |
 | Each `"zio-test"` line is another string | `.mod("zio-test")` shares the parent version literal |

@@ -99,9 +99,9 @@ lazy val root = (project in file("."))
     ),
     section("Versions catalog")(
       md"""
-Library and plugin versions live in one object you write under `project/` and extend from `ZipxVersions`. Drop
-`MyVersions.settings` at the top of `build.sbt`. Every `Lib` / `Plugin` val is a catalog row; you do not list them
-again. Each module picks a group. Full guide: **Versions**.
+Library, plugin, pin, and Action versions live in one object you write under `project/` and extend from
+`ZipxVersions`. Drop `MyVersions.settings` at the top of `build.sbt`. Every `Lib` / `Plugin` / `Pin` / `Action` val is
+a catalog row; you do not list them again. Each module picks a group. Full guide: **Versions**.
 
 ```scala
 // project/ZipxVersions.scala
@@ -137,7 +137,7 @@ A bare `zipxTestTask := zipxTasks.of(testFull)` is the plugin default. On sbt 2,
 uses `testFull` so every suite actually runs. Any module can override the task in its own `.settings(...)`.
 
 ```scala
-zipxJavaVersion := JavaVersion("25")
+zipxJavaVersion := JdkVersion("25")
 zipxTestTask    := zipxTasks.of(testFull)  // plugin default
 zipxWorkflowDispatch := true
 ```

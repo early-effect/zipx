@@ -60,8 +60,8 @@ The publishable `plugin` project remains for Central publish and scripted tests.
 both with `JobCondition.repositoryIs("early-effect/zipx")` so fork tag pushes do not publish or deploy Pages.
 
 **Remote-cache live proof** lives in `core` tests (`zipx.it.RemoteCacheItSpec`): plain Testcontainers for bazel-remote
-plus an sbt fixture image (Docker required; failure is a clear test failure). It runs under Aggregate `test` / `sbt
-core/test`. Pins and Put/Get are documented under **Remote cache for teams** / `RemoteCacheProof`.
+plus an sbt fixture image (Docker required; failure is a clear test failure). It runs under Aggregate Verify / `sbt
+core/testFull`. Pins and Put/Get are documented under **Remote cache for teams** / `RemoteCacheProof`.
 """
     ),
     section("Docs site")(

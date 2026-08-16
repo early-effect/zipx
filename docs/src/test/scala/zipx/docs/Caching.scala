@@ -14,18 +14,18 @@ object Caching extends DocSpecSuite:
 zipx restores sbt's cache on the CI runner so the test job does not start from zero every time. You can ignore the
 knobs on this page until CI feels slow.
 
-sbt 2 caches task results **across JVM runs**. zipx restores that cache before `sbt test`, keyed by a **commit-stable
-epoch** (`zipxCacheEpoch`, default `CacheEpoch.GitTags()`). Every push within a PR reuses prior hits; cutting a
-release tag rolls the epoch **without regenerating** `ci.yml`. Remote backends share the same hits across machines,
-including developer laptops when CI hydrates a shared store (see **Remote cache for teams**).
+sbt 2 caches task results **across JVM runs**. zipx restores that cache before the Verify test task, keyed by a
+**commit-stable epoch** (`zipxCacheEpoch`, default `CacheEpoch.GitTags()`). Every push within a PR reuses prior hits;
+cutting a release tag rolls the epoch **without regenerating** `ci.yml`. Remote backends share the same hits across
+machines, including developer laptops when CI hydrates a shared store (see **Remote cache for teams**).
 This pairs with [`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci).
 
 ```mermaid
 flowchart TD
   Push([1 · git push]) --> Restore[2 · restore epoch cache]
-  Restore --> Sbt[3 · sbt test]
+  Restore --> Sbt[3 · Verify test task]
   Sbt --> Hits{4 · digest hits?}
-  Hits -->|yes| Skip([skip compile and suites])
+  Hits -->|yes| Skip([skip redo when digests match])
   Hits -->|no| Work([run work · write digests])
   Work --> Store[(LocalDir or remote)]
   Skip --> Store

@@ -99,6 +99,7 @@ writing a file:
 | `ModuleId.make` on every sbt project id | a project id sbt allows and a GitHub job id does not |
 | `Step.validate` / `YamlPrinter.problem` at render | a hand-built step, or content YAML would mangle |
 | `Action` constructor / leftover pin YAML | a short SHA, a leftover `.github/zipx/action-pins.yml`, a duplicate Action name |
+| leftover `zipx-scala-steward.yml` | zipx no longer emits a bot workflow; `zipxLeftoverSteward` Fail (default) or Warn(reason) |
 
 A leftover pin YAML fails generate with the `Action(...)` vals to paste. Catalog rows overlay jar defaults. See
 **Action pins**.

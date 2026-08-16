@@ -9,12 +9,14 @@ object Settings extends DocSpecSuite:
 
   def doc = page("Settings")(
     md"""
-You can skip this reference until you need a knob. Defaults are enough for Aggregate test + publish.
+You can skip this reference until you need a knob. Defaults are enough for Aggregate Verify (test, fmt,
+workflow-check, advisories) plus publish.
 
 Write settings **without** `ThisBuild /`. zipx reads them from the root project (sbt 2).
 
-A typed setting (`WorkflowName`, `JdkVersion`, `RunnerOs`, …) checks its literal where you write it; the `String`-typed
-task settings below are checked at `zipxWorkflowGenerate` instead. See **Validation**.
+A typed setting (`WorkflowName`, `JdkVersion`, `RunnerOs`, …) checks its literal where you write it.
+`zipxTestTask` / `zipxPublishTask` / `zipxCacheRehydrateTask` are `SbtCommand` (prefer `zipxTasks` so a renamed key
+fails at load). Declared command names are checked at `zipxWorkflowGenerate`. See **Validation**.
 """,
     section("Build-level")(
       md"""
@@ -25,10 +27,9 @@ ${SettingDef.settingsTable(ZipxSettings.buildLevel)}
       md"""
 ${SettingDef.settingsTable(ZipxSettings.projectLevel)}
 
-The catalog types these as `SbtCommand` (same as `ModuleNode` / `PlanConfig`). The plugin still exposes
-`settingKey[String]` because an opaque type there would need a `JsonFormat`; the check moves to
-`zipxWorkflowGenerate`, which names the setting. `zipxTasks` / `cmd"…"` take real `TaskKey`s and skip it. See
-**Validation**.
+The catalog types these as `SbtCommand` (same as `ModuleNode` / `PlanConfig`). The plugin exposes
+`settingKey[SbtCommand]` (`zipxTestTask`, `zipxPublishTask`, `zipxCacheRehydrateTask`). Prefer `zipxTasks` /
+`cmd"…"` so a renamed task fails at load. See **Validation**.
 
 By default a module is in the publish graph when it is not an aggregator, `publish / skip` is false, and
 `publishArtifact` is true. Prefer `publish / skip := true` for non-publishers; set `zipxPublish := Some(false/true)`
@@ -54,7 +55,8 @@ Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Lay
 `CapabilityName` and `TargetName` are validated wrappers, not aliases for `String`: joined with `-` they *are* the
 `jobs.<job_id>` key GitHub sees, so a space or a `/` in one used to produce a workflow that failed on push. A literal
 is checked where you write it, `CapabilityName("docker-stg")`, and the built-in names are available as
-`Capability.TestName` / `.PublishName` / `.DockerName` / `.DeployName` / `.PinCheckName` for `needsCapabilities`. What a combination of
+`Capability.TestName` / `.FmtName` / `.WorkflowCheckName` / `.AdvisoriesName` / `.PublishName` / `.DockerName` /
+`.DeployName` / `.PinCheckName` for `needsCapabilities`. What a combination of
 fields cannot be checked at a literal (`needsCapabilities` cycles, `workflowCall` beside `services`, a never-true `if:`)
 is checked at `zipxWorkflowGenerate`; see **Validation**.
 

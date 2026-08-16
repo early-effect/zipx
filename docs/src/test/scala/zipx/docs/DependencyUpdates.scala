@@ -2,7 +2,6 @@ package zipx.docs
 
 import specular.*
 import specular.ziotest.DocSpecSuite
-import zipx.core.*
 import zipx.workflow.{Cron, DayOfWeek}
 import zio.test.*
 
@@ -18,7 +17,7 @@ fails undeclared GAVs. You bump locally with `zipxDepUpdate` / `zipxPinUpdate` /
 constructor diff, run tests, and open the PR. That is the product. There is no weekly bot job for the catalog.
 
 A regex across `build.sbt` cannot move version with sha256 / purl / git SHA, and a string-only PR would still fail
-generate. Do not install a search-replace bot.
+generate. Do not install a search-replace bot. Leftover `zipx-scala-steward.yml` fails generate (`zipxLeftoverSteward`).
 
 Four catalog kinds:
 

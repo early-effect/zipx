@@ -14,9 +14,9 @@ object RemoteCacheForTeams extends DocSpecSuite:
 Skip until CI is green and you want local builds to reuse what CI already compiled. **CI should make local builds
 faster, not only green checks.**
 
-On sbt 2.x, task and test results are content-addressed and remote-ready. When zipx CI runs `sbt test` (or publish)
-against a shared remote cache, it **hydrates** digests for the commits your team already built. The next laptop (or
-the next PR job) downloads those results instead of recompiling and retesting the same bytecode.
+On sbt 2.x, task and test results are content-addressed and remote-ready. When zipx CI runs the Verify test task
+(`testFull` by default, or publish) against a shared remote cache, it **hydrates** digests for the commits your team
+already built. The next laptop (or the next PR job) downloads those results instead of recompiling the same bytecode.
 
 That reverses a familiar bruise: every morning you pull a dozen teammates' changes and spend the first hour building
 *their* code. With a CI-hydrated cache, most of that work is already a hit. See
@@ -63,7 +63,7 @@ Typical loop with a **ManagedRemote** (or long-lived sidecar) backend:
 
 ```mermaid
 flowchart TD
-  CI([1 · CI Aggregate · sbt test]) -->|Put digests on miss| Cache[(ManagedRemote)]
+  CI([1 · CI Aggregate · testFull]) -->|Put digests on miss| Cache[(ManagedRemote)]
   CI -->|Get on later PR jobs| Cache
   Dev([2 · Developer laptop]) -->|Get after git pull| Cache
   class CI warn
@@ -73,10 +73,10 @@ flowchart TD
 CI is the hydrator (amber): misses compile onsite, then **Put**s digests. Later PR jobs and laptops (green) **Get**
 the same entries when JDK/OS `cacheVersion` and digests match.
 
-1. A PR or `main` job runs Aggregate `sbt test` with `ZIPX_REMOTE_CACHE` set.
+1. A PR or `main` job runs Aggregate `testFull` with `ZIPX_REMOTE_CACHE` set.
 2. Misses compile/test onsite; successes write action-cache entries and outputs to the remote store.
 3. Teammates (and later CI jobs) with the same JDK/OS `cacheVersion` and matching digests **Get** those entries.
-4. Local `sbt test` after `git pull` shows high cache %: cold JVM, warm digests.
+4. Local `sbt` after `git pull` shows high cache %: cold JVM, warm digests.
 
 **LocalDir** (default) already helps *within* GitHub Actions via epoch-keyed `actions/cache`. It does not share across
 developer laptops. Remote backends are how the win leaves the datacenter.

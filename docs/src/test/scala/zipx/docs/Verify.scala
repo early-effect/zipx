@@ -76,8 +76,8 @@ zipxVerifyCleanLabel := Some("clean")  // default
     section("Coverage (and why `test` is the wrong task here)")(
       md"""
 On sbt 2.0 plain **`test` is `testQuick`**. It skips tests it deems unaffected and prints `No tests to run`, which reads
-like success. That is usually what you want in a Verify job, where sbt's incrementality is the point. Under **coverage
-it is a silent wrong answer**: the hand-rolled alias everyone writes,
+like success. zipx's Verify default is **`testFull`** so CI cannot skip suites. Under **coverage that skip is a silent
+wrong answer**: the hand-rolled alias everyone writes,
 
 ```scala
 addCommandAlias("testWithCoverage", "cleanFull; coverage; compile; test; coverageAggregate; coverageReport; coverageOff")
@@ -139,10 +139,11 @@ and that should be a red job rather than an empty upload. Turn it off with `uplo
       md"""
 `zipxAffectedOnPR` (default `true`) emits an `affected` setup job only when a **Graph** Verify capability is present.
 Aggregate and Layer always invoke their full stage command (they do not skip GitHub jobs). That is not the same as
-"always recompile and retest everything": sbt 2's incremental `test` and cross-run task cache (restored by zipx at the
-epoch, or via remote cache) still skip unaffected work, even on a cold JVM. See **Execution modes** ("Two kinds of
-affected") and the **Affected** page for the fail-open handoff, who is gated, and `zipxAffectedPublish`, which extends
-the same narrowing to Graph Publish jobs as a separate opt-in.
+"always recompile everything": Zinc and the cross-run task cache (restored by zipx at the epoch, or via remote cache)
+still skip unaffected compile work, even on a cold JVM. Verify's default is `testFull`, so suites still run unless the
+whole test task is a cache hit. See **Execution modes** ("Two kinds of affected") and the **Affected** page for the
+fail-open handoff, who is gated, and `zipxAffectedPublish`, which extends the same narrowing to Graph Publish jobs as
+a separate opt-in.
 
 ```scala
 zipxAffectedOnPR := true   // default with Graph Verify

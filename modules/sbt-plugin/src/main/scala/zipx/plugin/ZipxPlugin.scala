@@ -656,18 +656,17 @@ object ZipxPlugin extends AutoPlugin:
     )
   }
 
-  /** Explicit `zipxActions` (≠ Defaults) wins. Else overlay jar Defaults with catalog Action rows. A committed pin YAML
-    * is leftover input and fails.
+  /** A committed pin YAML is leftover input and always fails, even if `zipxActions` is set. Dual source is not allowed.
+    * Else explicit `zipxActions` (≠ Defaults) wins; else overlay jar Defaults with catalog Action rows.
     */
   private def resolveActionPins(extracted: Extracted, root: File): ActionPins =
-    val setting        = readBuildSetting(extracted, zipxActions, ActionPins.Defaults)
-    val userOverrodeIt = setting != ActionPins.Defaults
-    if userOverrodeIt then setting
+    val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
+    if rel.nonEmpty && (root / rel).exists then
+      val parsed = ActionPinFile.load((root / rel).toPath).getOrElse(ActionPins.Defaults)
+      sys.error(ZipxCatalog.leftoverPinFileError(rel, parsed))
+    val setting = readBuildSetting(extracted, zipxActions, ActionPins.Defaults)
+    if setting != ActionPins.Defaults then setting
     else
-      val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
-      if rel.nonEmpty && (root / rel).exists then
-        val parsed = ActionPinFile.load((root / rel).toPath).getOrElse(ActionPins.Defaults)
-        sys.error(ZipxCatalog.leftoverPinFileError(rel, parsed))
       val rows = readBuildSetting(extracted, zipxActionRows, Seq.empty)
       orFail(ActionPins.overlay(ActionPins.Defaults, rows))
   end resolveActionPins

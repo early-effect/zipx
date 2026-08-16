@@ -64,7 +64,8 @@ gating is derived from phase, scope and the two settings, not from `Gate`, so th
 **Affected**.
 
 `zipxCapabilities += ...` merges with built-ins; the **same `name` replaces** a built-in (e.g. turn Aggregate docker
-into a multi-registry Graph capability).
+into a multi-registry Graph capability). A custom `extraSteps` `uses:` should be a full commit SHA (or an `Action`
+catalog row a pack looks up), not a floating `@v6` tag; zipx-emitted steps are already SHA-pinned.
 
 ```scala
 zipxCapabilities += Capability.publish.copy(

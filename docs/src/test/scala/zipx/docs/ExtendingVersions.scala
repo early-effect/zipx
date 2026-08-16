@@ -28,15 +28,16 @@ object ExtendingVersions extends DocSpecSuite:
     md"""
 Skip unless you are writing an **sbt plugin that sits on zipx** (a company catalog, CDN or vendor pins; sbt-splice is
 one). Consumers stay on **Versions**: they extend `ZipxVersions`, drop `MyVersions.settings`, and write `Lib` /
-`Plugin` / `Pin` vals.
+`Plugin` / `Pin` / `Action` vals.
 
 Two jobs. They are not the same hook.
 
 1. **Emit your plugin line** into generated `project/plugins.sbt` from the version on the classpath (`zipxSelfPlugins` /
    `ZipxSelf.emit`). Consumers should not duplicate that GAV in `ZipxVersions`.
-2. **Optionally** put your libraries and pins in the consumer catalog (`Lib` / `Pin` vals on a subtype, or `AsCoords` /
-   `AsPins` on a bundle). That is the row story below. A plugin that ships a `PinFeed` (lookup plus optional
-   `materialize`) does **not** ship the inventory: the consumer repo owns which version is pinned.
+2. **Optionally** put your libraries, pins, and Actions in the consumer catalog (`Lib` / `Pin` / `Action` vals on a
+   subtype, or `AsCoords` / `AsPins` / `AsActions` on a bundle). That is the row story below. A plugin that ships a
+   `PinFeed` (lookup plus optional `materialize`) does **not** ship the inventory: the consumer repo owns which version
+   is pinned.
 """,
     section("Emit your plugin line")(
       md"""
@@ -75,15 +76,15 @@ Generate writes zipx first, then your line, then the consumer's catalog plugins:
     ),
     section("Your libraries in that same catalog")(
       md"""
-Collection is a typeclass, `AsCoords` / `AsPins`. `Lib` and `Plugin` share `AsCoords` (`A <: ZipxCoord`). `Pin` has
-`AsPins`. You add a given for your own type, or you put `Lib` / `Plugin` / `Pin` vals on a `ZipxVersions` subtype. There
-is no second `coords` list for the consumer to keep in sync. Do not put *your* plugin GAV on that subtype if you already
-emit it; that catalog line is dropped.
+Collection is a typeclass, `AsCoords` / `AsPins` / `AsActions`. `Lib` and `Plugin` share `AsCoords` (`A <: ZipxCoord`).
+`Pin` has `AsPins`. `Action` has `AsActions`. You add a given for your own type, or you put `Lib` / `Plugin` / `Pin` /
+`Action` vals on a `ZipxVersions` subtype. There is no second `coords` list for the consumer to keep in sync. Do not
+put *your* plugin GAV on that subtype if you already emit it; that catalog line is dropped.
 """
     ),
     section("Two paths")(
       md"""
-**Path 1: `Lib` / `Plugin` / `Pin` vals on your subtype.** Inherited fields are collected. The consumer writes
+**Path 1: `Lib` / `Plugin` / `Pin` / `Action` vals on your subtype.** Inherited fields are collected. The consumer writes
 `object MyVersions extends SpliceVersions` and your vals are rows.
 
 ```scala
@@ -97,7 +98,7 @@ The consumer still owns those `Pin` vals (or copies them). You ship the feed, no
 
 **Path 2: a bundle type with `given AsCoords[YourType]`.** Put the given on the companion so the catalog file does not
 import extra machinery. Collection summons it the same way it summons `Lib`. CDN bundles use `given AsPins` the same
-way.
+way; Action bundles use `given AsActions`.
 
 ```scala
 final case class SpliceLibs(runtime: Lib)
@@ -114,9 +115,10 @@ trait SpliceVersions extends ZipxVersions:
 Do **not** add `given AsCoords[List[Lib]]`. That would collect every helper list on the consumer object. Own a named
 type.
 
-Keep `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` / `Pin("feed", "id", "from", …)` constructors in
-`project/ZipxVersions.scala`. `zipxDepUpdate` and `zipxPinUpdate` rewrite those literals; they do not know about
-`SpliceLibs("1.0.0")`. Maven, pin, and self-emit hunks are below.
+Keep `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` / `Pin("feed", "id", "from", …)` /
+`Action("owner/repo", "from", sha = …)` constructors in `project/ZipxVersions.scala`. `zipxDepUpdate`, `zipxPinUpdate`,
+and `zipxActionUpdate` rewrite those literals; they do not know about `SpliceLibs("1.0.0")`. Maven, pin, and self-emit
+hunks are below.
 """
     ),
     section("What collection sees")(
@@ -164,7 +166,8 @@ The consumer still writes one line in `build.sbt`: `MyVersions.settings`.
       md"""
 The consumer compiles `project/ZipxVersions.scala` with your plugin and sbt-zipx on the meta classpath. Put the trait,
 the bundle, and the given in a package they can `import` (`import splice.*`, plus `import zipx.*` for `ZipxVersions` /
-`AsCoords` / `AsPins` / `Pin`). The given on the bundle companion is found without a further import.
+`AsCoords` / `AsPins` / `AsActions` / `Pin` / `Action`). The given on the bundle companion is found without a further
+import.
 
 Do not name a package `sbt`. On sbt 2 that shadows `_root_.sbt` and the plugin will not compile. zipx keeps catalog
 types in `package zipx` for the same reason.

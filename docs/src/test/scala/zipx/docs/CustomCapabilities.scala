@@ -110,7 +110,7 @@ zipxCapabilities += Capability
   .copy(
     extraSteps = _ => List(
       Step
-        .uses("aws-actions/configure-aws-credentials@v6")
+        .uses("aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c")
         .named("Login")
         .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
         .build
@@ -142,7 +142,7 @@ zipxCapabilities += Capability
             _ =>
               List(
                 Step
-                  .uses("aws-actions/configure-aws-credentials@v6")
+                  .uses("aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c")
                   .named("Login")
                   .withInput("role-to-assume", Expr.env("DEPLOY_ROLE"))
                   .build
@@ -215,8 +215,8 @@ nothing is listening on yet, and nothing about it is expressible in your test co
 ready, it is usually better off **owning the container's lifecycle itself** with Testcontainers, which waits on a
 strategy you choose and reports a startup failure as a test failure. zipx's own live remote-cache suite does exactly
 that (`BazelRemoteTestContainer` in core tests, waiting on HTTP `/status` 200 because a listening gRPC port alone races)
-and runs under Aggregate `test` like any other suite. Docker must be available; if it is not, the suite fails with a
-clear message rather than being ignored.
+and runs under Aggregate Verify / `sbt core/testFull` like any other suite. Docker must be available; if it is not, the
+suite fails with a clear message rather than being ignored.
 
 The rule of thumb: a service the job just needs *present* (and can retry against) is a `withService`; a container a test
 needs *ready*, or needs to inspect and restart, belongs to the test.
