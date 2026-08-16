@@ -184,8 +184,8 @@ Public-ecosystem PURLs (`pkg:npm/...`, `pkg:maven/...`) are the ones the gate is
 `sbt zipxPinCheck` runs lookup + OSV.
 When some feed uses `Update`, the companion is `contents: write` and `pull-requests: write`, checks out with
 `GITHUB_TOKEN`, rewrites `Pin(...)` in the catalog, runs optional `materialize`, and `gh pr create`s `zipx/pin-updates`
-as `github-actions[bot]`. Alert-only stays `contents: read` and never opens a PR. The `pin-check` capability never
-applies.
+as `github-actions[bot]`. That PR does not rewrite `.github/workflows/` (`GITHUB_TOKEN` cannot push those files).
+Alert-only stays `contents: read` and never opens a PR. The `pin-check` capability never applies.
 
 **Required repo/org setting** (only needed for `Update`): [Allow GitHub Actions to create and
 approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).

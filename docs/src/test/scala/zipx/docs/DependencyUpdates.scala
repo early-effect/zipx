@@ -40,27 +40,37 @@ flowchart LR
 Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-updates.yml` (schedule plus
 `workflow_dispatch`). The default schedule is Sunday 00:00 UTC; set `zipxVersionUpdatesSchedule` to change it
 (`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job runs `zipxDepUpdate yes`, `zipxActionUpdate yes`,
-`zipxPinUpdate yes`, then `zipxWorkflowGenerate`, and `gh pr create`s `zipx/version-updates` as
-`github-actions[bot]`. That PR is every ZipxVersions row kind: Lib / Plugin / Action / Pin constructors, plus
-`plugins.sbt` when a plugin moved.
+`zipxPinUpdate yes`, then `zipxCatalogGenerate` (plugins.sbt, composites, `project/zipx-ci.env`; not workflow YAML),
+and `gh pr create`s `zipx/version-updates` as `github-actions[bot]`. That PR is every ZipxVersions row kind: Lib /
+Plugin / Action / Pin constructors, plus `plugins.sbt` when a plugin moved.
 
 `zipxVersionUpdates := false` deletes the companion.
 
 **Required repo/org setting:** [Allow GitHub Actions to create and
 approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).
+`GITHUB_TOKEN` is enough, the same as Scala Steward. The companion does not write `.github/workflows/` (`git add`
+excludes that directory). Java and runner come from `project/zipx-ci.env`; java and sbt pins live in `zipx-sbt-setup`.
+Checkout is a major tag because `uses:` cannot be parameterized. Generate the companion workflow once from a clone; the
+bot then leaves it alone.
 """,
       exampleValue {
-        VersionUpdatesWorkflow.render(ActionPins.Defaults, "21", "ubuntu-latest").yaml
+        VersionUpdatesWorkflow.render(ActionPins.Defaults).yaml
       }.assert(yaml =>
         assertTrue(
           yaml.contains("workflow_dispatch"),
           yaml.contains("zipxDepUpdate yes"),
           yaml.contains("zipxActionUpdate yes"),
           yaml.contains("zipxPinUpdate yes"),
-          yaml.contains("zipxWorkflowGenerate"),
+          yaml.contains("zipxCatalogGenerate"),
           yaml.contains("zipx/version-updates") || yaml.contains("gh pr create"),
           yaml.contains("contents: write") || yaml.contains("contents:write"),
           yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write"),
+          yaml.contains("./.github/actions/zipx-sbt-setup"),
+          yaml.contains("project/zipx-ci.env"),
+          yaml.contains("git add --all"),
+          yaml.contains(":!.github/workflows"),
+          !yaml.contains("git add -A"),
+          yaml.indexOf("zipxWorkflowGenerate") == yaml.lastIndexOf("zipxWorkflowGenerate"),
         )
       ),
     ),
@@ -73,8 +83,9 @@ The same rewrite, without waiting for the schedule. You do not need to know CI Y
 2. **Say yes, or type `y` at the prompt.** `yes` applies every listed bump. A bare command with no terminal lists and
    stops; pass `yes` from a script. Empty Action rows: `yes` is a no-op (the scheduled job stays green).
 3. **Reload if the catalog file changed.** `project/ZipxVersions.scala` is part of the build definition.
-4. **Regenerate if a plugin, sbt, Scala, or Action version moved.** `sbt zipxWorkflowGenerate`. The scheduled job
-   always generates after apply.
+4. **Regenerate catalog outputs if a plugin, sbt, Scala, or Action version moved.** `sbt zipxCatalogGenerate` writes
+   `plugins.sbt`, composites, and `project/zipx-ci.env`. Use `sbt zipxWorkflowGenerate` when `ci.yml` itself must
+   change (checkout major, job graph). The scheduled job runs `zipxCatalogGenerate` only.
 
 ```text
 sbt zipxDepUpdate             # list catalog bumps, then prompt

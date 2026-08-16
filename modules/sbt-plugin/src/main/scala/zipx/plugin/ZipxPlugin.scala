@@ -400,6 +400,7 @@ object ZipxPlugin extends AutoPlugin:
 
     val zipxGraph            = taskKey[Unit](ZipxSettings.graph.description)
     val zipxPublishOrder     = taskKey[Unit](ZipxSettings.publishOrder.description)
+    val zipxCatalogGenerate  = taskKey[Unit](ZipxSettings.catalogGenerate.description)
     val zipxWorkflowGenerate = taskKey[Unit](ZipxSettings.workflowGenerate.description)
     val zipxWorkflowCheck    = taskKey[Unit](ZipxSettings.workflowCheck.description)
     val zipxAdvisoryCheck    = taskKey[Unit](ZipxSettings.advisoryCheck.description)
@@ -500,6 +501,14 @@ object ZipxPlugin extends AutoPlugin:
     zipxGraph        := graphTask.value,
     zipxPublishOrder := publishOrderTask.value,
     // `Def.uncached` because a file write is not a valid cached-task output.
+    zipxCatalogGenerate := Def.uncached {
+      Def
+        .sequential(
+          Def.task(validateCatalog(Project.extract(state.value), streams.value.log)),
+          writeCatalogOutputs,
+        )
+        .value
+    },
     zipxWorkflowGenerate := Def.uncached {
       Def
         .sequential(
@@ -807,6 +816,12 @@ object ZipxPlugin extends AutoPlugin:
     ActionPinFile.annotateUses(yaml, cfg.actions)
   }
 
+  private def writeCatalogOutputs: Def.Initialize[Task[Unit]] = Def.task {
+    writeCompositeActions.value
+    writeCatalogIfEnabled.value
+    writeCiParams.value
+  }
+
   private def writeGeneratedWorkflows: Def.Initialize[Task[Unit]] = Def.task {
     val log     = streams.value.log
     val out     = workflowFile.value
@@ -814,11 +829,18 @@ object ZipxPlugin extends AutoPlugin:
     IO.write(out, content)
     log.info(s"zipx wrote ${out.getPath}")
     warnRawFragments.value
-    writeCompositeActions.value
+    writeCatalogOutputs.value
     checkLeftoverSteward(Project.extract(state.value), (LocalRootProject / baseDirectory).value, streams.value.log)
     writePinWorkflowsIfEnabled.value
     writeVersionUpdatesIfEnabled.value
-    writeCatalogIfEnabled.value
+  }
+
+  private def writeCiParams: Def.Initialize[Task[Unit]] = Def.task {
+    val cfg  = planConfig.value
+    val root = (LocalRootProject / baseDirectory).value
+    val file = root / ZipxCiParams.RelPath
+    IO.write(file, ZipxCiParams.render(cfg.javaVersion, cfg.runnerOs))
+    streams.value.log.info(s"zipx wrote ${file.getPath}")
   }
 
   private def writeCompositeActions: Def.Initialize[Task[Unit]] = Def.task {
@@ -907,7 +929,7 @@ object ZipxPlugin extends AutoPlugin:
     val file      = root / rel
     if enabled then
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
-      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, cfg.javaVersion, cfg.runnerOs, schedule))
+      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule))
       writeCompanion(root, rel, body, log)
     else if file.exists then
       IO.delete(file)
@@ -920,7 +942,7 @@ object ZipxPlugin extends AutoPlugin:
     val file    = root / rel
     if enabled then
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
-      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, cfg.javaVersion, cfg.runnerOs, schedule))
+      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule))
       checkCompanion(root, rel, expected, log)
     else if file.exists then
       sys.error(
@@ -1139,7 +1161,16 @@ object ZipxPlugin extends AutoPlugin:
     checkVersionUpdates(root, cfg, extracted, streams.value.log)
     validateCatalog(extracted, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
+    checkCiParams(root, cfg, streams.value.log)
   }
+
+  private def checkCiParams(root: File, cfg: PlanConfig, log: Logger): Unit =
+    val file     = root / ZipxCiParams.RelPath
+    val expected = ZipxCiParams.render(cfg.javaVersion, cfg.runnerOs)
+    val actual   = if file.exists then IO.read(file) else ""
+    if actual != expected then
+      sys.error(s"${file.getPath} is out of date. Run 'sbt zipxCatalogGenerate' and commit the result.")
+    log.info(s"zipx: ${file.getPath} is up to date.")
 
   private def writeCatalogIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)

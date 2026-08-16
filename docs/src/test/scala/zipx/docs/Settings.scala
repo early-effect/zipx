@@ -100,10 +100,11 @@ use site. Loaded plugins that emit themselves (`zipxSelfPlugins`) write their ow
 are the rest. Full guide: **Versions**. Plugin authors: **Extending Versions**.
 
 `settings` sets `scalaVersion` and the catalog keys. `zipxCheckDeps` fails generate when `libraryDependencies` contain a
-GAV that is not a `Lib` row. `zipxWorkflowGenerate` writes `project/plugins.sbt` and `project/build.properties`. Local
+GAV that is not a `Lib` row. `zipxCatalogGenerate` writes `project/plugins.sbt`, `project/build.properties`,
+`project/zipx-ci.env`, and composites; `zipxWorkflowGenerate` also writes workflow YAML. Local
 `zipxDepUpdate` / `zipxPinUpdate` / `zipxActionUpdate` rewrite constructors in `zipxVersionsFile`. The scheduled companion
-(`zipxVersionUpdates`, default true) runs those with `yes`, generates, and opens `zipx/version-updates`. Locally you
-can still apply, then `reload` and generate so `plugins.sbt` / `build.properties` match.
+(`zipxVersionUpdates`, default true) runs those with `yes`, then `zipxCatalogGenerate`, and opens `zipx/version-updates`.
+Locally you can still apply, then `reload` and `zipxCatalogGenerate` so `plugins.sbt` / `build.properties` match.
 """
     ),
   )

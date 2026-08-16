@@ -353,6 +353,7 @@ object PinFeedSpec extends ZIOSpecDefault:
             hasUpdate == yaml.contains("gh pr create"),
             hasUpdate == (yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write")),
             hasUpdate == yaml.contains("secrets.GITHUB_TOKEN"),
+            !hasUpdate || yaml.contains(":!.github/workflows"),
           )
         }
       },
