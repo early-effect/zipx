@@ -48,6 +48,7 @@ Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-upda
 
 **Required repo/org setting:** [Allow GitHub Actions to create and
 approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).
+The companion also needs `workflows: write` so `GITHUB_TOKEN` can push regenerated workflow YAML.
 """,
       exampleValue {
         VersionUpdatesWorkflow.render(ActionPins.Defaults, "21", "ubuntu-latest").yaml
@@ -61,6 +62,7 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
           yaml.contains("zipx/version-updates") || yaml.contains("gh pr create"),
           yaml.contains("contents: write") || yaml.contains("contents:write"),
           yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write"),
+          yaml.contains("workflows: write") || yaml.contains("workflows:write"),
         )
       ),
     ),

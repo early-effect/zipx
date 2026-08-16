@@ -8,7 +8,8 @@ import scala.collection.immutable.ListMap
   * `zipxActionUpdate`, `zipxPinUpdate`), regenerates, and opens `zipx/version-updates`.
   *
   * Opening that PR uses `GITHUB_TOKEN` and needs the repo or org setting **Allow GitHub Actions to create and approve
-  * pull requests**.
+  * pull requests**. Generate rewrites workflow YAML, so the token also needs `workflows: write` or GitHub rejects the
+  * push.
   */
 object VersionUpdatesWorkflow:
 
@@ -51,7 +52,7 @@ object VersionUpdatesWorkflow:
     Workflow(
       name = "zipx version updates",
       on = Triggers(schedule = List(schedule), workflowDispatch = true),
-      permissions = ListMap("contents" -> "write", "pull-requests" -> "write"),
+      permissions = ListMap("contents" -> "write", "pull-requests" -> "write", "workflows" -> "write"),
       jobs = ListMap(
         "version-updates" -> Job(
           name = Some("Catalog version updates"),

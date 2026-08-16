@@ -20,6 +20,7 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         yaml.contains("cron:") && (yaml.contains("0 0 * * 0") || yaml.contains("\"0 0 * * 0\"")),
         yaml.contains("contents: write") || yaml.contains("contents:write"),
         yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write"),
+        yaml.contains("workflows: write") || yaml.contains("workflows:write"),
         yaml.contains("zipx/version-updates"),
         checkoutAt >= 0,
         depAt > checkoutAt,
