@@ -185,7 +185,8 @@ drops that catalog line and keeps the loaded version.
       md"""
 The scheduled companion `.github/workflows/zipx-version-updates.yml` (`zipxVersionUpdates`, default true) applies
 `zipxDepUpdate yes`, `zipxActionUpdate yes`, and `zipxPinUpdate yes`, then `zipxCatalogGenerate` (not workflow YAML),
-and opens `zipx/version-updates`. That PR is these constructor hunks. You can run the same apply locally:
+and opens `zipx/version-updates-${'$'}GITHUB_RUN_ID` (labeled `clean`). That PR is these constructor hunks. You can run the
+same apply locally:
 
 ```text
 sbt zipxDepUpdate             # list, then prompt Apply N catalog update(s)? [y/N]
@@ -197,8 +198,9 @@ sbt "zipxActionUpdate yes"
 sbt "zipxActionUpdate dry-run"
 ```
 
-Lookup is Maven Central metadata (then the sbt plugin repo) for `Lib` / `Plugin`. Actions use the GitHub API plus a
-SHA peel. `yes` applies **every** listed bump. With no terminal, a bare command lists and stops.
+Lookup is Maven Central metadata (then the sbt plugin repo) for `Lib` / `Plugin`. Pre-releases are skipped unless
+`zipxPreRelease := PreRelease.Include`. Actions use the GitHub API plus a SHA peel. `yes` applies **every** listed bump.
+With no terminal, a bare command lists and stops.
 
 The catalog file lives under `project/`, so it is part of the build definition. After a local rewrite, `reload` (or a
 fresh sbt) before you generate. The scheduled job starts a new sbt for `zipxCatalogGenerate`, so it does not need

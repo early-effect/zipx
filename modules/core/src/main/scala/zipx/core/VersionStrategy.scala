@@ -6,6 +6,7 @@ import scala.math.Ordering.Implicits.infixOrderingOps
 trait VersionStrategy:
   def classify(current: String, candidate: String): BumpKind
   def latestStable(candidates: List[String]): Option[String]
+  def isPreRelease(version: String): Boolean
 
 object VersionStrategy:
 
@@ -21,6 +22,8 @@ object VersionStrategy:
 
     def latestStable(candidates: List[String]): Option[String] =
       candidates.lastOption
+
+    def isPreRelease(version: String): Boolean = false
 
   private final case class SemVer(major: Int, minor: Int, patch: Int, pre: Option[String]):
     def isPre: Boolean                 = pre.isDefined
@@ -41,6 +44,8 @@ object VersionStrategy:
     def latestStable(candidates: List[String]): Option[String] =
       val parsed = candidates.flatMap(c => parse(c).filterNot(_.isPre).map(c -> _))
       parsed.maxByOption(_._2.numeric).map(_._1)
+
+    def isPreRelease(version: String): Boolean = parse(version).exists(_.isPre)
 
     private def parse(raw: String): Option[SemVer] =
       val trimmed     = raw.stripPrefix("v")

@@ -124,7 +124,8 @@ lazy val service = project.settings(MyVersions.service)
 ```
 
 The trait is the extension point: another plugin that sits on zipx adds members and uses `inline override def settings`.
-Plugin authors: **Extending Versions**. When a row is stale, the scheduled companion opens `zipx/version-updates`, or you
+Plugin authors: **Extending Versions**. When a row is stale, the scheduled companion opens
+`zipx/version-updates-${'$'}GITHUB_RUN_ID`, or you
 run `zipxDepUpdate` locally. See **Dependency updates**.
 """
     ),

@@ -46,7 +46,8 @@ zipxVerifyClean := VerifyClean.CleanFull   // None (default) | Clean | CleanFull
 
 For a **one-off** LocalDir / action-cache bust without making clean permanent, leave `zipxVerifyClean` at
 `None` (default) and add the GitHub PR label **`clean`**. Verify then runs `cleanFull; <task>` only on that PR.
-Override the label name with `zipxVerifyCleanLabel`, or set it to `None` to disable.
+The version-updates and pin-updates companions always add that label. Override the label name with
+`zipxVerifyCleanLabel`, or set it to `None` to disable.
 
 ```scala
 zipxVerifyCleanLabel := Some("clean")  // default

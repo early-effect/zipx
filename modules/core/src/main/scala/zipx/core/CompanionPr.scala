@@ -8,11 +8,14 @@ import zipx.shell.*
   * `.github/workflows/` files: GitHub App tokens need a `workflows` git permission that `permissions:` cannot grant.
   * Scala Steward hits the same reject if an update rewrites a workflow file. Stage everything except
   * `.github/workflows`; a human generate already committed the companion YAML.
+  *
+  * The branch is `$prefix-$GITHUB_RUN_ID` so a second dispatch cannot force-push an open PR. The PR is labeled
+  * [[PlanConfig.DefaultVerifyCleanLabel]] so Verify runs `cleanFull`.
   */
 object CompanionPr:
 
   inline def open(
-      inline branch: String,
+      inline branchPrefix: String,
       inline commitMessage: String,
       inline prTitle: String,
       inline prBody: String,
@@ -34,7 +37,7 @@ object CompanionPr:
           Word.lit("user.email"),
           Word.quoted("41898282+github-actions[bot]@users.noreply.github.com"),
         ),
-        Exec("git", Word.lit("checkout"), Word.lit("-B"), Word.lit(branch)),
+        Exec("git", Word.lit("checkout"), Word.lit("-B"), runBranch(branchPrefix)),
         Exec(
           "git",
           Word.lit("add"),
@@ -56,6 +59,15 @@ object CompanionPr:
         Exec("git", Word.lit("push"), Word.lit("-u"), Word.lit("origin"), Word.lit("HEAD")),
         Exec(
           "gh",
+          Word.lit("label"),
+          Word.lit("create"),
+          Word.lit("clean"),
+          Word.lit("--force"),
+          Word.lit("--description"),
+          Word.quoted("zipx: Verify runs cleanFull"),
+        ) || Exec("true"),
+        Exec(
+          "gh",
           Word.lit("pr"),
           Word.lit("create"),
           Word.lit("--title"),
@@ -63,9 +75,14 @@ object CompanionPr:
           Word.lit("--body"),
           Word.quoted(prBody),
           Word.lit("--head"),
-          Word.lit(branch),
+          runBranch(branchPrefix),
+          Word.lit("--label"),
+          Word.lit("clean"),
         ) || Exec("true"),
       ),
       trailingNewline = true,
     )
+
+  private inline def runBranch(inline prefix: String): Word.Dquote =
+    Word.dquote(Word.lit(prefix + "-"), Word.vBraced("GITHUB_RUN_ID"))
 end CompanionPr

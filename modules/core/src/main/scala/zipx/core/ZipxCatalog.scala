@@ -76,6 +76,7 @@ object ZipxCatalog:
       coords: Seq[ZipxCoord],
       lookup: (ZipxCoord) => Either[String, Option[String]],
       classify: VersionStrategy = VersionStrategy.npm,
+      preRelease: PreRelease = PreRelease.Skip,
   ): Either[String, List[DepBump]] =
     coords.foldLeft[Either[String, List[DepBump]]](Right(Nil)) { (accE, coord) =>
       accE.flatMap { acc =>
@@ -83,8 +84,10 @@ object ZipxCatalog:
           latest
             .flatMap { candidate =>
               val kind = classify.classify(coord.version, candidate)
-              Option.when(kind != BumpKind.None) {
-                val to = classify.latestStable(List(candidate)).getOrElse(candidate)
+              Option.when(kind != BumpKind.None && preRelease.allows(kind)) {
+                val to =
+                  if kind == BumpKind.PreRelease then candidate
+                  else classify.latestStable(List(candidate)).getOrElse(candidate)
                 DepBump(coord, kind, to)
               }
             }

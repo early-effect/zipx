@@ -182,9 +182,10 @@ Public-ecosystem PURLs (`pkg:npm/...`, `pkg:maven/...`) are the ones the gate is
       md"""
 `.github/workflows/zipx-pin-check.yml` is scheduled plus `workflow_dispatch` (default Sunday 00:00 UTC).
 `sbt zipxPinCheck` runs lookup + OSV.
-When some feed uses `Update`, the companion is `contents: write` and `pull-requests: write`, checks out with
-`GITHUB_TOKEN`, rewrites `Pin(...)` in the catalog, runs optional `materialize`, and `gh pr create`s `zipx/pin-updates`
-as `github-actions[bot]`. That PR does not rewrite `.github/workflows/` (`GITHUB_TOKEN` cannot push those files).
+When some feed uses `Update`, the companion is `contents: write`, `pull-requests: write`, and `issues: write`, checks out
+with `GITHUB_TOKEN`, rewrites `Pin(...)` in the catalog, runs optional `materialize`, and `gh pr create`s
+`zipx/pin-updates-${'$'}GITHUB_RUN_ID` (labeled `clean`) as `github-actions[bot]`. That PR does not rewrite
+`.github/workflows/` (`GITHUB_TOKEN` cannot push those files).
 Alert-only stays `contents: read` and never opens a PR. The `pin-check` capability never applies.
 
 **Required repo/org setting** (only needed for `Update`): [Allow GitHub Actions to create and
@@ -196,9 +197,11 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
         assertTrue(
           yaml.contains("workflow_dispatch"),
           yaml.contains("sbt zipxPinCheck"),
-          yaml.contains("zipx/pin-updates") || yaml.contains("gh pr create"),
+          yaml.contains("zipx/pin-updates-${GITHUB_RUN_ID}") || yaml.contains("gh pr create"),
           yaml.contains("contents: write") || yaml.contains("contents:write"),
           yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write"),
+          yaml.contains("issues: write") || yaml.contains("issues:write"),
+          yaml.contains("--label clean"),
           yaml.indexOf(ActionPins.Defaults.checkout.unwrap) < yaml.indexOf("sbt zipxPinCheck"),
         )
       ),
@@ -242,7 +245,7 @@ sbt "zipxPinUpdate dry-run" # list only
 
 `zipxPinUpdate` always looks up latest, even when the feed is alert-only. `yes` applies every listed bump. With no
 terminal, a bare command lists and stops. After apply, commit and open a pull request yourself (unless the feed is
-`Update` and CI already opened `zipx/pin-updates`).
+`Update` and CI already opened `zipx/pin-updates-${'$'}GITHUB_RUN_ID`).
 """,
       exampleValue {
         PinEngine

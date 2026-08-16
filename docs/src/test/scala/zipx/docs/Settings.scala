@@ -103,7 +103,8 @@ are the rest. Full guide: **Versions**. Plugin authors: **Extending Versions**.
 GAV that is not a `Lib` row. `zipxCatalogGenerate` writes `project/plugins.sbt`, `project/build.properties`,
 `project/zipx-ci.env`, and composites; `zipxWorkflowGenerate` also writes workflow YAML. Local
 `zipxDepUpdate` / `zipxPinUpdate` / `zipxActionUpdate` rewrite constructors in `zipxVersionsFile`. The scheduled companion
-(`zipxVersionUpdates`, default true) runs those with `yes`, then `zipxCatalogGenerate`, and opens `zipx/version-updates`.
+(`zipxVersionUpdates`, default true) runs those with `yes`, then `zipxCatalogGenerate`, and opens
+`zipx/version-updates-${'$'}GITHUB_RUN_ID` labeled `clean`.
 Locally you can still apply, then `reload` and `zipxCatalogGenerate` so `plugins.sbt` / `build.properties` match.
 """
     ),
