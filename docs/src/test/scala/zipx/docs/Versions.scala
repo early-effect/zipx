@@ -63,6 +63,7 @@ is not a row. That is why groups are `def libraries = library(zio)`: selection, 
 |---|---|
 | `val zio = Lib(...)` | yes |
 | `val zioTest = zio.mod("zio-test").test` | yes (`zipxCheckDeps` sees it; apply rewrites the parent constructor) |
+| `val coursier = Lib(...).java.excluding(...)` | yes (excludes live on the row) |
 | `val scalafmt = Plugin(...)` | yes (generate writes `plugins.sbt`) |
 | `val sbt` / `val scala` | no (`SbtVersion` / `ScalaVersion` are not Maven coordinates) |
 | `def service = library(zio, slf4j)` | no (picks rows for a module) |
@@ -84,13 +85,39 @@ The service can take `slf4j` while the client does not.
           .mkString("\n")
       }.assert(text => assertTrue(text.contains("org.slf4j:slf4j-simple:2.0.18"))),
     ),
+    section("Excludes live on the row")(
+      md"""
+Do not put `excludeAll` at the `libraryDependencies` use site. The catalog row is the whole coordinate: GAV, cross
+(`.java` / `.full`), config (`.test`), and Maven excludes (`.excluding`). `Lib` and `Plugin` share that last helper.
+`ZipxExclude.org` is organization-only; pass a second argument for an organization plus artifact. `zipxCheckDeps` still
+compares GAV only. Lib excludes never appear in `plugins.sbt`; that file is plugins only.
+""",
+      exampleValue {
+        val coursier = Lib("io.get-coursier", "coursier-cache_2.13", "2.1.25-M26").java
+          .excluding(ZipxExclude.org("org.scala-lang.modules"))
+        val remote = Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.5")
+          .excluding(ZipxExclude.org("org.scala-sbt"))
+        val libEx =
+          coursier.excludes
+            .map(e => s"${e.organization}${e.artifact.fold("")(a => " / " + a)}")
+            .mkString(", ")
+        s"lib: $libEx\n${ZipxCatalog.renderPluginLine(remote)}"
+      }.assert(text =>
+        assertTrue(
+          text.contains("lib: org.scala-lang.modules"),
+          text.contains("excludeAll"),
+          text.contains("""ExclusionRule(organization = "org.scala-sbt")"""),
+          !text.contains("coursier-cache"),
+        )
+      ),
+    ),
     section("The trait is the extension point")(
       md"""
 `ZipxVersions` is a trait, not a closed object zipx owns. Your build extends it. Another plugin that sits on zipx
 (splice, a company catalog, CDN pins) extends it too. One object under `project/`, one `.settings` call.
 
-How that plugin's libraries become catalog rows (`AsCoords`, a bundle type, `inline override def settings`) is
-**Extending Versions**. Consumers stay on this page.
+How that plugin's libraries become catalog rows (`AsCoords`, a bundle type, `inline override def settings`), and how it
+emits its own `addSbtPlugin` line, is **Extending Versions**. Consumers stay on this page.
 """
     ),
     section("Not a string rewrite of the build")(
@@ -120,19 +147,29 @@ checked.
     ),
     section("Generated plugins.sbt")(
       md"""
-`zipxWorkflowGenerate` writes `project/plugins.sbt`. Consumers get the loaded `sbt-zipx` line first (`zipxEmitSelf`,
-default true). This repo sets `zipxEmitSelf := false` because dogfood loads zipx from source. The
-[`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) consumer also sets it false:
-CI injects the in-dev plugin via `-Dzipx.version` in `project/zipx.sbt`, and generate owns the other plugin lines.
+`zipxWorkflowGenerate` writes `project/plugins.sbt`. The file has three layers:
+
+1. Loaded sbt-zipx (`zipxEmitSelf`, default true). This repo sets `zipxEmitSelf := false` because dogfood loads zipx
+   from source. The [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) consumer
+   also sets it false: CI injects the in-dev plugin via `-Dzipx.version` in `project/zipx.sbt`.
+2. Other loaded plugins that emit themselves (`zipxSelfPlugins`). You do **not** copy their version into `ZipxVersions`.
+   Plugin authors: **Extending Versions**.
+3. Your `Plugin` vals (scalafmt, native-packager, anything that does not emit itself).
+
+If you also write `Plugin("com.acme", "sbt-acme", "…")` in the catalog for a plugin that already emits itself, generate
+drops that catalog line and keeps the loaded version.
 """,
       exampleValue {
-        ZipxCatalog.renderPlugins(List(scalafmt), self = Some(zipx))
+        val acme = Plugin("com.acme", "sbt-acme", "9.9.9")
+        ZipxCatalog.renderPlugins(List(scalafmt), self = List(zipx, acme))
       }.assert(text =>
         assertTrue(
           text.startsWith(ZipxCatalog.PluginsHeader),
           text.contains("""addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "0.5.1")"""),
+          text.contains("""addSbtPlugin("com.acme" % "sbt-acme" % "9.9.9")"""),
           text.contains("""addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")"""),
-          text.indexOf("sbt-zipx") < text.indexOf("sbt-scalafmt"),
+          text.indexOf("sbt-zipx") < text.indexOf("sbt-acme"),
+          text.indexOf("sbt-acme") < text.indexOf("sbt-scalafmt"),
         )
       ),
     ),

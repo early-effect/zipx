@@ -6,7 +6,7 @@ import zipx.core.*
 import zipx.docs.DocsRender.yaml
 import zio.test.*
 
-/** For sbt plugins that sit on zipx and contribute catalog rows (splice, a company catalog). */
+/** For sbt plugins that sit on zipx: emit the plugin line, then optionally contribute catalog rows. */
 object ExtendingVersions extends DocSpecSuite:
 
   private final case class AcmeBundle(runtime: Lib, plugin: Plugin)
@@ -29,10 +29,56 @@ object ExtendingVersions extends DocSpecSuite:
 Skip unless you are writing an **sbt plugin that sits on zipx** (splice, a company catalog, CDN pins). Consumers stay
 on **Versions**: they extend `ZipxVersions`, drop `MyVersions.settings`, and write `Lib` / `Plugin` vals.
 
-Your libraries have to land in that same catalog. Collection is a typeclass, `AsCoords`. `Lib` and `Plugin` share one
-given (`A <: ZipxCoord`). You add a given for your own type, or you put `Lib` / `Plugin` vals on a `ZipxVersions`
-subtype. There is no second `coords` list for the consumer to keep in sync.
+Two jobs. They are not the same hook.
+
+1. **Emit your plugin line** into generated `project/plugins.sbt` from the version on the classpath (`zipxSelfPlugins` /
+   `ZipxSelf.emit`). Consumers should not duplicate that GAV in `ZipxVersions`.
+2. **Optionally** put your libraries in the consumer catalog (`Lib` vals on a subtype, or `AsCoords` on a bundle). That
+   is the Maven-row story below.
 """,
+    section("Emit your plugin line")(
+      md"""
+`zipxEmitSelf` / `zipxPluginVersion` are sbt-zipx only (dogfood, scripted). Every other plugin that sits on zipx appends
+`zipxSelfPlugins`. A `Plugin` val on `ZipxVersions` is for consumer-owned plugins that do not emit themselves
+(scalafmt, native-packager).
+
+Group and artifact are always written out. zipx never scans the session. Missing `Implementation-Version` is a `zipx:`
+error naming that GAV. Duplicate group+artifact in the self list fails generate. `ZipxSelf.emit` does not read zipx's
+`-Dplugin.version`.
+
+```scala
+object SpliceZipxPlugin extends AutoPlugin:
+  override def requires = ZipxPlugin
+  override def buildSettings = Seq(
+    zipxSelfPlugins += ZipxSelf.emit("rocks.earlyeffect", "sbt-splice", getClass)
+  )
+```
+
+Generate writes zipx first, then your line, then the consumer's catalog plugins:
+""",
+      exampleValue {
+        val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
+        val splice   = Plugin("rocks.earlyeffect", "sbt-splice", "1.0.0")
+        val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
+        ZipxCatalog.renderPlugins(List(scalafmt), self = List(zipx, splice))
+      }.assert(text =>
+        assertTrue(
+          text.contains("""addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "0.5.1")"""),
+          text.contains("""addSbtPlugin("rocks.earlyeffect" % "sbt-splice" % "1.0.0")"""),
+          text.contains("""addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")"""),
+          text.indexOf("sbt-zipx") < text.indexOf("sbt-splice"),
+          text.indexOf("sbt-splice") < text.indexOf("sbt-scalafmt"),
+        )
+      ),
+    ),
+    section("Your libraries in that same catalog")(
+      md"""
+Collection is a typeclass, `AsCoords`. `Lib` and `Plugin` share one given (`A <: ZipxCoord`). You add a given for your
+own type, or you put `Lib` / `Plugin` vals on a `ZipxVersions` subtype. There is no second `coords` list for the
+consumer to keep in sync. Do not put *your* plugin GAV on that subtype if you already emit it; that catalog line is
+dropped.
+"""
+    ),
     section("Two paths")(
       md"""
 **Path 1: `Lib` / `Plugin` vals on your subtype.** Inherited fields are collected. The consumer writes
@@ -41,22 +87,20 @@ subtype. There is no second `coords` list for the consumer to keep in sync.
 ```scala
 trait SpliceVersions extends ZipxVersions:
   val spliceRuntime = Lib("rocks.earlyeffect", "splice-core", "1.0.0")
-  val splicePlugin  = Plugin("rocks.earlyeffect", "sbt-splice", "1.0.0")
 ```
 
 **Path 2: a bundle type with `given AsCoords[YourType]`.** Put the given on the companion so the catalog file does not
 import extra machinery. Collection summons it the same way it summons `Lib`.
 
 ```scala
-final case class SpliceLibs(runtime: Lib, plugin: Plugin)
+final case class SpliceLibs(runtime: Lib)
 object SpliceLibs:
   given AsCoords[SpliceLibs] with
-    def coords(s: SpliceLibs) = Seq(s.runtime, s.plugin)
+    def coords(s: SpliceLibs) = Seq(s.runtime)
 
 trait SpliceVersions extends ZipxVersions:
   val splice = SpliceLibs(
-    Lib("rocks.earlyeffect", "splice-core", "1.0.0"),
-    Plugin("rocks.earlyeffect", "sbt-splice", "1.0.0"),
+    Lib("rocks.earlyeffect", "splice-core", "1.0.0")
   )
 ```
 

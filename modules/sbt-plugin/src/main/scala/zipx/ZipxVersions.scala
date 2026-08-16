@@ -20,6 +20,7 @@ type ZipxExclude = zipx.core.ZipxExclude
 val ZipxExclude = zipx.core.ZipxExclude
 type AsCoords[A] = zipx.core.AsCoords[A]
 val AsCoords = zipx.core.AsCoords
+val ZipxSelf = zipx.plugin.ZipxSelf
 
 /** Catalog a build writes under `project/` and extends. `.sbt` files get plugin autoImport; this package is what those
   * Scala sources import.

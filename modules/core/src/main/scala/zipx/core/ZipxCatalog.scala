@@ -46,11 +46,21 @@ object ZipxCatalog:
       s"zipx: scalaVersion is '$declared' but zipxScala is '$exp'"
     }
 
-  def renderPlugins(plugins: Seq[Plugin], self: Option[Plugin] = None): String =
-    val selfKey = self.map(p => (p.group: String, p.artifact: String))
-    val rest    = plugins.filterNot(p => selfKey.contains((p.group: String, p.artifact: String)))
-    val lines   = (self.toList ++ rest).map(renderPluginLine)
+  def renderPlugins(plugins: Seq[Plugin], self: Seq[Plugin] = Nil): String =
+    val selfKeys = self.map(p => (p.group: String, p.artifact: String)).toSet
+    val rest     = plugins.filterNot(p => selfKeys.contains((p.group: String, p.artifact: String)))
+    val lines    = (self ++ rest).map(renderPluginLine)
     (PluginsHeader +: lines).mkString("\n") + "\n"
+
+  /** First duplicate group+artifact in a self-emit list. Generate refuses rather than writing two `addSbtPlugin` lines.
+    */
+  def duplicateSelf(self: Seq[Plugin]): Option[String] =
+    self
+      .map(p => (p.group: String, p.artifact: String))
+      .groupBy(identity)
+      .collectFirst {
+        case ((g, a), copies) if copies.size > 1 => s"zipx: zipxSelfPlugins lists $g % $a twice"
+      }
 
   def renderBuildProperties(sbt: SbtVersion): String =
     s"$GeneratedHeader\nsbt.version=${sbt: String}\n"
