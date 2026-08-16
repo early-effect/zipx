@@ -11,7 +11,8 @@ object ActionPinsDoc extends DocSpecSuite:
   def doc = page("Action pins")(
     md"""
 Skip this page at first. zipx already pins third-party GitHub Actions to **full commit SHAs** (not floating `@v4`
-tags) in the generated workflow, so a moved tag cannot change what CI runs. Version labels appear as trailing comments:
+tags) in `ci.yml` and in composites, so a moved tag cannot change what CI runs. Version labels appear as trailing
+comments:
 
 ```yaml
 - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -62,7 +63,9 @@ val checkout = Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825d
 
 Apply rewrites the canonical constructor so version and sha move together. `zipxActionUpdate` looks up GitHub
 releases (tags if there are none), peels the tag to a commit SHA, and queries OSV (`pkg:github/owner/repo@version`).
-Never write a floating `@v4` into the catalog or into `uses:`.
+Never write a floating `@v4` into the catalog or into `ci.yml` `uses:`. The version-updates companion is the one
+exception: checkout is a major tag (`actions/checkout@v7`) because `uses:` cannot be an expression and `GITHUB_TOKEN`
+cannot push workflow SHA edits. Java and sbt pins still move in `zipx-sbt-setup`. See **Dependency updates**.
 
 ```
 sbt zipxActionUpdate             # list, then prompt

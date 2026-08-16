@@ -36,7 +36,7 @@ Defaults are Aggregate: parallel Verify jobs (`testFull`, `fmt`, `workflow-check
 
 ### Action pins
 
-Generated `uses:` lines are SHA-pinned (with `# vX.Y.Z` comments). Jar defaults ship in the plugin. To track upstream action releases ahead of a zipx upgrade, add `Action` vals to `project/ZipxVersions.scala` and run `sbt "zipxActionUpdate yes"`, then `reload` and `zipxWorkflowGenerate`. A leftover `.github/zipx/action-pins.yml` fails generate (paste the constructors). A `github-actions` Dependabot ecosystem is not needed. Full guide: **Action pins** on the docs site.
+Generated `ci.yml` `uses:` lines are SHA-pinned (with `# vX.Y.Z` comments). Jar defaults ship in the plugin. To track upstream action releases ahead of a zipx upgrade, add `Action` vals to `project/ZipxVersions.scala` and run `sbt "zipxActionUpdate yes"`, then `reload` and `zipxCatalogGenerate`. Use `zipxWorkflowGenerate` when `ci.yml` itself must move (checkout SHA, job graph). The scheduled companion never writes `.github/workflows/` (`GITHUB_TOKEN` cannot push those files). A leftover `.github/zipx/action-pins.yml` fails generate (paste the constructors). A `github-actions` Dependabot ecosystem is not needed. Full guide: **Action pins** and **Dependency updates** on the docs site.
 
 ### Keeping versions current
 

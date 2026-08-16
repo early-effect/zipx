@@ -40,18 +40,28 @@ flowchart LR
 Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-updates.yml` (schedule plus
 `workflow_dispatch`). The default schedule is Sunday 00:00 UTC; set `zipxVersionUpdatesSchedule` to change it
 (`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job runs `zipxDepUpdate yes`, `zipxActionUpdate yes`,
-`zipxPinUpdate yes`, then `zipxCatalogGenerate` (plugins.sbt, composites, `project/zipx-ci.env`; not workflow YAML),
-and `gh pr create`s `zipx/version-updates` as `github-actions[bot]`. That PR is every ZipxVersions row kind: Lib /
-Plugin / Action / Pin constructors, plus `plugins.sbt` when a plugin moved.
+`zipxPinUpdate yes`, then `zipxCatalogGenerate`, and `gh pr create`s `zipx/version-updates` as `github-actions[bot]`.
+That PR is every ZipxVersions row kind: Lib / Plugin / Action / Pin constructors, plus `plugins.sbt` and composites
+when those moved.
+
+**The companion never writes `.github/workflows/`.** `GITHUB_TOKEN` cannot push those files: GitHub App tokens need a
+`workflows` git permission that `permissions:` cannot grant (the same reject Scala Steward hits). The job parameterizes
+instead of rewriting YAML:
+
+- **JDK and runner** come from `project/zipx-ci.env` at runtime.
+- **Java and sbt Action pins** live in `zipx-sbt-setup` (the bot can push `.github/actions/`).
+- **Checkout** is a major tag (`actions/checkout@v7`). `uses:` cannot be an expression, so a SHA pin would force a
+  workflow rewrite. `ci.yml` stays SHA-pinned.
+- **`git add`** excludes `.github/workflows`.
+
+Generate the companion YAML once from a clone (human `zipxWorkflowGenerate`); the bot then leaves it alone. A checkout
+SHA bump in the catalog can make `zipxWorkflowCheck` fail on that PR until someone regenerates `ci.yml`.
 
 `zipxVersionUpdates := false` deletes the companion.
 
 **Required repo/org setting:** [Allow GitHub Actions to create and
 approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).
-`GITHUB_TOKEN` is enough, the same as Scala Steward. The companion does not write `.github/workflows/` (`git add`
-excludes that directory). Java and runner come from `project/zipx-ci.env`; java and sbt pins live in `zipx-sbt-setup`.
-Checkout is a major tag because `uses:` cannot be parameterized. Generate the companion workflow once from a clone; the
-bot then leaves it alone.
+`GITHUB_TOKEN` is enough, the same as Scala Steward. No PAT.
 """,
       exampleValue {
         VersionUpdatesWorkflow.render(ActionPins.Defaults).yaml
