@@ -198,8 +198,6 @@ lazy val docsJS = project
       // sbt 2 + ScalaJSPlugin: `%%` already appends `_sjs1` (no `%%%`).
       V.specular,
       V.specularMermoid,
-      V.ascentJs,
-      V.ascentCss,
       V.zio,
       V.zio.mod("zio-test"),
     ),
@@ -221,8 +219,6 @@ lazy val docs = project
       V.specularSite,
       V.specularMermoid.test,
       V.specularTheme,
-      V.ascent.test,
-      V.ascentHtml.test,
     ) ++ V.zioDeps,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     Test / mainClass       := Some("specular.site.DocsServe"),
