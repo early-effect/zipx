@@ -3,15 +3,15 @@ scalaVersion := "3.8.4"
 version      := "1.0.0-ci"
 // Keep Fixed so scripted asserts stay on a literal epoch (default is now GitTags at runtime).
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
-zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 // Scripted asserts name per-module jobs and literal module paths; keep Graph expanded here.
 // (Product default is MatrixCollapse.Auto; Auto is covered in core MatrixCollapseSpec.)
 zipxMatrixCollapse := Map(
-  Capability.TestName                    -> MatrixCollapse.Off,
-  Capability.PublishName                 -> MatrixCollapse.Off,
-  CapabilityName("compileCheck")         -> MatrixCollapse.Off,
-  CapabilityName("crossPublishCheck")    -> MatrixCollapse.Off,
-  CapabilityName("mixedCheck")           -> MatrixCollapse.Off,
+  Capability.TestName                 -> MatrixCollapse.Off,
+  Capability.PublishName              -> MatrixCollapse.Off,
+  CapabilityName("compileCheck")      -> MatrixCollapse.Off,
+  CapabilityName("crossPublishCheck") -> MatrixCollapse.Off,
+  CapabilityName("mixedCheck")        -> MatrixCollapse.Off,
 )
 // A build-wide default is now testFull from the plugin; client overrides back to plain `test`.
 zipxTestTask := zipxTasks.of(testFull)
@@ -131,7 +131,8 @@ assertGraph := {
   assert(content.contains("local-cache: \"true\""), "LocalDir must enable local-cache on the composite")
   assert(content.contains("sbt-disk-cache: \"false\""), "LocalDir must disable setup-sbt hashFiles disk-cache")
   assert(!content.contains("cache: sbt"), "LocalDir must not enable setup-java cache:sbt")
-  val setup = IO.read((LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-sbt-setup" / "action.yml")
+  val setup =
+    IO.read((LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-sbt-setup" / "action.yml")
   assert(
     setup.contains(
       "key: ${{ inputs.runner-os }}-jdk${{ inputs.java-version }}-sbt-${{ inputs.cache-epoch }}-${{ github.run_id }}-${{ inputs.cache-key-suffix }}"
@@ -139,6 +140,8 @@ assertGraph := {
     "composite cache key should embed epoch + run_id + job suffix",
   )
   assert(setup.contains("target"), "cache path should include target/ for compile + sona-staging reuse")
+  val awsLogin = (LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-aws-login"
+  assert(!awsLogin.exists, "non-AWS consumer must not get zipx-aws-login")
   // M3: affected-only setup job + gating on verify jobs (default AffectedOnPR).
   assert(content.contains("affected:"), "missing affected setup job")
   assert(content.contains("modules: ${{ steps.compute.outputs.modules }}"), "affected job should output modules")

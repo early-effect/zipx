@@ -4,6 +4,8 @@
 $ exists .github/workflows/ci.yml
 $ exists .github/workflows/zipx-version-updates.yml
 $ exists project/zipx-ci.env
+$ exists .github/actions/zipx-sbt-setup/action.yml
+$ absent .github/actions/zipx-aws-login/action.yml
 > assertGraph
 # Freshly generated file must pass the check (determinism / idempotence).
 > zipxWorkflowCheck

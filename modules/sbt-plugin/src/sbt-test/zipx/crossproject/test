@@ -3,6 +3,8 @@
 > zipxWorkflowGenerate
 $ exists .github/workflows/ci.yml
 $ exists .github/workflows/zipx-version-updates.yml
+$ exists .github/actions/zipx-sbt-setup/action.yml
+$ absent .github/actions/zipx-aws-login/action.yml
 > assertBothRowsGetJobs
 # Real git history, so the diff genuinely succeeds and fail-open never masks a wrong answer.
 $ exec git init -q .
