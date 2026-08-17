@@ -5,6 +5,7 @@ import sbt.Keys.*
 import zipx.core.*
 import zipx.workflow.Render
 import zipx.workflow.Step
+import zipx.workflow.Workflow
 
 /** zipx: the build describes its own GitHub Actions CI.
   *
@@ -807,15 +808,27 @@ object ZipxPlugin extends AutoPlugin:
     dp(m)(n)
   end distance
 
+  private def capabilitiesOf(extracted: Extracted, graph: ModuleGraph): List[Capability] =
+    val userCaps   = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
+    val verifyTask = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
+    val verify     = orFail(ZipxVerify.validate(readBuildSetting(extracted, zipxVerify, ZipxVerify.Strict)))
+    combineCapabilities(builtinCapabilities(graph, verifyTask, verify), userCaps.toList)
+
+  /** Same graph and capabilities as [[renderWorkflow]], so catalog generate and workflow generate agree on composites.
+    */
+  private def plannedWorkflow: Def.Initialize[Task[Workflow]] = Def.task {
+    val graph     = buildGraph.value
+    val extracted = Project.extract(state.value)
+    Planner.plan(graph, capabilitiesOf(extracted, graph), planConfig.value)
+  }
+
   private def renderWorkflow: Def.Initialize[Task[String]] = Def.task {
     val graph        = buildGraph.value
     val cfg          = planConfig.value
     val st           = state.value
     val extracted    = Project.extract(st)
-    val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
-    val verifyTask   = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
+    val capabilities = capabilitiesOf(extracted, graph)
     val verify       = orFail(ZipxVerify.validate(readBuildSetting(extracted, zipxVerify, ZipxVerify.Strict)))
-    val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask, verify), userCaps.toList)
     checkFmtPlugin(verify, extracted)
     checkCommandNames(capabilities, st, extracted)
     val yaml = orFail(Render.render(Planner.plan(graph, capabilities, cfg)))
@@ -850,15 +863,22 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   private def writeCompositeActions: Def.Initialize[Task[Unit]] = Def.task {
-    val log   = streams.value.log
-    val root  = (LocalRootProject / baseDirectory).value
-    val cfg   = planConfig.value
-    val files = orFail(ZipxComposites.artifacts(cfg.actions, cfg.cacheEpoch))
+    val log        = streams.value.log
+    val root       = (LocalRootProject / baseDirectory).value
+    val cfg        = planConfig.value
+    val includeAws = ZipxComposites.usesAwsLogin(plannedWorkflow.value)
+    val files      = orFail(ZipxComposites.artifacts(cfg.actions, cfg.cacheEpoch, includeAwsLogin = includeAws))
     files.foreach { (rel, body) =>
       val file = root / rel
       IO.write(file, body)
       log.info(s"zipx wrote ${file.getPath}")
     }
+    if !includeAws then
+      val leftoverDir = root / ZipxComposites.ActionsDir / ZipxComposites.AwsLoginName
+      if leftoverDir.exists then
+        log.warn(ZipxComposites.leftoverAwsLoginMessage)
+        IO.delete(leftoverDir)
+        log.info(s"zipx deleted ${leftoverDir.getPath}")
   }
 
   /** Warns once per escape-hatch fragment, naming the bundle. Raw content is typed, so it cannot emit YAML GitHub fails
@@ -869,10 +889,7 @@ object ZipxPlugin extends AutoPlugin:
     val graph        = buildGraph.value
     val cfg          = planConfig.value
     val extracted    = Project.extract(state.value)
-    val userCaps     = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
-    val verifyTask   = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
-    val verify       = orFail(ZipxVerify.validate(readBuildSetting(extracted, zipxVerify, ZipxVerify.Strict)))
-    val capabilities = combineCapabilities(builtinCapabilities(graph, verifyTask, verify), userCaps.toList)
+    val capabilities = capabilitiesOf(extracted, graph)
     Steps.rawWarnings(capabilities, cfg).foreach(w => log.warn(s"zipx: $w"))
     MatrixCollapse.warnings(capabilities, graph, cfg).foreach(w => log.warn(s"zipx: $w"))
   }
@@ -1154,7 +1171,8 @@ object ZipxPlugin extends AutoPlugin:
     streams.value.log.info(s"zipx: ${out.getPath} is up to date.")
     val cfg             = planConfig.value
     val root            = (LocalRootProject / baseDirectory).value
-    val expectedActions = orFail(ZipxComposites.artifacts(cfg.actions, cfg.cacheEpoch))
+    val includeAws      = ZipxComposites.usesAwsLogin(plannedWorkflow.value)
+    val expectedActions = orFail(ZipxComposites.artifacts(cfg.actions, cfg.cacheEpoch, includeAwsLogin = includeAws))
     expectedActions.foreach { (rel, expectedBody) =>
       val file   = root / rel
       val actual = if file.exists then IO.read(file) else ""
@@ -1164,6 +1182,9 @@ object ZipxPlugin extends AutoPlugin:
         )
       streams.value.log.info(s"zipx: ${file.getPath} is up to date.")
     }
+    if !includeAws && (root / ZipxComposites.AwsLoginPath).exists then
+      streams.value.log.warn(ZipxComposites.leftoverAwsLoginMessage)
+      sys.error(ZipxComposites.leftoverAwsLoginMessage)
     val extracted = Project.extract(state.value)
     checkLeftoverSteward(extracted, root, streams.value.log)
     checkPinWorkflows(root, cfg, extracted, streams.value.log)

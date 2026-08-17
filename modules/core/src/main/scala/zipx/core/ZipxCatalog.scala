@@ -20,7 +20,7 @@ object ZipxCatalog:
   def libs(coords: Seq[ZipxCoord]): List[Lib]       = coords.collect { case l: Lib => l }.toList
   def plugins(coords: Seq[ZipxCoord]): List[Plugin] = coords.collect { case p: Plugin => p }.toList
 
-  /** Platform jars sbt / Scala.js inject into `libraryDependencies`. Not user catalog rows. */
+  /** Platform jars sbt / Scala.js / Scala Native inject into `libraryDependencies`. Not user catalog rows. */
   def isAutoPlatform(group: String, artifact: String): Boolean =
     val a = artifact
     (group == "org.scala-lang" && (
@@ -31,6 +31,14 @@ object ZipxCatalog:
       a.startsWith("scalajs-library") || a.startsWith("scalajs-scalalib") ||
         a.startsWith("scalajs-test-bridge") || a.startsWith("scalajs-junit-test-plugin") ||
         a.startsWith("scalajs-compiler")
+    )) || (group == "org.scala-native" && (
+      // sbt-scala-native injects already-crossed names (`nativelib_native0.5_3`). Ignore toolchain artifacts only:
+      // a user can still catalog a real Native library under this group.
+      a.startsWith("nativelib") || a.startsWith("clib") || a.startsWith("posixlib") ||
+        a.startsWith("windowslib") || a.startsWith("javalib") || a.startsWith("auxlib") ||
+        a.startsWith("scala3lib") || a.startsWith("scalalib") ||
+        a.startsWith("test-interface") || a.startsWith("junit-runtime") ||
+        a.startsWith("junit-plugin") || a.startsWith("nscplugin")
     ))
   end isAutoPlatform
 

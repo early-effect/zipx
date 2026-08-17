@@ -1,8 +1,6 @@
 package zipx.core
 
 import java.net.URI
-import java.net.http.{HttpClient, HttpRequest, HttpResponse}
-import java.nio.charset.StandardCharsets
 import java.time.Duration
 
 enum AdvisorySeverity:
@@ -25,23 +23,20 @@ trait AdvisorySource:
 
 /** OSV HTTP client. Tests inject a fake [[AdvisorySource]] and never construct this. */
 final class OsvAdvisorySource(
-    client: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build(),
-    endpoint: URI = URI.create("https://api.osv.dev/v1/query"),
+    endpoint: URI = URI.create("https://api.osv.dev/v1/query")
 ) extends AdvisorySource:
 
   def advisories(purl: Purl, version: String): Either[String, List[Advisory]] =
-    val body    = OsvAdvisorySource.queryBody(purl, version)
-    val request = HttpRequest
-      .newBuilder(endpoint)
-      .timeout(Duration.ofSeconds(30))
-      .header("Content-Type", "application/json")
-      .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-      .build()
-    try
-      val response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-      if response.statusCode() == 200 then OsvAdvisorySource.parseResponse(response.body())
-      else Left(s"osv: HTTP ${response.statusCode()}")
-    catch case e: Exception => Left(s"osv: ${e.getMessage}")
+    val body = OsvAdvisorySource.queryBody(purl, version)
+    HttpLookup.post(
+      endpoint.toString,
+      body,
+      headers = Map("Content-Type" -> "application/json"),
+      timeout = Duration.ofSeconds(30),
+    ) match
+      case Left(err)                       => Left(s"osv: $err")
+      case Right(res) if res.status == 200 => OsvAdvisorySource.parseResponse(res.body)
+      case Right(res)                      => Left(s"osv: HTTP ${res.status}")
   end advisories
 end OsvAdvisorySource
 

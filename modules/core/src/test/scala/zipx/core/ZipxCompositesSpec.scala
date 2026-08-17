@@ -1,12 +1,17 @@
 package zipx.core
 
 import neotype.unwrap
-import zipx.workflow.Render
+import zipx.workflow.*
 import zio.test.*
+
+import scala.collection.immutable.ListMap
 
 object ZipxCompositesSpec extends ZIOSpecDefault:
 
   private val pins = ActionPins.Defaults
+
+  private def workflowWith(steps: List[Step]) =
+    Workflow(name = "ci", on = Triggers(), jobs = ListMap("job" -> Job(steps = steps)))
 
   def spec = suite("ZipxComposites")(
     test("sbt-setup action.yml has composite runs and pinned nested uses, but not checkout") {
@@ -32,15 +37,41 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
         yaml.contains("aws-actions/"),
       )
     },
-    test("artifacts map is deterministic") {
-      val once  = ZipxComposites.artifacts(pins).toOption.get
-      val twice = ZipxComposites.artifacts(pins).toOption.get
-      assertTrue(once == twice, once.contains(ZipxComposites.SbtSetupPath))
+    test("artifacts omit aws-login unless includeAwsLogin is true") {
+      val off   = ZipxComposites.artifacts(pins).toOption.get
+      val on    = ZipxComposites.artifacts(pins, includeAwsLogin = true).toOption.get
+      val again = ZipxComposites.artifacts(pins).toOption.get
+      assertTrue(
+        off == again,
+        off.contains(ZipxComposites.SbtSetupPath),
+        !off.contains(ZipxComposites.AwsLoginPath),
+        on.contains(ZipxComposites.SbtSetupPath),
+        on.contains(ZipxComposites.AwsLoginPath),
+      )
+    },
+    test("usesAwsLogin is true only when a step uses the local composite") {
+      val withAws = workflowWith(List(ZipxComposites.awsLoginStep()))
+      val setup   = ZipxComposites.sbtSetupStep(
+        PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.0.0")),
+        JobId("test"),
+        None,
+        localCache = true,
+      )
+      val without = workflowWith(List(setup))
+      assertTrue(ZipxComposites.usesAwsLogin(withAws), !ZipxComposites.usesAwsLogin(without))
+    },
+    test("leftover aws-login message names the path and generate") {
+      val msg = ZipxComposites.leftoverAwsLoginMessage
+      assertTrue(
+        msg.contains(ZipxComposites.AwsLoginPath),
+        msg.contains("unused"),
+        msg.contains("zipxWorkflowGenerate"),
+      )
     },
     test("sbtSetupStep points at the local composite") {
       val step = ZipxComposites.sbtSetupStep(
         PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.0.0")),
-        zipx.workflow.JobId("test"),
+        JobId("test"),
         None,
         localCache = true,
       )

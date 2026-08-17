@@ -26,15 +26,29 @@ object ZipxComposites:
   /** Input expression `${{ inputs.<name> }}` for composite `with:` / `run:` templates. */
   private def input(name: String): String = s"$${{ inputs.$name }}"
 
-  /** All composite `action.yml` files to write, relative to the build root. */
+  /** All composite `action.yml` files to write, relative to the build root.
+    *
+    * `zipx-aws-login` is included only when `includeAwsLogin` is true. Default off so a consumer that never selects
+    * ZipxAws does not have to commit an ECR login composite.
+    */
   def artifacts(
       pins: ActionPins,
       cacheEpoch: CacheEpoch = CacheEpoch.GitTags(),
+      includeAwsLogin: Boolean = false,
   ): Either[String, ListMap[String, String]] =
     for
       setup <- renderSbtSetup(pins, cacheEpoch)
-      aws   <- renderAwsLogin(pins)
-    yield ListMap(SbtSetupPath -> setup, AwsLoginPath -> aws)
+      files <-
+        if includeAwsLogin then renderAwsLogin(pins).map(aws => ListMap(SbtSetupPath -> setup, AwsLoginPath -> aws))
+        else Right(ListMap(SbtSetupPath -> setup))
+    yield files
+
+  /** True when a planned workflow step `uses` [[AwsLoginRef]] (ZipxAws extraSteps or an equivalent hand-built step). */
+  def usesAwsLogin(wf: Workflow): Boolean =
+    wf.jobs.values.exists(_.steps.exists(_.uses.contains(AwsLoginRef)))
+
+  def leftoverAwsLoginMessage: String =
+    s"zipx: $AwsLoginPath is unused. This workflow does not use zipx-aws-login. Run sbt zipxWorkflowGenerate and commit the deletion."
 
   def renderSbtSetup(pins: ActionPins, cacheEpoch: CacheEpoch = CacheEpoch.GitTags()): Either[String, String] =
     Render.renderComposite(sbtSetup(pins, cacheEpoch)).map(ActionPinFile.annotateUses(_, pins))

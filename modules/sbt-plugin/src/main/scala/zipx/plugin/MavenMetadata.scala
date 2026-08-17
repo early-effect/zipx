@@ -2,15 +2,11 @@ package zipx.plugin
 
 import zipx.core.*
 
-import java.net.URI
-import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.time.Duration
 
-/** Latest version from Maven-style `maven-metadata.xml` (Maven Central, then the sbt plugin repo). */
+/** Latest version from Maven-style `maven-metadata.xml` (Maven Central, then the sbt plugin repo for [[Plugin]] rows).
+  */
 object MavenMetadata:
-
-  private val Client: HttpClient =
-    HttpClient.newBuilder.nn.connectTimeout(Duration.ofSeconds(10)).nn.build.nn
 
   def latest(coord: ZipxCoord, scalaBin: String, sbtBin: String): Either[String, Option[String]] =
     latest(coord, scalaBin, sbtBin, PreRelease.Skip)
@@ -21,24 +17,37 @@ object MavenMetadata:
       sbtBin: String,
       preRelease: PreRelease,
   ): Either[String, Option[String]] =
+    firstHit(metadataUrls(coord, scalaBin, sbtBin), url => fetchLatest(url, preRelease))
+
+  private[plugin] def latest(
+      coord: ZipxCoord,
+      scalaBin: String,
+      sbtBin: String,
+      fetch: String => Either[String, Option[String]],
+  ): Either[String, Option[String]] =
+    firstHit(metadataUrls(coord, scalaBin, sbtBin), fetch)
+
+  /** Central for every coord. The sbt plugin repo only for [[Plugin]] rows, and only after Central misses. */
+  private[plugin] def metadataUrls(coord: ZipxCoord, scalaBin: String, sbtBin: String): List[String] =
     val artifact  = mavenArtifact(coord, scalaBin, sbtBin)
     val groupPath = (coord.group: String).replace('.', '/')
     val rel       = s"$groupPath/$artifact/maven-metadata.xml"
-    val urls      = List(
-      s"https://repo1.maven.org/maven2/$rel",
-      s"https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/$rel",
-    )
-    combine(urls.map(url => fetchLatest(url, preRelease)))
-  end latest
+    val central   = s"https://repo1.maven.org/maven2/$rel"
+    coord match
+      case _: Lib    => List(central)
+      case _: Plugin => List(central, s"https://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/$rel")
 
-  private[plugin] def combine(results: List[Either[String, Option[String]]]): Either[String, Option[String]] =
-    results.collectFirst { case Right(Some(v)) => v } match
-      case Some(v) => Right(Some(v))
-      case None    =>
-        val errors = results.collect { case Left(e) => e }
-        if results.exists(_.isRight) then Right(None)
-        else if errors.nonEmpty then Left(errors.mkString("; "))
-        else Right(None)
+  private[plugin] def firstHit(
+      urls: List[String],
+      fetch: String => Either[String, Option[String]],
+  ): Either[String, Option[String]] =
+    urls match
+      case Nil         => Right(None)
+      case url :: rest =>
+        fetch(url) match
+          case Right(Some(v)) => Right(Some(v))
+          case Right(None)    => firstHit(rest, fetch)
+          case Left(err)      => Left(err)
 
   private def mavenArtifact(coord: ZipxCoord, scalaBin: String, sbtBin: String): String =
     coord match
@@ -51,12 +60,12 @@ object MavenMetadata:
         s"${p.artifact}_sbt${sbtMaj}_$scalaBin"
 
   private def fetchLatest(url: String, preRelease: PreRelease): Either[String, Option[String]] =
-    try
-      val req = HttpRequest.newBuilder(URI.create(url)).nn.timeout(Duration.ofSeconds(15)).nn.GET.nn.build.nn
-      val res = Client.send(req, HttpResponse.BodyHandlers.ofString).nn
-      if res.statusCode != 200 then Right(None)
-      else Right(parseLatest(Option(res.body).getOrElse(""), preRelease))
-    catch case ex: Exception => Left(s"lookup $url: ${ex.getMessage}")
+    HttpLookup.get(url, timeout = Duration.ofSeconds(15)) match
+      case Left(err)                       => Left(s"lookup $url: $err")
+      case Right(res) if res.status == 200 => Right(parseLatest(res.body, preRelease))
+      case Right(res) if res.status == 404 || res.status == 410 || res.notModified =>
+        Right(None)
+      case Right(res) => Left(s"lookup $url: HTTP ${res.status}")
 
   private[plugin] def parseLatest(xml: String, preRelease: PreRelease = PreRelease.Skip): Option[String] =
     val latest  = raw"<latest>([^<]+)</latest>".r.findFirstMatchIn(xml).map(_.group(1))

@@ -7,7 +7,7 @@
 scalaVersion   := "3.8.4"
 version        := "1.0.0-ci"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
-zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 
 lazy val shared = (projectMatrix in file("shared"))
   .jvmPlatform(scalaVersions = Seq("3.8.4"))
@@ -18,7 +18,7 @@ lazy val consumer = project
   .dependsOn(shared.jvm("3.8.4"))
 
 lazy val root = (project in file("."))
-  .aggregate((shared.projectRefs ++ Seq[ProjectReference](consumer))*)
+  .aggregate((shared.projectRefs ++ Seq[ProjectReference](consumer)) *)
   .settings(publish / skip := true)
 
 // withNodeVersion also proves the NodeVersion newtype and the setupNode pin reach a real build.sbt.
@@ -40,9 +40,12 @@ assertBothRowsGetJobs := {
   assert(content.contains("node-version: \"22\""), "expected the node-version input on the composite")
   assert(!content.contains("actions/setup-node@"), "setup-node must not be inlined in the workflow")
   assert(!content.contains("Setup Node 22"), "Setup Node step name lives in the composite")
-  val setup = IO.read((LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-sbt-setup" / "action.yml")
+  val setup =
+    IO.read((LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-sbt-setup" / "action.yml")
   assert(setup.contains("actions/setup-node@"), "composite must SHA-pin setup-node")
   assert(setup.contains("Setup Node"), "composite must name the Setup Node step")
+  val awsLogin = (LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-aws-login"
+  assert(!awsLogin.exists, "non-AWS consumer must not get zipx-aws-login")
 }
 
 val assertSharedAffectsBothRows = taskKey[Unit]("a shared source change affects both platform rows")

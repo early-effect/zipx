@@ -76,27 +76,21 @@ $manifestJson
       token: String,
       repository: String,
       body: String,
-      client: java.net.http.HttpClient =
-        java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build(),
   ): Either[String, Unit] =
     if !repository.contains("/") then Left("GITHUB_REPOSITORY must be owner/name")
     else
-      val uri     = java.net.URI.create(s"https://api.github.com/repos/$repository/dependency-graph/snapshots")
-      val request = java.net.http.HttpRequest
-        .newBuilder(uri)
-        .timeout(java.time.Duration.ofSeconds(30))
-        .header("Accept", "application/vnd.github+json")
-        .header("Authorization", s"Bearer $token")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("Content-Type", "application/json")
-        .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body, java.nio.charset.StandardCharsets.UTF_8))
-        .build()
-      try
-        val response = client.send(
-          request,
-          java.net.http.HttpResponse.BodyHandlers.ofString(java.nio.charset.StandardCharsets.UTF_8),
-        )
-        if response.statusCode() >= 200 && response.statusCode() < 300 then Right(())
-        else Left(s"github snapshot: HTTP ${response.statusCode()}")
-      catch case e: Exception => Left(s"github snapshot: ${e.getMessage}")
+      HttpLookup.post(
+        s"https://api.github.com/repos/$repository/dependency-graph/snapshots",
+        body,
+        headers = Map(
+          "Accept"               -> "application/vnd.github+json",
+          "Authorization"        -> s"Bearer $token",
+          "X-GitHub-Api-Version" -> "2022-11-28",
+          "Content-Type"         -> "application/json",
+        ),
+        timeout = java.time.Duration.ofSeconds(30),
+      ) match
+        case Left(err)                                           => Left(s"github snapshot: $err")
+        case Right(res) if res.status >= 200 && res.status < 300 => Right(())
+        case Right(res)                                          => Left(s"github snapshot: HTTP ${res.status}")
 end PinSnapshot
