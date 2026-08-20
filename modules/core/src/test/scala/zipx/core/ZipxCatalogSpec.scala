@@ -85,6 +85,67 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
         out.contains("""ExclusionRule(organization = "org.scala-sbt")"""),
       )
     },
+    test("parsePlugins round-trips renderPlugins including excludeAll") {
+      val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
+      val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
+      val remote   =
+        Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.6").excluding(ZipxExclude.org("org.scala-sbt"))
+      val rendered = ZipxCatalog.renderPlugins(List(scalafmt, remote), self = List(zipx))
+      val expected = ZipxCatalog.pluginInventory(List(scalafmt, remote), self = List(zipx))
+      assertTrue(ZipxCatalog.parsePlugins(rendered) == Right(expected))
+    },
+    test("parsePlugins treats % alignment, extra parens, and wrapping as trivia") {
+      val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
+      val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
+      val remote   =
+        Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.6").excluding(ZipxExclude.org("org.scala-sbt"))
+      val aligned =
+        s"""${ZipxCatalog.PluginsHeader}
+           |addSbtPlugin("rocks.earlyeffect" % "sbt-zipx"     % "0.5.1")
+           |addSbtPlugin("org.scalameta"     % "sbt-scalafmt"  % "2.6.2")
+           |addSbtPlugin(
+           |  ("org.scala-sbt" % "sbt-remote-cache" % "2.0.6")
+           |    .excludeAll(ExclusionRule(organization = "org.scala-sbt"),)
+           |)
+           |""".stripMargin
+      val expected = List(zipx, scalafmt, remote)
+      assertTrue(ZipxCatalog.parsePlugins(aligned) == Right(expected))
+    },
+    test("parsePlugins refuses resolvers and %%") {
+      val resolvers = ZipxCatalog.parsePlugins("""resolvers += Resolver.sonatypeCentralRepo""")
+      val crossed   = ZipxCatalog.parsePlugins("""addSbtPlugin("org.scalameta" %% "sbt-scalafmt" % "2.6.2")""")
+      assertTrue(
+        resolvers == Left("unexpected 'resolvers'"),
+        crossed == Left("uses %%; generated plugins are %"),
+      )
+    },
+    test("checkPlugins is green when bytes differ but inventory matches") {
+      val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
+      val expected = List(scalafmt)
+      val aligned  = """addSbtPlugin("org.scalameta"     % "sbt-scalafmt"  % "2.6.2")""" + "\n"
+      assertTrue(ZipxCatalog.checkPlugins("project/plugins.sbt", aligned, expected).isRight)
+    },
+    test("checkPlugins names a version drift") {
+      val expected = List(Plugin("org.scalameta", "sbt-scalafmt", "2.6.2"))
+      val got      = """addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.3")"""
+      val err      = ZipxCatalog.checkPlugins("project/plugins.sbt", got, expected)
+      assertTrue(
+        err.isLeft,
+        err.swap.exists(_.contains("plugin list drifted")),
+        err.swap.exists(_.contains("2.6.2")),
+        err.swap.exists(_.contains("2.6.3")),
+        err.swap.exists(_.contains("zipxCatalogGenerate")),
+      )
+    },
+    test("checkPlugins names a parse error on an extra statement") {
+      val expected = List(Plugin("org.scalameta", "sbt-scalafmt", "2.6.2"))
+      val src      =
+        """addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")
+          |resolvers += "x"
+          |""".stripMargin
+      val err = ZipxCatalog.checkPlugins("project/plugins.sbt", src, expected)
+      assertTrue(err.swap.exists(_.contains("unexpected 'resolvers'")))
+    },
     test("renderBuildProperties writes sbt.version") {
       val out = ZipxCatalog.renderBuildProperties(SbtVersion("2.0.6"))
       assertTrue(out.contains("sbt.version=2.0.6"), out.startsWith(ZipxCatalog.GeneratedHeader))

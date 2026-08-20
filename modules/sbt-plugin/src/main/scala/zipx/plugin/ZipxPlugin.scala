@@ -1240,10 +1240,10 @@ object ZipxPlugin extends AutoPlugin:
         IO.write(file, expected)
         log.info(s"zipx wrote ${file.getPath}")
       else
-        val actual = if file.exists then IO.read(file) else ""
-        if actual != expected then
-          sys.error(s"${file.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result.")
-        log.info(s"zipx: ${file.getPath} is up to date.")
+        val actual    = if file.exists then IO.read(file) else ""
+        val inventory = ZipxCatalog.pluginInventory(plugins, self)
+        ZipxCatalog.checkPlugins(file.getPath, actual, inventory).left.foreach(sys.error)
+        log.info(s"zipx: ${file.getPath} plugin list is up to date.")
     end if
     sbtVer.foreach { ver =>
       val expected = ZipxCatalog.renderBuildProperties(ver)
