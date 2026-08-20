@@ -166,6 +166,10 @@ YAML). The file has three layers:
 
 If you also write `Plugin("com.acme", "sbt-acme", "…")` in the catalog for a plugin that already emits itself, generate
 drops that catalog line and keeps the loaded version.
+
+`zipxWorkflowCheck` compares the **plugin list**, not the bytes. Generate writes unaligned `addSbtPlugin` lines; a
+consumer `align.preset = more` may pad `%` columns. That is the same inventory. YAML, `build.properties`, and
+`zipx-ci.env` stay byte-equal.
 """,
       exampleValue {
         val acme = Plugin("com.acme", "sbt-acme", "9.9.9")
