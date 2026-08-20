@@ -491,6 +491,9 @@ object Planner:
     * The `--jq` filter is a double-quoted shell argument containing a *nested* double-quoted jq string, so the inner
     * quotes must reach jq as `\"`. A `Word.Dquote` inside another `Dquote` renders exactly that, which is why no
     * backslashes are counted by hand here.
+    *
+    * `GET /commits/{sha}/pulls` is eventually consistent: a squash (new SHA at merge) can return `[]` for several
+    * seconds. One empty answer used to fail-open into a second Verify. Retry with sleeps (1/2/4/8/16s) before that.
     */
   private def verifyGateScript: Script =
     val jqFilter = Word.dquote(
@@ -498,26 +501,49 @@ object Planner:
       Word.dquote(Expr.github("ref_name").asWord),
       Word.lit(")] | length"),
     )
+    val fetchPrs = Assign(
+      "prs",
+      Word.subst(
+        Continued(
+          "gh",
+          List(
+            List(
+              Word.lit("api"),
+              Word.dquote(
+                Word.lit("repos/"),
+                Expr.github("repository").asWord,
+                Word.lit("/commits/"),
+                Expr.github("sha").asWord,
+                Word.lit("/pulls"),
+              ),
+            ),
+            List(Word.lit("--jq"), jqFilter),
+          ),
+        )
+      ),
+    )
+    // Attempt 1 is immediate. Later attempts sleep first; unmatched attempt 1 falls through with no else.
+    val backoff = If(
+      ShTest.IntEq(Word.vq("attempt"), Word.lit("2")),
+      Block(Exec("sleep", Word.lit("1"))),
+      elifs = List(
+        ShTest.IntEq(Word.vq("attempt"), Word.lit("3")) -> Block(Exec("sleep", Word.lit("2"))),
+        ShTest.IntEq(Word.vq("attempt"), Word.lit("4")) -> Block(Exec("sleep", Word.lit("4"))),
+        ShTest.IntEq(Word.vq("attempt"), Word.lit("5")) -> Block(Exec("sleep", Word.lit("8"))),
+        ShTest.IntEq(Word.vq("attempt"), Word.lit("6")) -> Block(Exec("sleep", Word.lit("16"))),
+      ),
+    )
     Script(
       Comment("Commits landed by merging/squashing a PR are associated with that PR via the API."),
-      Assign(
-        "prs",
-        Word.subst(
-          Continued(
-            "gh",
-            List(
-              List(
-                Word.lit("api"),
-                Word.dquote(
-                  Word.lit("repos/"),
-                  Expr.github("repository").asWord,
-                  Word.lit("/commits/"),
-                  Expr.github("sha").asWord,
-                  Word.lit("/pulls"),
-                ),
-              ),
-              List(Word.lit("--jq"), jqFilter),
-            ),
+      Comment("The commit-to-PR index can lag after squash; retry rather than fail-open into a second Verify."),
+      Assign("prs", Word.lit("0")),
+      ForIn(
+        VarName("attempt"),
+        List(Word.lit("1"), Word.lit("2"), Word.lit("3"), Word.lit("4"), Word.lit("5"), Word.lit("6")),
+        Block(
+          If(
+            ShTest.IntEq(Word.vq("prs"), Word.lit("0")),
+            Block(backoff, fetchPrs),
           )
         ),
       ),

@@ -181,6 +181,10 @@ Direct pushes still Verify. **Tag pushes never run Verify** (release tags only n
 Publish and Deploy still run after a merge; the `affected` job they read stays up and emits `["all"]` on that
 non-PR push, so they do not `fromJson` an empty output.
 
+`verify-gate` looks up the landed SHA on `GET /commits/{sha}/pulls`. That index can lag a few seconds after a
+squash (new SHA at merge). The gate retries with 1/2/4/8/16s sleeps rather than treating an empty first answer as a
+direct push and running Verify again.
+
 With **LocalDir**, that skip would otherwise leave `main` without an `actions/cache` save (PR caches are
 branch-scoped; later PRs only warm from the default branch). So by default zipx also emits a minimal
 `cache-rehydrate` job that runs **only** when verify-gate skips Verify: same checkout / JDK / LocalDir cache
