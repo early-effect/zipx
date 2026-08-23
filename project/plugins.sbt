@@ -2,7 +2,7 @@
 addSbtPlugin("rocks.earlyeffect" % "sbt-dynver-ci" % "0.2.3")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")
 addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.3.1")
-addSbtPlugin("rocks.earlyeffect" % "sbt-specular" % "0.12.1")
+addSbtPlugin("rocks.earlyeffect" % "sbt-specular" % "0.14.1")
 addSbtPlugin("com.jamesward" % "sbt-reload" % "0.0.7")
 addSbtPlugin("org.scala-js" % "sbt-scalajs" % "1.22.0")
 addSbtPlugin(("org.scala-sbt" % "sbt-remote-cache" % "2.0.6").excludeAll(ExclusionRule(organization = "org.scala-sbt")))
