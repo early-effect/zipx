@@ -28,19 +28,19 @@ object ZipxVersions extends zipx.ZipxVersions:
 
   val dynverCi: Plugin       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.3")
   val scalafmt: Plugin       = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
-  val pgp: Plugin            = Plugin("com.github.sbt", "sbt-pgp", "2.3.1")
+  val pgp: Plugin            = Plugin("com.github.sbt", "sbt-pgp", "2.3.2")
   val specularPlugin: Plugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.14.1")
   val sbtReload: Plugin      = Plugin("com.jamesward", "sbt-reload", "0.0.7")
   val scalajs: Plugin        = Plugin("org.scala-js", "sbt-scalajs", "1.22.0")
   val remoteCache: Plugin    =
-    Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.6").excluding(ZipxExclude.org("org.scala-sbt"))
+    Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.7").excluding(ZipxExclude.org("org.scala-sbt"))
 
   val checkout: Action =
     Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")
   val setupJava: Action =
     Action("actions/setup-java", "v5.7.0", sha = "b6effb05e454b25005698d916606bdc6ffcbf961")
   val setupSbt: Action =
-    Action("sbt/setup-sbt", "v1.5.7", sha = "8feba82adc7f01ddcf8165b86f778bdb5b82cebc")
+    Action("sbt/setup-sbt", "v1.5.8", sha = "c7d2d6258b4bd0d3ec5129e6b3453199d3c79729")
   val setupNode: Action =
     Action("actions/setup-node", "v7.0.0", sha = "820762786026740c76f36085b0efc47a31fe5020")
   val cache: Action =
@@ -56,7 +56,7 @@ object ZipxVersions extends zipx.ZipxVersions:
       sha = "e6de054238d6b7531b4efff3b6587d9aade6a06c",
     )
   val ecrLogin: Action =
-    Action("aws-actions/amazon-ecr-login", "v2.1.6", sha = "d539f0932e70871a027e9d5a9d8fc38589180a64")
+    Action("aws-actions/amazon-ecr-login", "v2.1.7", sha = "03f1aad4c6c7ffd436567f42f9384779290529bd")
 
   val commonScalacOptions: Seq[String] = Seq(
     "-deprecation",
