@@ -20,7 +20,7 @@ object ZipxVersions extends zipx.ZipxVersions:
   val testcontainers: Lib = Lib("org.testcontainers", "testcontainers", "2.0.5").java.test
   val slf4jSimple: Lib    = Lib("org.slf4j", "slf4j-simple", "2.0.18").java.test
 
-  val specular: Lib        = Lib("rocks.earlyeffect", "specular-core", "0.12.1")
+  val specular: Lib        = Lib("rocks.earlyeffect", "specular-core", "0.14.1")
   val specularMermoid: Lib = specular.mod("specular-mermoid")
   val specularZioTest: Lib = specular.mod("specular-zio-test").test
   val specularSite: Lib    = specular.mod("specular-site").test
@@ -29,7 +29,7 @@ object ZipxVersions extends zipx.ZipxVersions:
   val dynverCi: Plugin       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.3")
   val scalafmt: Plugin       = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
   val pgp: Plugin            = Plugin("com.github.sbt", "sbt-pgp", "2.3.1")
-  val specularPlugin: Plugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.12.1")
+  val specularPlugin: Plugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.14.1")
   val sbtReload: Plugin      = Plugin("com.jamesward", "sbt-reload", "0.0.7")
   val scalajs: Plugin        = Plugin("org.scala-js", "sbt-scalajs", "1.22.0")
   val remoteCache: Plugin    =
