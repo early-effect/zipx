@@ -1278,11 +1278,13 @@ object ZipxPlugin extends AutoPlugin:
       combined
 
   private def cliVersion(extracted: Extracted): String =
-    readBuildSetting(extracted, zipxPluginVersion, None)
-      .orElse(sys.props.get("plugin.version"))
-      .orElse(Option(getClass.getPackage).flatMap(p => Option(p.getImplementationVersion)))
-      .filter(_.nonEmpty)
-      .getOrElse("")
+    val raw =
+      readBuildSetting(extracted, zipxPluginVersion, None)
+        .orElse(sys.props.get("plugin.version"))
+        .orElse(Option(getClass.getPackage).flatMap(p => Option(p.getImplementationVersion)))
+        .filter(_.nonEmpty)
+        .getOrElse("")
+    if ZipxCiParams.isReleaseCli(raw) then raw else ""
 
   private def loadedZipxPlugin(extracted: Extracted): Option[Plugin] =
     if !readBuildSetting(extracted, zipxEmitSelf, true) then None

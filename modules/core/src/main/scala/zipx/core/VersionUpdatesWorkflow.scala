@@ -95,7 +95,6 @@ object VersionUpdatesWorkflow:
         Exec(".", Word.lit("project/zipx-ci.env")),
         setOutput("java-version", Word.v("ZIPX_JAVA_VERSION")),
         setOutput("runner-os", Word.v("ZIPX_RUNNER_OS")),
-        setOutput("cli-version", Word.v("ZIPX_CLI_VERSION")),
       )
       .withTrailingNewline(true)
 
@@ -103,6 +102,18 @@ object VersionUpdatesWorkflow:
     Script
       .strict(
         Exec(".", Word.lit("project/zipx-ci.env")),
+        If(
+          ShTest.Empty(Word.Dquote(List(Word.vOrEmpty("ZIPX_CLI_VERSION")))),
+          Block(
+            Exec(
+              "echo",
+              Word.quoted(
+                "zipx: ZIPX_CLI_VERSION is unset. A release writes it to project/zipx-ci.env; dogfood sets it from zipxVersionUpdatesPreSteps."
+              ),
+            ),
+            Exit(ExitCode.Failure),
+          ),
+        ),
         Exec(
           "cs",
           Word.lit("launch"),

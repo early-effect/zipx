@@ -26,7 +26,6 @@ jobs:
           . project/zipx-ci.env
           echo "java-version=$ZIPX_JAVA_VERSION" >> "$GITHUB_OUTPUT"
           echo "runner-os=$ZIPX_RUNNER_OS" >> "$GITHUB_OUTPUT"
-          echo "cli-version=$ZIPX_CLI_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
@@ -42,6 +41,10 @@ jobs:
         run: |
           set -euo pipefail
           . project/zipx-ci.env
+          if [ -z "${ZIPX_CLI_VERSION:-}" ]; then
+            echo "zipx: ZIPX_CLI_VERSION is unset. A release writes it to project/zipx-ci.env; dogfood sets it from zipxVersionUpdatesPreSteps."
+            exit 1
+          fi
           cs launch --ttl Inf "rocks.earlyeffect:zipx-cli_3:$ZIPX_CLI_VERSION" -- catalog update --yes --verify-load
           sbt "zipxPinUpdate yes"
           sbt zipxCatalogGenerate
