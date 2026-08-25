@@ -6,7 +6,7 @@ package zipx
   * Consumer files still extend [[ZipxVersions]] from the plugin, which adds `settings` / `deps` / `library`. The CLI
   * compiles that file against zipx jars on *its* classpath, not against the target `plugins.sbt`.
   */
-trait ZipxCatalogRows:
+trait Catalog:
   def sbt: SbtVersion
   def scala: ScalaVersion
 
@@ -21,4 +21,4 @@ trait ZipxCatalogRows:
 
   /** Every val on this object whose type has an [[AsActions]] given. */
   inline def actions: Seq[Action] = zipx.core.ZipxCatalog.actionsOf[this.type](this)
-end ZipxCatalogRows
+end Catalog

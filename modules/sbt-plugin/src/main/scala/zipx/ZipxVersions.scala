@@ -10,13 +10,13 @@ val ZipxSelf = zipx.plugin.ZipxSelf
 /** Catalog a build writes under `project/` and extends. `.sbt` files get plugin autoImport; this package is what those
   * Scala sources import.
   *
-  * Row collection (`coords` / `pins` / `actions`) lives on [[ZipxCatalogRows]] in core so a process that is not the
-  * target session can compile this file. `settings` / `deps` / `library` stay here because they return sbt types.
+  * Row collection (`coords` / `pins` / `actions`) lives on [[Catalog]] in core so a process that is not the target
+  * session can compile this file. `settings` / `deps` / `library` stay here because they return sbt types.
   *
   * Drop `MyVersions.settings` at the top of `build.sbt`. Extra settings belong next to that call (`MyVersions.settings
   * ++ …`).
   */
-trait ZipxVersions extends ZipxCatalogRows:
+trait ZipxVersions extends Catalog:
   /** Drop at the top of `build.sbt`. Bare `scalaVersion` (sbt 2 common setting, no `ThisBuild`) plus the zipx catalog
     * keys generate and `zipxCheckDeps` read. Inline so [[coords]] / [[pins]] / [[actions]] expand against the concrete
     * object.
