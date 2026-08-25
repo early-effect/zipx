@@ -18,9 +18,15 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         !text.contains("ZIPX_CLI_VERSION"),
       )
     },
-    test("zipx-ci.env includes ZIPX_CLI_VERSION when generate knows the jar") {
-      val text = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.7.0")
-      assertTrue(text.contains("ZIPX_CLI_VERSION=0.7.0"))
+    test("zipx-ci.env includes ZIPX_CLI_VERSION only for a release jar") {
+      val release = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.7.0")
+      val snap    = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.1.0-SNAPSHOT")
+      val ci      = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.8.0-ci")
+      assertTrue(
+        release.contains("ZIPX_CLI_VERSION=0.7.0"),
+        !snap.contains("ZIPX_CLI_VERSION"),
+        !ci.contains("ZIPX_CLI_VERSION"),
+      )
     },
     test("checkout major is the catalog label's vN, not the SHA") {
       assertTrue(
@@ -67,6 +73,7 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         yaml.contains("catalog update"),
         yaml.contains("--verify-load"),
         yaml.contains("rocks.earlyeffect:zipx-cli_3:"),
+        yaml.contains("ZIPX_CLI_VERSION is unset"),
         !yaml.contains("zipxDepUpdate yes"),
         !yaml.contains("zipxActionUpdate yes"),
         checkoutAt >= 0,

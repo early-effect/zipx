@@ -41,7 +41,8 @@ flowchart LR
 Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-updates.yml` (schedule plus
 `workflow_dispatch`). The default schedule is Sunday 00:00 UTC; set `zipxVersionUpdatesSchedule` to change it
 (`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job installs `cs` via `zipx-sbt-setup` (`coursier: true`), runs
-`cs launch rocks.earlyeffect:zipx-cli_3:${'$'}ZIPX_CLI_VERSION -- catalog update --yes --verify-load`, then
+`cs launch rocks.earlyeffect:zipx-cli_3:${'$'}ZIPX_CLI_VERSION -- catalog update --yes --verify-load`
+(a release writes `ZIPX_CLI_VERSION` to `project/zipx-ci.env`; in-dev dogfood exports it from `zipxVersionUpdatesPreSteps`), then
 `zipxPinUpdate yes` and `zipxCatalogGenerate`, and opens a PR as `github-actions[bot]`. The branch is
 `zipx/version-updates-${'$'}GITHUB_RUN_ID` so a second dispatch cannot overwrite an open PR. The PR is labeled **`clean`**,
 so Verify runs `cleanFull` (same label as a one-off human PR). That PR is every ZipxVersions row kind: Lib / Plugin /
@@ -59,7 +60,8 @@ parameterizes instead of rewriting YAML:
   are staged.
 
 `zipxVersionUpdatesPreSteps` (default empty) runs after setup and before `zipx-cli` apply. zipx dogfoods this to
-`publishLocal` the in-dev CLI so Sunday `cs launch` can resolve a SNAPSHOT.
+`publishLocal` the in-dev CLI and export `ZIPX_CLI_VERSION` on `GITHUB_ENV`, so Sunday `cs launch` can resolve that
+version without baking dynver into committed `zipx-ci.env`.
 
 `zipxVersionUpdatesExtraSteps` (default empty) runs after `zipxCatalogGenerate` and before the PR opens. Any zipx repo
 can set it. The usual case is an **sbt plugin** whose nested example (or scripted fixture) must see the in-dev plugin:
