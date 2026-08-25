@@ -1,10 +1,8 @@
 package zipx.cli
 
-import zipx.syntax.PluginsSbt
 import zio.*
 
-import java.nio.charset.StandardCharsets
-import java.nio.file.{Files, Path}
+import java.nio.file.Path
 
 /** ZIO entry for `cs launch rocks.earlyeffect:zipx-cli_3:… -- catalog …`.
   *
@@ -32,31 +30,28 @@ object Main extends ZIOAppDefault:
 
   private def update(file: Path, yes: Boolean, dryRun: Boolean, verifyLoad: Boolean): IO[String, ExitCode] =
     for
-      _ <- say("zipx: catalog update (ZIO). Lookup and apply land in a later commit.")
-      _ <- ZIO.when(dryRun)(say("zipx: dry-run; no files written."))
-      _ <- ZIO.when(yes && !dryRun)(say(s"zipx: --yes against ${file.toString} (apply not wired yet)."))
-      _ <- ZIO.when(verifyLoad)(say("zipx: --verify-load (probe not wired yet)."))
+      plan <- ZIO.fromEither(CatalogOps.planUpdate(file))
+      _    <- say(s"zipx catalog update:\n${CatalogOps.formatPlan(plan)}")
+      _    <-
+        if CatalogOps.nothingToDo(plan) then say("zipx: no catalog updates to apply")
+        else if dryRun || !yes then say("zipx: pass --yes to apply (dry-run lists only).")
+        else
+          ZIO.fromEither(CatalogOps.writeUpdate(file, plan)) *>
+            say(s"zipx: wrote ${file.toString}") *>
+            ZIO.when(verifyLoad)(say("zipx: --verify-load (sbt probe lands with the companion).")).unit
     yield ExitCode.success
 
   private def generate(file: Path): IO[String, ExitCode] =
-    say(s"zipx: catalog generate from ${file.toString} (write not wired yet).").as(ExitCode.success)
+    ZIO.fromEither(CatalogOps.generate(file)) *>
+      say(s"zipx: wrote plugins.sbt from ${file.toString}").as(ExitCode.success)
 
   private def check(file: Path): IO[String, ExitCode] =
-    val plugins = Option(file.getParent).getOrElse(Path.of(".")).resolve("plugins.sbt")
-    for
-      text <- readText(plugins)
-      got  <- ZIO.fromEither(PluginsSbt.parse(text))
-      _    <- say(s"zipx: ${got.size} plugin line(s) in ${plugins.toString}")
-    yield ExitCode.success
+    ZIO.fromEither(CatalogOps.check(file)) *>
+      say(s"zipx: ${file.toString} plugin list is up to date").as(ExitCode.success)
 
   private def say(msg: String): IO[String, Unit] =
     Console.printLine(msg).mapError(err => s"zipx: ${err.getMessage}")
 
   private def fail(err: String): UIO[ExitCode] =
     Console.printLineError(err).orDie.as(ExitCode.failure)
-
-  private def readText(path: Path): IO[String, String] =
-    ZIO
-      .attempt(new String(Files.readAllBytes(path), StandardCharsets.UTF_8))
-      .mapError(err => s"zipx: cannot read ${path.toString}: ${err.getMessage}")
 end Main
