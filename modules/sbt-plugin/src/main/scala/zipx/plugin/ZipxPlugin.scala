@@ -66,7 +66,6 @@ object ZipxPlugin extends AutoPlugin:
     type ZipxExclude = zipx.core.ZipxExclude
     val ZipxExclude = zipx.core.ZipxExclude
     type ZipxVersions = zipx.ZipxVersions
-    type Catalog      = zipx.Catalog
     val ZipxDeps    = zipx.plugin.ZipxDeps
     val ZipxCatalog = zipx.core.ZipxCatalog
     val ZipxSelf    = zipx.plugin.ZipxSelf
