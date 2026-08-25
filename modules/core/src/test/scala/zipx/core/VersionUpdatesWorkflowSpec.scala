@@ -15,7 +15,12 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         text.startsWith(ZipxCatalog.GeneratedHeader),
         text.contains("ZIPX_JAVA_VERSION=25"),
         text.contains("ZIPX_RUNNER_OS=ubuntu-latest"),
+        !text.contains("ZIPX_CLI_VERSION"),
       )
+    },
+    test("zipx-ci.env includes ZIPX_CLI_VERSION when generate knows the jar") {
+      val text = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.7.0")
+      assertTrue(text.contains("ZIPX_CLI_VERSION=0.7.0"))
     },
     test("checkout major is the catalog label's vN, not the SHA") {
       assertTrue(
@@ -27,8 +32,7 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
       val checkoutAt = yaml.indexOf("actions/checkout@v7")
       val loadAt     = yaml.indexOf("project/zipx-ci.env")
       val setupAt    = yaml.indexOf("./.github/actions/zipx-sbt-setup")
-      val depAt      = yaml.indexOf("zipxDepUpdate yes")
-      val actionAt   = yaml.indexOf("zipxActionUpdate yes")
+      val csAt       = yaml.indexOf("cs launch")
       val pinAt      = yaml.indexOf("zipxPinUpdate yes")
       val genAt      = yaml.indexOf("zipxCatalogGenerate", pinAt)
       val applyAt    = yaml.indexOf("Apply catalog updates")
@@ -59,12 +63,17 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         yaml.contains("--label clean"),
         yaml.contains("steps.zipx-ci.outputs.java-version"),
         yaml.contains("steps.zipx-ci.outputs.runner-os"),
+        yaml.contains("coursier: \"true\"") || yaml.contains("coursier: true"),
+        yaml.contains("catalog update"),
+        yaml.contains("--verify-load"),
+        yaml.contains("rocks.earlyeffect:zipx-cli_3:"),
+        !yaml.contains("zipxDepUpdate yes"),
+        !yaml.contains("zipxActionUpdate yes"),
         checkoutAt >= 0,
         loadAt > checkoutAt,
         setupAt > loadAt,
-        depAt > setupAt,
-        actionAt > depAt,
-        pinAt > actionAt,
+        csAt > setupAt,
+        pinAt > csAt,
         genAt > pinAt,
         applyAt >= 0,
         openAt > applyAt,

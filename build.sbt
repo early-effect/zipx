@@ -50,7 +50,7 @@ val commonSettings = Seq(
 lazy val zipxWriteVersion = taskKey[File]("Write the build version to target/zipx-version.txt for the example check")
 
 lazy val root = (project in file("."))
-  .aggregate(shell, workflow, core, central, aws, plugin, docs, docsJS)
+  .aggregate(shell, workflow, core, syntax, cli, central, aws, plugin, docs, docsJS)
   .settings(
     name           := "zipx",
     publish / skip := true,
@@ -85,6 +85,7 @@ lazy val root = (project in file("."))
     zipxJavaVersion                := JdkVersion("25"),
     zipxWorkflowDispatch           := true,
     zipxEmitSelf                   := false,
+    zipxVersionUpdatesPreSteps     := zipx.ExampleCheck.companionPreSteps,
     zipxVersionUpdatesExtraSteps   := zipx.ExampleCheck.companionSteps,
   )
 
@@ -130,6 +131,27 @@ lazy val core = (project in file("modules/core"))
     libraryDependencies ++= V.testcontainersDeps,
   )
 
+// Scala 3 compiler trees for catalog files. Not on a consumer's sbt session unless they load the plugin check
+// path: the plugin depends on this so zipxWorkflowCheck walks plugins.sbt the same way the CLI will.
+lazy val syntax = (project in file("modules/syntax"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name        := "zipx-syntax",
+    description := "Scala 3 compiler trees for ZipxVersions.scala and generated plugins.sbt",
+    libraryDependencies += "org.scala-lang" %% "scala3-compiler" % scalaVersion.value,
+  )
+
+// ZIO CLI above the target sbt. No Typelevel. Published so the companion can cs launch it.
+lazy val cli = (project in file("modules/cli"))
+  .dependsOn(syntax, core % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name        := "zipx-cli",
+    description := "zipx catalog CLI: apply and generate without loading the target sbt session",
+    Compile / mainClass := Some("zipx.cli.Main"),
+  )
+
 // Early-effect / Maven Central paved path (typed secrets + GPG import + publishSigned + sonaRelease).
 lazy val central = (project in file("modules/central"))
   .dependsOn(core % "compile->compile;test->test")
@@ -152,7 +174,7 @@ lazy val aws = (project in file("modules/aws"))
 // the root build dogfoods via the meta-build source mirror in project/dogfood.sbt (no publishLocal).
 lazy val plugin = (project in file("modules/sbt-plugin"))
   .enablePlugins(SbtPlugin)
-  .dependsOn(core, central, aws)
+  .dependsOn(core, syntax, central, aws)
   .settings(
     name        := "sbt-zipx",
     description := "sbt 2 AutoPlugin: the build describes its own GitHub Actions CI",

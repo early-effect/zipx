@@ -4,8 +4,8 @@ import zipx.shell.*
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** Scheduled catalog companion: cron + dispatch. Applies every ZipxVersions row kind (`zipxDepUpdate`,
-  * `zipxActionUpdate`, `zipxPinUpdate`), writes catalog outputs (`zipxCatalogGenerate`), and opens a PR on
+/** Scheduled catalog companion: cron + dispatch. Applies Lib / Plugin / Action rows via `zipx-cli` (above the target
+  * sbt), then `zipxPinUpdate` / `zipxCatalogGenerate` once the session can load, and opens a PR on
   * `zipx/version-updates-$GITHUB_RUN_ID`.
   *
   * This workflow file is generated once and then left alone. Java and runner come from [[ZipxCiParams]]; java / sbt
@@ -35,6 +35,7 @@ object VersionUpdatesWorkflow:
       checkout: ActionRef,
       schedule: Cron = DefaultSchedule,
       extraSteps: List[Step] = Nil,
+      preSteps: List[Step] = Nil,
   ): Workflow =
     val checkoutStep = Step(
       uses = Some(checkout),
@@ -55,22 +56,13 @@ object VersionUpdatesWorkflow:
           "cache-key-suffix" -> "version-updates",
           "node-version"     -> "",
           "sbt-disk-cache"   -> "false",
-          "local-cache"      -> "false",
+          "local-cache"      -> "true",
+          "coursier"         -> "true",
         )
       )
       .build
     val apply = Step
-      .run(
-        Script(
-          List(
-            Exec("sbt", Word.quoted("zipxDepUpdate yes")),
-            Exec("sbt", Word.quoted("zipxActionUpdate yes")),
-            Exec("sbt", Word.quoted("zipxPinUpdate yes")),
-            Exec("sbt", Word.lit("zipxCatalogGenerate")),
-          ),
-          trailingNewline = true,
-        )
-      )
+      .run(applyScript)
       .named("Apply catalog updates")
       .build
     val openPr = Step.run(updatePrScript).named("Open update PR").build
@@ -83,7 +75,7 @@ object VersionUpdatesWorkflow:
           name = Some("Catalog version updates"),
           runsOn = List("ubuntu-latest"),
           env = ListMap("GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}"),
-          steps = List(checkoutStep, load, setup, apply) ++ extraSteps ++ List(openPr),
+          steps = List(checkoutStep, load, setup) ++ preSteps ++ List(apply) ++ extraSteps ++ List(openPr),
         )
       ),
     )
@@ -93,8 +85,9 @@ object VersionUpdatesWorkflow:
       pins: ActionPins,
       schedule: Cron = DefaultSchedule,
       extraSteps: List[Step] = Nil,
+      preSteps: List[Step] = Nil,
   ): Either[String, String] =
-    checkoutMajor(pins).flatMap(ref => Render.render(plan(ref, schedule, extraSteps)))
+    checkoutMajor(pins).flatMap(ref => Render.render(plan(ref, schedule, extraSteps, preSteps)))
 
   private def loadParams: Script =
     Script
@@ -102,6 +95,28 @@ object VersionUpdatesWorkflow:
         Exec(".", Word.lit("project/zipx-ci.env")),
         setOutput("java-version", Word.v("ZIPX_JAVA_VERSION")),
         setOutput("runner-os", Word.v("ZIPX_RUNNER_OS")),
+        setOutput("cli-version", Word.v("ZIPX_CLI_VERSION")),
+      )
+      .withTrailingNewline(true)
+
+  private def applyScript: Script =
+    Script
+      .strict(
+        Exec(".", Word.lit("project/zipx-ci.env")),
+        Exec(
+          "cs",
+          Word.lit("launch"),
+          Word.lit("--ttl"),
+          Word.lit("Inf"),
+          Word.dquote(Word.lit("rocks.earlyeffect:zipx-cli_3:"), Word.v("ZIPX_CLI_VERSION")),
+          Word.lit("--"),
+          Word.lit("catalog"),
+          Word.lit("update"),
+          Word.lit("--yes"),
+          Word.lit("--verify-load"),
+        ),
+        Exec("sbt", Word.quoted("zipxPinUpdate yes")),
+        Exec("sbt", Word.lit("zipxCatalogGenerate")),
       )
       .withTrailingNewline(true)
 
@@ -113,7 +128,7 @@ object VersionUpdatesWorkflow:
       branchPrefix = "zipx/version-updates",
       commitMessage = "ci: zipx version updates",
       prTitle = "ci: zipx version updates",
-      prBody = "Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate.",
+      prBody = "Applied zipx-cli catalog update and zipxPinUpdate.",
       emptyMessage = "No catalog updates to commit.",
       workflowRegenHint = true,
     )

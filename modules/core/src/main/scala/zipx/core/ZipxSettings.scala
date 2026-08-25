@@ -156,7 +156,7 @@ object ZipxSettings:
       SettingName("zipxVersionUpdates"),
       true,
       SettingPurpose(
-        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, applies zipxDepUpdate / zipxActionUpdate / zipxPinUpdate, zipxCatalogGenerate, opens zipx/version-updates-$GITHUB_RUN_ID labeled clean. Commits everything except repo-root .github/workflows. Nested extra generate is zipxVersionUpdatesExtraSteps. Default true. false deletes the companion."
+        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, cs launch zipx-cli catalog update --yes --verify-load, then zipxPinUpdate / zipxCatalogGenerate, opens zipx/version-updates-$GITHUB_RUN_ID labeled clean. Commits everything except repo-root .github/workflows. Nested extra generate is zipxVersionUpdatesExtraSteps. Default true. false deletes the companion."
       ),
       Build,
     )
@@ -167,6 +167,16 @@ object ZipxSettings:
       VersionUpdatesWorkflow.DefaultSchedule,
       SettingPurpose(
         "Cron for zipx-version-updates.yml. Default Sunday 00:00 UTC. Use Cron.daily / Cron.weekly / Cron.raw."
+      ),
+      Build,
+    )
+
+  val versionUpdatesPreSteps: SettingDef[Seq[zipx.workflow.Step]] =
+    SettingDef.setting(
+      SettingName("zipxVersionUpdatesPreSteps"),
+      Seq.empty,
+      SettingPurpose(
+        "Extra steps on the version-updates companion after zipx-sbt-setup and before zipx-cli apply (default empty). Typical use: publishLocal an in-dev zipx-cli so cs launch can resolve a SNAPSHOT."
       ),
       Build,
     )
@@ -591,6 +601,7 @@ object ZipxSettings:
     leftoverSteward,
     versionUpdates,
     versionUpdatesSchedule,
+    versionUpdatesPreSteps,
     versionUpdatesExtraSteps,
     pinFeeds,
     pinPrGate,

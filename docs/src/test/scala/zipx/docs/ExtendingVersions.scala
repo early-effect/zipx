@@ -91,7 +91,7 @@ put *your* plugin GAV on that subtype if you already emit it; that catalog line 
 trait SpliceVersions extends ZipxVersions:
   val spliceRuntime = Lib("rocks.earlyeffect", "splice-core", "1.0.0")
   val preact        = Pin("cdn", "preact", "10.26.4", sha256 = "sha256-abc", purl = "pkg:npm/preact@10.26.4")
-  inline override def settings = super.settings ++ spliceCdnFeed
+  // extra settings: MyVersions.settings ++ spliceCdnFeed in build.sbt
 ```
 
 The consumer still owns those `Pin` vals (or copies them). You ship the feed, not a second inventory list.
@@ -147,17 +147,11 @@ catalog hit, same as a bare `val zio = Lib(...)`.
         if extra.isEmpty then "(none)" else extra.map(_.render).mkString("\n")
       }.assert(text => assertTrue(text == "(none)")),
     ),
-    section("settings stays inline")(
+    section("settings stays on the plugin")(
       md"""
-`ZipxVersions.settings` is `inline` so `coordsOf` expands against the consumer object, not the trait. If you add
-settings, keep the override inline:
-
-```scala
-trait SpliceVersions extends ZipxVersions:
-  val splice = SpliceLibs(...)
-  inline override def settings =
-    super.settings ++ spliceSettings
-```
+`coords` / `pins` / `actions` live on the core trait so a process that is not the target sbt can compile the catalog
+file. `settings` is an inline extension on the plugin (`MyVersions.settings` in `build.sbt`). Extra settings belong next
+to that call (`MyVersions.settings ++ spliceSettings`), not as `inline override def settings` on a subtype.
 
 The consumer still writes one line in `build.sbt`: `MyVersions.settings`.
 """

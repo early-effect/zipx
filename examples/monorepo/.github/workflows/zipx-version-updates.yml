@@ -26,6 +26,7 @@ jobs:
           . project/zipx-ci.env
           echo "java-version=$ZIPX_JAVA_VERSION" >> "$GITHUB_OUTPUT"
           echo "runner-os=$ZIPX_RUNNER_OS" >> "$GITHUB_OUTPUT"
+          echo "cli-version=$ZIPX_CLI_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: zipx sbt setup
         uses: ./.github/actions/zipx-sbt-setup
@@ -35,11 +36,13 @@ jobs:
           cache-key-suffix: version-updates
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "false"
+          local-cache: "true"
+          coursier: "true"
       - name: Apply catalog updates
         run: |
-          sbt "zipxDepUpdate yes"
-          sbt "zipxActionUpdate yes"
+          set -euo pipefail
+          . project/zipx-ci.env
+          cs launch --ttl Inf "rocks.earlyeffect:zipx-cli_3:$ZIPX_CLI_VERSION" -- catalog update --yes --verify-load
           sbt "zipxPinUpdate yes"
           sbt zipxCatalogGenerate
 
@@ -61,7 +64,7 @@ jobs:
           git push -u origin HEAD
           gh label create clean --force --description "zipx: Verify runs cleanFull" || true
           cat > /tmp/zipx-pr-body.md <<EOF
-          Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate.
+          Applied zipx-cli catalog update and zipxPinUpdate.
 
           ## Repo-root workflow YAML is not in this PR
 

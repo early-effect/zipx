@@ -57,6 +57,8 @@ object ZipxVersions extends zipx.ZipxVersions:
     )
   val ecrLogin: Action =
     Action("aws-actions/amazon-ecr-login", "v2.1.7", sha = "03f1aad4c6c7ffd436567f42f9384779290529bd")
+  val setupCoursier: Action =
+    Action("coursier/setup-action", "v3.0.2", sha = "9b7939bf01fd1185ce2babe16135168361bf2c62")
 
   val commonScalacOptions: Seq[String] = Seq(
     "-deprecation",

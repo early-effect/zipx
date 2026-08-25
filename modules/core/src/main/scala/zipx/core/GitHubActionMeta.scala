@@ -1,6 +1,6 @@
 package zipx.core
 
-/** Parse GitHub releases/tags/git-ref JSON for [[Action]] bumps. HTTP lives in the plugin. */
+/** Parse GitHub releases/tags/git-ref JSON for [[Action]] bumps. HTTP lives in [[GitHubActionLookup]]. */
 object GitHubActionMeta:
 
   final case class Release(tag: String, sha: Option[String])
