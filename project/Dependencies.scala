@@ -31,6 +31,10 @@ object Dependencies:
     "dev.zio" %% "zio-blocks-schema-yaml" % zioBlocksVersion,
   )
 
+  val scala3Compiler: Seq[ModuleID] = Seq(
+    "org.scala-lang" %% "scala3-compiler" % scala3Version
+  )
+
   // neotype's compile scope is light enough to put on a consumer's meta-build classpath: its own jar, comptime, and
   // scala3-library. Its zio-test integration is test-only.
   val shellLibraryDeps: Seq[ModuleID] = Seq(

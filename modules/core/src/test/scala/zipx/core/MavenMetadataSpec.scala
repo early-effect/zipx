@@ -1,6 +1,5 @@
-package zipx.plugin
+package zipx.core
 
-import zipx.core.{Lib, Plugin, PreRelease}
 import zio.test.*
 
 object MavenMetadataSpec extends ZIOSpecDefault:

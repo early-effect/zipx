@@ -66,6 +66,7 @@ object ZipxPlugin extends AutoPlugin:
     type ZipxExclude = zipx.core.ZipxExclude
     val ZipxExclude = zipx.core.ZipxExclude
     type ZipxVersions = zipx.ZipxVersions
+    type Catalog      = zipx.Catalog
     val ZipxDeps    = zipx.plugin.ZipxDeps
     val ZipxCatalog = zipx.core.ZipxCatalog
     val ZipxSelf    = zipx.plugin.ZipxSelf
@@ -1242,8 +1243,12 @@ object ZipxPlugin extends AutoPlugin:
       else
         val actual    = if file.exists then IO.read(file) else ""
         val inventory = ZipxCatalog.pluginInventory(plugins, self)
-        ZipxCatalog.checkPlugins(file.getPath, actual, inventory).left.foreach(sys.error)
+        ZipxCatalog
+          .checkPlugins(file.getPath, zipx.syntax.PluginsSbt.parse(actual), inventory)
+          .left
+          .foreach(sys.error)
         log.info(s"zipx: ${file.getPath} plugin list is up to date.")
+      end if
     end if
     sbtVer.foreach { ver =>
       val expected = ZipxCatalog.renderBuildProperties(ver)

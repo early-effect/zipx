@@ -29,7 +29,7 @@ flowchart TD
 Same trees under `modules/*/src`: the green path is dogfood (`project/meta-*` mirrors → root loads from
 source). The amber path is the publishable `plugin` project for Central and scripted.
 
-- `project/meta-{workflow,core,central,plugin}` compile the same `modules/*/src/main/scala` trees
+- `project/meta-{workflow,core,syntax,central,plugin}` compile the same `modules/*/src/main/scala` trees
 - Shared versions for the **main** build live in [`project/ZipxVersions.scala`](https://github.com/early-effect/zipx/blob/main/project/ZipxVersions.scala)
   (`Lib` / `Plugin` / `Action`). The meta-build cannot import those types, so dogfood ModuleIDs stay in
   [`project/Dependencies.scala`](https://github.com/early-effect/zipx/blob/main/project/Dependencies.scala)
@@ -37,7 +37,7 @@ source). The amber path is the publishable `plugin` project for Central and scri
   [`project/project/build.sbt`](https://github.com/early-effect/zipx/blob/main/project/project/build.sbt)
   pulls `Dependencies.scala` / `Dogfood.scala` onto that classpath via `unmanagedSources` (no symlinks)
 
-**After changing** sources under `modules/{workflow,core,central,sbt-plugin}`: `reload`, then `zipxWorkflowGenerate` if
+**After changing** sources under `modules/{workflow,core,syntax,central,sbt-plugin}`: `reload`, then `zipxWorkflowGenerate` if
 planner output changed.
 
 **Action pins:** add or bump `Action` vals in [`project/ZipxVersions.scala`](https://github.com/early-effect/zipx/blob/main/project/ZipxVersions.scala)

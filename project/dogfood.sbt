@@ -39,6 +39,17 @@ lazy val metaCore = project
   )
   .settings(Dogfood.mirrorMainScala("core"))
 
+lazy val metaSyntax = project
+  .in(file("meta-syntax"))
+  .dependsOn(metaCore)
+  .settings(
+    name           := "meta-zipx-syntax",
+    publish / skip := true,
+    scalacOptions ++= Dependencies.commonScalacOptions,
+    libraryDependencies ++= Dependencies.zioDeps ++ Dependencies.scala3Compiler,
+  )
+  .settings(Dogfood.mirrorMainScala("syntax"))
+
 lazy val metaCentral = project
   .in(file("meta-central"))
   .dependsOn(metaCore)
@@ -64,7 +75,7 @@ lazy val metaAws = project
 lazy val metaPlugin = project
   .in(file("meta-plugin"))
   .enablePlugins(SbtPlugin)
-  .dependsOn(metaCore, metaCentral, metaAws)
+  .dependsOn(metaCore, metaSyntax, metaCentral, metaAws)
   .settings(
     name           := "meta-sbt-zipx",
     publish / skip := true,
