@@ -16,7 +16,7 @@ When you change **emission shape** (Planner, composites, packs, pins, MatrixColl
 | --- | --- |
 | `modules/core` planner / composites / collapse | `core/testFull`, then **`docs/testFull`** (Specular examples lock job YAML) |
 | `modules/aws` / `central` packs | pack `testFull` **and** docs pages that show that pack (`Packs`, `ActionPinsDoc`, `Caching`, …) |
-| Generated `.github/**` or plugin emission | `zipxWorkflowCheck`, **`plugin/scripted`** (asserts on ci.yml + composites), monorepo example check when those change. Catalog companion PRs regenerate `examples/monorepo` (including its `ci.yml`); repo-root `.github/workflows/` still needs a human `zipxWorkflowGenerate`. |
+| Generated `.github/**` or plugin emission | `zipxWorkflowCheck`, **`plugin/scripted`** (asserts on ci.yml + composites), monorepo example check when those change. Catalog companion PRs regenerate `examples/monorepo` (including its `ci.yml`); repo-root `.github/workflows/` still needs a human `zipxWorkflowGenerate`. Companion apply is `zipx-cli` (`cs launch … catalog update --yes --verify-load`), not in-sbt `zipxDepUpdate`. |
 
 Pack specs and Specular examples are **different suites**. Updating `ZipxAwsSpec` does not update `docs/.../Packs.scala`. CI Aggregate `test` runs docs; a green local pack suite is not enough before push.
 
