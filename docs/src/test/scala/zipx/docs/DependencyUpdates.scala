@@ -40,8 +40,9 @@ flowchart LR
       md"""
 Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-updates.yml` (schedule plus
 `workflow_dispatch`). The default schedule is Sunday 00:00 UTC; set `zipxVersionUpdatesSchedule` to change it
-(`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job runs `zipxDepUpdate yes`, `zipxActionUpdate yes`,
-`zipxPinUpdate yes`, then `zipxCatalogGenerate`, and opens a PR as `github-actions[bot]`. The branch is
+(`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job installs `cs` via `zipx-sbt-setup` (`coursier: true`), runs
+`cs launch rocks.earlyeffect:zipx-cli_3:${'$'}ZIPX_CLI_VERSION -- catalog update --yes --verify-load`, then
+`zipxPinUpdate yes` and `zipxCatalogGenerate`, and opens a PR as `github-actions[bot]`. The branch is
 `zipx/version-updates-${'$'}GITHUB_RUN_ID` so a second dispatch cannot overwrite an open PR. The PR is labeled **`clean`**,
 so Verify runs `cleanFull` (same label as a one-off human PR). That PR is every ZipxVersions row kind: Lib / Plugin /
 Action / Pin constructors, plus `plugins.sbt` and composites when those moved.
@@ -56,6 +57,9 @@ parameterizes instead of rewriting YAML:
   workflow rewrite. Root `ci.yml` stays SHA-pinned.
 - **`git add`** excludes repo-root `.github/workflows` only. Nested trees such as `examples/monorepo/.github/workflows/`
   are staged.
+
+`zipxVersionUpdatesPreSteps` (default empty) runs after setup and before `zipx-cli` apply. zipx dogfoods this to
+`publishLocal` the in-dev CLI so Sunday `cs launch` can resolve a SNAPSHOT.
 
 `zipxVersionUpdatesExtraSteps` (default empty) runs after `zipxCatalogGenerate` and before the PR opens. Any zipx repo
 can set it. The usual case is an **sbt plugin** whose nested example (or scripted fixture) must see the in-dev plugin:
@@ -99,8 +103,8 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
       }.assert(yaml =>
         assertTrue(
           yaml.contains("workflow_dispatch"),
-          yaml.contains("zipxDepUpdate yes"),
-          yaml.contains("zipxActionUpdate yes"),
+          yaml.contains("cs launch"),
+          yaml.contains("catalog update"),
           yaml.contains("zipxPinUpdate yes"),
           yaml.contains("zipxCatalogGenerate"),
           yaml.contains("zipx/version-updates-${GITHUB_RUN_ID}") || yaml.contains("gh pr create"),
@@ -116,6 +120,7 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
           yaml.contains("--body-file"),
           yaml.contains("sbt zipxWorkflowGenerate"),
           yaml.contains("git push origin zipx/version-updates-${GITHUB_RUN_ID}"),
+          yaml.contains("coursier: \"true\"") || yaml.contains("coursier: true"),
           yaml.indexOf("Apply catalog updates") < yaml.indexOf("Open update PR"),
           yaml.indexOf("sbt zipxCatalogGenerate") < yaml.indexOf("Open update PR"),
           yaml.indexOf("sbt zipxWorkflowGenerate", yaml.indexOf("Open update PR")) > yaml.indexOf("Open update PR"),

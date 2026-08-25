@@ -188,7 +188,8 @@ consumer `align.preset = more` may pad `%` columns. That is the same inventory. 
     section("Catalog update")(
       md"""
 The scheduled companion `.github/workflows/zipx-version-updates.yml` (`zipxVersionUpdates`, default true) applies
-`zipxDepUpdate yes`, `zipxActionUpdate yes`, and `zipxPinUpdate yes`, then `zipxCatalogGenerate` (not workflow YAML),
+Lib / Plugin / Action rows with `zipx-cli` (`cs launch … catalog update --yes --verify-load`), then `zipxPinUpdate yes`
+and `zipxCatalogGenerate` (not workflow YAML),
 and opens `zipx/version-updates-${'$'}GITHUB_RUN_ID` (labeled `clean`). That PR is these constructor hunks. If
 `zipxWorkflowCheck` fails on `ci.yml`, the PR body names that branch and the `sbt zipxWorkflowGenerate` / `git` commands
 to push workflow YAML onto it (the bot cannot). You can run the same apply locally:

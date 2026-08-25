@@ -93,6 +93,12 @@ object ZipxComposites:
         `with` = ListMap("disk-cache" -> input("sbt-disk-cache")),
       ),
       Step(
+        name = Some("Setup Coursier"),
+        `if` = Some("inputs.coursier == 'true'"),
+        uses = Some(pins.extraByPrefix(CoursierSetupPinKey).getOrElse(DefaultCoursierSetup)),
+        `with` = ListMap("apps" -> "cs"),
+      ),
+      Step(
         name = Some("Setup Node"),
         `if` = Some("inputs.node-version != ''"),
         uses = Some(pins.setupNode),
@@ -160,6 +166,10 @@ object ZipxComposites:
           "Fixed cache epoch; when non-empty skips git-tag resolve and keys the cache with this value",
           default = Some(""),
         ),
+        "coursier" -> CompositeInput(
+          "When true, install cs via coursier/setup-action so the job can launch zipx-cli",
+          default = Some("false"),
+        ),
       ),
       steps = steps,
     )
@@ -202,13 +212,16 @@ object ZipxComposites:
   end awsLogin
 
   // Pin keys mirrored from zipx-aws so core does not depend on that module. Keep the strings identical.
-  val CredentialsPinKey: String = "aws-actions/configure-aws-credentials"
-  val EcrLoginPinKey: String    = "aws-actions/amazon-ecr-login"
+  val CredentialsPinKey: String   = "aws-actions/configure-aws-credentials"
+  val EcrLoginPinKey: String      = "aws-actions/amazon-ecr-login"
+  val CoursierSetupPinKey: String = "coursier/setup-action"
 
   private val DefaultCredentials: ActionRef =
     ActionRef("aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c")
   private val DefaultEcrLogin: ActionRef =
     ActionRef("aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64")
+  private val DefaultCoursierSetup: ActionRef =
+    ActionRef("coursier/setup-action@9b7939bf01fd1185ce2babe16135168361bf2c62")
 
   /** One workflow step that invokes [[SbtSetupRef]] with the planner's LocalDir (or no-cache) settings. */
   def sbtSetupStep(

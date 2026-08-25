@@ -32,8 +32,7 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
       val checkoutAt = yaml.indexOf("actions/checkout@v7")
       val loadAt     = yaml.indexOf("project/zipx-ci.env")
       val setupAt    = yaml.indexOf("./.github/actions/zipx-sbt-setup")
-      val depAt      = yaml.indexOf("zipxDepUpdate yes")
-      val actionAt   = yaml.indexOf("zipxActionUpdate yes")
+      val csAt       = yaml.indexOf("cs launch")
       val pinAt      = yaml.indexOf("zipxPinUpdate yes")
       val genAt      = yaml.indexOf("zipxCatalogGenerate", pinAt)
       val applyAt    = yaml.indexOf("Apply catalog updates")
@@ -64,12 +63,17 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         yaml.contains("--label clean"),
         yaml.contains("steps.zipx-ci.outputs.java-version"),
         yaml.contains("steps.zipx-ci.outputs.runner-os"),
+        yaml.contains("coursier: \"true\"") || yaml.contains("coursier: true"),
+        yaml.contains("catalog update"),
+        yaml.contains("--verify-load"),
+        yaml.contains("rocks.earlyeffect:zipx-cli_3:"),
+        !yaml.contains("zipxDepUpdate yes"),
+        !yaml.contains("zipxActionUpdate yes"),
         checkoutAt >= 0,
         loadAt > checkoutAt,
         setupAt > loadAt,
-        depAt > setupAt,
-        actionAt > depAt,
-        pinAt > actionAt,
+        csAt > setupAt,
+        pinAt > csAt,
         genAt > pinAt,
         applyAt >= 0,
         openAt > applyAt,

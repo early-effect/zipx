@@ -69,6 +69,14 @@ object ExampleCheck:
     */
   val companionSteps: Seq[Step] = Seq(publishLocal.build, generateExample.build)
 
+  /** Publish zipx-cli so Sunday `cs launch` can resolve the in-dev SNAPSHOT from the local Ivy cache. */
+  val companionPreSteps: Seq[Step] = Seq(
+    Step
+      .run(Script.strict(SbtCommand.session(SbtCommand.unsafeTask("cli/publishLocal")).render))
+      .named("Publish zipx-cli locally")
+      .build
+  )
+
   /** Runs after `test; plugin/scripted` on the Aggregate test job. */
   val steps: Steps =
     Steps.built("publish-local")(publishLocal) ++ Steps.built("example-check")(checkExample)

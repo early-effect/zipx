@@ -368,6 +368,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxLeftoverSteward   = settingKey[LeftoverOpt](ZipxSettings.leftoverSteward.description)
     val zipxVersionUpdates    = settingKey[Boolean](ZipxSettings.versionUpdates.description)
     val zipxVersionUpdatesSchedule   = settingKey[Cron](ZipxSettings.versionUpdatesSchedule.description)
+    val zipxVersionUpdatesPreSteps   = settingKey[Seq[Step]](ZipxSettings.versionUpdatesPreSteps.description)
     val zipxVersionUpdatesExtraSteps = settingKey[Seq[Step]](ZipxSettings.versionUpdatesExtraSteps.description)
     val zipxWorkflowDispatch         = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
     val zipxCiRelevant               = settingKey[Boolean](ZipxSettings.ciRelevant.description)
@@ -454,6 +455,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxLeftoverSteward          := LeftoverOpt.Fail,
     zipxVersionUpdates           := true,
     zipxVersionUpdatesSchedule   := VersionUpdatesWorkflow.DefaultSchedule,
+    zipxVersionUpdatesPreSteps   := Seq.empty,
     zipxVersionUpdatesExtraSteps := Seq.empty,
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
@@ -855,10 +857,11 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   private def writeCiParams: Def.Initialize[Task[Unit]] = Def.task {
-    val cfg  = planConfig.value
-    val root = (LocalRootProject / baseDirectory).value
-    val file = root / ZipxCiParams.RelPath
-    IO.write(file, ZipxCiParams.render(cfg.javaVersion, cfg.runnerOs))
+    val cfg       = planConfig.value
+    val root      = (LocalRootProject / baseDirectory).value
+    val extracted = Project.extract(state.value)
+    val file      = root / ZipxCiParams.RelPath
+    IO.write(file, ZipxCiParams.render(cfg.javaVersion, cfg.runnerOs, cliVersion(extracted)))
     streams.value.log.info(s"zipx wrote ${file.getPath}")
   }
 
@@ -953,7 +956,8 @@ object ZipxPlugin extends AutoPlugin:
     if enabled then
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
       val extra    = readBuildSetting(extracted, zipxVersionUpdatesExtraSteps, Seq.empty).toList
-      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra))
+      val pre      = readBuildSetting(extracted, zipxVersionUpdatesPreSteps, Seq.empty).toList
+      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre))
       writeCompanion(root, rel, body, log)
     else if file.exists then
       IO.delete(file)
@@ -967,12 +971,14 @@ object ZipxPlugin extends AutoPlugin:
     if enabled then
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
       val extra    = readBuildSetting(extracted, zipxVersionUpdatesExtraSteps, Seq.empty).toList
-      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra))
+      val pre      = readBuildSetting(extracted, zipxVersionUpdatesPreSteps, Seq.empty).toList
+      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre))
       checkCompanion(root, rel, expected, log)
     else if file.exists then
       sys.error(
         s"zipx: $rel is leftover. Set zipxVersionUpdates := true or delete $rel, then sbt zipxWorkflowGenerate."
       )
+    end if
   end checkVersionUpdates
 
   private def writeCompanion(root: File, rel: String, body: String, log: Logger): Unit =
@@ -1191,12 +1197,12 @@ object ZipxPlugin extends AutoPlugin:
     checkVersionUpdates(root, cfg, extracted, streams.value.log)
     validateCatalog(extracted, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
-    checkCiParams(root, cfg, streams.value.log)
+    checkCiParams(root, cfg, extracted, streams.value.log)
   }
 
-  private def checkCiParams(root: File, cfg: PlanConfig, log: Logger): Unit =
+  private def checkCiParams(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
     val file     = root / ZipxCiParams.RelPath
-    val expected = ZipxCiParams.render(cfg.javaVersion, cfg.runnerOs)
+    val expected = ZipxCiParams.render(cfg.javaVersion, cfg.runnerOs, cliVersion(extracted))
     val actual   = if file.exists then IO.read(file) else ""
     if actual != expected then
       sys.error(s"${file.getPath} is out of date. Run 'sbt zipxCatalogGenerate' and commit the result.")
@@ -1270,6 +1276,13 @@ object ZipxPlugin extends AutoPlugin:
         loadedZipxPlugin(extracted).toList ++ readBuildSetting(extracted, zipxSelfPlugins, Seq.empty)
       ZipxCatalog.duplicateSelf(combined).foreach(sys.error)
       combined
+
+  private def cliVersion(extracted: Extracted): String =
+    readBuildSetting(extracted, zipxPluginVersion, None)
+      .orElse(sys.props.get("plugin.version"))
+      .orElse(Option(getClass.getPackage).flatMap(p => Option(p.getImplementationVersion)))
+      .filter(_.nonEmpty)
+      .getOrElse("")
 
   private def loadedZipxPlugin(extracted: Extracted): Option[Plugin] =
     if !readBuildSetting(extracted, zipxEmitSelf, true) then None

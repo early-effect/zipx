@@ -36,9 +36,16 @@ object Main extends ZIOAppDefault:
         if CatalogOps.nothingToDo(plan) then say("zipx: no catalog updates to apply")
         else if dryRun || !yes then say("zipx: pass --yes to apply (dry-run lists only).")
         else
-          ZIO.fromEither(CatalogOps.writeUpdate(file, plan)) *>
-            say(s"zipx: wrote ${file.toString}") *>
-            ZIO.when(verifyLoad)(say("zipx: --verify-load (sbt probe lands with the companion).")).unit
+          ZIO
+            .fromEither(
+              LoadVerify.applyWrite(file, () => CatalogOps.writeUpdate(file, plan), verify = verifyLoad)
+            )
+            .flatMap {
+              case None =>
+                say(s"zipx: wrote ${file.toString}")
+              case Some(err) =>
+                say(s"zipx: load failed after apply; restored snapshot ($err)")
+            }
     yield ExitCode.success
 
   private def generate(file: Path): IO[String, ExitCode] =

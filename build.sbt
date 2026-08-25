@@ -85,6 +85,7 @@ lazy val root = (project in file("."))
     zipxJavaVersion                := JdkVersion("25"),
     zipxWorkflowDispatch           := true,
     zipxEmitSelf                   := false,
+    zipxVersionUpdatesPreSteps     := zipx.ExampleCheck.companionPreSteps,
     zipxVersionUpdatesExtraSteps   := zipx.ExampleCheck.companionSteps,
   )
 
