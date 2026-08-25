@@ -15,7 +15,12 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         text.startsWith(ZipxCatalog.GeneratedHeader),
         text.contains("ZIPX_JAVA_VERSION=25"),
         text.contains("ZIPX_RUNNER_OS=ubuntu-latest"),
+        !text.contains("ZIPX_CLI_VERSION"),
       )
+    },
+    test("zipx-ci.env includes ZIPX_CLI_VERSION when generate knows the jar") {
+      val text = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.7.0")
+      assertTrue(text.contains("ZIPX_CLI_VERSION=0.7.0"))
     },
     test("checkout major is the catalog label's vN, not the SHA") {
       assertTrue(

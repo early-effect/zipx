@@ -50,6 +50,17 @@ lazy val metaSyntax = project
   )
   .settings(Dogfood.mirrorMainScala("syntax"))
 
+lazy val metaCli = project
+  .in(file("meta-cli"))
+  .dependsOn(metaSyntax)
+  .settings(
+    name           := "meta-zipx-cli",
+    publish / skip := true,
+    scalacOptions ++= Dependencies.commonScalacOptions,
+    libraryDependencies ++= Dependencies.zioDeps ++ Dependencies.scala3Compiler,
+  )
+  .settings(Dogfood.mirrorMainScala("cli"))
+
 lazy val metaCentral = project
   .in(file("meta-central"))
   .dependsOn(metaCore)

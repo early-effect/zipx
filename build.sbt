@@ -50,7 +50,7 @@ val commonSettings = Seq(
 lazy val zipxWriteVersion = taskKey[File]("Write the build version to target/zipx-version.txt for the example check")
 
 lazy val root = (project in file("."))
-  .aggregate(shell, workflow, core, syntax, central, aws, plugin, docs, docsJS)
+  .aggregate(shell, workflow, core, syntax, cli, central, aws, plugin, docs, docsJS)
   .settings(
     name           := "zipx",
     publish / skip := true,
@@ -139,6 +139,16 @@ lazy val syntax = (project in file("modules/syntax"))
     name        := "zipx-syntax",
     description := "Scala 3 compiler trees for ZipxVersions.scala and generated plugins.sbt",
     libraryDependencies += "org.scala-lang" %% "scala3-compiler" % scalaVersion.value,
+  )
+
+// ZIO CLI above the target sbt. No Typelevel. Published so the companion can cs launch it.
+lazy val cli = (project in file("modules/cli"))
+  .dependsOn(syntax, core % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name        := "zipx-cli",
+    description := "zipx catalog CLI: apply and generate without loading the target sbt session",
+    Compile / mainClass := Some("zipx.cli.Main"),
   )
 
 // Early-effect / Maven Central paved path (typed secrets + GPG import + publishSigned + sonaRelease).
