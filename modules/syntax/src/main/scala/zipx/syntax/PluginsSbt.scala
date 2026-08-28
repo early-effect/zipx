@@ -22,7 +22,7 @@ object PluginsSbt:
     // ("Illegal start of toplevel definition"), so wrap as an object body and walk that.
     ScalaParse.untyped(s"object ZipxPluginsSbt {\n$source\n}\n", "plugins.sbt").flatMap(fromTree)
 
-  def fromTree(tree: Tree)(using Context): Either[String, List[Plugin]] =
+  private def fromTree(tree: Tree)(using Context): Either[String, List[Plugin]] =
     statsOf(tree).flatMap(parseStats)
 
   private def statsOf(tree: Tree)(using Context): Either[String, List[Tree]] =
@@ -182,7 +182,7 @@ object PluginsSbt:
     yield ZipxExclude(g, a)
 end PluginsSbt
 
-object ScalaParse:
+private[syntax] object ScalaParse:
 
   def freshContext(): Context =
     val base = new ContextBase

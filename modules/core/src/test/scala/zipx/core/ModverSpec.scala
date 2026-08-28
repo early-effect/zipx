@@ -118,6 +118,25 @@ object ModverSpec extends ZIOSpecDefault:
         yield assertTrue(good.isRight, badId.isLeft, badName.isLeft)
       },
     ),
+    suite("bumpVersion")(
+      test("patch, minor, and major increment and never write -ci") {
+        assertTrue(
+          Modver.bumpVersion("1.4.2", BumpKind.Patch) == Right("1.4.3"),
+          Modver.bumpVersion("1.4.2", BumpKind.Minor) == Right("1.5.0"),
+          Modver.bumpVersion("1.4.2", BumpKind.Major) == Right("2.0.0"),
+          Modver.bumpVersion("1.4.2-ci", BumpKind.Patch).isLeft,
+        )
+      },
+      test("rowForProject prefers the exact id then a JS suffix of a Ship root") {
+        val rows = List[PublishedRow](Ship("core", "1.4.2"), Ship("cli", "0.3.0"))
+        assertTrue(
+          Modver.rowForProject("core", rows).exists(_.identity == "core"),
+          Modver.rowForProject("coreJS", rows).exists(_.identity == "core"),
+          Modver.rowForProject("cli", rows).exists(_.identity == "cli"),
+          Modver.rowForProject("service", rows).isEmpty,
+        )
+      },
+    ),
     suite("membership")(
       test("a covering catalog is Right and every publishing root is in exactly one row") {
         check(gCovered) { (g, rows) =>

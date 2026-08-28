@@ -241,6 +241,34 @@ object ZipxSettings:
       Build,
     )
 
+  val ships: SettingDef[Seq[PublishedRow]] =
+    SettingDef.setting(
+      SettingName("zipxShips"),
+      Seq.empty,
+      SettingPurpose(
+        "Ship / ShipGroup rows collected from the ZipxVersions object. Presence is the independent-versioning flag."
+      ),
+      Build,
+    )
+
+  val matrixRoot: SettingDef[Option[ModuleId]] =
+    SettingDef.setting(
+      SettingName("zipxMatrixRoot"),
+      None,
+      SettingPurpose(
+        "Override the inferred matrix root for this project (Scala-version axes, unusual layouts). Default None."
+      ),
+      Project,
+    )
+
+  val modverBump: SettingDef[Unit] =
+    SettingDef.input(
+      SettingName("zipxModverBump"),
+      SettingPurpose(
+        "Rewrite a Ship / ShipGroup version in zipxVersionsFile. Default patch. Identity is a project id or group name. Never writes -ci."
+      ),
+    )
+
   val sbtVersionCoord: SettingDef[Option[SbtVersion]] =
     SettingDef.setting(
       SettingName("zipxSbt"),
@@ -608,6 +636,7 @@ object ZipxSettings:
     preRelease,
     versions,
     pins,
+    ships,
     sbtVersionCoord,
     scalaVersionCoord,
     checkDeps,
@@ -642,6 +671,7 @@ object ZipxSettings:
     docker,
     testTask,
     publishTask,
+    matrixRoot,
   )
 
   val tasks: List[SettingDef[?]] = List(
@@ -659,6 +689,7 @@ object ZipxSettings:
     pinUpdate,
     depUpdate,
     actionUpdate,
+    modverBump,
   )
 
   /** Every public catalog entry, in docs-friendly order. */
