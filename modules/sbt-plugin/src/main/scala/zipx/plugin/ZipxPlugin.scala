@@ -83,6 +83,8 @@ object ZipxPlugin extends AutoPlugin:
     val Ship = zipx.core.Ship
     type ShipGroup = zipx.core.ShipGroup
     val ShipGroup = zipx.core.ShipGroup
+    type ModverPropagate = zipx.core.ModverPropagate
+    val ModverPropagate = zipx.core.ModverPropagate
     type ModuleId = zipx.core.ModuleId
     val ModuleId = zipx.core.ModuleId
     type Action = zipx.core.Action
@@ -407,6 +409,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxVersions             = settingKey[Seq[ZipxCoord]](ZipxSettings.versions.description)
     val zipxPins                 = settingKey[Seq[Pin]](ZipxSettings.pins.description)
     val zipxShips                = settingKey[Seq[PublishedRow]](ZipxSettings.ships.description)
+    val zipxModverPropagate      = settingKey[ModverPropagate](ZipxSettings.modverPropagate.description)
     val zipxMatrixRoot           = settingKey[Option[ModuleId]](ZipxSettings.matrixRoot.description)
     val zipxSbt                  = settingKey[Option[SbtVersion]](ZipxSettings.sbtVersionCoord.description)
     val zipxScala                = settingKey[Option[ScalaVersion]](ZipxSettings.scalaVersionCoord.description)
@@ -479,6 +482,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxVersions                 := Seq.empty,
     zipxPins                     := Seq.empty,
     zipxShips                    := Seq.empty,
+    zipxModverPropagate          := ModverPropagate.Never,
     zipxSbt                      := None,
     zipxScala                    := None,
     zipxCheckDeps                := false,
@@ -1726,7 +1730,8 @@ object ZipxPlugin extends AutoPlugin:
             row.memberRoots.exists(rootId => !Modver.isJsOnly(graph, rootId) && previous.rowFor(rootId).isDefined)
           }
         }
-      bumps = Modver.expand(BumpSet(kinds), graph, index)
+      policy = readBuildSetting(extracted, zipxModverPropagate, ModverPropagate.Never)
+      bumps  = Modver.expand(BumpSet(kinds), graph, index, policy)
       report <- Modver.report(index, previous, lifted, moved, bumps.asMap, mimaRan)
     yield report
     end for

@@ -30,12 +30,35 @@ object ShipIndex:
     ShipIndex(byIdentity, byRoot)
 end ShipIndex
 
-/** Min-bump map after lift (and, later, after propagate). */
+/** Min-bump map after lift and after [[ModverPropagate.expand]]. */
 opaque type BumpSet = Map[ShipRef, BumpKind]
 object BumpSet:
   def empty: BumpSet                                       = Map.empty
   def apply(m: Map[ShipRef, BumpKind]): BumpSet            = m
   extension (b: BumpSet) def asMap: Map[ShipRef, BumpKind] = b
+
+/** Reverse-dep bump policy on the contracted Ship graph. Intra-group `dependsOn` is not an edge. */
+enum ModverPropagate:
+  case Never
+  case PatchPublished
+  case MatchBump
+  case Custom(f: (Map[ShipRef, BumpKind], ModuleGraph, ShipIndex) => Map[ShipRef, BumpKind])
+
+  def expand(bumps: BumpSet, graph: ModuleGraph, ships: ShipIndex): BumpSet =
+    this match
+      case Never          => bumps
+      case Custom(f)      => BumpSet(f(bumps.asMap, graph, ships))
+      case PatchPublished => Modver.propagate(bumps, graph, ships, inheritTrigger = false)
+      case MatchBump      => Modver.propagate(bumps, graph, ships, inheritTrigger = true)
+end ModverPropagate
+
+object ModverPropagate:
+  def default: ModverPropagate = Never
+
+  def custom(
+      f: (Map[ShipRef, BumpKind], ModuleGraph, ShipIndex) => Map[ShipRef, BumpKind]
+  ): ModverPropagate = Custom(f)
+end ModverPropagate
 
 enum RegistryStatus:
   case Published, Missing
@@ -115,10 +138,67 @@ object Modver:
       yield (major, minor, patch)
   end parseSemver
 
-  /** After MiMa kinds exist, PR 4 will walk reverse-deps. Identity so MatchBump cannot see Patch placeholders. */
-  def expand(bumps: BumpSet, graph: ModuleGraph, ships: ShipIndex): BumpSet =
-    val _ = (graph, ships)
-    bumps
+  /** Walk published reverse-deps after MiMa kinds exist. Never is identity so MatchBump cannot see Patch placeholders.
+    */
+  def expand(bumps: BumpSet, graph: ModuleGraph, ships: ShipIndex, policy: ModverPropagate): BumpSet =
+    policy.expand(bumps, graph, ships)
+
+  /** Direct contracted dependents: each [[PublishedRow]] is a node; A depends on B when a member of A `dependsOn` a
+    * module whose [[ModuleNode.matrixRoot]] is in B. Intra-group edges are dropped. Values are reverse-deps of the key.
+    */
+  private[core] def contractedDependents(graph: ModuleGraph, ships: ShipIndex): Map[ShipRef, Set[ShipRef]] =
+    val empty = ships.byIdentity.keys.map(_ -> Set.empty[ShipRef]).toMap
+    graph.nodes.foldLeft(empty) { (acc, node) =>
+      ships.rowFor(node.matrixRoot) match
+        case None          => acc
+        case Some(fromRow) =>
+          val fromRef = ships.refOf(fromRow)
+          node.dependsOn.foldLeft(acc) { (m, depId) =>
+            graph.get(depId).flatMap(dep => ships.rowFor(dep.matrixRoot)) match
+              case Some(toRow) =>
+                val toRef = ships.refOf(toRow)
+                if fromRef == toRef then m
+                else m.updated(toRef, m.getOrElse(toRef, Set.empty) + fromRef)
+              case None => m
+          }
+    }
+  end contractedDependents
+
+  private[core] def propagate(
+      bumps: BumpSet,
+      graph: ModuleGraph,
+      ships: ShipIndex,
+      inheritTrigger: Boolean,
+  ): BumpSet =
+    val dependents = contractedDependents(graph, ships)
+    val seed       = bumps.asMap
+    val start      = seed.iterator.collect { case (ref, kind) if isMinBump(kind) => ref }.toList
+    BumpSet(walk(seed, start, dependents, inheritTrigger))
+  end propagate
+
+  private def isMinBump(kind: BumpKind): Boolean =
+    kind == BumpKind.Patch || kind == BumpKind.Minor || kind == BumpKind.Major
+
+  @annotation.tailrec
+  private def walk(
+      out: Map[ShipRef, BumpKind],
+      queue: List[ShipRef],
+      dependents: Map[ShipRef, Set[ShipRef]],
+      inheritTrigger: Boolean,
+  ): Map[ShipRef, BumpKind] =
+    queue match
+      case Nil       => out
+      case src :: qs =>
+        val inherited     = if inheritTrigger then out(src) else BumpKind.Patch
+        val (next, extra) =
+          dependents.getOrElse(src, Set.empty).foldLeft((out, List.empty[ShipRef])) { case ((m, acc), dep) =>
+            val proposed = m.get(dep).fold(inherited)(existing => minBumpOrd.max(existing, inherited))
+            m.get(dep) match
+              case Some(prev) if !minBumpOrd.lt(prev, proposed) => (m, acc)
+              case _                                            => (m.updated(dep, proposed), dep :: acc)
+          }
+        walk(next, qs ++ extra, dependents, inheritTrigger)
+  end walk
 
   /** Owning published matrix roots. Empty file list is empty set, not all. `.sbt` / `project/` do not expand. */
   def dirtyRoots(graph: ModuleGraph, changedFiles: List[String]): Set[ModuleId] =
@@ -377,7 +457,7 @@ object Modver:
       mimaRan: Set[ShipRef],
   ): Either[String, ModverReport] =
     val dirty = newMemberDirtyRefs(moved, lifted, current)
-    val refs  = (lifted ++ dirty).toList.sortBy {
+    val refs  = (kinds.keySet ++ dirty).toList.sortBy {
       case ShipRef.One(id)     => id: String
       case ShipRef.Group(name) => name: String
     }
