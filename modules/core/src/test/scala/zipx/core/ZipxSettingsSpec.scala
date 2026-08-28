@@ -34,6 +34,9 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
         ZipxSettings.names.contains("zipxShips"),
         ZipxSettings.names.contains("zipxMatrixRoot"),
         ZipxSettings.names.contains("zipxModverBump"),
+        ZipxSettings.names.contains("zipxModverCompat"),
+        ZipxSettings.names.contains("zipxModverCheck"),
+        ZipxSettings.names.contains("zipxModverSuggest"),
       )
     },
     test("build / project / task partitions cover every entry exactly once") {

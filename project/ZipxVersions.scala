@@ -14,6 +14,8 @@ object ZipxVersions extends zipx.ZipxVersions:
   val zio: Lib            = Lib("dev.zio", "zio", "2.1.26")
   val zioTest: Lib        = zio.mod("zio-test").test
   val zioTestSbt: Lib     = zio.mod("zio-test-sbt").test
+  val zioJson: Lib        = Lib("dev.zio", "zio-json", "0.10.0")
+  val mimaCore: Lib       = Lib("com.typesafe", "mima-core", "1.1.5")
   val zioBlocks: Lib      = Lib("dev.zio", "zio-blocks-schema", "0.0.51")
   val zioBlocksYaml: Lib  = zioBlocks.mod("zio-blocks-schema-yaml")
   val neotype: Lib        = Lib("io.github.kitlangton", "neotype", "0.7.0")

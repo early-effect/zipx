@@ -6,6 +6,7 @@ import zipx.core.*
 import zipx.workflow.Render
 import zipx.workflow.Step
 import zipx.workflow.Workflow
+import zio.json.*
 
 /** zipx: the build describes its own GitHub Actions CI.
   *
@@ -430,6 +431,9 @@ object ZipxPlugin extends AutoPlugin:
     val zipxDepUpdate        = inputKey[Unit](ZipxSettings.depUpdate.description)
     val zipxActionUpdate     = inputKey[Unit](ZipxSettings.actionUpdate.description)
     val zipxModverBump       = inputKey[Unit](ZipxSettings.modverBump.description)
+    val zipxModverCompat     = taskKey[Unit](ZipxSettings.modverCompat.description)
+    val zipxModverCheck      = taskKey[Unit](ZipxSettings.modverCheck.description)
+    val zipxModverSuggest    = taskKey[Unit](ZipxSettings.modverSuggest.description)
   end autoImport
 
   import autoImport.*
@@ -550,6 +554,9 @@ object ZipxPlugin extends AutoPlugin:
     zipxDepUpdate                := depUpdateTask.evaluated,
     zipxActionUpdate             := actionUpdateTask.evaluated,
     zipxModverBump               := modverBumpTask.evaluated,
+    zipxModverCompat             := Def.uncached { modverCompatTask.value },
+    zipxModverCheck              := Def.uncached { modverCheckTask.value },
+    zipxModverSuggest            := Def.uncached { modverSuggestTask.value },
     zipxDepUpdate / aggregate    := false,
     zipxActionUpdate / aggregate := false,
     zipxPinUpdate / aggregate    := false,
@@ -859,7 +866,17 @@ object ZipxPlugin extends AutoPlugin:
     val userCaps   = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
     val verifyTask = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
     val verify     = orFail(ZipxVerify.validate(readBuildSetting(extracted, zipxVerify, ZipxVerify.Strict)))
-    combineCapabilities(builtinCapabilities(graph, verifyTask, verify), userCaps.toList)
+    val ships      = readBuildSetting(extracted, zipxShips, Seq.empty)
+    val builtins   = builtinCapabilities(graph, verifyTask, verify)
+    val modver     =
+      if ships.isEmpty then Nil
+      else
+        List(
+          Capability.modverSuggest(CapabilityTasks.of(zipxModverSuggest)),
+          Capability.modverCheck(CapabilityTasks.of(zipxModverCheck)),
+        )
+    combineCapabilities(builtins ++ modver, userCaps.toList)
+  end capabilitiesOf
 
   /** Same graph and capabilities as [[renderWorkflow]], so catalog generate and workflow generate agree on composites.
     */
@@ -1617,10 +1634,10 @@ object ZipxPlugin extends AutoPlugin:
       val diffFailed   = changedFiles.isEmpty
       if diffFailed then
         streams.value.log.warn(
-          s"zipx: could not diff against '$baseRef', emitting ${jsonArray(Affected.AllSentinel)} so every job runs. " +
+          s"zipx: could not diff against '$baseRef', emitting ${List(Affected.AllSentinel).toJson} so every job runs. " +
             "Affected-only gating is disabled for this run."
         )
-      val json = jsonArray(Affected.outputModules(graph, changedFiles))
+      val json = Affected.outputModules(graph, changedFiles).toJson
       IO.write(root / "target" / "zipx-affected.json", json + "\n")
       println(json)
     }
@@ -1641,7 +1658,211 @@ object ZipxPlugin extends AutoPlugin:
       if code == 0 then Some(lines.map(_.trim).filter(_.nonEmpty).toList) else None
     catch case scala.util.control.NonFatal(_) => None
 
-  private def jsonArray(items: List[String]): String =
-    items.map(s => "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"").mkString("[", ",", "]")
+  private def modverCompatTask: Def.Initialize[Task[ModverReport]] = Def.task {
+    val extracted = Project.extract(state.value)
+    val graph     = buildGraph.value
+    val ships     = readBuildSetting(extracted, zipxShips, Seq.empty)
+    val log       = streams.value.log
+    val root      = (LocalRootProject / baseDirectory).value
+    if ships.isEmpty then
+      log.info("zipx: zipxShips is empty; no min-bump report")
+      ModverReport(Nil)
+    else
+      val st     = state.value
+      val report = orFail(writeModverReport(extracted, graph, ships, root, st))
+      val file   = root / ModverReport.RelPath
+      IO.write(file, ModverReport.render(report) + "\n")
+      log.info(s"zipx: wrote ${file.getPath}")
+      report
+    end if
+  }
+
+  private def modverCheckTask: Def.Initialize[Task[Unit]] = Def.task {
+    val report = modverCompatTask.value
+    val bad    = report.rows.filter(r => Modver.checkFails(r.status))
+    if bad.nonEmpty then
+      val listed = bad
+        .map(r => s"${r.label}(\"${r.identity}\") ${r.from} -> ${r.suggested} (${r.status})")
+        .mkString("; ")
+      sys.error(s"missing or undersized Ship bump: $listed")
+    else streams.value.log.info("zipx: Ship versions meet the min bump")
+  }
+
+  private def modverSuggestTask: Def.Initialize[Task[Unit]] = Def.task {
+    val report = modverCompatTask.value
+    val log    = streams.value.log
+    val ctor   =
+      report.rows.find(r => r.status == BumpStatus.Missing || r.status == BumpStatus.Undersized).map(_.constructor)
+    val body = ModverComment.body(report, ctor)
+    postModverComment(body, log)
+  }
+
+  private def writeModverReport(
+      extracted: Extracted,
+      graph: ModuleGraph,
+      ships: Seq[PublishedRow],
+      root: File,
+      st: State,
+  ): Either[String, ModverReport] =
+    val rel     = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
+    val baseSha = sys.env.get(ModverCheck.BaseShaEnv).filter(_.nonEmpty).getOrElse("HEAD^")
+    for
+      index    <- Modver.membership(graph, ships)
+      files    <- gitDiffNames(root, baseSha).toRight(s"could not diff changed files against '$baseSha'")
+      lifted   <- Modver.liftedBumpSet(graph, index, Some(files))
+      previous <- previousShips(root, rel, baseSha).map(ShipIndex.from)
+      moved    <- Modver.movedRows(index, Right(previous))
+      kinds = Modver.minBumps(
+        lifted,
+        index,
+        graph,
+        previous,
+        schemeOf = id => versionSchemeOf(extracted, id),
+        probeOf = id => probeMember(extracted, graph, previous, id, st),
+      )
+      mimaRan =
+        kinds.keySet.filter { ref =>
+          index.byIdentity.get(ref).exists { row =>
+            row.memberRoots.exists(rootId => !Modver.isJsOnly(graph, rootId) && previous.rowFor(rootId).isDefined)
+          }
+        }
+      bumps = Modver.expand(BumpSet(kinds), graph, index)
+      report <- Modver.report(index, previous, lifted, moved, bumps.asMap, mimaRan)
+    yield report
+    end for
+  end writeModverReport
+
+  private def previousShips(root: File, rel: String, sha: String): Either[String, List[PublishedRow]] =
+    val out  = scala.collection.mutable.ListBuffer.empty[String]
+    val err  = scala.collection.mutable.ListBuffer.empty[String]
+    val code =
+      scala.sys.process
+        .Process(Seq("git", "show", s"$sha:$rel"), root)
+        .!(scala.sys.process.ProcessLogger(out += _, err += _))
+    if code == 0 then zipx.syntax.CatalogSource.parse(out.mkString("\n"), rel).map(_.ships)
+    else Right(Nil)
+
+  private def versionSchemeOf(extracted: Extracted, id: ModuleId): String =
+    val ref = extracted.structure.allProjectRefs.find(_.project == (id: String))
+    ref
+      .flatMap(r => extracted.getOpt(r / versionScheme))
+      .flatten
+      .orElse(extracted.getOpt(ThisBuild / versionScheme).flatten)
+      .getOrElse("early-semver")
+
+  private def probeMember(
+      extracted: Extracted,
+      graph: ModuleGraph,
+      previous: ShipIndex,
+      id: ModuleId,
+      st: State,
+  ): MemberProbe =
+    if previous.rowFor(id).isEmpty then MemberProbe.FirstPublish
+    else if Modver.isJsOnly(graph, id) then MemberProbe.JsOnly
+    else
+      val ref = extracted.structure.allProjectRefs.find(_.project == (id: String))
+      ref match
+        case None    => MemberProbe.Clean
+        case Some(r) =>
+          extracted.runTask(r / Compile / compile, st)
+          val classes = classDirectoryOf(extracted, r)
+          val prevVer = previous.rowFor(id).map(row => row.version: String).getOrElse("")
+          previousArtifactJar(extracted, r, prevVer) match
+            case None      => MemberProbe.FirstPublish
+            case Some(old) =>
+              val lib = new com.typesafe.tools.mima.lib.MiMaLib(Nil)
+              if lib.collectProblems(old, classes, Nil).isEmpty then MemberProbe.Clean
+              else MemberProbe.BinaryBreak
+      end match
+
+  private def classDirectoryOf(extracted: Extracted, ref: ProjectRef): File =
+    val raw = extracted.get(ref / Compile / classDirectory)
+    try extracted.get(fileConverter).toPath(raw.asInstanceOf[xsbti.VirtualFileRef]).toFile
+    catch case _: ClassCastException => raw.asInstanceOf[File]
+
+  private def previousArtifactJar(extracted: Extracted, ref: ProjectRef, version: String): Option[File] =
+    if version.isEmpty then None
+    else
+      val org      = extracted.get(ref / organization)
+      val name     = extracted.get(ref / moduleName)
+      val scalaBin = extracted.getOpt(ref / scalaBinaryVersion).getOrElse("")
+      val artifact =
+        extracted.getOpt(ref / crossVersion) match
+          case Some(_: sbt.librarymanagement.Disabled) => name
+          case _ if scalaBin.nonEmpty                  => s"${name}_$scalaBin"
+          case _                                       => name
+      val groupPath = org.replace('.', '/')
+      val url       = s"https://repo1.maven.org/maven2/$groupPath/$artifact/$version/$artifact-$version.jar"
+      val dest = extracted.get(LocalRootProject / baseDirectory) / "target" / "zipx-mima" / s"$artifact-$version.jar"
+      dest.getParentFile.mkdirs()
+      downloadJar(url, dest)
+
+  private def downloadJar(url: String, dest: File): Option[File] =
+    try
+      val client  = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build()
+      val request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).GET().build()
+      val res     = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(dest.toPath))
+      if res.statusCode() == 200 then Some(dest)
+      else
+        dest.delete()
+        None
+    catch case scala.util.control.NonFatal(_) => None
+
+  private def postModverComment(body: String, log: Logger): Unit =
+    val repo = sys.env.getOrElse("GITHUB_REPOSITORY", "")
+    val pr   = pullRequestNumber()
+    if repo.isEmpty || !repo.contains("/") || pr.isEmpty then log.info("zipx: not a GitHub PR; skipping sticky comment")
+    else
+      try
+        val n        = pr.get
+        val list     = osProcess(Seq("gh", "api", s"repos/$repo/issues/$n/comments"), None)
+        val existing =
+          list.toOption.flatMap { json =>
+            json.fromJson[List[GhComment]].toOption.flatMap(_.find(_.body.contains(ModverComment.Marker)))
+          }
+        val payload = CommentBody(body).toJson
+        existing match
+          case Some(c) =>
+            osProcess(
+              Seq("gh", "api", "--method", "PATCH", s"repos/$repo/issues/comments/${c.id}", "--input", "-"),
+              Some(payload),
+            )
+            log.info(s"zipx: updated sticky comment ${c.id}")
+          case None =>
+            osProcess(
+              Seq("gh", "api", "--method", "POST", s"repos/$repo/issues/$n/comments", "--input", "-"),
+              Some(payload),
+            )
+            log.info("zipx: posted sticky comment")
+        end match
+      catch
+        case scala.util.control.NonFatal(e) =>
+          log.warn(s"zipx: sticky comment failed (${e.getMessage}); continuing")
+    end if
+  end postModverComment
+
+  private final case class GhComment(id: Long, body: String) derives JsonDecoder
+  private final case class GhEvent(number: Option[Int], pull_request: Option[GhPr]) derives JsonDecoder
+  private final case class GhPr(number: Int) derives JsonDecoder
+  private final case class CommentBody(body: String) derives JsonEncoder
+
+  private def pullRequestNumber(): Option[Int] =
+    sys.env.get("GITHUB_EVENT_PATH").flatMap { path =>
+      val file = new File(path)
+      if !file.exists then None
+      else IO.read(file).fromJson[GhEvent].toOption.flatMap(e => e.pull_request.map(_.number).orElse(e.number))
+    }
+
+  private def osProcess(cmd: Seq[String], stdin: Option[String]): Either[String, String] =
+    val out   = new StringBuilder
+    val err   = new StringBuilder
+    val proc  = scala.sys.process.Process(cmd)
+    val piped = stdin match
+      case None       => proc
+      case Some(body) =>
+        proc #< new java.io.ByteArrayInputStream(body.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    val code = piped.!(scala.sys.process.ProcessLogger(out.append, err.append))
+    if code == 0 then Right(out.toString) else Left(err.toString)
+  end osProcess
 
 end ZipxPlugin

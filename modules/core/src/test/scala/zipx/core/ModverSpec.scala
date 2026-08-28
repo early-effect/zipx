@@ -398,6 +398,103 @@ object ModverSpec extends ZIOSpecDefault:
           case Right(pub) => assertTrue(pub.keySet == Set(ModuleId("core"), ModuleId("coreJS")))
       },
     ),
+    suite("min-bump")(
+      test("early-semver 0.y binary break is minor; 1.y is major") {
+        assertTrue(
+          Modver.minBumpKind("0.4.2", "early-semver", MemberProbe.BinaryBreak) == BumpKind.Minor,
+          Modver.minBumpKind("1.4.2", "early-semver", MemberProbe.BinaryBreak) == BumpKind.Major,
+          Modver.minBumpKind("1.4.2", "pvp", MemberProbe.BinaryBreak) == BumpKind.Major,
+          Modver.minBumpKind("1.4.2", "semver-spec", MemberProbe.BinaryBreak) == BumpKind.Major,
+          Modver.minBumpKind("1.4.2", "early-semver", MemberProbe.Clean) == BumpKind.Patch,
+          Modver.minBumpKind("1.4.2", "early-semver", MemberProbe.JsOnly) == BumpKind.Patch,
+          Modver.minBumpKind("1.4.2", "early-semver", MemberProbe.FirstPublish) == BumpKind.None,
+        )
+      },
+      test("group max ignores None and uses minBumpOrd") {
+        assertTrue(
+          Modver.maxKind(List(BumpKind.Patch, BumpKind.Major, BumpKind.None)) == BumpKind.Major,
+          Modver.maxKind(List(BumpKind.None)) == BumpKind.None,
+          Modver.maxKind(Nil) == BumpKind.None,
+        )
+      },
+      test("writtenStatus is missing when equal, undersized when below the floor, over-bump when above") {
+        assertTrue(
+          Modver.writtenStatus("1.4.2", "1.4.2", BumpKind.Patch) == BumpStatus.Missing,
+          Modver.writtenStatus("1.4.2", "1.4.3", BumpKind.Minor) == BumpStatus.Undersized,
+          Modver.writtenStatus("1.4.2", "1.5.0", BumpKind.Patch) == BumpStatus.OverBump,
+          Modver.writtenStatus("1.4.2", "1.4.3", BumpKind.Patch) == BumpStatus.Ok,
+          Modver.writtenStatus("1.4.2", "1.4.2", BumpKind.None) == BumpStatus.Ok,
+          Modver.checkFails(BumpStatus.Missing),
+          Modver.checkFails(BumpStatus.Undersized),
+          !Modver.checkFails(BumpStatus.OverBump),
+          !Modver.checkFails(BumpStatus.Ok),
+        )
+      },
+      test("JS-only roots skip MiMa and first publish has no floor") {
+        val jsOnly = GraphFixture(
+          List(
+            node("uiJS", sources = List("ui/src/main/scala", "ui/src/main/scalajs"), root = "ui")
+          )
+        )
+        assertTrue(
+          Modver.isJsOnly(jsOnly, ModuleId.unsafeMake("ui")),
+          !Modver.isJsOnly(matrix, ModuleId.unsafeMake("core")),
+        )
+      },
+      test("report JSON round-trips through zio-json and missing bump fails the gate") {
+        val kinds  = Map[ShipRef, BumpKind](ShipRef.One(ModuleId.unsafeMake("client")) -> BumpKind.Patch)
+        val lifted = Set[ShipRef](ShipRef.One(ModuleId.unsafeMake("client")))
+        Modver.report(index, index, lifted, MovedRows.empty, kinds, mimaRan = Set.empty) match
+          case Left(err)     => assertTrue(err.isEmpty)
+          case Right(report) =>
+            val json = ModverReport.render(report)
+            assertTrue(
+              ModverReport.parse(json) == Right(report),
+              report.rows.exists(r => r.identity == "client" && r.status == BumpStatus.Missing),
+              report.rows.exists(r => Modver.checkFails(r.status)),
+            )
+      },
+      test("comment body carries the sticky marker and a constructor table") {
+        val row = ModverReportRow(
+          identity = "client",
+          label = "Ship",
+          from = "0.3.0",
+          written = "0.3.0",
+          suggested = "0.3.1",
+          constructor = """Ship("client", "0.3.1")""",
+          kind = BumpKind.Patch,
+          mimaRan = true,
+          status = BumpStatus.Missing,
+        )
+        val body = ModverComment.body(ModverReport(List(row)), Some("""Ship("client", "0.3.1")"""))
+        assertTrue(
+          body.contains(ModverComment.Marker),
+          body.contains("client"),
+          body.contains("0.3.1"),
+          body.contains("```suggestion"),
+        )
+      },
+    ),
+    suite("Capability.modverCheck")(
+      test("allJobIds matches plan job keys") {
+        val cap = Capability.modverCheck()
+        val cfg = PlanConfig(skipMergedPrPush = false, verifyCleanLabel = None, affected = AffectedMode.Always)
+        val ids = Planner.allJobIds(cap, graph, cfg).map(id => id: String).sorted
+        val wf  = Planner.plan(graph, List(cap), cfg)
+        assertTrue(ids == List("modver-check"), wf.jobs.keys.toList.sorted == ids)
+      },
+      test("planned YAML is pull_request and does not sit on test needs") {
+        val cfg     = PlanConfig(skipMergedPrPush = false, verifyCleanLabel = None, affected = AffectedMode.Always)
+        val wf      = Planner.plan(graph, List(Capability.modverCheck(), Capability.test), cfg)
+        val checkIf = wf.jobs("modver-check").`if`.getOrElse("")
+        assertTrue(
+          checkIf.contains("pull_request"),
+          !wf.jobs("modver-check").needs.contains("test"),
+          !wf.jobs("test").needs.contains("modver-check"),
+          wf.jobs("modver-check").env.contains(ModverCheck.BaseShaEnv),
+        )
+      },
+    ),
     suite("thisCommitReleases")(
       test("a version change, a first add, or a new member releases that row") {
         val versioned = MovedRows(
