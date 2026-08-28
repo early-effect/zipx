@@ -48,6 +48,7 @@ goal is CI-from-graph plus content-addressed reuse, not a second product to conf
 zipxCacheEpoch := CacheEpoch.GitTags()                 // default: resolve from git tags on the runner
 zipxCacheEpoch := CacheEpoch.GitTags(tagMatch = "v*")  // same, explicit match glob
 zipxCacheEpoch := CacheEpoch.Fixed(version.value)      // bake at generate time (old behaviour)
+zipxCacheEpoch := CacheEpoch.ShipCatalog               // LocalDir namespace from Ship / ShipGroup rows
 zipxCacheEpoch := CacheEpoch.Script(myEpochShell)      // custom shell; must write epoch= and release=
 ```
 
@@ -60,7 +61,30 @@ zipxCacheEpoch := CacheEpoch.Script(myEpochShell)      // custom shell; must wri
 Prefer GitTags so post-tag PRs warm from the release cache without a regenerate commit.
 
 **Script:** supply your own shell; write `epoch=` and `release=` to `$$GITHUB_OUTPUT`. Restore-keys use both outputs.
-"""
+
+**ShipCatalog:** for independent outbound versions (`Ship` / `ShipGroup`; see **Independent versions**). Bakes a SHA-256
+of sorted Ship identity and version as the setup composite `cache-epoch` input (same generate-time path as `Fixed`).
+One row bump rolls the **repo-wide** LocalDir key, the same way a `v*` tag does under `GitTags()`. Recommended when
+ships are present. Lockstep OSS keeps `GitTags()`. `examples/monorepo` sets `ShipCatalog`.
+""",
+      exampleValue {
+        val ships = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+        val hash  = Modver.epochHash(ships)
+        val yaml  = DocsRender.job("test")(Capability.test)(using
+          libGraph,
+          config.copy(cacheEpoch = CacheEpoch.ShipCatalog, shipEpochHash = Some(hash)),
+        )
+        s"hash: $hash\n$yaml"
+      }.assert(text =>
+        val hash = Modver.epochHash(
+          List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+        )
+        assertTrue(
+          hash.length == 16,
+          text.contains(s"hash: $hash"),
+          text.contains(s"cache-epoch: \"$hash\"") || text.contains(s"cache-epoch: $hash"),
+        )
+      ),
     ),
     section("Backends")(
       md"""
@@ -83,9 +107,10 @@ zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUD
   This is the path for **CI-hydrated caches that developers reuse** (see **Remote cache for teams**).
 
 The remote-cache transport is bundled with zipx. For remote backends zipx also sets `Global / cacheVersion` from
-`(JDK, OS)` so heterogeneous runners cannot poison the shared cache. Remote backends turn off LocalDir cache in
-`zipx-sbt-setup` (the gRPC store is the persistence); LocalDir passes `local-cache: true` so the composite runs
-epoch-keyed `actions/cache`.
+`(JDK, OS)` so heterogeneous runners cannot poison the shared cache. **`CacheEpoch.ShipCatalog` does not fold the Ship
+hash into that value.** A bump already changes that module's `version`, which is a digest input, so only that module's
+remote entries miss. Remote backends turn off LocalDir cache in `zipx-sbt-setup` (the gRPC store is the persistence);
+LocalDir passes `local-cache: true` so the composite runs epoch-keyed `actions/cache`.
 """,
       exampleValue {
         val local = DocsRender.job("test")(Capability.test)(using

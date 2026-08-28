@@ -6,3 +6,4 @@
 > assertBumpedClient
 > zipxWorkflowGenerate
 $ exists .github/workflows/ci.yml
+> assertModverWorkflow

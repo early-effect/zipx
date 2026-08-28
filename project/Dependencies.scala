@@ -12,7 +12,7 @@ object Dependencies:
   val zioVersion         = "2.1.26"
   val zioJsonVersion     = "0.10.0"
   val zioBlocksVersion   = "0.0.51"
-  val remoteCacheVersion = "2.0.5"
+  val remoteCacheVersion = "2.0.8"
   val neotypeVersion     = "0.7.0"
 
   val commonScalacOptions: Seq[String] = Seq(
@@ -27,7 +27,7 @@ object Dependencies:
     "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
   )
 
-  val zioJson: ModuleID  = "dev.zio" %% "zio-json" % zioJsonVersion
+  val zioJson: ModuleID  = "dev.zio"      %% "zio-json"  % zioJsonVersion
   val mimaCore: ModuleID = "com.typesafe" %% "mima-core" % "1.1.5"
 
   val workflowLibraryDeps: Seq[ModuleID] = Seq(

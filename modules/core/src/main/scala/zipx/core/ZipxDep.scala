@@ -15,7 +15,7 @@ object ArtifactId extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
     if input.nonEmpty then true else "an artifact id must be non-empty"
 
-/** A version literal (`2.1.26`, `2.0.6`, `2.1.25-M26`). */
+/** A version literal (`2.1.26`, `2.0.8`, `2.1.25-M26`). */
 type DepVersion = DepVersion.Type
 object DepVersion extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =

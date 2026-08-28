@@ -28,7 +28,7 @@ object ExtendingVersions extends DocSpecSuite:
     md"""
 Skip unless you are writing an **sbt plugin that sits on zipx** (a company catalog, CDN or vendor pins; sbt-splice is
 one). Consumers stay on **Versions**: they extend `ZipxVersions`, drop `MyVersions.settings`, and write `Lib` /
-`Plugin` / `Pin` / `Action` vals.
+`Plugin` / `Pin` / `Action` vals. Outbound `Ship` / `ShipGroup` rows are **Independent versions**.
 
 Two jobs. They are not the same hook.
 
@@ -76,10 +76,11 @@ Generate writes zipx first, then your line, then the consumer's catalog plugins:
     ),
     section("Your libraries in that same catalog")(
       md"""
-Collection is a typeclass, `AsCoords` / `AsPins` / `AsActions`. `Lib` and `Plugin` share `AsCoords` (`A <: ZipxCoord`).
-`Pin` has `AsPins`. `Action` has `AsActions`. You add a given for your own type, or you put `Lib` / `Plugin` / `Pin` /
-`Action` vals on a `ZipxVersions` subtype. There is no second `coords` list for the consumer to keep in sync. Do not
-put *your* plugin GAV on that subtype if you already emit it; that catalog line is dropped.
+Collection is a typeclass, `AsCoords` / `AsPins` / `AsActions` / `AsShips`. `Lib` and `Plugin` share `AsCoords`
+(`A <: ZipxCoord`). `Pin` has `AsPins`. `Action` has `AsActions`. `Ship` / `ShipGroup` have `AsShips`. You add a given
+for your own type, or you put `Lib` / `Plugin` / `Pin` / `Action` / `Ship` vals on a `ZipxVersions` subtype. There is no
+second `coords` list for the consumer to keep in sync. Do not put *your* plugin GAV on that subtype if you already emit
+it; that catalog line is dropped.
 """
     ),
     section("Two paths")(

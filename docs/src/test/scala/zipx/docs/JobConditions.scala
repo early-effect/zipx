@@ -18,14 +18,14 @@ object JobConditions extends DocSpecSuite:
   def doc = page("Job conditions")(
     md"""
 Skip until you need a job to run only on some PRs (forks, labels, branches). Most jobs use the default timeline:
-tests always, publish on a version tag.
+tests always, publish on a version tag (or, with `Ship` rows, on merge to the default branch).
 
-[[JobCondition]] is a typed AST for optional job `if:` filters. [[Gate]] is still the timeline (`Always` vs
-`OnReleaseTag`). The planner **ANDs** Gate clauses with capability and target conditions.
+[[JobCondition]] is a typed AST for optional job `if:` filters. [[Gate]] is still the timeline (`Always`,
+`OnReleaseTag`, `OnDefaultPush`). The planner **ANDs** Gate clauses with capability and target conditions.
 
 ```mermaid
 flowchart TD
-  Cap[Capability] --> Gate[Gate · Always or OnReleaseTag]
+  Cap[Capability] --> Gate[Gate · Always, OnReleaseTag, or OnDefaultPush]
   Cap --> Cond[JobCondition · optional]
   Gate --> And[planner AND]
   Cond --> And
@@ -52,7 +52,8 @@ val notFork = !JobCondition.repositoryIs("acme/other")
 
 `JobCondition.and` / `or` / `not` remain available; infix `&&` / `||` / `!` are the usual style. Precedence matches
 Boolean ops: `&&` binds tighter than `||` (`a || b && c` ≡ `a || (b && c)`); both are left-associative. Parenthesize
-when you mean `(a || b) && c`. Typed leaves also include `eventIs`, `onWorkflowDispatch`, and `onReleaseTag`.
+when you mean `(a || b) && c`. Typed leaves also include `eventIs`, `onWorkflowDispatch`, `onReleaseTag`, and
+`onDefaultPush` (push to `zipxPushBranches` or `workflow_dispatch`; the same clause `Gate.OnDefaultPush` renders).
 """,
       exampleValue {
         val c = (JobCondition.onReleaseTag || JobCondition.onWorkflowDispatch) &&
@@ -73,6 +74,7 @@ when you mean `(a || b) && c`. Typed leaves also include `eventIs`, `onWorkflowD
 | test / testJoined / Layers / Graph | `Always` | `None` |
 | publish / docker / deploy | `OnReleaseTag` | `None` |
 | ZipxCentral / ZipxGitHubPackages | `OnReleaseTag` | `None` (unless you pass one) |
+| ZipxModver.publish | `OnDefaultPush` | `None` (planner ANDs the version-moved `contains`) |
 | ZipxDocs.pages | `Always` | `onReleaseTag` or `onWorkflowDispatch` |
 
 **Important:** Gate and JobCondition are ANDed. A capability with `Gate.OnReleaseTag` will **not** run on a PR even if
@@ -98,6 +100,30 @@ Capability.dockerGraph.copy(
         assertTrue(
           yaml.contains("refs/tags/v"),
           yaml.contains("deploy-stg"),
+        )
+      ),
+    ),
+    section("OnDefaultPush")(
+      md"""
+Independent library publish uses `Gate.OnDefaultPush`: a push to `zipxPushBranches` (default `main`) **or**
+`workflow_dispatch`. Merge to the default branch is the release signal. The planner groups the rendered `if:` so `&&` /
+`||` precedence cannot swallow a later clause. Full guide: **Independent versions**.
+
+```scala
+zipxCapabilities += ZipxModver.publish()
+```
+""",
+      exampleValue {
+        DocsRender.job("publish-api")(
+          ZipxModver.publish(SbtCommand.unsafeTask("zipxModverPublishSigned"))
+        )(using libGraph, config.copy(modverPublish = true))
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("workflow_dispatch"),
+          yaml.contains("refs/heads/main"),
+          yaml.contains("needs.modver.outputs.modules"),
+          yaml.contains("'api'"),
+          !yaml.contains("'all'"),
         )
       ),
     ),

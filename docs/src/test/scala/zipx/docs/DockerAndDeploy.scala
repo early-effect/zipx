@@ -45,7 +45,9 @@ lazy val service = project
 
 zipx detects `DockerPlugin` and emits a release-gated Aggregate `docker` job joining `…/Docker/publish` (or use
 `dockerGraph`). Pushing one image to several registries stays **one** job; see *Registries are destinations, targets are
-environments* below. For PR-label stage ECR (before merge), see **Job conditions**.
+environments* below. For PR-label stage ECR (before merge), see **Job conditions**. Independent library versions
+(`Ship` / `ShipGroup`) do **not** move docker onto `Gate.OnDefaultPush`; image and deploy still wait on a human `v*`
+tag. See **Independent versions**.
 """,
       exampleValue {
         DocsRender.job("docker")(Capability.docker)

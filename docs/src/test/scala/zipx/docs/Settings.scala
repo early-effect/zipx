@@ -49,14 +49,15 @@ only to override that derivation.
 with `.when(...)`, so a pack can publish one and a build can extend it. See **Shell and steps**.
 
 Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Layers`, `.*Graph`, `.deploy` /
-`.deployGraph`, `.custom`, `.once`. Packs: `ZipxCentral.*`, `ZipxGitHubPackages.*`, `ZipxDocs.pages`. A `Target` is
+`.deployGraph`, `.custom`, `.once`. Packs: `ZipxCentral.*`, `ZipxModver.publish`, `ZipxGitHubPackages.*`,
+`ZipxDocs.pages`. A `Target` is
 `(name, environment, env, condition)` with typed `EnvValue`s and `JobCondition`.
 
 `CapabilityName` and `TargetName` are validated wrappers, not aliases for `String`: joined with `-` they *are* the
 `jobs.<job_id>` key GitHub sees, so a space or a `/` in one used to produce a workflow that failed on push. A literal
 is checked where you write it, `CapabilityName("docker-stg")`, and the built-in names are available as
 `Capability.TestName` / `.FmtName` / `.WorkflowCheckName` / `.AdvisoriesName` / `.PublishName` / `.DockerName` /
-`.DeployName` / `.PinCheckName` for `needsCapabilities`. What a combination of
+`.DeployName` / `.PinCheckName` / `.ModverCheckName` / `.ModverSuggestName` for `needsCapabilities`. What a combination of
 fields cannot be checked at a literal (`needsCapabilities` cycles, `workflowCall` beside `services`, a never-true `if:`)
 is checked at `zipxWorkflowGenerate`; see **Validation**.
 
@@ -94,10 +95,11 @@ and open the PR.
     ),
     section("Versions catalog")(
       md"""
-Typed `Lib` / `Plugin` / `Pin` / `Action` vals. You extend `ZipxVersions` and call `MyVersions.settings`, which collects
-every val. You do not maintain a `coords` list. Excludes (`.excluding`) live on the row, not at the `libraryDependencies`
-use site. Loaded plugins that emit themselves (`zipxSelfPlugins`) write their own `plugins.sbt` line; your `Plugin` vals
-are the rest. Full guide: **Versions**. Plugin authors: **Extending Versions**.
+Typed inbound `Lib` / `Plugin` / `Pin` / `Action` vals, plus optional outbound `Ship` / `ShipGroup` vals. You extend
+`ZipxVersions` and call `MyVersions.settings`, which collects every val. You do not maintain a `coords` list. Excludes
+(`.excluding`) live on the row, not at the `libraryDependencies` use site. Loaded plugins that emit themselves
+(`zipxSelfPlugins`) write their own `plugins.sbt` line; your `Plugin` vals are the rest. Full guide: **Versions**.
+Outbound versions: **Independent versions**. Plugin authors: **Extending Versions**.
 
 `settings` sets `scalaVersion` and the catalog keys. `zipxCheckDeps` fails generate when `libraryDependencies` contain a
 GAV that is not a `Lib` row. `zipxCatalogGenerate` writes `project/plugins.sbt`, `project/build.properties`,

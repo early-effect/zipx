@@ -1,15 +1,21 @@
 // Example monorepo exercising zipx end-to-end. The graph deliberately mirrors the
 // shape zipx targets: cross-built publishing libraries in a dependency chain, plus a
-// non-publishing service (a docker target once M4 lands).
+// non-publishing service (a docker target).
 //
-//   models ──▶ core-lib ──▶ client   (all publish, cross 2.13 + 3)
+//   models ──▶ core-lib ──▶ client   (publish; ShipGroup libs 1.4.2 + Ship client 0.3.0)
 //     └───────────────────▶ service  (non-publishing app; depends on core-lib)
+//
+// Library coordinates ship on merge to main when a Ship / ShipGroup row moved.
+// Image and deploy still wait on a human v* tag (docs/docker only, not the library
+// version). A library-only release does not push an image.
 //
 // zipx derives everything (module set, needs edges, publish order, matrix) from this.
 
 MyVersions.settings
 organization := "com.example"
-version      := "1.4.2-ci" // stands in for sbt-dynver-ci output; drives the cache epoch (bare, a common setting)
+// No repo-wide version. Ship / ShipGroup rows own library versions (`<row>-ci` locally;
+// catalog number on publish). Root and `service` keep sbt's default (never published).
+zipxCacheEpoch := CacheEpoch.ShipCatalog
 
 // Build-level zipx config: plain bare settings (sbt 2.0 common settings). zipx reads these from the root project's
 // scope, so no `ThisBuild /` prefix is needed.
@@ -27,7 +33,7 @@ lazy val coreLib = (project in file("core-lib"))
 
 lazy val client = project
   .dependsOn(coreLib)
-  .settings(MyVersions.cross, MyVersions.client)
+  .settings(MyVersions.cross, MyVersions.libraries)
 
 // A deploy-time promote task that re-tags the image with a tier-scoped moving tag. It reads the TIER env var that
 // zipx injects from the deploy target, proving a user sbt task can consume per-target config (Gap 2).
@@ -86,14 +92,14 @@ lazy val root = (project in file("."))
     ),
   )
 
-// Format is a builtin Verify job (parallel with test). Layer-mode test/publish
+// Format is a builtin Verify job (parallel with test). Layer-mode test
 // (dependency-ordered waves, few sbt sessions).
-// Deploy stays Aggregate-by-target (one job per staging/prod; modules batched). Multi-registry
-// docker below is a single Aggregate job: the registries are destinations of one image build, not
-// separate environments.
+// Library publish is ZipxModver (Graph, OnDefaultPush): version-moved Ships only, no Central
+// secrets. Deploy stays Aggregate-by-target (one job per staging/prod). Multi-registry docker
+// below is a single Aggregate job still gated on a human v* tag.
 zipxCapabilities ++= Seq(
   Capability.testLayers,
-  Capability.publishLayers,
+  ZipxModver.publish(),
 )
 
 // Multi-registry image publish (Gap 1). Overrides the built-in single-target `docker` capability (same name ⇒

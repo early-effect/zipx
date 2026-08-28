@@ -58,3 +58,25 @@ assertBumpedClient := {
   assert(!src.contains("0.3.1-ci"), src)
   assert(src.contains("""ShipGroup("libs", "1.4.2")("models", "coreLib")"""), src)
 }
+
+val assertModverWorkflow = taskKey[Unit]("generated CI is ZipxModver Graph publish, no Central secrets")
+assertModverWorkflow := {
+  val content = IO.read((LocalRootProject / baseDirectory).value / ".github" / "workflows" / "ci.yml")
+  assert(content.contains("modver:"), "missing synthetic modver job")
+  assert(content.contains("publish-client:"), "missing publish-client")
+  assert(content.contains("publish-models:"), "missing publish-models")
+  assert(content.contains("publish-coreLib:"), "missing publish-coreLib")
+  assert(content.contains("modver-check:"), "missing injected modver-check")
+  assert(content.contains("modver-suggest:"), "missing injected modver-suggest")
+  assert(content.contains("workflow_dispatch"), "OnDefaultPush must include workflow_dispatch")
+  assert(
+    content.contains("contains(fromJson(needs.modver.outputs.modules), 'client')"),
+    "publish-client should gate on the compact modver array",
+  )
+  assert(
+    !content.contains("contains(fromJson(needs.modver.outputs.modules), 'all')"),
+    "modver JSON must not use the affected all-sentinel",
+  )
+  assert(!content.contains("SONATYPE_"), "ZipxModver must not require Central secrets")
+  assert(!content.contains("PGP_"), "ZipxModver must not require signing secrets")
+}
