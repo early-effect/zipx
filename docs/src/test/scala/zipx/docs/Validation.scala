@@ -100,6 +100,7 @@ writing a file:
 | `Step.validate` / `YamlPrinter.problem` at render | a hand-built step, or content YAML would mangle |
 | `Action` constructor / leftover pin YAML | a short SHA, a leftover `.github/zipx/action-pins.yml`, a duplicate Action name |
 | leftover `zipx-scala-steward.yml` | Fail (default) or Warn(reason); the replacement companion is `zipx-version-updates.yml` |
+| Ship membership / library publish topology | a publishing module with no row, Aggregate/`OnReleaseTag` library publish when ships are present; see **Independent versions** |
 
 A leftover pin YAML fails generate with the `Action(...)` vals to paste. Catalog rows overlay jar defaults. See
 **Action pins**.

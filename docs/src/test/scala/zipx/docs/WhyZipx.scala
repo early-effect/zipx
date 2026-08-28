@@ -61,6 +61,10 @@ keys, `zipxCheckDeps`). Apply rewrites those constructors. Generate owns `plugin
 the catalog fails generate. Other plugins extend the same trait. See **Versions**. Plugin authors: **Extending
 Versions**.
 
+Outbound versions are a fourth collection: `Ship` / `ShipGroup` when a monorepo publishes libraries on different
+cadences. Merge to `main` is the release signal. zipx-the-product stays lockstep on a `v*` tag. See **Independent
+versions**.
+
 ```scala
 import zipx.*
 object MyVersions extends ZipxVersions:
