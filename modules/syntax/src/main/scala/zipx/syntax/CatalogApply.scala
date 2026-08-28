@@ -44,6 +44,68 @@ object CatalogApply:
   def applyPinBumps(source: String, bumps: List[PinBump]): Either[String, String] =
     ZipxCatalog.applyPinBumps(source, bumps)
 
+  /** Rewrite the version literal of `Ship(` / `ShipGroup(` by tree span. Missing constructor is Left. */
+  def applyShipBumps(source: String, bumps: List[ShipBump]): Either[String, String] =
+    bumps.foldLeft[Either[String, String]](Right(source)) { (accE, bump) =>
+      accE.flatMap(src => applyOneShipBump(src, bump))
+    }
+
+  private def applyOneShipBump(src: String, bump: ShipBump): Either[String, String] =
+    if bump.to.endsWith("-ci") then Left(s"zipx: zipxModverBump must not write a -ci suffix (got '${bump.to}')")
+    else
+      given Context = ScalaParse.freshContext()
+      ScalaParse.untyped(src, "ZipxVersions.scala").flatMap { tree =>
+        findShipVersionLit(tree, bump.identity)
+          .map { lit =>
+            val (start, end) = spanOf(lit)
+            applyEdits(src, List((start, end) -> quote(bump.to)))
+          }
+          .toRight(s"zipx: catalog has no Ship / ShipGroup constructor for '${bump.identity}' ${bump.from}")
+      }
+
+  private def findShipVersionLit(tree: Tree, identity: String)(using Context): Option[Tree] =
+    var found: Option[Tree] = None
+    def go(t: Tree): Unit   =
+      if found.isDefined then ()
+      else
+        t match
+          case Apply(Apply(fun, args1), args2)
+              if isCtor(fun, "ShipGroup") && lits(args1).headOption.contains(identity) =>
+            found = versionLit(args1)
+            args2.foreach(go)
+          case Apply(fun, applyArgs) if isCtor(fun, "Ship") && lits(applyArgs).headOption.contains(identity) =>
+            found = versionLit(applyArgs)
+          case Apply(fun, applyArgs) =>
+            go(fun)
+            applyArgs.foreach(go)
+          case Select(qual, _)      => go(qual)
+          case PackageDef(_, stats) => stats.foreach(go)
+          case TypeDef(_, rhs)      =>
+            rhs match
+              case tmpl: Template => tmpl.body.foreach(go)
+              case other          => go(other)
+          case ModuleDef(_, impl) => impl.body.foreach(go)
+          case vd: ValDef         => go(vd.rhs)
+          case dd: DefDef         => go(dd.rhs)
+          case Block(stats, expr) =>
+            stats.foreach(go)
+            go(expr)
+          case Thicket(trees)   => trees.foreach(go)
+          case Parens(inner)    => go(inner)
+          case Typed(expr, _)   => go(expr)
+          case NamedArg(_, arg) => go(arg)
+          case _                => ()
+    go(tree)
+    found
+  end findShipVersionLit
+
+  private def versionLit(args: List[Tree]): Option[Tree] =
+    val stringArgs = args.collect {
+      case lit @ Literal(c) if c.tag == Constants.StringTag              => lit
+      case NamedArg(_, lit @ Literal(c)) if c.tag == Constants.StringTag => lit
+    }
+    stringArgs.lift(1)
+
   private def findCtor(tree: Tree, ctor: String, args: List[String])(using Context): Option[Tree] =
     var found: Option[Tree] = None
     def go(t: Tree): Unit   =
@@ -78,9 +140,11 @@ object CatalogApply:
 
   private def isCtor(tree: Tree, ctor: String): Boolean =
     tree match
-      case Ident(name)     => name.toString == ctor
-      case Select(_, name) => name.toString == ctor
-      case _               => false
+      case Ident(name)         => name.toString == ctor
+      case Select(New(tpt), _) => isCtor(tpt, ctor)
+      case Select(qual, name)  => name.toString == ctor || isCtor(qual, ctor)
+      case New(tpt)            => isCtor(tpt, ctor)
+      case _                   => false
 
   private def lits(args: List[Tree]): List[String] =
     args.flatMap {

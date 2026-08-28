@@ -64,5 +64,32 @@ object CatalogOpsSpec extends ZIOSpecDefault:
         plan.toOption.exists(_.nextSource.contains("""Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")""")),
       )
     },
+    test("planUpdate does not rewrite Ship or ShipGroup constructors") {
+      val dir = Files.createTempDirectory("zipx-cli-ships")
+      val cat = dir.resolve("ZipxVersions.scala")
+      Files.writeString(
+        cat,
+        """object MyVersions:
+          |  val zio  = Lib("dev.zio", "zio", "2.1.26")
+          |  val core = Ship("core", "1.4.2")
+          |  val foo  = ShipGroup("foo", "1.4.2")("foo-api", "foo-cli")
+          |""".stripMargin,
+        StandardCharsets.UTF_8,
+      )
+      val plan = CatalogOps.planUpdate(
+        cat,
+        lookupCoord = {
+          case c if c.artifact == "zio" => Right(Some("2.1.27"))
+          case _                        => Right(None)
+        },
+        lookupAction = _ => Right(None),
+      )
+      assertTrue(
+        plan.isRight,
+        plan.toOption.exists(_.nextSource.contains("""Lib("dev.zio", "zio", "2.1.27")""")),
+        plan.toOption.exists(_.nextSource.contains("""Ship("core", "1.4.2")""")),
+        plan.toOption.exists(_.nextSource.contains("""ShipGroup("foo", "1.4.2")("foo-api", "foo-cli")""")),
+      )
+    },
   )
 end CatalogOpsSpec

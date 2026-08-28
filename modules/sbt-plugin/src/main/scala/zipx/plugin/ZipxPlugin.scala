@@ -75,6 +75,15 @@ object ZipxPlugin extends AutoPlugin:
     val AsPins = zipx.core.AsPins
     type AsActions[A] = zipx.core.AsActions[A]
     val AsActions = zipx.core.AsActions
+    type AsShips[A] = zipx.core.AsShips[A]
+    val AsShips = zipx.core.AsShips
+    type PublishedRow = zipx.core.PublishedRow
+    type Ship         = zipx.core.Ship
+    val Ship = zipx.core.Ship
+    type ShipGroup = zipx.core.ShipGroup
+    val ShipGroup = zipx.core.ShipGroup
+    type ModuleId = zipx.core.ModuleId
+    val ModuleId = zipx.core.ModuleId
     type Action = zipx.core.Action
     val Action = zipx.core.Action
     type ZipxVerify = zipx.core.ZipxVerify
@@ -396,6 +405,8 @@ object ZipxPlugin extends AutoPlugin:
     val zipxPreRelease           = settingKey[PreRelease](ZipxSettings.preRelease.description)
     val zipxVersions             = settingKey[Seq[ZipxCoord]](ZipxSettings.versions.description)
     val zipxPins                 = settingKey[Seq[Pin]](ZipxSettings.pins.description)
+    val zipxShips                = settingKey[Seq[PublishedRow]](ZipxSettings.ships.description)
+    val zipxMatrixRoot           = settingKey[Option[ModuleId]](ZipxSettings.matrixRoot.description)
     val zipxSbt                  = settingKey[Option[SbtVersion]](ZipxSettings.sbtVersionCoord.description)
     val zipxScala                = settingKey[Option[ScalaVersion]](ZipxSettings.scalaVersionCoord.description)
     val zipxCheckDeps            = settingKey[Boolean](ZipxSettings.checkDeps.description)
@@ -418,6 +429,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxPinUpdate        = inputKey[Unit](ZipxSettings.pinUpdate.description)
     val zipxDepUpdate        = inputKey[Unit](ZipxSettings.depUpdate.description)
     val zipxActionUpdate     = inputKey[Unit](ZipxSettings.actionUpdate.description)
+    val zipxModverBump       = inputKey[Unit](ZipxSettings.modverBump.description)
   end autoImport
 
   import autoImport.*
@@ -462,6 +474,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxPreRelease               := PreRelease.Skip,
     zipxVersions                 := Seq.empty,
     zipxPins                     := Seq.empty,
+    zipxShips                    := Seq.empty,
     zipxSbt                      := None,
     zipxScala                    := None,
     zipxCheckDeps                := false,
@@ -513,7 +526,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxCatalogGenerate := Def.uncached {
       Def
         .sequential(
-          Def.task(validateCatalog(Project.extract(state.value), streams.value.log)),
+          Def.task(validateCatalog(Project.extract(state.value), buildGraph.value, streams.value.log)),
           writeCatalogOutputs,
         )
         .value
@@ -521,7 +534,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxWorkflowGenerate := Def.uncached {
       Def
         .sequential(
-          Def.task(validateCatalog(Project.extract(state.value), streams.value.log)),
+          Def.task(validateCatalog(Project.extract(state.value), buildGraph.value, streams.value.log)),
           writeGeneratedWorkflows,
         )
         .value
@@ -536,9 +549,11 @@ object ZipxPlugin extends AutoPlugin:
     zipxPinUpdate                := pinUpdateTask.evaluated,
     zipxDepUpdate                := depUpdateTask.evaluated,
     zipxActionUpdate             := actionUpdateTask.evaluated,
+    zipxModverBump               := modverBumpTask.evaluated,
     zipxDepUpdate / aggregate    := false,
     zipxActionUpdate / aggregate := false,
     zipxPinUpdate / aggregate    := false,
+    zipxModverBump / aggregate   := false,
   )
 
   /** An aggregator is a container rather than a testable module, so it is CI-irrelevant by default. Plain settings, so
@@ -550,6 +565,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxTestTask    := CapabilityTasks.of(testFull),
     zipxPublishTask := CapabilityTasks.of(publish),
     zipxDocker      := thisProject.value.autoPlugins.exists(_.label == DockerPluginLabel),
+    zipxMatrixRoot  := None,
   )
 
   /** A module opts into the docker capability by enabling sbt-native-packager's `DockerPlugin`, detected by label so
@@ -571,35 +587,64 @@ object ZipxPlugin extends AutoPlugin:
     val resolvedById: Map[String, ResolvedProject] = structure.allProjects.map(p => p.id -> p).toMap
     val buildRoot                                  = (LocalRootProject / baseDirectory).value.toPath
 
-    val nodes = refsSortedForDeterminism.map { ref =>
+    val prelim = refsSortedForDeterminism.map { ref =>
       def read[A](key: SettingKey[A], default: A): A = extracted.getOpt(ref / key).getOrElse(default)
       val explicitOverride                           = read[Option[Boolean]](zipxPublish, None)
       val isAggregator                               = aggregatorIds.contains(ref.project)
-      // `publish / skip` is a TaskKey, hence `runTask`; `publishArtifact` is a Setting.
-      val skipsPublish      = extracted.runTask(ref / publish / skip, st)._2
-      val publishesArtifact = read(publishArtifact, true)
-      val publishes         = explicitOverride.getOrElse(!isAggregator && !skipsPublish && publishesArtifact)
-      val crossVersions     =
+      val skipsPublish                               = extracted.runTask(ref / publish / skip, st)._2
+      val publishesArtifact                          = read(publishArtifact, true)
+      val publishes     = explicitOverride.getOrElse(!isAggregator && !skipsPublish && publishesArtifact)
+      val crossVersions =
         read(crossScalaVersions, Nil) match
           case Nil      => List(read(scalaVersion, "")).filter(_.nonEmpty)
           case versions => versions.toList
-      val baseDir = resolvedById.get(ref.project).map(p => relativeToRoot(buildRoot, p.base)).getOrElse("")
-      ModuleNode(
-        // The one place a project id enters zipx, so the one place it is checked. sbt admits any id starting with a
-        // `Character.isLetter`, so `café` is a legal project; GitHub job ids are ASCII, and a workflow naming that
-        // module would be rejected on push. Reported here, before anything is written, rather than thrown from the
-        // middle of planning. The newtype's message already quotes the offending id, so no prefix is added.
-        id = orFail(ModuleId.make(ref.project)),
-        dependsOn = deps.classpathRefs(ref).map(_.project).toList.distinct,
-        publishes = publishes,
-        ciRelevant = read(zipxCiRelevant, true),
-        crossScalaVersions = crossVersions,
-        testTask = read(zipxTestTask, CapabilityTasks.of(testFull)),
-        publishTask = read(zipxPublishTask, CapabilityTasks.of(publish)),
-        baseDir = baseDir,
-        sourcePaths = sourcePathsFor(ref, extracted, buildRoot),
-        docker = read(zipxDocker, false),
+      val baseDir      = resolvedById.get(ref.project).map(p => relativeToRoot(buildRoot, p.base)).getOrElse("")
+      val sourcePaths  = sourcePathsFor(ref, extracted, buildRoot)
+      val overrideRoot = read[Option[ModuleId]](zipxMatrixRoot, None)
+      (
+        orFail(ModuleId.make(ref.project)),
+        deps.classpathRefs(ref).map(_.project).toList.distinct,
+        publishes,
+        read(zipxCiRelevant, true),
+        crossVersions,
+        read(zipxTestTask, CapabilityTasks.of(testFull)),
+        read(zipxPublishTask, CapabilityTasks.of(publish)),
+        baseDir,
+        sourcePaths,
+        read(zipxDocker, false),
+        overrideRoot,
       )
+    }
+    val ids         = prelim.map(_._1).map(id => id: String).toSet
+    val sourcesById = prelim.map(p => (p._1: String) -> p._9).toMap
+    val nodes       = prelim.map {
+      case (
+            id,
+            dependsOn,
+            publishes,
+            ciRelevant,
+            crossVersions,
+            testTask,
+            publishTask,
+            baseDir,
+            sourcePaths,
+            docker,
+            overrideRoot,
+          ) =>
+        val root = inferMatrixRoot(id, overrideRoot, ids, sourcePaths, sourcesById)
+        ModuleNode(
+          id = id,
+          dependsOn = dependsOn,
+          publishes = publishes,
+          ciRelevant = ciRelevant,
+          crossScalaVersions = crossVersions,
+          testTask = testTask,
+          publishTask = publishTask,
+          baseDir = baseDir,
+          sourcePaths = sourcePaths,
+          docker = docker,
+          matrixRootOpt = Option.when(root != id)(root),
+        )
     }.toList
 
     // sbt rejects a `dependsOn` cycle when it loads the build, so this cannot fail for a build that got this far. It
@@ -1195,7 +1240,7 @@ object ZipxPlugin extends AutoPlugin:
     checkLeftoverSteward(extracted, root, streams.value.log)
     checkPinWorkflows(root, cfg, extracted, streams.value.log)
     checkVersionUpdates(root, cfg, extracted, streams.value.log)
-    validateCatalog(extracted, streams.value.log)
+    validateCatalog(extracted, buildGraph.value, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
     checkCiParams(root, cfg, extracted, streams.value.log)
   }
@@ -1217,10 +1262,11 @@ object ZipxPlugin extends AutoPlugin:
   private def checkCatalog(root: File, extracted: Extracted, log: Logger): Unit =
     syncCatalogFiles(extracted, root, log, write = false)
 
-  private def validateCatalog(extracted: Extracted, log: Logger): Unit =
+  private def validateCatalog(extracted: Extracted, graph: ModuleGraph, log: Logger): Unit =
     val pins = readBuildSetting(extracted, zipxPins, Seq.empty)
     ZipxCatalog.unknownPinFeeds(readBuildSetting(extracted, zipxPinFeeds, Seq.empty), pins).foreach(sys.error)
     val coords = readBuildSetting(extracted, zipxVersions, Seq.empty)
+    val ships  = readBuildSetting(extracted, zipxShips, Seq.empty)
     val check  = readBuildSetting(extracted, zipxCheckDeps, false)
     val scalaV = readBuildSetting(extracted, zipxScala, None)
     if check && coords.isEmpty && pins.isEmpty then
@@ -1232,7 +1278,41 @@ object ZipxPlugin extends AutoPlugin:
         sys.error(
           s"zipx: libraryDependencies not in zipxVersions: ${extra.map(_.render).mkString(", ")}. Add a Lib row or select via ZipxDeps."
         )
+    if ships.nonEmpty then
+      orFail(Modver.membership(graph, ships).map(_ => ()))
+      if dynverPresent(extracted, coords) then
+        sys.error(
+          "zipx: Ship rows cannot share version with sbt-dynver-ci. Remove Plugin(\"rocks.earlyeffect\", \"sbt-dynver-ci\", …) and the dynver plugin; zipx assigns version from Ship rows."
+        )
   end validateCatalog
+
+  private def dynverPresent(extracted: Extracted, coords: Seq[ZipxCoord]): Boolean =
+    ZipxCatalog.plugins(coords).exists(p => (p.artifact: String) == "sbt-dynver-ci") ||
+      extracted.structure.allProjects.exists { p =>
+        p.autoPlugins.exists(ap => ap.label.toLowerCase.contains("dynver"))
+      }
+
+  private def inferMatrixRoot(
+      id: ModuleId,
+      overrideRoot: Option[ModuleId],
+      ids: Set[String],
+      sourcePaths: List[String],
+      sourcesById: Map[String, List[String]],
+  ): ModuleId =
+    overrideRoot.getOrElse {
+      def suffixParent(suffix: String): Option[String] =
+        val raw = id: String
+        Option.when(raw.endsWith(suffix) && raw.length > suffix.length)(raw.dropRight(suffix.length)).filter { parent =>
+          ids.contains(parent) && shareEditableSources(sourcePaths, sourcesById.getOrElse(parent, Nil))
+        }
+      suffixParent("JS").orElse(suffixParent("Native")).map(ModuleId.unsafeMake).getOrElse(id)
+    }
+
+  private def shareEditableSources(a: List[String], b: List[String]): Boolean =
+    a.toSet.intersect(b.toSet).exists { p =>
+      val n = p.replace('\\', '/')
+      !n.startsWith(".sbt/") && !n.contains("/.sbt/") && !n.startsWith("target/") && !n.contains("/target/")
+    }
 
   private def syncCatalogFiles(extracted: Extracted, root: File, log: Logger, write: Boolean): Unit =
     val coords  = readBuildSetting(extracted, zipxVersions, Seq.empty)
@@ -1368,6 +1448,43 @@ object ZipxPlugin extends AutoPlugin:
             IO.write(file, next)
             log.info(s"zipx: wrote ${file.getPath}")
           else log.info("zipx: no catalog updates applied")
+        end if
+      end if
+    }
+
+  private def modverBumpTask: Def.Initialize[InputTask[Unit]] =
+    Def.inputTask {
+      val arg       = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+      val extracted = Project.extract(state.value)
+      val ships     = readBuildSetting(extracted, zipxShips, Seq.empty)
+      val log       = streams.value.log
+      if ships.isEmpty then log.info("zipx: zipxShips is empty; nothing to bump")
+      else
+        val (identity, kindName) = arg.split("\\s+", 2).toList match
+          case id :: rest => (id, rest.headOption.getOrElse("patch"))
+          case Nil        => ("", "patch")
+        if identity.isEmpty then sys.error("zipx: zipxModverBump needs a Ship id or ShipGroup name")
+        else
+          val kind = kindName.toLowerCase match
+            case "patch" => BumpKind.Patch
+            case "minor" => BumpKind.Minor
+            case "major" => BumpKind.Major
+            case other   => sys.error(s"zipx: unknown bump kind '$other' (patch, minor, or major)")
+          val row = ships
+            .find(r => r.identity == identity)
+            .getOrElse(sys.error(s"zipx: no Ship / ShipGroup named '$identity'"))
+          val to   = orFail(Modver.bumpVersion(row.version, kind))
+          val rel  = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
+          val file = (LocalRootProject / baseDirectory).value / rel
+          if !file.exists then sys.error(s"zipx: catalog file ${file.getPath} is missing")
+          val next = orFail(
+            zipx.syntax.CatalogApply
+              .applyShipBumps(IO.read(file), List(ShipBump(row.identity, row.version, to)))
+              .left
+              .map(_.stripPrefix("zipx: "))
+          )
+          IO.write(file, next)
+          log.info(s"zipx: bumped ${Modver.describe(row)} ${row.version} -> $to")
         end if
       end if
     }

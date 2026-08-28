@@ -52,6 +52,9 @@ final case class MovedRows(
 object MovedRows:
   val empty: MovedRows = MovedRows(Set.empty, Set.empty, Set.empty)
 
+/** One catalog rewrite: identity is a Ship project id or a ShipGroup name. `to` is the release number, never `-ci`. */
+final case class ShipBump(identity: String, from: String, to: String)
+
 /** Fail-closed bump and publish sets. Verify's [[Affected]] stays a sibling; do not call it from here. */
 object Modver:
 
@@ -74,6 +77,43 @@ object Modver:
 
   def rowFor(projectId: ModuleId, ships: Seq[PublishedRow]): Option[PublishedRow] =
     ships.find(_.memberRoots.contains(projectId))
+
+  /** Exact member root, then a JS/Native platform suffix of a root that has a row. */
+  def rowForProject(projectId: String, ships: Seq[PublishedRow]): Option[PublishedRow] =
+    ModuleId.make(projectId).toOption.flatMap { id =>
+      rowFor(id, ships).orElse {
+        val parent =
+          if projectId.endsWith("JS") && projectId.length > 2 then Some(projectId.dropRight(2))
+          else if projectId.endsWith("Native") && projectId.length > 6 then Some(projectId.dropRight(6))
+          else None
+        parent.flatMap(ModuleId.make(_).toOption).flatMap(rowFor(_, ships))
+      }
+    }
+
+  def bumpVersion(from: String, kind: BumpKind): Either[String, String] =
+    if from.endsWith("-ci") then Left(s"version '$from' must be the release number, not a -ci suffix")
+    else
+      parseSemver(from) match
+        case None                  => Left(s"not a major.minor.patch version: '$from'")
+        case Some((maj, min, pat)) =>
+          kind match
+            case BumpKind.None | BumpKind.PreRelease =>
+              Left(s"$kind is not a min-bump")
+            case BumpKind.Patch => Right(s"$maj.$min.${pat + 1}")
+            case BumpKind.Minor => Right(s"$maj.${min + 1}.0")
+            case BumpKind.Major => Right(s"${maj + 1}.0.0")
+
+  private def parseSemver(raw: String): Option[(Int, Int, Int)] =
+    val core  = raw.stripPrefix("v").takeWhile(_ != '-')
+    val parts = core.split("\\.", -1)
+    if parts.length != 3 then None
+    else
+      for
+        major <- parts(0).toIntOption
+        minor <- parts(1).toIntOption
+        patch <- parts(2).toIntOption
+      yield (major, minor, patch)
+  end parseSemver
 
   /** PR 1 stub: later rounds run MiMa then propagate. Identity so MatchBump cannot see Patch placeholders. */
   def expand(bumps: BumpSet, graph: ModuleGraph, ships: ShipIndex): BumpSet =

@@ -1,0 +1,8 @@
+> assertModverSettings
+> zipxDepUpdate dry-run
+> assertCatalogUntouched
+> assertClientPom
+> zipxModverBump client
+> assertBumpedClient
+> zipxWorkflowGenerate
+$ exists .github/workflows/ci.yml
