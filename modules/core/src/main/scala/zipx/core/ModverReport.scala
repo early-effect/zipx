@@ -30,3 +30,21 @@ object ModverReport:
 
   def render(report: ModverReport): String = report.toJson
 end ModverReport
+
+/** Object the Graph publish task reads. Keys are module ids; values are scalaBinaryVersion strings still Missing. */
+final case class ModverPublishFile(missing: Map[String, List[String]]) derives JsonCodec
+
+object ModverPublishFile:
+  val RelPath: String        = "target/zipx-modver-publish.json"
+  val ModulesRelPath: String = "target/zipx-modver-modules.json"
+
+  val empty: ModverPublishFile = ModverPublishFile(Map.empty)
+
+  def parse(json: String): Either[String, ModverPublishFile] =
+    json.fromJson[ModverPublishFile].left.map(err => s"modver publish file: $err")
+
+  def render(file: ModverPublishFile): String = file.toJson
+
+  def modulesJson(file: ModverPublishFile): String =
+    file.missing.keys.toList.sorted.toJson
+end ModverPublishFile

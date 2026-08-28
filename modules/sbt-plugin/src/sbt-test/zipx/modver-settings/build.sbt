@@ -2,6 +2,7 @@ MyVersions.settings
 organization := "com.example"
 zipxCacheEpoch := CacheEpoch.Fixed("1.4.2-ci")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+zipxCapabilities += ZipxModver.publish()
 
 lazy val models = project.settings(MyVersions.libraries)
 

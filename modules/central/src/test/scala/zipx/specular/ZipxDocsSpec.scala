@@ -55,6 +55,10 @@ object ZipxDocsSpec extends ZIOSpecDefault:
         job.`with`.get("java-version").contains("25"),
       )
     },
+    test("pages still contributes tag triggers without OnReleaseTag publish") {
+      val wf = Planner.plan(GraphFixture(Nil), List(ZipxDocs.pages()), config)
+      assertTrue(wf.on.push.exists(_.tags.nonEmpty))
+    },
     test("pages omits PlanConfig.env so GHA accepts the uses: caller job") {
       val job = Planner
         .plan(

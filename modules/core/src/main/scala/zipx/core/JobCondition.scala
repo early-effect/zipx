@@ -103,6 +103,16 @@ object JobCondition:
   /** The same refs as [[Gate.OnReleaseTag]]. */
   def onReleaseTag: JobCondition = refStartsWith("refs/tags/v")
 
+  /** Push to one of `branches` (as `refs/heads/<branch>`) or a manual `workflow_dispatch`. */
+  def onDefaultPush(branches: List[String]): JobCondition =
+    val refs = branches.flatMap { b =>
+      ExprLiteral.make(s"refs/heads/$b").toOption.map(RefIs(_))
+    }
+    val onPush = refs match
+      case Nil          => eventIs("push")
+      case head :: tail => eventIs("push") && JobCondition.anyOf(head :: tail).get
+    onPush || onWorkflowDispatch
+
   /** `contains(github.event.pull_request.labels.*.name, 'label')`. */
   inline def hasPrLabel(inline label: String): JobCondition = HasPrLabel(ExprLiteral(label.trim))
 

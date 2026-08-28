@@ -303,6 +303,22 @@ object ZipxSettings:
       ),
     )
 
+  val modverPublishModules: SettingDef[Unit] =
+    SettingDef.input(
+      SettingName("zipxModverPublishModules"),
+      SettingPurpose(
+        "Write target/zipx-modver-publish.json (missing binaries) and target/zipx-modver-modules.json (id array). Fail closed. Empty arg is registry-only."
+      ),
+    )
+
+  val modverPublishSigned: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxModverPublishSigned"),
+      SettingPurpose(
+        "Publish this scalaBinaryVersion only when it is in the module's missing list from zipxModverPublishModules."
+      ),
+    )
+
   val sbtVersionCoord: SettingDef[Option[SbtVersion]] =
     SettingDef.setting(
       SettingName("zipxSbt"),
@@ -728,6 +744,8 @@ object ZipxSettings:
     modverCompat,
     modverCheck,
     modverSuggest,
+    modverPublishModules,
+    modverPublishSigned,
   )
 
   /** Every public catalog entry, in docs-friendly order. */

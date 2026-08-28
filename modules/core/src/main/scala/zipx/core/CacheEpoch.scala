@@ -28,6 +28,11 @@ enum CacheEpoch:
     *   and the failure would surface as a broken cache key rather than as a rejected setting.
     */
   case Script(run: String, stepId: StepId = CacheEpoch.GitTagsStepId)
+
+  /** LocalDir namespace from sorted Ship identity/version lines ([[Modver.epochHash]]). Baked at generate like
+    * [[Fixed]]. Remote `cacheVersion` stays JDK/OS only.
+    */
+  case ShipCatalog
 end CacheEpoch
 
 object CacheEpoch:
