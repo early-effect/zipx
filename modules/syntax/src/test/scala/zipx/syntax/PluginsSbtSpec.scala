@@ -10,7 +10,7 @@ object PluginsSbtSpec extends ZIOSpecDefault:
       val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
       val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
       val remote   =
-        Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.6").excluding(ZipxExclude.org("org.scala-sbt"))
+        Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.8").excluding(ZipxExclude.org("org.scala-sbt"))
       val rendered = ZipxCatalog.renderPlugins(List(scalafmt, remote), self = List(zipx))
       val expected = ZipxCatalog.pluginInventory(List(scalafmt, remote), self = List(zipx))
       assertTrue(PluginsSbt.parse(rendered) == Right(expected))
@@ -19,13 +19,13 @@ object PluginsSbtSpec extends ZIOSpecDefault:
       val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
       val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
       val remote   =
-        Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.6").excluding(ZipxExclude.org("org.scala-sbt"))
+        Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.8").excluding(ZipxExclude.org("org.scala-sbt"))
       val aligned =
         s"""${ZipxCatalog.PluginsHeader}
            |addSbtPlugin("rocks.earlyeffect" % "sbt-zipx"     % "0.5.1")
            |addSbtPlugin("org.scalameta"     % "sbt-scalafmt"  % "2.6.2")
            |addSbtPlugin(
-           |  ("org.scala-sbt" % "sbt-remote-cache" % "2.0.6")
+           |  ("org.scala-sbt" % "sbt-remote-cache" % "2.0.8")
            |    .excludeAll(ExclusionRule(organization = "org.scala-sbt"))
            |)
            |""".stripMargin

@@ -56,11 +56,13 @@ wire `dependsOn` like the existing chain.
 
 The publishable `plugin` project remains for Central publish and scripted tests.
 [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) is a **consumer** (uses
-`publishLocal` or a released `sbt-zipx`, with `project/ZipxVersions.scala` like a real repo). Aggregate `test` still
-`zipxWorkflowCheck`s it after `publishLocal`. The version-updates companion regenerates it via
+`publishLocal` or a released `sbt-zipx`, with `project/ZipxVersions.scala` like a real repo). It dogfoods independent
+versioning: a `ShipGroup` for `models`/`coreLib`, a `Ship` for `client`, `ZipxModver.publish`, `CacheEpoch.ShipCatalog`.
+Aggregate `test` still `zipxWorkflowCheck`s it after `publishLocal`. The version-updates companion regenerates it via
 `zipxVersionUpdatesExtraSteps` (`ExampleCheck.companionSteps`): nested `.github/workflows/` is not repo-root, so the bot
-can commit that `ci.yml`. Root dogfood uses Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
-both with `JobCondition.repositoryIs("early-effect/zipx")` so fork tag pushes do not publish or deploy Pages.
+can commit that `ci.yml`. Root dogfood stays lockstep: Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
+both with `JobCondition.repositoryIs("early-effect/zipx")` so fork tag pushes do not publish or deploy Pages. Do not put
+`Ship` rows on zipx-the-product.
 
 **Remote-cache live proof** lives in `core` tests (`zipx.it.RemoteCacheItSpec`): plain Testcontainers for bazel-remote
 plus an sbt fixture image (Docker required; failure is a clear test failure). It runs under Aggregate Verify / `sbt

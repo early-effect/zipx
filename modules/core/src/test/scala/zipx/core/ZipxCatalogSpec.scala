@@ -78,7 +78,7 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
     },
     test("renderPlugins emits excludeAll for bundled plugins") {
       val remote =
-        Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.5").excluding(ZipxExclude.org("org.scala-sbt"))
+        Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.8").excluding(ZipxExclude.org("org.scala-sbt"))
       val out = ZipxCatalog.renderPluginLine(remote)
       assertTrue(
         out.contains("excludeAll"),
@@ -115,8 +115,8 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
       assertTrue(err.swap.exists(_.contains("unexpected 'resolvers'")))
     },
     test("renderBuildProperties writes sbt.version") {
-      val out = ZipxCatalog.renderBuildProperties(SbtVersion("2.0.6"))
-      assertTrue(out.contains("sbt.version=2.0.6"), out.startsWith(ZipxCatalog.GeneratedHeader))
+      val out = ZipxCatalog.renderBuildProperties(SbtVersion("2.0.8"))
+      assertTrue(out.contains("sbt.version=2.0.8"), out.startsWith(ZipxCatalog.GeneratedHeader))
     },
     test("extraLibs is empty when every declared GAV is a catalog Lib") {
       val zio      = Lib("dev.zio", "zio", "2.1.26")
@@ -310,7 +310,7 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
       trait Catalog:
         inline def coords: Seq[ZipxCoord] = ZipxCatalog.coordsOf[this.type](this)
       object Sample extends Catalog:
-        val sbt: SbtVersion     = SbtVersion("2.0.6")
+        val sbt: SbtVersion     = SbtVersion("2.0.8")
         val scala: ScalaVersion = ScalaVersion("3.8.4")
         val zio                 = Lib("dev.zio", "zio", "2.1.26")
         val zioTest             = zio.mod("zio-test").test

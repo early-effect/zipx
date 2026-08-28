@@ -15,7 +15,7 @@ object CatalogOpsSpec extends ZIOSpecDefault:
       Files.writeString(
         cat,
         """object MyVersions:
-          |  val sbt: SbtVersion = SbtVersion("2.0.6")
+          |  val sbt: SbtVersion = SbtVersion("2.0.8")
           |  val fmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
           |""".stripMargin,
         StandardCharsets.UTF_8,
@@ -35,7 +35,7 @@ object CatalogOpsSpec extends ZIOSpecDefault:
         got.contains("""addSbtPlugin("rocks.earlyeffect" % "sbt-zipx" % "0.5.1")"""),
         got.contains("""addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.2")"""),
         !got.contains("2.6.1"),
-        props.contains("sbt.version=2.0.6"),
+        props.contains("sbt.version=2.0.8"),
       )
     },
     test("planUpdate rewrites Lib constructors from injected lookup") {

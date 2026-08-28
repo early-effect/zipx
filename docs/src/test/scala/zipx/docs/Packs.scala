@@ -7,6 +7,7 @@ import zipx.aws.*
 import zipx.central.ZipxCentral
 import zipx.core.*
 import zipx.core.EnvValue.secret
+import zipx.docs.DocsFixtures.*
 import zipx.github.ZipxGitHubPackages
 import zipx.specular.ZipxDocs
 import zio.test.*
@@ -24,19 +25,22 @@ Secret *names* live in Scala; values stay in GitHub.
 ```mermaid
 flowchart TD
   Caps([zipxCapabilities]) --> Central[ZipxCentral.release]
+  Caps --> Modver[ZipxModver.publish]
   Caps --> Packages[ZipxGitHubPackages]
   Caps --> Docs[ZipxDocs.pages]
   Caps --> Aws[ZipxAws.dockerPublish]
   Central --> Sonatype[(Maven Central)]
+  Modver --> Registry[(version-moved registry)]
   Packages --> GH[(GitHub Packages)]
   Docs --> Pages[(GitHub Pages)]
   Aws --> Ecr[(ECR)]
   class Caps warn
-  class Central,Packages,Docs,Aws,Sonatype,GH,Pages,Ecr happy
+  class Central,Modver,Packages,Docs,Aws,Sonatype,Registry,GH,Pages,Ecr happy
 ```
 
 Amber is the knob (`zipxCapabilities += …`). Each green pack is a paved Publish/docs capability that lands in its
-destination; you only name secrets in code, values stay in GitHub.
+destination; you only name secrets in code, values stay in GitHub. `ZipxModver` is topology for independent library
+versions, not a registry pack; see **Independent versions**.
 """,
     section("ZipxCentral")(
       md"""
@@ -55,6 +59,38 @@ zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
           yaml.contains("publishSigned; sonaRelease"),
           yaml.contains("SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}"),
           yaml.contains("Import signing key"),
+        )
+      ),
+    ),
+    section("ZipxModver")(
+      md"""
+Independent outbound versions (`Ship` / `ShipGroup`) cannot use Aggregate `ZipxCentral.release` on a tag.
+`ZipxModver.publish` is Graph library publish on `Gate.OnDefaultPush`, `MatrixCollapse.Off`. Default command
+`zipxModverPublishSigned`. Full guide: **Independent versions**.
+
+```scala
+zipxCapabilities += ZipxModver.publish()
+
+// Optional: Central sonaRelease once after Graph publish
+zipxCapabilities += ZipxCentral.releaseOnce.copy(gate = Gate.OnDefaultPush)
+```
+
+The monorepo example uses ZipxModver without Central secrets. Compose `releaseOnce` only when the repo actually
+publishes to Maven Central.
+""",
+      exampleValue {
+        DocsRender.jobs("modver", "publish-api", "central-release")(
+          ZipxModver.publish(SbtCommand.unsafeTask("zipxModverPublishSigned")),
+          ZipxCentral.releaseOnce.copy(gate = Gate.OnDefaultPush),
+        )(using libGraph, config.copy(modverPublish = true))
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("modver:"),
+          yaml.contains("publish-api:"),
+          yaml.contains("zipxModverPublishSigned"),
+          yaml.contains("workflow_dispatch"),
+          yaml.contains("central-release:"),
+          yaml.contains("sonaRelease"),
         )
       ),
     ),

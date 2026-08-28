@@ -36,8 +36,8 @@ when feeds are present. `Capability.pinCheck` remains if you want a dedicated jo
 
 Use `testGraph` / `publishGraph` / `dockerGraph` for one-job-per-module. Use `*Layers` for wave scheduling. Use
 `testJoined` if Aggregate must join `<module>/<testTask>` instead of a root task. Packs (`ZipxCentral.release`,
-`ZipxGitHubPackages`, `ZipxDocs.pages`, AWS helpers) replace or extend these by **name**; see **Packs** and **Docker
-and deploy**.
+`ZipxModver.publish`, `ZipxGitHubPackages`, `ZipxDocs.pages`, AWS helpers) replace or extend these by **name**; see
+**Packs**, **Independent versions**, and **Docker and deploy**.
 """
     ),
     section("Phases and replace-by-name")(
@@ -49,7 +49,7 @@ flowchart TD
   V[Verify] --> P[Publish]
   P --> D[Deploy]
   V -.-> Aff[Affected · Graph path gate]
-  P -.-> Tag[Release tag gate]
+  P -.-> Tag[Release tag or default-branch push]
   D -.-> Env[Environments · never affected]
   class V,P,D happy
   class Aff,Tag,Env warn
@@ -59,9 +59,10 @@ Path gating reaches **Graph** capabilities only (`zipxAffectedOnPR` / `zipxAffec
 default, Publish under `zipxAffectedPublish`, where the release gate and the affected clause compose. Deploy is
 destination-driven and **never** path-affected.
 
-`Gate` today is `Always` | `OnReleaseTag` | `AffectedOnly`. **`AffectedOnly` is rejected at generate time**: affected
-gating is derived from phase, scope and the two settings, not from `Gate`, so this would be a silent Always. See
-**Affected**.
+`Gate` today is `Always` | `OnReleaseTag` | `OnDefaultPush` | `AffectedOnly`. **`AffectedOnly` is rejected at generate
+time**: affected gating is derived from phase, scope and the two settings, not from `Gate`, so this would be a silent
+Always. See **Affected**. `OnDefaultPush` is the independent-versioning library publish gate (see **Independent
+versions**).
 
 `zipxCapabilities += ...` merges with built-ins; the **same `name` replaces** a built-in (e.g. turn Aggregate docker
 into a multi-registry Graph capability). A custom `extraSteps` `uses:` should be a full commit SHA (or an `Action`

@@ -14,6 +14,7 @@ object BuildSite extends DocsSite:
     WhyZipx.doc,
     QuickStart.doc,
     Versions.doc,
+    IndependentVersions.doc,
     ExtendingVersions.doc,
     ExecutionModes.doc,
     MatrixCollapsePage.doc,
@@ -48,17 +49,18 @@ workflow, so you do not maintain a second copy in YAML.
 
 Day one is Aggregate: parallel Verify (`test`, `fmt`, `workflow-check`, `advisories`) and a publish job on a version
 tag. Add the plugin, run `zipxWorkflowGenerate`, commit, open a PR. `zipxWorkflowCheck` fails the PR if you forgot to
-regenerate. Versions live in a `ZipxVersions` catalog you extend (`Lib` / `Plugin` / `Pin` / `Action` vals, no second
-list); drop `MyVersions.settings` in `build.sbt`.
+regenerate. Versions live in a `ZipxVersions` catalog you extend (`Lib` / `Plugin` / `Pin` / `Action` inbound vals, no
+second list); drop `MyVersions.settings` in `build.sbt`. Multi-artifact repos add outbound `Ship` / `ShipGroup` rows
+(**Independent versions**); zipx-the-product stays lockstep on dynver-ci.
 
 Later pages cover extra jobs (Graph, docker, deploy), packs (Central, Pages, AWS), and the local bump loop. Skip them
 until you need them. **Extending Versions** is for sbt plugins that sit on zipx (splice, a company catalog). If you
 already maintain painful CI YAML, **Why zipx** is the recovery story.
 
-Guide: Why zipx → Quick start → Versions → Extending Versions → Execution modes → Matrix collapse → Capabilities →
-Custom capabilities → Composing sbt commands → Shell and steps → Verify → Affected → Caching → Remote cache for teams →
-From Bazel → Action pins → Dependency updates → Pin feeds → Docker and deploy → Job conditions → Validation → Packs →
-Settings.
+Guide: Why zipx → Quick start → Versions → Independent versions → Extending Versions → Execution modes → Matrix collapse
+→ Capabilities → Custom capabilities → Composing sbt commands → Shell and steps → Verify → Affected → Caching → Remote
+cache for teams → From Bazel → Action pins → Dependency updates → Pin feeds → Docker and deploy → Job conditions →
+Validation → Packs → Settings.
 """
       ),
       installSnippets = Vector(
@@ -77,7 +79,7 @@ sbt zipxWorkflowCheck   # fails CI when the committed YAML drifts""",
           """// project/ZipxVersions.scala
 import zipx.*
 object MyVersions extends ZipxVersions:
-  val sbt   = SbtVersion("2.0.6")
+  val sbt   = SbtVersion("2.0.8")
   val scala = ScalaVersion("3.8.4")
   val zio   = Lib("dev.zio", "zio", "2.1.26")
   val slf4j = Lib("org.slf4j", "slf4j-simple", "2.0.18").java

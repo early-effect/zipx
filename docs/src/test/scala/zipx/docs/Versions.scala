@@ -16,15 +16,16 @@ object Versions extends DocSpecSuite:
   def doc = page("Versions")(
     md"""
 Extend `ZipxVersions`. Drop `MyVersions.settings` at the top of `build.sbt`. Every `Lib` / `Plugin` / `Pin` / `Action`
-**val** is a catalog row; zipx collects them. You do not write a second `coords` list. Each module picks a group. That
-is the catalog: one object, not version strings copied through `build.sbt` and `plugins.sbt`.
+**val** is an inbound catalog row; zipx collects them. You do not write a second `coords` list. Each module picks a
+group. That is the catalog: one object, not version strings copied through `build.sbt` and `plugins.sbt`. Outbound
+library versions (`Ship` / `ShipGroup`) live on **Independent versions**.
 
 ```scala
 // project/ZipxVersions.scala
 import zipx.*
 
 object MyVersions extends ZipxVersions:
-  val sbt: SbtVersion     = SbtVersion("2.0.6")
+  val sbt: SbtVersion     = SbtVersion("2.0.8")
   val scala: ScalaVersion = ScalaVersion("3.8.4")
   val zio                 = Lib("dev.zio", "zio", "2.1.26")
   val zioTest             = zio.mod("zio-test").test
@@ -60,9 +61,9 @@ yes, commit, open a pull request. Generate writes `project/plugins.sbt` and `pro
 """,
     section("Every val is a row")(
       md"""
-zipx collects every val whose type has an `AsCoords`, `AsPins`, or `AsActions` given. `Lib` and `Plugin` share
-`AsCoords`; `Pin` has `AsPins`; `Action` has `AsActions`. A `def` is not a val, so it is not a row. That is why groups
-are `def libraries = library(zio)`: selection, not a second copy of the coordinate.
+zipx collects every val whose type has an `AsCoords`, `AsPins`, `AsActions`, or `AsShips` given. `Lib` and `Plugin` share
+`AsCoords`; `Pin` has `AsPins`; `Action` has `AsActions`; `Ship` / `ShipGroup` have `AsShips`. A `def` is not a val, so
+it is not a row. That is why groups are `def libraries = library(zio)`: selection, not a second copy of the coordinate.
 
 | On the object | Catalog row? |
 |---|---|
@@ -72,10 +73,12 @@ are `def libraries = library(zio)`: selection, not a second copy of the coordina
 | `val scalafmt = Plugin(...)` | yes (generate writes `plugins.sbt`) |
 | `val preact = Pin("cdn", "preact", …)` | yes (`zipxPins`; apply rewrites version, sha256, and purl together) |
 | `val checkout = Action("actions/checkout", …, sha = …)` | yes (`zipxActionRows`; apply rewrites version and git SHA together) |
+| `val client = Ship("client", "0.3.0")` | yes (outbound; **Independent versions**) |
+| `val libs = ShipGroup("libs", "1.4.2")("models", "coreLib")` | yes (outbound; **Independent versions**) |
 | `val sbt` / `val scala` | no (`SbtVersion` / `ScalaVersion` are not Maven coordinates) |
 | `def service = library(zio, slf4j)` | no (picks rows for a module) |
-| `val libs = List(zio)` | no (a list has no `AsCoords` given; do not add one for `List`) |
-| a bundle val with `given AsCoords[YourType]` / `AsPins` | yes (plugin authors: **Extending Versions**) |
+| `val coords = List(zio)` | no (a list has no `AsCoords` given; do not add one for `List`) |
+| a bundle val with `given AsCoords[YourType]` / `AsPins` / `AsShips` | yes (plugin authors: **Extending Versions**) |
 
 A row no module selects is still legal. Unused plugins still land in `plugins.sbt`.
 """
@@ -102,7 +105,7 @@ compares GAV only. Lib excludes never appear in `plugins.sbt`; that file is plug
       exampleValue {
         val coursier = Lib("io.get-coursier", "coursier-cache_2.13", "2.1.25-M26").java
           .excluding(ZipxExclude.org("org.scala-lang.modules"))
-        val remote = Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.5")
+        val remote = Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.8")
           .excluding(ZipxExclude.org("org.scala-sbt"))
         val libEx =
           coursier.excludes
@@ -217,7 +220,8 @@ those files). Nested example YAML can still land on the PR via `zipxVersionUpdat
 
 Apply rewrites `Lib("g", "a", "from")` / `Plugin("g", "a", "from")` and
 `Action("owner/repo", "from", sha = "…")` so version and git SHA move together. `.mod` copies share the parent version
-literal. The PR is that catalog file:
+literal. `Ship` / `ShipGroup` constructors are left intact; bump those yourself (see **Independent versions**). The PR is
+that catalog file:
 """,
       example {
         catalogDepPrDiff

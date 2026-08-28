@@ -101,14 +101,15 @@ lazy val root = (project in file("."))
       md"""
 Library, plugin, pin, and Action versions live in one object you write under `project/` and extend from
 `ZipxVersions`. Drop `MyVersions.settings` at the top of `build.sbt`. Every `Lib` / `Plugin` / `Pin` / `Action` val is
-a catalog row; you do not list them again. Each module picks a group. Full guide: **Versions**.
+a catalog row; you do not list them again. Each module picks a group. Full guide: **Versions**. Independent outbound
+versions (`Ship` / `ShipGroup`) are **Independent versions**.
 
 ```scala
 // project/ZipxVersions.scala
 import zipx.*
 
 object MyVersions extends ZipxVersions:
-  val sbt: SbtVersion     = SbtVersion("2.0.6")
+  val sbt: SbtVersion     = SbtVersion("2.0.8")
   val scala: ScalaVersion = ScalaVersion("3.8.4")
   val zio                 = Lib("dev.zio", "zio", "2.1.26")
   val slf4j               = Lib("org.slf4j", "slf4j-simple", "2.0.18").java

@@ -8,7 +8,7 @@ import zipx.*
   */
 object ZipxVersions extends zipx.ZipxVersions:
 
-  val sbt: SbtVersion     = SbtVersion("2.0.7")
+  val sbt: SbtVersion     = SbtVersion("2.0.8")
   val scala: ScalaVersion = ScalaVersion("3.8.4")
 
   val zio: Lib            = Lib("dev.zio", "zio", "2.1.26")
@@ -35,7 +35,7 @@ object ZipxVersions extends zipx.ZipxVersions:
   val sbtReload: Plugin      = Plugin("com.jamesward", "sbt-reload", "0.0.7")
   val scalajs: Plugin        = Plugin("org.scala-js", "sbt-scalajs", "1.22.0")
   val remoteCache: Plugin    =
-    Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.7").excluding(ZipxExclude.org("org.scala-sbt"))
+    Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.8").excluding(ZipxExclude.org("org.scala-sbt"))
 
   val checkout: Action =
     Action("actions/checkout", "v7.0.1", sha = "3d3c42e5aac5ba805825da76410c181273ba90b1")

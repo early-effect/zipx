@@ -7,9 +7,10 @@ name: CI
     tags:
       - v[0-9]+.[0-9]+.[0-9]+
   pull_request: null
+  workflow_dispatch: null
 concurrency:
   group: CI-${{ github.ref }}
-  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') && github.ref != 'refs/heads/main' }}
 jobs:
   verify-gate:
     name: verify-gate
@@ -72,9 +73,52 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: cache-rehydrate
         run: sbt 'compile'
+  modver:
+    name: modver
+    runs-on: ubuntu-latest
+    if: ((github.event_name == 'push') && ((github.ref == 'refs/heads/main'))) || (github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+    outputs:
+      modules: ${{ steps.compute.outputs.modules }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
+      - name: zipx sbt setup
+        uses: ./.github/actions/zipx-sbt-setup
+        with:
+          java-version: "21"
+          runner-os: ubuntu-latest
+          cache-key-suffix: modver
+          node-version: ""
+          sbt-disk-cache: "false"
+          local-cache: "false"
+          cache-epoch: "8f2e77a00c7c0f58"
+      - name: Compute version-moved modules
+        id: compute
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            sbt -batch --error zipxModverPublishModules
+            modules=$(cat target/zipx-modver-modules.json)
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            before="${{ github.event.before }}"
+            if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              echo "zipx: github.event.before is missing or all-zero; refusing to guess the publish set"
+              exit 1
+            else
+              sbt -batch --error "zipxModverPublishModules $before"
+              modules=$(cat target/zipx-modver-modules.json)
+            fi
+          else
+            echo "zipx: github.event.before is missing or all-zero; refusing to guess the publish set"
+            exit 1
+          fi
+          echo "modules=$modules" >> "$GITHUB_OUTPUT"
   test-L0:
     name: test L0
     runs-on: ubuntu-latest
@@ -95,7 +139,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -124,7 +168,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -153,7 +197,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -183,7 +227,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: fmt
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -213,7 +257,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: workflow-check
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -243,7 +287,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: advisories
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -253,33 +297,17 @@ jobs:
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
-  publish-L0:
-    name: publish L0
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: "0"
-          fetch-tags: "true"
-      - name: zipx sbt setup
-        uses: ./.github/actions/zipx-sbt-setup
-        with:
-          java-version: "21"
-          runner-os: ubuntu-latest
-          cache-key-suffix: publish-L0
-          node-version: ""
-          sbt-disk-cache: "false"
-          local-cache: "true"
-          cache-epoch: ""
-      - name: publish
-        run: sbt '+models/publish'
-  publish-L1:
-    name: publish L1
+  modver-suggest:
+    name: modver-suggest
     runs-on: ubuntu-latest
     needs:
-      - publish-L0
-    if: startsWith(github.ref, 'refs/tags/v')
+      - verify-gate
+    if: (!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))) && (github.event_name == 'pull_request')
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      ZIPX_MODVER_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -290,19 +318,32 @@ jobs:
         with:
           java-version: "21"
           runner-os: ubuntu-latest
-          cache-key-suffix: publish-L1
+          cache-key-suffix: modver-suggest
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
-      - name: publish
-        run: sbt '+coreLib/publish'
-  publish-L2:
-    name: publish L2
+          cache-epoch: "8f2e77a00c7c0f58"
+      - name: Fetch PR base SHA
+        run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
+      - name: modver-suggest
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; zipxModverSuggest'
+          else
+            sbt 'zipxModverSuggest'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
+  modver-check:
+    name: modver-check
     runs-on: ubuntu-latest
     needs:
-      - publish-L1
-    if: startsWith(github.ref, 'refs/tags/v')
+      - verify-gate
+    if: (!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))) && (github.event_name == 'pull_request')
+    permissions:
+      contents: read
+    env:
+      ZIPX_MODVER_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -313,13 +354,99 @@ jobs:
         with:
           java-version: "21"
           runner-os: ubuntu-latest
-          cache-key-suffix: publish-L2
+          cache-key-suffix: modver-check
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
+      - name: Fetch PR base SHA
+        run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
+      - name: modver-check
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; zipxModverCheck'
+          else
+            sbt 'zipxModverCheck'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
+  publish-models:
+    name: publish models
+    runs-on: ubuntu-latest
+    needs:
+      - modver
+    if: "!cancelled() && (((github.event_name == 'push') && ((github.ref == 'refs/heads/main'))) || (github.event_name == 'workflow_dispatch')) && contains(fromJson(needs.modver.outputs.modules), 'models')"
+    env:
+      ZIPX_MODVER_REGISTRY: central
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
+      - name: zipx sbt setup
+        uses: ./.github/actions/zipx-sbt-setup
+        with:
+          java-version: "21"
+          runner-os: ubuntu-latest
+          cache-key-suffix: publish-models
+          node-version: ""
+          sbt-disk-cache: "false"
+          local-cache: "true"
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: publish
-        run: sbt '+client/publish'
+        run: sbt '+models/zipxModverPublishSigned'
+  publish-coreLib:
+    name: publish coreLib
+    runs-on: ubuntu-latest
+    needs:
+      - modver
+      - publish-models
+    if: "!cancelled() && (((github.event_name == 'push') && ((github.ref == 'refs/heads/main'))) || (github.event_name == 'workflow_dispatch')) && contains(fromJson(needs.modver.outputs.modules), 'coreLib') && needs.publish-models.result != 'failure'"
+    env:
+      ZIPX_MODVER_REGISTRY: central
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
+      - name: zipx sbt setup
+        uses: ./.github/actions/zipx-sbt-setup
+        with:
+          java-version: "21"
+          runner-os: ubuntu-latest
+          cache-key-suffix: publish-coreLib
+          node-version: ""
+          sbt-disk-cache: "false"
+          local-cache: "true"
+          cache-epoch: "8f2e77a00c7c0f58"
+      - name: publish
+        run: sbt '+coreLib/zipxModverPublishSigned'
+  publish-client:
+    name: publish client
+    runs-on: ubuntu-latest
+    needs:
+      - modver
+      - publish-coreLib
+    if: "!cancelled() && (((github.event_name == 'push') && ((github.ref == 'refs/heads/main'))) || (github.event_name == 'workflow_dispatch')) && contains(fromJson(needs.modver.outputs.modules), 'client') && needs.publish-coreLib.result != 'failure'"
+    env:
+      ZIPX_MODVER_REGISTRY: central
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
+      - name: zipx sbt setup
+        uses: ./.github/actions/zipx-sbt-setup
+        with:
+          java-version: "21"
+          runner-os: ubuntu-latest
+          cache-key-suffix: publish-client
+          node-version: ""
+          sbt-disk-cache: "false"
+          local-cache: "true"
+          cache-epoch: "8f2e77a00c7c0f58"
+      - name: publish
+        run: sbt '+client/zipxModverPublishSigned'
   docker:
     name: docker
     runs-on: ubuntu-latest
@@ -350,7 +477,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: zipx AWS login (eu)
         uses: ./.github/actions/zipx-aws-login
         with:
@@ -410,7 +537,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           local-cache: "true"
-          cache-epoch: ""
+          cache-epoch: "8f2e77a00c7c0f58"
       - name: zipx AWS login
         uses: ./.github/actions/zipx-aws-login
         with:

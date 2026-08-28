@@ -71,9 +71,12 @@ still bump before a PR. Not an M12 item. First consumer feed is sbt-splice, in t
 
 ### Versions catalog
 
-Typed `Lib` / `Plugin` / `Pin` / `Action` rows in `project/ZipxVersions.scala`. Apply rewrites those constructors (not a regex over
-the build, not a whole-file regen); generate writes `plugins.sbt` / `build.properties`; `zipxCheckDeps` fails generate
+Typed inbound `Lib` / `Plugin` / `Pin` / `Action` rows in `project/ZipxVersions.scala`, plus optional outbound
+`Ship` / `ShipGroup` rows for independent library versions. Apply rewrites inbound constructors (not a regex over
+the build, not a whole-file regen) and never rewrites `Ship` / `ShipGroup`; generate writes `plugins.sbt` / `build.properties`; `zipxCheckDeps` fails generate
 when `libraryDependencies` contain a GAV that is not a `Lib` row. A `Pin` with no matching `PinFeed` fails generate.
+Independent versioning is opt-in: merge to the default branch publishes version-moved modules via `ZipxModver.publish`.
+zipx-the-product stays lockstep dynver-ci. See Specular **Independent versions**.
 Default `zipxVersionUpdates` emits `.github/workflows/zipx-version-updates.yml`: schedule plus dispatch, `cs launch`
 `zipx-cli` (`catalog update --yes --verify-load`) above the target sbt, then `zipxPinUpdate yes` / `zipxCatalogGenerate`
 (not workflow YAML; `GITHUB_TOKEN` cannot push `.github/workflows`), `gh pr create` on
