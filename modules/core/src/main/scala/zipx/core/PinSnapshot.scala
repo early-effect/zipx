@@ -1,9 +1,25 @@
 package zipx.core
 
-/** GitHub Dependency Submission snapshot JSON. Hand-rolled so core stays free of a JSON library. */
+import zio.json.*
+
+/** GitHub Dependency Submission snapshot JSON. */
 object PinSnapshot:
 
   val Correlator: String = "zipx-pin-snapshot"
+
+  final case class Snapshot(
+      version: Int,
+      sha: String,
+      ref: String,
+      job: Job,
+      detector: Detector,
+      scanned: String,
+      manifests: Map[String, Manifest],
+  ) derives JsonEncoder
+  final case class Job(correlator: String, id: String) derives JsonEncoder
+  final case class Detector(name: String, version: String, url: String) derives JsonEncoder
+  final case class Manifest(name: String, resolved: Map[String, Resolved]) derives JsonEncoder
+  final case class Resolved(package_url: String, relationship: String, scope: String) derives JsonEncoder
 
   def render(
       feeds: Seq[PinFeed],
@@ -15,61 +31,29 @@ object PinSnapshot:
       detectorVersion: String,
   ): String =
     val manifests = feeds
-      .map(feed => feed.name -> PinFeeds.inventory(feed, pins).filter(_.purl.isDefined))
-      .filter(_._2.nonEmpty)
-    val manifestJson =
-      if manifests.isEmpty then "{}"
-      else
-        manifests
-          .map { (name, pins) =>
-            val resolved = pins
-              .map { pin =>
-                val purl = pin.purl.get
-                s"""      "${escape(pin.id)}":{"package_url":"${escape(
-                    purl
-                  )}","relationship":"direct","scope":"runtime"}"""
-              }
-              .mkString(",\n")
-            s"""    "${escape(name)}":{"name":"${escape(name)}","resolved":{\n$resolved\n    }}"""
+      .map { feed =>
+        val resolved = PinFeeds
+          .inventory(feed, pins)
+          .flatMap { pin =>
+            pin.purl.map { purl =>
+              pin.id -> Resolved(package_url = purl, relationship = "direct", scope = "runtime")
+            }
           }
-          .mkString(",\n")
-    s"""{
-  "version": 0,
-  "sha": "${escape(sha)}",
-  "ref": "${escape(ref)}",
-  "job": {"correlator": "$Correlator", "id": "${escape(jobId)}"},
-  "detector": {"name": "zipx", "version": "${escape(detectorVersion)}", "url": "https://github.com/early-effect/zipx"},
-  "scanned": "${escape(scanned)}",
-  "manifests": {
-$manifestJson
-  }
-}"""
+          .toMap
+        (feed.name: String) -> Manifest(name = feed.name, resolved = resolved)
+      }
+      .filter(_._2.resolved.nonEmpty)
+      .toMap
+    Snapshot(
+      version = 0,
+      sha = sha,
+      ref = ref,
+      job = Job(Correlator, jobId),
+      detector = Detector("zipx", detectorVersion, "https://github.com/early-effect/zipx"),
+      scanned = scanned,
+      manifests = manifests,
+    ).toJson
   end render
-
-  def escape(s: String): String =
-    val out = StringBuilder(s.length)
-    var i   = 0
-    while i < s.length do
-      s.charAt(i) match
-        case '"'         => out.append("\\\"")
-        case '\\'        => out.append("\\\\")
-        case '\n'        => out.append("\\n")
-        case '\r'        => out.append("\\r")
-        case '\t'        => out.append("\\t")
-        case c if c < 32 =>
-          out.append("\\u")
-          val hex = Integer.toHexString(c)
-          var pad = 4 - hex.length
-          while pad > 0 do
-            out.append('0')
-            pad -= 1
-          out.append(hex)
-        case c => out.append(c)
-      end match
-      i += 1
-    end while
-    out.toString
-  end escape
 
   /** POST the snapshot to GitHub's Dependency Submission API. Tests never call this. */
   def submit(

@@ -2,6 +2,7 @@ package zipx.core
 
 import neotype.Subtype
 import zipx.workflow.Names
+import zio.json.*
 
 /** A feed's name, which is also a snapshot manifest key and must be a GitHub Actions id. */
 type PinFeedName = PinFeedName.Type
@@ -21,7 +22,7 @@ enum PinAction:
 enum PinPrGate:
   case All, Introduced, Off
 
-enum BumpKind:
+enum BumpKind derives JsonCodec:
   case None, Patch, Minor, Major, PreRelease
 
 /** Whether catalog / pin lookup may list a pre-release as a bump. Default [[Skip]]. */

@@ -115,7 +115,7 @@ object Modver:
       yield (major, minor, patch)
   end parseSemver
 
-  /** PR 1 stub: later rounds run MiMa then propagate. Identity so MatchBump cannot see Patch placeholders. */
+  /** After MiMa kinds exist, PR 4 will walk reverse-deps. Identity so MatchBump cannot see Patch placeholders. */
   def expand(bumps: BumpSet, graph: ModuleGraph, ships: ShipIndex): BumpSet =
     val _ = (graph, ships)
     bumps
@@ -291,4 +291,123 @@ object Modver:
         }
       }
     }
+
+  def isJsOnly(graph: ModuleGraph, root: ModuleId): Boolean =
+    val rows = graph.nodes.filter(n => n.matrixRoot == root && n.publishes)
+    rows.nonEmpty && rows.forall(n => (n.id: String).endsWith("JS"))
+
+  def minBumpKind(version: String, scheme: String, probe: MemberProbe): BumpKind =
+    probe match
+      case MemberProbe.FirstPublish => BumpKind.None
+      case MemberProbe.JsOnly       => BumpKind.Patch
+      case MemberProbe.Clean        => BumpKind.Patch
+      case MemberProbe.BinaryBreak  =>
+        val earlyZero = parseSemver(version).exists(_._1 == 0) && isEarlySemver(scheme)
+        if earlyZero then BumpKind.Minor else BumpKind.Major
+
+  def isEarlySemver(scheme: String): Boolean =
+    scheme.trim.toLowerCase match
+      case "semver-spec" => false
+      case _             => true
+
+  def maxKind(kinds: Iterable[BumpKind]): BumpKind =
+    val counted = kinds.filter(k => k != BumpKind.None && k != BumpKind.PreRelease)
+    counted.maxOption(using minBumpOrd).getOrElse(BumpKind.None)
+
+  def suggestedVersion(from: String, kind: BumpKind): Either[String, String] =
+    kind match
+      case BumpKind.None | BumpKind.PreRelease => Right(from)
+      case other                               => bumpVersion(from, other)
+
+  def writtenStatus(base: String, written: String, floor: BumpKind): BumpStatus =
+    if floor == BumpKind.None || floor == BumpKind.PreRelease then BumpStatus.Ok
+    else if written == base then BumpStatus.Missing
+    else
+      val got = VersionStrategy.npm.classify(base, written)
+      val cmp = minBumpOrd.compare(got, floor)
+      if cmp < 0 then BumpStatus.Undersized
+      else if cmp > 0 then BumpStatus.OverBump
+      else BumpStatus.Ok
+
+  def checkFails(status: BumpStatus): Boolean =
+    status == BumpStatus.Missing || status == BumpStatus.Undersized || status == BumpStatus.NewMemberDirty
+
+  def suggestedCtor(row: PublishedRow, to: String): String =
+    row match
+      case s: Ship      => s"""Ship("${s.id}", "$to")"""
+      case g: ShipGroup =>
+        val mem = g.members.map(m => s""""$m"""").mkString(", ")
+        s"""ShipGroup("${g.name}", "$to")($mem)"""
+
+  def minBumps(
+      lifted: Set[ShipRef],
+      index: ShipIndex,
+      graph: ModuleGraph,
+      previous: ShipIndex,
+      schemeOf: ModuleId => String,
+      probeOf: ModuleId => MemberProbe,
+  ): Map[ShipRef, BumpKind] =
+    lifted.iterator.map { ref =>
+      index.byIdentity.get(ref) match
+        case None      => ref -> BumpKind.None
+        case Some(row) =>
+          val kinds = row.memberRoots.map { root =>
+            val probe =
+              if previous.rowFor(root).isEmpty then MemberProbe.FirstPublish
+              else if isJsOnly(graph, root) then MemberProbe.JsOnly
+              else probeOf(root)
+            minBumpKind(row.version, schemeOf(root), probe)
+          }
+          ref -> maxKind(kinds)
+    }.toMap
+
+  def newMemberDirtyRefs(moved: MovedRows, lifted: Set[ShipRef], index: ShipIndex): Set[ShipRef] =
+    moved.newMembers.flatMap { id =>
+      index.byRoot.get(id).map(index.refOf).filter { ref =>
+        lifted.contains(ref) && !moved.versionChanged.contains(ref)
+      }
+    }
+
+  def report(
+      current: ShipIndex,
+      previous: ShipIndex,
+      lifted: Set[ShipRef],
+      moved: MovedRows,
+      kinds: Map[ShipRef, BumpKind],
+      mimaRan: Set[ShipRef],
+  ): Either[String, ModverReport] =
+    val dirty = newMemberDirtyRefs(moved, lifted, current)
+    val refs  = (lifted ++ dirty).toList.sortBy {
+      case ShipRef.One(id)     => id: String
+      case ShipRef.Group(name) => name: String
+    }
+    refs
+      .foldLeft[Either[String, List[ModverReportRow]]](Right(Nil)) { (acc, ref) =>
+        acc.flatMap { rows =>
+          current.byIdentity.get(ref) match
+            case None      => Left(s"no catalog row for $ref")
+            case Some(row) =>
+              val written = row.version: String
+              val from    = previous.byIdentity.get(ref).map(r => r.version: String).getOrElse(written)
+              val floor   = kinds.getOrElse(ref, BumpKind.None)
+              suggestedVersion(from, floor).map { suggested =>
+                val status0 = writtenStatus(from, written, floor)
+                val status  =
+                  if dirty.contains(ref) && written == from then BumpStatus.NewMemberDirty else status0
+                rows :+ ModverReportRow(
+                  identity = row.identity,
+                  label = row.label,
+                  from = from,
+                  written = written,
+                  suggested = suggested,
+                  constructor = suggestedCtor(row, suggested),
+                  kind = floor,
+                  mimaRan = mimaRan.contains(ref),
+                  status = status,
+                )
+              }
+        }
+      }
+      .map(ModverReport(_))
+  end report
 end Modver

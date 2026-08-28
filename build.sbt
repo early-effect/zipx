@@ -128,7 +128,7 @@ lazy val core = (project in file("modules/core"))
     // Docker image; host setup-sbt PATH is irrelevant. Docker is required when these tests run.
     // Leave Testcontainers Ryuk enabled (do not set TESTCONTAINERS_RYUK_DISABLED): cleans up containers
     // after aborted runs locally and is fine on GHA.
-    libraryDependencies ++= V.testcontainersDeps,
+    libraryDependencies ++= V.testcontainersDeps ++ V.deps(V.zioJson),
   )
 
 // Scala 3 compiler trees for catalog files. Not on a consumer's sbt session unless they load the plugin check
@@ -181,7 +181,7 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     scalacOptions ++= V.commonScalacOptions,
     publishMavenStyle    := true,
     pomIncludeRepository := { _ => false },
-    libraryDependencies ++= V.zioDeps,
+    libraryDependencies ++= V.zioDeps :+ V.moduleID(V.mimaCore),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     Test / mainClass := None,
     // Bundle the remote-cache transport so consumers need one addSbtPlugin line. RemoteCachePlugin triggers on

@@ -405,6 +405,8 @@ object Capability:
   val FmtName: CapabilityName           = CapabilityName("fmt")
   val WorkflowCheckName: CapabilityName = CapabilityName("workflow-check")
   val AdvisoriesName: CapabilityName    = CapabilityName("advisories")
+  val ModverCheckName: CapabilityName   = CapabilityName("modver-check")
+  val ModverSuggestName: CapabilityName = CapabilityName("modver-suggest")
 
   private def testBody(scope: CapabilityScope, matrixed: Boolean): Capability = Capability(
     name = TestName,
@@ -450,6 +452,32 @@ object Capability:
       gate = Gate.Always,
       condition = Some(JobCondition.eventIs("pull_request")),
       env = Map(PinCheck.BaseShaEnv -> EnvValue.typed(Expr.github("event.pull_request.base.sha"))),
+    )
+
+  def modverCheck(command: SbtCommand = SbtCommand.unsafeTask("zipxModverCheck")): Capability =
+    Capability.once(
+      name = ModverCheckName,
+      command = command,
+      phase = Phase.Verify,
+      gate = Gate.Always,
+      needsCapabilities = Nil,
+      permissions = Map("contents" -> "read"),
+      extraSteps = ModverCheck.fetchBaseSha,
+      condition = Some(JobCondition.eventIs("pull_request")),
+      env = Map(ModverCheck.BaseShaEnv -> EnvValue.typed(Expr.github("event.pull_request.base.sha"))),
+    )
+
+  def modverSuggest(command: SbtCommand = SbtCommand.unsafeTask("zipxModverSuggest")): Capability =
+    Capability.once(
+      name = ModverSuggestName,
+      command = command,
+      phase = Phase.Verify,
+      gate = Gate.Always,
+      needsCapabilities = Nil,
+      permissions = Map("contents" -> "read", "pull-requests" -> "write"),
+      extraSteps = ModverCheck.fetchBaseSha,
+      condition = Some(JobCondition.eventIs("pull_request")),
+      env = Map(ModverCheck.BaseShaEnv -> EnvValue.typed(Expr.github("event.pull_request.base.sha"))),
     )
 
   /** A Verify Once job that prints `zipx: skipping <gate>: <reason>` and exits 0. The check name stays on the PR. */

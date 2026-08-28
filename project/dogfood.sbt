@@ -35,7 +35,7 @@ lazy val metaCore = project
     name           := "meta-zipx-core",
     publish / skip := true,
     scalacOptions ++= Dependencies.commonScalacOptions,
-    libraryDependencies ++= Dependencies.zioDeps,
+    libraryDependencies ++= Dependencies.zioDeps :+ Dependencies.zioJson,
   )
   .settings(Dogfood.mirrorMainScala("core"))
 
@@ -91,6 +91,7 @@ lazy val metaPlugin = project
     name           := "meta-sbt-zipx",
     publish / skip := true,
     scalacOptions ++= Dependencies.commonScalacOptions,
+    libraryDependencies += Dependencies.mimaCore,
     addSbtPlugin(Dependencies.remoteCachePlugin),
   )
   .settings(Dogfood.mirrorMainScala("sbt-plugin"))

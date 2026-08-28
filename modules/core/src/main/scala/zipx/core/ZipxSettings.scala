@@ -269,6 +269,30 @@ object ZipxSettings:
       ),
     )
 
+  val modverCompat: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxModverCompat"),
+      SettingPurpose(
+        "Compile the lifted bump set, run MiMa, write target/zipx-modver-report.json. Fail closed on a missing diff."
+      ),
+    )
+
+  val modverCheck: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxModverCheck"),
+      SettingPurpose(
+        "Fail closed on a missing or undersized Ship bump. Reads the min-bump report after zipxModverCompat."
+      ),
+    )
+
+  val modverSuggest: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxModverSuggest"),
+      SettingPurpose(
+        "Sticky PR comment with suggested Ship / ShipGroup constructors. Best-effort on forks."
+      ),
+    )
+
   val sbtVersionCoord: SettingDef[Option[SbtVersion]] =
     SettingDef.setting(
       SettingName("zipxSbt"),
@@ -690,6 +714,9 @@ object ZipxSettings:
     depUpdate,
     actionUpdate,
     modverBump,
+    modverCompat,
+    modverCheck,
+    modverSuggest,
   )
 
   /** Every public catalog entry, in docs-friendly order. */
