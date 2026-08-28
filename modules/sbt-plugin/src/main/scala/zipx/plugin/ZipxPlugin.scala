@@ -85,6 +85,8 @@ object ZipxPlugin extends AutoPlugin:
     val ShipGroup = zipx.core.ShipGroup
     type ModverPropagate = zipx.core.ModverPropagate
     val ModverPropagate = zipx.core.ModverPropagate
+    type ModverRegistry = zipx.core.ModverRegistry
+    val ModverRegistry = zipx.core.ModverRegistry
     type ModuleId = zipx.core.ModuleId
     val ModuleId = zipx.core.ModuleId
     type Action = zipx.core.Action
@@ -419,24 +421,36 @@ object ZipxPlugin extends AutoPlugin:
     val zipxSelfPlugins          = settingKey[Seq[Plugin]](ZipxSettings.selfPlugins.description)
     val zipxVersionsFile         = settingKey[String](ZipxSettings.versionsFile.description)
 
-    val zipxGraph            = taskKey[Unit](ZipxSettings.graph.description)
-    val zipxPublishOrder     = taskKey[Unit](ZipxSettings.publishOrder.description)
-    val zipxCatalogGenerate  = taskKey[Unit](ZipxSettings.catalogGenerate.description)
-    val zipxWorkflowGenerate = taskKey[Unit](ZipxSettings.workflowGenerate.description)
-    val zipxWorkflowCheck    = taskKey[Unit](ZipxSettings.workflowCheck.description)
-    val zipxAdvisoryCheck    = taskKey[Unit](ZipxSettings.advisoryCheck.description)
-    val zipxAffectedModules  = inputKey[Unit](ZipxSettings.affectedModules.description)
-    val zipxPinCheck         = taskKey[Unit](ZipxSettings.pinCheck.description)
-    val zipxPinCheckPr       = taskKey[Unit](ZipxSettings.pinCheckPr.description)
-    val zipxPinSubmit        = taskKey[Unit](ZipxSettings.pinSubmit.description)
-    val zipxPinInventory     = taskKey[Unit](ZipxSettings.pinInventory.description)
-    val zipxPinUpdate        = inputKey[Unit](ZipxSettings.pinUpdate.description)
-    val zipxDepUpdate        = inputKey[Unit](ZipxSettings.depUpdate.description)
-    val zipxActionUpdate     = inputKey[Unit](ZipxSettings.actionUpdate.description)
-    val zipxModverBump       = inputKey[Unit](ZipxSettings.modverBump.description)
-    val zipxModverCompat     = taskKey[Unit](ZipxSettings.modverCompat.description)
-    val zipxModverCheck      = taskKey[Unit](ZipxSettings.modverCheck.description)
-    val zipxModverSuggest    = taskKey[Unit](ZipxSettings.modverSuggest.description)
+    val zipxGraph                = taskKey[Unit](ZipxSettings.graph.description)
+    val zipxPublishOrder         = taskKey[Unit](ZipxSettings.publishOrder.description)
+    val zipxCatalogGenerate      = taskKey[Unit](ZipxSettings.catalogGenerate.description)
+    val zipxWorkflowGenerate     = taskKey[Unit](ZipxSettings.workflowGenerate.description)
+    val zipxWorkflowCheck        = taskKey[Unit](ZipxSettings.workflowCheck.description)
+    val zipxAdvisoryCheck        = taskKey[Unit](ZipxSettings.advisoryCheck.description)
+    val zipxAffectedModules      = inputKey[Unit](ZipxSettings.affectedModules.description)
+    val zipxPinCheck             = taskKey[Unit](ZipxSettings.pinCheck.description)
+    val zipxPinCheckPr           = taskKey[Unit](ZipxSettings.pinCheckPr.description)
+    val zipxPinSubmit            = taskKey[Unit](ZipxSettings.pinSubmit.description)
+    val zipxPinInventory         = taskKey[Unit](ZipxSettings.pinInventory.description)
+    val zipxPinUpdate            = inputKey[Unit](ZipxSettings.pinUpdate.description)
+    val zipxDepUpdate            = inputKey[Unit](ZipxSettings.depUpdate.description)
+    val zipxActionUpdate         = inputKey[Unit](ZipxSettings.actionUpdate.description)
+    val zipxModverBump           = inputKey[Unit](ZipxSettings.modverBump.description)
+    val zipxModverCompat         = taskKey[Unit](ZipxSettings.modverCompat.description)
+    val zipxModverCheck          = taskKey[Unit](ZipxSettings.modverCheck.description)
+    val zipxModverSuggest        = taskKey[Unit](ZipxSettings.modverSuggest.description)
+    val zipxModverPublishModules = inputKey[Unit](ZipxSettings.modverPublishModules.description)
+    val zipxModverPublishSigned  = taskKey[Unit](ZipxSettings.modverPublishSigned.description)
+
+    object ZipxModver:
+      def publish(
+          command: SbtCommand = CapabilityTasks.of(zipxModverPublishSigned),
+          registry: ModverRegistry = zipx.core.ModverRegistry.MavenCentral,
+      ): Capability =
+        zipx.core.ZipxModver
+          .publish(command, registry)
+          .withEnv(Map(zipx.core.ModverRegistry.EnvKey -> EnvValue.plain(registry.encode)))
+    end ZipxModver
   end autoImport
 
   import autoImport.*
@@ -547,36 +561,40 @@ object ZipxPlugin extends AutoPlugin:
         )
         .value
     },
-    zipxWorkflowCheck            := checkTask.value,
-    zipxAdvisoryCheck            := Def.uncached { advisoryCheckTask.value },
-    zipxAffectedModules          := affectedModulesTask.evaluated,
-    zipxPinCheck                 := Def.uncached { pinCheckTask.value },
-    zipxPinCheckPr               := Def.uncached { pinCheckPrTask.value },
-    zipxPinSubmit                := Def.uncached { pinSubmitTask.value },
-    zipxPinInventory             := Def.uncached { pinInventoryTask.value },
-    zipxPinUpdate                := pinUpdateTask.evaluated,
-    zipxDepUpdate                := depUpdateTask.evaluated,
-    zipxActionUpdate             := actionUpdateTask.evaluated,
-    zipxModverBump               := modverBumpTask.evaluated,
-    zipxModverCompat             := Def.uncached { modverCompatTask.value },
-    zipxModverCheck              := Def.uncached { modverCheckTask.value },
-    zipxModverSuggest            := Def.uncached { modverSuggestTask.value },
-    zipxDepUpdate / aggregate    := false,
-    zipxActionUpdate / aggregate := false,
-    zipxPinUpdate / aggregate    := false,
-    zipxModverBump / aggregate   := false,
+    zipxWorkflowCheck                    := checkTask.value,
+    zipxAdvisoryCheck                    := Def.uncached { advisoryCheckTask.value },
+    zipxAffectedModules                  := affectedModulesTask.evaluated,
+    zipxPinCheck                         := Def.uncached { pinCheckTask.value },
+    zipxPinCheckPr                       := Def.uncached { pinCheckPrTask.value },
+    zipxPinSubmit                        := Def.uncached { pinSubmitTask.value },
+    zipxPinInventory                     := Def.uncached { pinInventoryTask.value },
+    zipxPinUpdate                        := pinUpdateTask.evaluated,
+    zipxDepUpdate                        := depUpdateTask.evaluated,
+    zipxActionUpdate                     := actionUpdateTask.evaluated,
+    zipxModverBump                       := modverBumpTask.evaluated,
+    zipxModverCompat                     := Def.uncached { modverCompatTask.value },
+    zipxModverCheck                      := Def.uncached { modverCheckTask.value },
+    zipxModverSuggest                    := Def.uncached { modverSuggestTask.value },
+    zipxModverPublishModules             := modverPublishModulesTask.evaluated,
+    zipxDepUpdate / aggregate            := false,
+    zipxActionUpdate / aggregate         := false,
+    zipxPinUpdate / aggregate            := false,
+    zipxModverBump / aggregate           := false,
+    zipxModverPublishModules / aggregate := false,
   )
 
   /** An aggregator is a container rather than a testable module, so it is CI-irrelevant by default. Plain settings, so
     * a project can override any of them.
     */
   override def projectSettings: Seq[Setting[?]] = Seq(
-    zipxCiRelevant  := thisProject.value.aggregate.isEmpty,
-    zipxPublish     := zipxAuto,
-    zipxTestTask    := CapabilityTasks.of(testFull),
-    zipxPublishTask := CapabilityTasks.of(publish),
-    zipxDocker      := thisProject.value.autoPlugins.exists(_.label == DockerPluginLabel),
-    zipxMatrixRoot  := None,
+    zipxCiRelevant                      := thisProject.value.aggregate.isEmpty,
+    zipxPublish                         := zipxAuto,
+    zipxTestTask                        := CapabilityTasks.of(testFull),
+    zipxPublishTask                     := CapabilityTasks.of(publish),
+    zipxDocker                          := thisProject.value.autoPlugins.exists(_.label == DockerPluginLabel),
+    zipxMatrixRoot                      := None,
+    zipxModverPublishSigned             := Def.uncached { modverPublishSignedTask.value },
+    zipxModverPublishSigned / aggregate := false,
   )
 
   /** A module opts into the docker capability by enabling sbt-native-packager's `DockerPlugin`, detected by label so
@@ -734,6 +752,10 @@ object ZipxPlugin extends AutoPlugin:
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
       verifyCleanLabel = orFail(typedVerifyCleanLabel(read(zipxVerifyCleanLabel, Some("clean")))),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
+      modverPublish = read(zipxShips, Seq.empty).nonEmpty,
+      shipEpochHash = Option.when(read(zipxCacheEpoch, CacheEpoch.GitTags()) == CacheEpoch.ShipCatalog)(
+        Modver.epochHash(read(zipxShips, Seq.empty))
+      ),
     )
   }
 
@@ -1736,6 +1758,113 @@ object ZipxPlugin extends AutoPlugin:
     yield report
     end for
   end writeModverReport
+
+  private def modverPublishModulesTask: Def.Initialize[InputTask[Unit]] = Def.inputTask {
+    val before    = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+    val extracted = Project.extract(state.value)
+    val graph     = buildGraph.value
+    val ships     = readBuildSetting(extracted, zipxShips, Seq.empty)
+    val root      = (LocalRootProject / baseDirectory).value
+    val rel       = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
+    val log       = streams.value.log
+    val report    =
+      if ships.isEmpty then ModverPublishFile.empty
+      else
+        val index    = orFail(Modver.membership(graph, ships))
+        val registry = resolveRegistry(extracted, graph)
+        val moved    =
+          if before.isEmpty then MovedRows(Set.empty, added = index.byIdentity.keySet, newMembers = Set.empty)
+          else
+            val shown = ModverRelease.gitShow(root, before, rel)
+            val prev  = orFail(
+              Modver.previousIndex(
+                shown,
+                src => zipx.syntax.CatalogSource.parse(src, rel).map(c => ShipIndex.from(c.ships)),
+              )
+            )
+            orFail(Modver.movedRows(index, Right(prev)))
+        val enumerated                                    = liveBinaries(extracted, graph, index)
+        val gavs                                          = (id: ModuleId) => enumerated.getOrElse(id, Nil).map(_._2)
+        val lookup: Gav => Either[String, RegistryStatus] = gav => lookupGav(registry, gav)
+        val missing = orFail(Modver.filterUnpublished(moved, index, graph, gavs, lookup))
+        ModverPublishFile(
+          missing.map { (id, gs) =>
+            val byGav = enumerated.getOrElse(id, Nil).map(p => p._2 -> p._1).toMap
+            (id: String) -> gs.flatMap(byGav.get).distinct
+          }
+        )
+    IO.write(root / ModverPublishFile.RelPath, ModverPublishFile.render(report) + "\n")
+    IO.write(root / ModverPublishFile.ModulesRelPath, ModverPublishFile.modulesJson(report) + "\n")
+    log.info(s"zipx: wrote ${ModverPublishFile.ModulesRelPath} (${report.missing.size} modules)")
+  }
+
+  private def modverPublishSignedTask: Def.Initialize[Task[Unit]] = Def.taskDyn {
+    val root   = (LocalRootProject / baseDirectory).value
+    val file   = root / ModverPublishFile.RelPath
+    val report =
+      if file.exists then orFail(ModverPublishFile.parse(IO.read(file))) else ModverPublishFile.empty
+    val id      = thisProject.value.id
+    val bin     = scalaBinaryVersion.value
+    val missing = report.missing.getOrElse(id, Nil)
+    if missing.contains(bin) then
+      import com.jsuereth.sbtpgp.PgpKeys.publishSigned
+      publishSigned
+    else
+      Def.task {
+        streams.value.log.info(s"zipx: skip publishSigned for $id binary $bin (already on the registry)")
+        ()
+      }
+  }
+
+  private def resolveRegistry(extracted: Extracted, graph: ModuleGraph): ModverRegistry =
+    capabilitiesOf(extracted, graph)
+      .find(_.name == Capability.PublishName)
+      .flatMap(_.env.get(ModverRegistry.EnvKey))
+      .flatMap {
+        case EnvValue.Plain(value) => ModverRegistry.decode(value).toOption
+        case _                     => None
+      }
+      .getOrElse(ModverRegistry.MavenCentral)
+
+  private def lookupGav(registry: ModverRegistry, gav: Gav): Either[String, RegistryStatus] =
+    val headers =
+      if registry.usesGithubToken then
+        sys.env
+          .get("GITHUB_TOKEN")
+          .filter(_.nonEmpty)
+          .map(t => Map("Authorization" -> s"Bearer $t"))
+          .getOrElse(Map.empty)
+      else Map.empty
+    HttpLookup.get(registry.pomUrl(gav), headers = headers) match
+      case Left(err)  => Left(err)
+      case Right(res) => Modver.registryStatus(res.status)
+  end lookupGav
+
+  private def liveBinaries(
+      extracted: Extracted,
+      graph: ModuleGraph,
+      index: ShipIndex,
+  ): Map[ModuleId, List[(String, Gav)]] =
+    graph.nodes
+      .filter(n => index.rowFor(n.matrixRoot).isDefined)
+      .flatMap { node =>
+        extracted.structure.allProjectRefs.find(_.project == (node.id: String)).toList.flatMap { ref =>
+          val org     = extracted.get(ref / organization)
+          val name    = extracted.get(ref / moduleName)
+          val cross   = extracted.get(ref / crossVersion)
+          val version = index.rowFor(node.matrixRoot).map(r => r.version: String).getOrElse("0.0.0")
+          val scalaVs = extracted.getOpt(ref / crossScalaVersions).getOrElse(Seq.empty)
+          val fullVs  = if scalaVs.isEmpty then extracted.getOpt(ref / scalaVersion).toSeq else scalaVs
+          fullVs.toList.map { sv =>
+            val bin = sbt.librarymanagement.CrossVersion.binaryScalaVersion(sv)
+            val art =
+              sbt.librarymanagement.CrossVersion(cross, sv, bin).map(f => f(name)).getOrElse(name)
+            (node.id, (bin, Gav(org, art, version)))
+          }
+        }
+      }
+      .groupMap(_._1)(_._2)
+  end liveBinaries
 
   private def previousShips(root: File, rel: String, sha: String): Either[String, List[PublishedRow]] =
     val out  = scala.collection.mutable.ListBuffer.empty[String]

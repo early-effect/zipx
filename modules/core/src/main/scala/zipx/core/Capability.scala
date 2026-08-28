@@ -111,7 +111,7 @@ enum Ordering:
   * **under-verifying is silently unsafe** while **under-publishing is loudly broken**.
   */
 enum Gate:
-  case Always, OnReleaseTag, AffectedOnly
+  case Always, OnReleaseTag, AffectedOnly, OnDefaultPush
 
 /** How a capability turns participating modules into jobs, the main CI-cost lever.
   *

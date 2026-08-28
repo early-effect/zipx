@@ -1,16 +1,26 @@
 package zipx
 
-import sbt.{Def, ModuleID, Setting}
-import sbt.Keys.{crossScalaVersions, libraryDependencies, pomPostProcess, scalaVersion, thisProject, version}
+import sbt.{Def, LocalRootProject, ModuleID, Setting}
+import sbt.Keys.{
+  baseDirectory,
+  crossScalaVersions,
+  libraryDependencies,
+  pomPostProcess,
+  scalaVersion,
+  thisProject,
+  version,
+}
 import zipx.plugin.ZipxDeps
 import zipx.plugin.ZipxPlugin.autoImport.{
   zipxActionRows,
   zipxCheckDeps,
   zipxPins,
+  zipxPushBranches,
   zipxSbt,
   zipxScala,
   zipxShips,
   zipxVersions,
+  zipxVersionsFile,
 }
 
 val ZipxSelf = zipx.plugin.ZipxSelf
@@ -70,10 +80,14 @@ object ZipxVersions:
       else
         Seq(
           version := Def.uncached {
-            val id = thisProject.value.id
-            zipx.core.Modver.rowForProject(id, shipRows) match
-              case Some(pub) => s"${pub.version}-ci"
-              case None      => "0.1.0-SNAPSHOT"
+            zipx.plugin.ModverRelease.versionString(
+              thisProject.value.id,
+              zipxShips.value,
+              zipxPushBranches.value,
+              zipxVersionsFile.value,
+              (LocalRootProject / baseDirectory).value,
+              sys.env,
+            )
           },
           pomPostProcess := { (node: scala.xml.Node) => stripCiPomVersions(node) },
         )

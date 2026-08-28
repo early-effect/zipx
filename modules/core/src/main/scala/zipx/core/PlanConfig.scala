@@ -164,6 +164,10 @@ final case class PlanConfig(
     cancelSupersededRuns: Boolean = true,
     matrixCollapse: Map[CapabilityName, MatrixCollapse] = Map.empty,
     defaultMatrixCollapse: MatrixCollapse = MatrixCollapse.Auto,
+    /** True when the build has Ship rows. Library Graph publish is version-moved, not fail-open affected. */
+    modverPublish: Boolean = false,
+    /** SHA-256 prefix baked into LocalDir keys when [[cacheEpoch]] is [[CacheEpoch.ShipCatalog]]. */
+    shipEpochHash: Option[String] = None,
 )
 
 object PlanConfig:

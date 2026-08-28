@@ -95,6 +95,21 @@ object Modver:
     case s: Ship      => s"""Ship("${s.id}")"""
     case g: ShipGroup => s"""ShipGroup("${g.name}")"""
 
+  /** 16-char SHA-256 hex of sorted `identity<TAB>version` lines. LocalDir [[CacheEpoch.ShipCatalog]] key. */
+  def epochHash(ships: Seq[PublishedRow]): String =
+    val lines = ships.map(r => s"${r.identity}\t${r.version: String}").sorted.mkString("\n")
+    val md    = java.security.MessageDigest.getInstance("SHA-256")
+    md.digest(lines.getBytes(java.nio.charset.StandardCharsets.UTF_8)).take(8).map("%02x".format(_)).mkString
+
+  def registryStatus(httpStatus: Int): Either[String, RegistryStatus] =
+    httpStatus match
+      case 200       => Right(RegistryStatus.Published)
+      case 404 | 410 => Right(RegistryStatus.Missing)
+      case n         => Left(s"HTTP $n")
+
+  def isZeroSha(sha: String): Boolean =
+    sha.isEmpty || sha.forall(_ == '0')
+
   def publishingRoots(graph: ModuleGraph): Set[ModuleId] =
     graph.nodes.filter(_.publishes).map(_.matrixRoot).toSet
 

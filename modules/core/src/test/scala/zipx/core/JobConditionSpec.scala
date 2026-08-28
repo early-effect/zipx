@@ -29,6 +29,15 @@ object JobConditionSpec extends ZIOSpecDefault:
           JobCondition.onReleaseTag.render == "startsWith(github.ref, 'refs/tags/v')",
         )
       },
+      test("onDefaultPush is push to a branch or workflow_dispatch") {
+        val rendered = JobCondition.onDefaultPush(List("main")).render
+        assertTrue(
+          rendered.contains("github.event_name == 'push'"),
+          rendered.contains("github.ref == 'refs/heads/main'"),
+          rendered.contains("workflow_dispatch"),
+          rendered.contains("||"),
+        )
+      },
       test("HasPrLabel") {
         assertTrue(
           JobCondition

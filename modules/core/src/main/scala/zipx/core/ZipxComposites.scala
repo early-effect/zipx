@@ -64,9 +64,9 @@ object ZipxComposites:
     */
   def sbtSetup(pins: ActionPins, cacheEpoch: CacheEpoch = CacheEpoch.GitTags()): CompositeAction =
     val resolveScript = cacheEpoch match
-      case CacheEpoch.GitTags(tagMatch) => CacheEpoch.gitTagsResolveScript(tagMatch)
-      case CacheEpoch.Script(run, _)    => run
-      case CacheEpoch.Fixed(_)          => CacheEpoch.gitTagsResolveScript()
+      case CacheEpoch.GitTags(tagMatch)                 => CacheEpoch.gitTagsResolveScript(tagMatch)
+      case CacheEpoch.Script(run, _)                    => run
+      case CacheEpoch.Fixed(_) | CacheEpoch.ShipCatalog => CacheEpoch.gitTagsResolveScript()
     val resolveId = cacheEpoch match
       case CacheEpoch.Script(_, stepId) => stepId.unwrap
       case _                            => CacheEpoch.GitTagsStepId.unwrap
@@ -232,6 +232,7 @@ object ZipxComposites:
   ): Step =
     val fixedEpoch = config.cacheEpoch match
       case CacheEpoch.Fixed(value) => value
+      case CacheEpoch.ShipCatalog  => config.shipEpochHash.getOrElse("")
       case _                       => ""
     val diskCache =
       if config.cache == CacheBackend.LocalDir then "false"
