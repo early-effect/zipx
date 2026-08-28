@@ -85,6 +85,8 @@ end ModuleId
   * @param docker
   *   whether this module publishes a docker image (has sbt-native-packager's Docker plugin enabled / opted in). Drives
   *   the docker capability's per-module jobs.
+  * @param matrixRootOpt
+  *   override for [[matrixRoot]]. `None` means the root is [[id]].
   */
 final case class ModuleNode(
     id: ModuleId,
@@ -97,7 +99,13 @@ final case class ModuleNode(
     baseDir: String = "",
     sourcePaths: List[String] = Nil,
     docker: Boolean = false,
+    matrixRootOpt: Option[ModuleId] = None,
 ):
+
+  /** The sbt project id a [[Ship]] names. A `projectMatrix` JVM row is `core` and its JS row is `coreJS`; both share
+    * `matrixRoot = core`. Defaults to [[id]] so existing fixtures keep compiling.
+    */
+  def matrixRoot: ModuleId = matrixRootOpt.getOrElse(id)
 
   /** Every path this module owns for affected-gating: [[baseDir]] and its [[sourcePaths]].
     *

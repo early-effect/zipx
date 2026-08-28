@@ -16,4 +16,4 @@ val ZipxExclude = zipx.core.ZipxExclude
 type AsCoords[A] = zipx.core.AsCoords[A]
 val AsCoords = zipx.core.AsCoords
 
-export zipx.core.{AsActions, AsPins, Action, Pin, PinFeedName, Purl}
+export zipx.core.{AsActions, AsPins, AsShips, Action, Pin, PinFeedName, Purl, PublishedRow, Ship, ShipGroup}

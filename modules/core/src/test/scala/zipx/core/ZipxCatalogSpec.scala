@@ -233,6 +233,35 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
             out.contains("""Plugin("org.scalameta", "sbt-scalafmt", "2.7.0")"""),
           )
     },
+    test("applyBumps does not rewrite a coincidental version inside a Ship constructor") {
+      val src =
+        """
+          |val zio  = Lib("dev.zio", "zio", "1.4.2")
+          |val core = Ship("core", "1.4.2")
+          |val foo  = ShipGroup("foo", "1.4.2")("foo-api", "foo-cli")
+          |""".stripMargin
+      val bumps = List(DepBump(Lib("dev.zio", "zio", "1.4.2"), BumpKind.Patch, "1.4.3"))
+      ZipxCatalog.applyBumps(src, bumps) match
+        case Left(err)  => assertTrue(err.isEmpty)
+        case Right(out) =>
+          assertTrue(
+            out.contains("""Lib("dev.zio", "zio", "1.4.3")"""),
+            out.contains("""Ship("core", "1.4.2")"""),
+            out.contains("""ShipGroup("foo", "1.4.2")("foo-api", "foo-cli")"""),
+          )
+    },
+    test("shipsOf collects Ship and ShipGroup vals and skips Lib, lists, and defs") {
+      trait Catalog:
+        inline def ships: Seq[PublishedRow] = ZipxCatalog.shipsOf[this.type](this)
+      object Sample extends Catalog:
+        val zio    = Lib("dev.zio", "zio", "2.1.26")
+        val core   = Ship("core", "1.4.2")
+        val foo    = ShipGroup("foo", "1.4.2")("foo-api", "foo-cli")
+        val listed = List(core)
+        def unused = core
+      val labels = Sample.ships.map(r => s"${r.label}:${r.identity}")
+      assertTrue(labels == List("Ship:core", "ShipGroup:foo"))
+    },
     test("pinsOf collects Pin vals and skips Lib, lists, and defs") {
       trait Catalog:
         inline def pins: Seq[Pin] = ZipxCatalog.pinsOf[this.type](this)

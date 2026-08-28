@@ -1,7 +1,7 @@
 package zipx
 
 /** Catalog surface a process that is not the target sbt can compile: `sbt` / `scala` / [[coords]] / [[pins]] /
-  * [[actions]]. No sbt types.
+  * [[actions]] / [[ships]]. No sbt types.
   *
   * Consumer files still extend [[ZipxVersions]] from the plugin, which adds `settings` / `deps` / `library`. The CLI
   * compiles that file against zipx jars on *its* classpath, not against the target `plugins.sbt`.
@@ -21,4 +21,7 @@ trait Catalog:
 
   /** Every val on this object whose type has an [[AsActions]] given. */
   inline def actions: Seq[Action] = zipx.core.ZipxCatalog.actionsOf[this.type](this)
+
+  /** Every val on this object whose type has an [[AsShips]] given (`Ship`, `ShipGroup`, or a bundle). */
+  inline def ships: Seq[PublishedRow] = zipx.core.ZipxCatalog.shipsOf[this.type](this)
 end Catalog

@@ -6,6 +6,10 @@ object ModuleGraphSpec extends ZIOSpecDefault:
   import Fixtures.*
 
   def spec = suite("ModuleGraph")(
+    test("matrixRoot defaults to id so existing fixtures keep compiling") {
+      val n = ModuleNode(ModuleId("schema"), publishes = true)
+      assertTrue(n.matrixRoot == n.id, (n.matrixRoot: String) == "schema")
+    },
     test("topological sort places dependencies before dependents") {
       val order           = sampleGraph.topologicalSort
       def idx(id: String) = order.indexOf(id)
