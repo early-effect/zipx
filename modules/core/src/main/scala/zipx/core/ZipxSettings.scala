@@ -251,6 +251,16 @@ object ZipxSettings:
       Build,
     )
 
+  val modverPropagate: SettingDef[ModverPropagate] =
+    SettingDef.setting(
+      SettingName("zipxModverPropagate"),
+      ModverPropagate.Never,
+      SettingPurpose(
+        "Reverse-dep bump policy across Ship groups. Never (default) is the lifted+MiMa set; PatchPublished patches published reverse-deps; MatchBump floors them at the triggering kind; Custom is the whole policy."
+      ),
+      Build,
+    )
+
   val matrixRoot: SettingDef[Option[ModuleId]] =
     SettingDef.setting(
       SettingName("zipxMatrixRoot"),
@@ -661,6 +671,7 @@ object ZipxSettings:
     versions,
     pins,
     ships,
+    modverPropagate,
     sbtVersionCoord,
     scalaVersionCoord,
     checkDeps,

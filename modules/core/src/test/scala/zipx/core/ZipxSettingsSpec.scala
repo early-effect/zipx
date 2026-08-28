@@ -32,6 +32,7 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
         ZipxSettings.names.contains("zipxEmitSelf"),
         ZipxSettings.names.contains("zipxSelfPlugins"),
         ZipxSettings.names.contains("zipxShips"),
+        ZipxSettings.names.contains("zipxModverPropagate"),
         ZipxSettings.names.contains("zipxMatrixRoot"),
         ZipxSettings.names.contains("zipxModverBump"),
         ZipxSettings.names.contains("zipxModverCompat"),
@@ -56,6 +57,7 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
       }
       assertTrue(
         values.contains("zipxCapabilities"),
+        values.contains("zipxModverPropagate"),
         values.contains("zipxCacheRehydrateTask"),
         derived.contains("zipxPublish"),
         derived.contains("zipxDocker"),

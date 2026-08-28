@@ -257,10 +257,6 @@ object ModverSpec extends ZIOSpecDefault:
         val lifted  = Modver.liftedBumpSet(matrix, built, Some(List("core/src/main/scala/Foo.scala")))
         assertTrue(lifted == Right(Set(ShipRef.One(ModuleId("core")))))
       },
-      test("expand is identity") {
-        val bumps = BumpSet(Map(ShipRef.One(ModuleId("client")) -> BumpKind.Major))
-        assertTrue(Modver.expand(bumps, graph, index).asMap == bumps.asMap)
-      },
       test("min-bump order is None then Patch then Minor then Major") {
         import Modver.minBumpOrd
         assertTrue(
@@ -268,6 +264,151 @@ object ModverSpec extends ZIOSpecDefault:
           minBumpOrd.lt(BumpKind.Patch, BumpKind.Minor),
           minBumpOrd.lt(BumpKind.Minor, BumpKind.Major),
           minBumpOrd.max(BumpKind.Patch, BumpKind.Major) == BumpKind.Major,
+        )
+      },
+    ),
+    suite("propagate")(
+      test("Never is the lifted set even when reverse-deps exist") {
+        check(gCovered) { (g, rows) =>
+          val built = Modver.membership(g, rows).toOption.get
+          val bumps = BumpSet(built.byIdentity.keys.map(_ -> BumpKind.Patch).toMap)
+          assertTrue(
+            Modver.expand(bumps, g, built, ModverPropagate.Never).asMap == bumps.asMap,
+            ModverPropagate.Never.expand(bumps, g, built).asMap == bumps.asMap,
+          )
+        }
+      },
+      test("PatchPublished patches published reverse-deps and skips unpublished ones") {
+        val bumps  = BumpSet(Map(ShipRef.Group(ShipGroupName("libs")) -> BumpKind.Minor))
+        val out    = Modver.expand(bumps, graph, index, ModverPropagate.PatchPublished).asMap
+        val client = ShipRef.One(ModuleId("client"))
+        assertTrue(
+          out.get(ShipRef.Group(ShipGroupName("libs"))).contains(BumpKind.Minor),
+          out.get(client).contains(BumpKind.Patch),
+          !out.keys.exists {
+            case ShipRef.One(id) => (id: String) == "service"
+            case _               => false
+          },
+        )
+      },
+      test("MatchBump floors reverse-deps at the triggering kind, not Patch") {
+        val bumps = BumpSet(Map(ShipRef.Group(ShipGroupName("libs")) -> BumpKind.Major))
+        val out   = Modver.expand(bumps, graph, index, ModverPropagate.MatchBump).asMap
+        assertTrue(out.get(ShipRef.One(ModuleId("client"))).contains(BumpKind.Major))
+      },
+      test("intra-group dependsOn is not an edge") {
+        val bumps = BumpSet(Map(ShipRef.Group(ShipGroupName("libs")) -> BumpKind.Patch))
+        val deps  = Modver.contractedDependents(graph, index)
+        val libs  = ShipRef.Group(ShipGroupName("libs"))
+        assertTrue(
+          !deps.getOrElse(libs, Set.empty).contains(libs),
+          Modver.expand(bumps, graph, index, ModverPropagate.PatchPublished).asMap.get(libs).contains(BumpKind.Patch),
+        )
+      },
+      test("existing kind wins via minBumpOrd.max") {
+        val client    = ShipRef.One(ModuleId("client"))
+        val patchSeed = BumpSet(
+          Map(
+            ShipRef.Group(ShipGroupName("libs")) -> BumpKind.Patch,
+            client                               -> BumpKind.Minor,
+          )
+        )
+        val majorSeed = BumpSet(
+          Map(
+            ShipRef.Group(ShipGroupName("libs")) -> BumpKind.Major,
+            client                               -> BumpKind.Patch,
+          )
+        )
+        val patch = Modver.expand(patchSeed, graph, index, ModverPropagate.PatchPublished).asMap
+        val keep  = Modver.expand(patchSeed, graph, index, ModverPropagate.MatchBump).asMap
+        val raise = Modver.expand(majorSeed, graph, index, ModverPropagate.MatchBump).asMap
+        assertTrue(
+          patch.get(client).contains(BumpKind.Minor),
+          keep.get(client).contains(BumpKind.Minor),
+          raise.get(client).contains(BumpKind.Major),
+        )
+      },
+      test("MatchBump walks the contracted reverse-dep chain") {
+        val chain = GraphFixture(
+          List(
+            node("a"),
+            node("b", deps = List("a")),
+            node("c", deps = List("b")),
+          )
+        )
+        val rows   = List[PublishedRow](Ship("a", "1.0.0"), Ship("b", "1.0.0"), Ship("c", "1.0.0"))
+        val built  = Modver.membership(chain, rows).toOption.get
+        val seed   = BumpSet(Map(ShipRef.One(ModuleId("a")) -> BumpKind.Major))
+        val matchB = Modver.expand(seed, chain, built, ModverPropagate.MatchBump).asMap
+        val patch  = Modver.expand(seed, chain, built, ModverPropagate.PatchPublished).asMap
+        assertTrue(
+          matchB.get(ShipRef.One(ModuleId("b"))).contains(BumpKind.Major),
+          matchB.get(ShipRef.One(ModuleId("c"))).contains(BumpKind.Major),
+          patch.get(ShipRef.One(ModuleId("b"))).contains(BumpKind.Patch),
+          patch.get(ShipRef.One(ModuleId("c"))).contains(BumpKind.Patch),
+        )
+      },
+      test("a platform-row dependsOn contracts to the matrix root") {
+        val covered = List[PublishedRow](Ship("core", "1.4.2"), Ship("cli", "0.3.0"))
+        val built   = Modver.membership(matrix, covered).toOption.get
+        val seed    = BumpSet(Map(ShipRef.One(ModuleId("core")) -> BumpKind.Minor))
+        val out     = Modver.expand(seed, matrix, built, ModverPropagate.MatchBump).asMap
+        assertTrue(out.get(ShipRef.One(ModuleId("cli"))).contains(BumpKind.Minor))
+      },
+      test("unpublished intermediates are not contracted edges") {
+        val hole = GraphFixture(
+          List(
+            node("core"),
+            node("app", publishes = false, deps = List("core")),
+            node("client", deps = List("app")),
+          )
+        )
+        val rows  = List[PublishedRow](Ship("core", "1.0.0"), Ship("client", "1.0.0"))
+        val built = Modver.membership(hole, rows).toOption.get
+        val seed  = BumpSet(Map(ShipRef.One(ModuleId("core")) -> BumpKind.Major))
+        val out   = Modver.expand(seed, hole, built, ModverPropagate.MatchBump).asMap
+        assertTrue(
+          out.get(ShipRef.One(ModuleId("core"))).contains(BumpKind.Major),
+          !out.contains(ShipRef.One(ModuleId("client"))),
+        )
+      },
+      test("Custom is the whole policy and can drop reverse-deps") {
+        val seed = BumpSet(Map(ShipRef.Group(ShipGroupName("libs")) -> BumpKind.Major))
+        val out  =
+          Modver.expand(seed, graph, index, ModverPropagate.custom { (bumps, _, _) => bumps }).asMap
+        assertTrue(
+          out == seed.asMap,
+          !out.contains(ShipRef.One(ModuleId("client"))),
+        )
+      },
+      test("check and report consume the post-propagate set") {
+        val kinds = Modver
+          .expand(
+            BumpSet(Map(ShipRef.Group(ShipGroupName("libs")) -> BumpKind.Minor)),
+            graph,
+            index,
+            ModverPropagate.MatchBump,
+          )
+          .asMap
+        val lifted = Set[ShipRef](ShipRef.Group(ShipGroupName("libs")))
+        Modver.report(index, index, lifted, MovedRows.empty, kinds, mimaRan = Set.empty) match
+          case Left(err)     => assertTrue(err.isEmpty)
+          case Right(report) =>
+            val client = report.rows.find(_.identity == "client")
+            val libs   = report.rows.find(_.identity == "libs")
+            assertTrue(
+              client.exists(r => r.kind == BumpKind.Minor && r.status == BumpStatus.Missing),
+              libs.exists(r => r.kind == BumpKind.Minor && Modver.checkFails(r.status)),
+              client.exists(r => Modver.checkFails(r.status)),
+            )
+        end match
+      },
+      test("None floors do not seed reverse-deps") {
+        val seed = BumpSet(Map(ShipRef.Group(ShipGroupName("libs")) -> BumpKind.None))
+        val out  = Modver.expand(seed, graph, index, ModverPropagate.PatchPublished).asMap
+        assertTrue(
+          out.get(ShipRef.Group(ShipGroupName("libs"))).contains(BumpKind.None),
+          !out.contains(ShipRef.One(ModuleId("client"))),
         )
       },
     ),
