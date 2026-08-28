@@ -88,6 +88,67 @@ object AsActions:
 
   given ofAction: AsActions[Action] = a => Seq(a)
 
+/** How a catalog val becomes outbound version rows. [[Ship]] / [[ShipGroup]] have givens; a bundle can add its own. */
+trait AsShips[A]:
+  def ships(value: A): Seq[PublishedRow]
+
+object AsShips:
+  def apply[A](using ev: AsShips[A]): AsShips[A] = ev
+
+  given ofRow[A <: PublishedRow]: AsShips[A] = a => Seq(a)
+
+/** Identity of a [[ShipGroup]] (`foo` in `ShipGroup("foo", "1.4.2")(...)`). */
+type ShipGroupName = ShipGroupName.Type
+object ShipGroupName extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.nonEmpty then true else "a ship group name must be non-empty"
+
+/** One outbound version row: a lone [[Ship]] or a [[ShipGroup]] whose members share a number. */
+sealed trait PublishedRow:
+  def version: DepVersion
+
+  /** `"Ship"` or `"ShipGroup"`, for comments and apply. */
+  def label: String
+
+  /** Project id or group name. */
+  def identity: String
+
+  /** Matrix roots this row owns. */
+  def memberRoots: List[ModuleId]
+end PublishedRow
+
+final case class Ship(id: ModuleId, version: DepVersion) extends PublishedRow:
+  def label: String               = "Ship"
+  def identity: String            = id
+  def memberRoots: List[ModuleId] = List(id)
+
+object Ship:
+  /** Catalog literal. `@targetName` plus `new` because [[ModuleId]] / [[DepVersion]] erase to `String` and would clash
+    * with the case-class apply. Same pattern as [[Action.apply]] (`Lib` / `Plugin` dodge it with extra defaults; Ship
+    * has none).
+    */
+  @targetName("fromLiterals")
+  inline def apply(inline id: String, inline version: String): Ship =
+    new Ship(ModuleId(id), DepVersion(version))
+
+final case class ShipGroup(
+    name: ShipGroupName,
+    version: DepVersion,
+    members: List[ModuleId],
+) extends PublishedRow:
+  def label: String               = "ShipGroup"
+  def identity: String            = name
+  def memberRoots: List[ModuleId] = members
+
+object ShipGroup:
+  /** Catalog literal. Member ids are runtime strings (`String*`), so they cannot use inline [[ModuleId.apply]]. */
+  inline def apply(inline name: String, inline version: String)(members: String*): ShipGroup =
+    new ShipGroup(
+      ShipGroupName(name),
+      DepVersion(version),
+      members.iterator.map(ModuleId.unsafeMake).toList,
+    )
+
 /** A full git commit SHA (40 hex). Stricter than [[zipx.workflow.ActionRef]], which still allows tags. */
 type GitSha = GitSha.Type
 object GitSha extends Subtype[String]:

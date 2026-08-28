@@ -264,6 +264,10 @@ object ZipxCatalog:
   inline def actionsOf[A](inline catalog: A): Seq[Action] =
     ${ actionsOfImpl[A]('catalog) }
 
+  /** Every val on `catalog` whose type has an [[AsShips]] given. Same walk as [[coordsOf]]. */
+  inline def shipsOf[A](inline catalog: A): Seq[PublishedRow] =
+    ${ shipsOfImpl[A]('catalog) }
+
   private def coordsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[ZipxCoord]] =
     import quotes.reflect.*
     val parts = catalogValParts[A].flatMap { (sym, mt) =>
@@ -302,6 +306,19 @@ object ZipxCatalog:
     }
     if parts.isEmpty then '{ Seq.empty[Action] } else '{ ${ Expr.ofList(parts) }.flatten }
   end actionsOfImpl
+
+  private def shipsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[PublishedRow]] =
+    import quotes.reflect.*
+    val parts = catalogValParts[A].flatMap { (sym, mt) =>
+      mt.asType match
+        case '[t] =>
+          Expr.summon[AsShips[t]].map { tc =>
+            val field = Select.unique(catalog.asTerm, sym.name).asExprOf[t]
+            '{ $tc.ships($field) }
+          }
+    }
+    if parts.isEmpty then '{ Seq.empty[PublishedRow] } else '{ ${ Expr.ofList(parts) }.flatten }
+  end shipsOfImpl
 
   private def catalogValParts[A: Type](using Quotes): List[(quotes.reflect.Symbol, quotes.reflect.TypeRepr)] =
     import quotes.reflect.*
