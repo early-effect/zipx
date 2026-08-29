@@ -176,7 +176,7 @@ object ZipxSettings:
       SettingName("zipxVersionUpdatesPreSteps"),
       Seq.empty,
       SettingPurpose(
-        "Extra steps on the version-updates companion after zipx-sbt-setup and before zipx-cli apply (default empty). Typical use: publishLocal an in-dev zipx-cli so cs launch can resolve a SNAPSHOT."
+        "Extra steps on the version-updates companion after zipx-sbt-setup and before zipx-cli apply (default empty). Typical use: publishLocal the whole in-dev graph (not only cli/) so cs launch can resolve zipx-cli plus its modules from m2Local."
       ),
       Build,
     )

@@ -356,6 +356,12 @@ object PinFeedSpec extends ZIOSpecDefault:
             hasUpdate == yaml.contains("zipx/pin-updates-${GITHUB_RUN_ID}"),
             hasUpdate == yaml.contains("--label clean"),
             hasUpdate == yaml.contains("secrets.GITHUB_TOKEN"),
+            hasUpdate == yaml.contains("Detect GitHub App credentials"),
+            hasUpdate == yaml.contains("actions/create-github-app-token@v3"),
+            !hasUpdate || yaml.indexOf("Detect GitHub App credentials") < yaml.indexOf(
+              ActionPins.Defaults.checkout.unwrap
+            ),
+            !hasUpdate || yaml.contains("steps.zipx-app-token.outputs.token"),
             !hasUpdate || yaml.contains(":!.github/workflows"),
           )
         }

@@ -6,8 +6,8 @@ import scala.collection.immutable.ListMap
 
 /** Scheduled pin-feed companion: cron + dispatch. Apply/PR only when some feed uses [[PinAction.Update]].
   *
-  * Opening that PR uses `GITHUB_TOKEN` and needs the repo or org setting **Allow GitHub Actions to create and approve
-  * pull requests**.
+  * Opening that PR uses `GITHUB_TOKEN` by default, or a GitHub App installation token when [[CompanionAuth]] secrets
+  * are set. Needs the repo or org setting **Allow GitHub Actions to create and approve pull requests**.
   */
 object PinCheckWorkflow:
 
@@ -34,13 +34,19 @@ object PinCheckWorkflow:
       if hasUpdate then
         Step(
           uses = Some(pins.checkout),
-          `with` = ListMap("token" -> "${{ secrets.GITHUB_TOKEN }}", "persist-credentials" -> "true"),
+          `with` = CompanionAuth.checkoutWith,
         )
       else Step(uses = Some(pins.checkout))
     val check = Step(name = Some("Check pin feeds"), run = Some("sbt zipxPinCheck"))
     val steps =
       if hasUpdate then
-        List(checkout, setupJava, setupSbt, check, Step.run(updatePrScript).named("Open update PR").build)
+        CompanionAuth.steps ++ List(
+          checkout,
+          setupJava,
+          setupSbt,
+          check,
+          Step.run(updatePrScript).named("Open update PR").build,
+        )
       else List(checkout, setupJava, setupSbt, check)
     val permissions =
       if hasUpdate then ListMap("contents" -> "write", "pull-requests" -> "write", "issues" -> "write")
