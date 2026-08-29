@@ -1437,7 +1437,7 @@ object ZipxPlugin extends AutoPlugin:
 
   private def isIgnoredDeclared(m: ModuleID): Boolean =
     isSbtPluginModule(m) ||
-      ZipxCatalog.isAutoPlatform(m.organization, m.name) ||
+      AutoPlatform.ignore(m) ||
       m.organization == "org.scala-sbt" ||
       m.configurations.exists { c =>
         val x = c.toLowerCase

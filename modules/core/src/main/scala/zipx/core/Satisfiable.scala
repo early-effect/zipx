@@ -22,10 +22,13 @@ private[core] object Satisfiable:
   /** One clause of the conjunction, with where it came from, so an error can name the two places to look. */
   final case class Clause(source: String, condition: JobCondition)
 
-  /** `None` when nothing decidable is wrong. `Some` explains which two clauses cannot both hold, quoting the GHA
-    * expression each renders to, since that is the text the author will see in the generated file.
+  /** Finds a pair of conjuncts that cannot both hold. `None` when nothing decidable is wrong.
+    *
+    * The message quotes the GHA expression each side renders to, since that is the text the author will see in the
+    * generated file. Earliest pair in clause order, not every pair: generate fail-fasts on the first, and extra pairs
+    * on the same context are the same bug restated.
     */
-  def contradiction(clauses: List[Clause]): Option[String] =
+  def findContradiction(clauses: List[Clause]): Option[String] =
     val atoms = clauses.flatMap(c => conjunctsOf(c.condition).flatMap(atomOf(c.source, _)))
     firstConflict(atoms).map { case (a, b) =>
       s"${a.source} requires `${a.rendered}` and ${b.source} requires `${b.rendered}`, which cannot both hold: " +

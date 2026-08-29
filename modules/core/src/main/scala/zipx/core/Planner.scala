@@ -326,7 +326,7 @@ object Planner:
       sys.error(s"zipx: $where can never run: $problem")
 
     Satisfiable
-      .contradiction(gate.toList ++ own.toList)
+      .findContradiction(gate.toList ++ own.toList)
       .foreach(problem => refuse(s"capability '${capability.name}'", problem))
 
     val targets = graph.nodes.filter(capability.participates).flatMap(capability.targets).distinctBy(_.name)
@@ -334,7 +334,7 @@ object Planner:
       target.condition.foreach { condition =>
         val clause = Satisfiable.Clause(s"target '${target.name}' condition", condition)
         Satisfiable
-          .contradiction(gate.toList ++ own.toList :+ clause)
+          .findContradiction(gate.toList ++ own.toList :+ clause)
           .foreach(problem => refuse(s"capability '${capability.name}' target '${target.name}'", problem))
       }
     }
