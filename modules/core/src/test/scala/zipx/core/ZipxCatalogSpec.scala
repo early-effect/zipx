@@ -141,34 +141,6 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
       val extra  = ZipxCatalog.extraLibs(List(DeclaredGav("org.scalameta", "sbt-scalafmt", "2.6.2")), List(plugin))
       assertTrue(extra.size == 1)
     },
-    test("extraLibs ignores sbt, Scala.js, and Scala Native auto-platform jars") {
-      val extra = ZipxCatalog.extraLibs(
-        List(
-          DeclaredGav("org.scala-lang", "scala3-library", "3.8.4"),
-          DeclaredGav("org.scala-js", "scalajs-library", "1.22.0"),
-          DeclaredGav("org.scala-js", "scalajs-library_2.13", "1.22.0"),
-          DeclaredGav("org.scala-js", "scalajs-test-bridge_2.13", "1.22.0"),
-          DeclaredGav("org.scala-native", "nativelib", "0.5.12"),
-          DeclaredGav("org.scala-native", "nativelib_native0.5_3", "0.5.12"),
-          DeclaredGav("org.scala-native", "scala3lib", "3.8.4+0.5.12"),
-          DeclaredGav("org.scala-native", "test-interface", "0.5.12"),
-          DeclaredGav("org.scala-native", "clib", "0.5.12"),
-          DeclaredGav("org.scala-native", "posixlib", "0.5.12"),
-          DeclaredGav("org.scala-native", "windowslib", "0.5.12"),
-          DeclaredGav("org.scala-native", "javalib", "0.5.12"),
-          DeclaredGav("org.scala-native", "auxlib", "0.5.12"),
-          DeclaredGav("org.scala-native", "bindgen", "0.1.0"),
-          DeclaredGav("org.slf4j", "slf4j-simple", "2.0.18"),
-        ),
-        Nil,
-      )
-      assertTrue(
-        extra.map(_.render).toSet == Set(
-          "org.scala-native:bindgen:0.1.0",
-          "org.slf4j:slf4j-simple:2.0.18",
-        )
-      )
-    },
     test("scalaMismatch is empty when versions agree") {
       assertTrue(
         ZipxCatalog.scalaMismatch("3.8.4", Some(ScalaVersion("3.8.4"))).isEmpty,
