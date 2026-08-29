@@ -41,9 +41,9 @@ flowchart LR
 Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-updates.yml` (schedule plus
 `workflow_dispatch`). The default schedule is Sunday 00:00 UTC; set `zipxVersionUpdatesSchedule` to change it
 (`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job installs `cs` via `zipx-sbt-setup` (`coursier: true`), runs
-`cs launch rocks.earlyeffect:zipx-cli_3:${'$'}ZIPX_CLI_VERSION -- catalog update --yes --verify-load`
-(a release writes `ZIPX_CLI_VERSION` to `project/zipx-ci.env`; in-dev dogfood exports it from `zipxVersionUpdatesPreSteps`), then
-`zipxPinUpdate yes` and `zipxCatalogGenerate`, and opens a PR as `github-actions[bot]`. The branch is
+`cs launch --ttl Inf --repository m2Local --repository ivy2Local --repository central rocks.earlyeffect:zipx-cli_3:${'$'}ZIPX_CLI_VERSION -- catalog update --yes --verify-load`
+(a release writes `ZIPX_CLI_VERSION` to `project/zipx-ci.env`; in-dev dogfood exports it from `zipxVersionUpdatesPreSteps`). `--repository m2Local` is how zipx dogfood resolves a just-`publishLocal`'d `0.0.0-ci` CLI (sbt 2 writes Maven local; default `cs` does not search it). Empty `m2Local` on a consumer runner is a no-op. Then
+`zipxPinUpdate yes` and `zipxCatalogGenerate`, and opens a PR as `github-actions[bot]` unless App secrets are set (below). The branch is
 `zipx/version-updates-${'$'}GITHUB_RUN_ID` so a second dispatch cannot overwrite an open PR. The PR is labeled **`clean`**,
 so Verify runs `cleanFull` (same label as a one-off human PR). That PR is every ZipxVersions row kind: Lib / Plugin /
 Action / Pin constructors, plus `plugins.sbt` and composites when those moved.
@@ -60,7 +60,8 @@ parameterizes instead of rewriting YAML:
   are staged.
 
 `zipxVersionUpdatesPreSteps` (default empty) runs after setup and before `zipx-cli` apply. zipx dogfoods this to
-`publishLocal` the in-dev CLI and export `ZIPX_CLI_VERSION` on `GITHUB_ENV`, so Sunday `cs launch` can resolve that
+`publishLocal` the **whole** in-dev graph (not `cli/publishLocal` alone: `cs launch` still needs `zipx-core` and
+`zipx-syntax` at the same dynver) and export `ZIPX_CLI_VERSION` on `GITHUB_ENV`, so Sunday `cs launch` can resolve that
 version without baking dynver into committed `zipx-ci.env`.
 
 `zipxVersionUpdatesExtraSteps` (default empty) runs after `zipxCatalogGenerate` and before the PR opens. Any zipx repo
@@ -98,7 +99,13 @@ already in the bot commit.
 
 **Required repo/org setting:** [Allow GitHub Actions to create and
 approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).
-`GITHUB_TOKEN` is enough, the same as Scala Steward. No PAT.
+No PAT.
+
+`GITHUB_TOKEN` still opens the PR by default. Since GitHub's 11 June 2026 change, that `pull_request` CI waits for a
+write-access **Approve workflows to run**. Set org (or repo) secrets `ZIPX_APP_ID` and `ZIPX_APP_PRIVATE_KEY` to mint
+an installation token before checkout: the PR author is the App, a write collaborator, and CI starts on its own. Both
+secrets or neither; exactly one fails the job. Grant the App contents + pull-requests + issues, not `workflows`. Do
+**not** loosen **Fork pull request workflows** to skip the banner: that would also auto-run stranger forks.
 """,
       exampleValue {
         VersionUpdatesWorkflow.render(ActionPins.Defaults).yaml
@@ -123,6 +130,14 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
           yaml.contains("sbt zipxWorkflowGenerate"),
           yaml.contains("git push origin zipx/version-updates-${GITHUB_RUN_ID}"),
           yaml.contains("coursier: \"true\"") || yaml.contains("coursier: true"),
+          yaml.contains("--repository m2Local"),
+          yaml.contains("--repository ivy2Local"),
+          yaml.contains("--repository central"),
+          yaml.contains("Detect GitHub App credentials"),
+          yaml.contains("actions/create-github-app-token@v3"),
+          yaml.contains("ZIPX_APP_ID"),
+          yaml.contains("ZIPX_APP_PRIVATE_KEY"),
+          yaml.indexOf("Detect GitHub App credentials") < yaml.indexOf("actions/checkout@v7"),
           yaml.indexOf("Apply catalog updates") < yaml.indexOf("Open update PR"),
           yaml.indexOf("sbt zipxCatalogGenerate") < yaml.indexOf("Open update PR"),
           yaml.indexOf("sbt zipxWorkflowGenerate", yaml.indexOf("Open update PR")) > yaml.indexOf("Open update PR"),

@@ -183,13 +183,16 @@ Public-ecosystem PURLs (`pkg:npm/...`, `pkg:maven/...`) are the ones the gate is
 `.github/workflows/zipx-pin-check.yml` is scheduled plus `workflow_dispatch` (default Sunday 00:00 UTC).
 `sbt zipxPinCheck` runs lookup + OSV.
 When some feed uses `Update`, the companion is `contents: write`, `pull-requests: write`, and `issues: write`, checks out
-with `GITHUB_TOKEN`, rewrites `Pin(...)` in the catalog, runs optional `materialize`, and `gh pr create`s
-`zipx/pin-updates-${'$'}GITHUB_RUN_ID` (labeled `clean`) as `github-actions[bot]`. That PR does not rewrite
-`.github/workflows/` (`GITHUB_TOKEN` cannot push those files).
+with `GITHUB_TOKEN` (or a GitHub App installation token when `ZIPX_APP_ID` / `ZIPX_APP_PRIVATE_KEY` are set; same
+secrets as the version-updates companion), rewrites `Pin(...)` in the catalog, runs optional `materialize`, and
+`gh pr create`s `zipx/pin-updates-${'$'}GITHUB_RUN_ID` (labeled `clean`). App secrets skip the **Approve workflows to
+run** banner on that PR; unset secrets keep `github-actions[bot]` and GitHub holds CI. That PR does not rewrite
+`.github/workflows/` (`GITHUB_TOKEN` has no `workflows` permission; do not grant the App that either).
 Alert-only stays `contents: read` and never opens a PR. The `pin-check` capability never applies.
 
 **Required repo/org setting** (only needed for `Update`): [Allow GitHub Actions to create and
 approve pull requests](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository#preventing-github-actions-from-creating-or-approving-pull-requests).
+Do not loosen **Fork pull request workflows** to skip the banner.
 """,
       exampleValue {
         PinCheckWorkflow.render(ActionPins.Defaults, "21", "ubuntu-latest", hasUpdate = true).yaml
@@ -202,6 +205,9 @@ approve pull requests](https://docs.github.com/en/repositories/managing-your-rep
           yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write"),
           yaml.contains("issues: write") || yaml.contains("issues:write"),
           yaml.contains("--label clean"),
+          yaml.contains("Detect GitHub App credentials"),
+          yaml.contains("actions/create-github-app-token@v3"),
+          yaml.indexOf("Detect GitHub App credentials") < yaml.indexOf(ActionPins.Defaults.checkout.unwrap),
           yaml.indexOf(ActionPins.Defaults.checkout.unwrap) < yaml.indexOf("sbt zipxPinCheck"),
         )
       ),

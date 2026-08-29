@@ -69,7 +69,8 @@ object ExampleCheck:
     */
   val companionSteps: Seq[Step] = Seq(publishLocal.build, generateExample.build)
 
-  /** Publish zipx-cli and export `ZIPX_CLI_VERSION` so Sunday `cs launch` can resolve the in-dev version.
+  /** Publish the whole in-dev graph and export `ZIPX_CLI_VERSION` so Sunday `cs launch` can resolve zipx-cli plus
+    * zipx-core / zipx-syntax at the same dynver. `cli/publishLocal` alone is not enough.
     *
     * Do not bake dynver into committed `zipx-ci.env`: that file is a `zipxWorkflowCheck` input, and the next SHA would
     * fail. `GITHUB_ENV` lasts for later steps in this job only.
@@ -79,7 +80,7 @@ object ExampleCheck:
       .run(
         Script.strict(
           SbtCommand
-            .session(SbtCommand.unsafeTask("cli/publishLocal"), SbtCommand.unsafeTask("zipxWriteVersion"))
+            .session(SbtCommand.unsafeTask("publishLocal"), SbtCommand.unsafeTask("zipxWriteVersion"))
             .render,
           Exec("test", Word.lit("-f"), Word.quoted("target/zipx-version.txt")),
           Assign("ZIPX_CLI_VERSION", Word.subst(Exec("cat", Word.quoted("target/zipx-version.txt")))),

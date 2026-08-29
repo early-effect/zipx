@@ -10,9 +10,10 @@ import scala.collection.immutable.ListMap
   *
   * This workflow file is generated once and then left alone. Java and runner come from [[ZipxCiParams]]; java / sbt
   * Action pins live in `zipx-sbt-setup`. Checkout is a major tag (`actions/checkout@v7`) because `uses:` cannot be an
-  * expression and `GITHUB_TOKEN` cannot push workflow SHA edits. [[CompanionPr]] stages everything except repo-root
-  * `.github/workflows`. Nested trees such as `examples/monorepo/.github/workflows/` are committed when
-  * `zipxVersionUpdatesExtraSteps` regenerates them.
+  * expression and `GITHUB_TOKEN` cannot push workflow SHA edits. [[CompanionAuth]] may mint an installation token
+  * before checkout when `ZIPX_APP_ID` / `ZIPX_APP_PRIVATE_KEY` are set; otherwise checkout and `gh` keep
+  * `GITHUB_TOKEN`. [[CompanionPr]] stages everything except repo-root `.github/workflows`. Nested trees such as
+  * `examples/monorepo/.github/workflows/` are committed when `zipxVersionUpdatesExtraSteps` regenerates them.
   */
 object VersionUpdatesWorkflow:
 
@@ -39,7 +40,7 @@ object VersionUpdatesWorkflow:
   ): Workflow =
     val checkoutStep = Step(
       uses = Some(checkout),
-      `with` = ListMap("token" -> "${{ secrets.GITHUB_TOKEN }}", "persist-credentials" -> "true"),
+      `with` = CompanionAuth.checkoutWith,
     )
     val load = Step
       .run(loadParams)
@@ -75,7 +76,10 @@ object VersionUpdatesWorkflow:
           name = Some("Catalog version updates"),
           runsOn = List("ubuntu-latest"),
           env = ListMap("GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}"),
-          steps = List(checkoutStep, load, setup) ++ preSteps ++ List(apply) ++ extraSteps ++ List(openPr),
+          steps =
+            CompanionAuth.steps ++ List(checkoutStep, load, setup) ++ preSteps ++ List(apply) ++ extraSteps ++ List(
+              openPr
+            ),
         )
       ),
     )
@@ -119,6 +123,12 @@ object VersionUpdatesWorkflow:
           Word.lit("launch"),
           Word.lit("--ttl"),
           Word.lit("Inf"),
+          Word.lit("--repository"),
+          Word.lit("m2Local"),
+          Word.lit("--repository"),
+          Word.lit("ivy2Local"),
+          Word.lit("--repository"),
+          Word.lit("central"),
           Word.dquote(Word.lit("rocks.earlyeffect:zipx-cli_3:"), Word.v("ZIPX_CLI_VERSION")),
           Word.lit("--"),
           Word.lit("catalog"),
