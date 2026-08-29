@@ -14,6 +14,8 @@ object AutoPlatformSpec extends ZIOSpecDefault:
           AutoPlatform.ignore(mid("org.scala-lang", "scala-library")),
           AutoPlatform.ignore(mid("org.scala-lang", "scala3-library")),
           AutoPlatform.ignore(mid("org.scala-lang", "scala3-library_sjs1_3")),
+          AutoPlatform.ignore(mid("org.scala-lang", "scala3-compiler")),
+          AutoPlatform.ignore(mid("org.scala-lang", "scala3-compiler_3")),
           AutoPlatform.ignore(mid("org.scala-lang", "scala-reflect")),
           AutoPlatform.ignore(mid("org.scala-lang", "scala-compiler")),
         )

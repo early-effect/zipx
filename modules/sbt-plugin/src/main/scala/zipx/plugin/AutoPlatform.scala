@@ -26,7 +26,8 @@ private[plugin] object AutoPlatform:
     group == ScalaArtifacts.Organization && (
       ScalaArtifacts.Artifacts.exists(id => stem(name, id)) ||
         ScalaArtifacts.isScala3Artifact(name) ||
-        stem(name, ScalaArtifacts.Scala3LibraryID)
+        stem(name, ScalaArtifacts.Scala3LibraryID) ||
+        stem(name, ScalaArtifacts.Scala3CompilerID)
     )
 
   private def scalaJs(group: String, name: String): Boolean =
