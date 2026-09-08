@@ -46,7 +46,8 @@ only to override that derivation.
 
 `extraSteps` is a `Steps` bundle rather than a hand-written lambda: build steps with `Step.run(script)` /
 `Step.uses(pin)`, bodies with the shell AST, and `${'$'}{{ … }}` values with `Expr`. Bundles compose with `++` and gate
-with `.when(...)`, so a pack can publish one and a build can extend it. See **Shell and steps**.
+with `.when(...)`. `withExtraSteps` replaces; `plusExtraSteps` / `dropExtraSteps(name)` layer onto a pack that already
+filled the field. See **Shell and steps**.
 
 Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Layers`, `.*Graph`, `.deploy` /
 `.deployGraph`, `.custom`, `.once`. Packs: `ZipxCentral.*`, `ZipxModver.publish`, `ZipxGitHubPackages.*`,

@@ -235,5 +235,28 @@ default.
         )
       ),
     ),
+    section("zipxDepCleanup")(
+      md"""
+Sunday bumps every selected `Lib`. That is wrong when another selected row already pulled the GAV (saferis docs
+selecting `zio-json` while the theme still pulls `0.10.0`). `zipxDepCleanup` is the doctor: per sbt project, after
+`update`, it prints catalog rows to drop from `library()` and siblings that could use `.fromGraph`. It does not rewrite
+`ZipxVersions.scala`. `zipxWorkflowCheck` does not require a clean report. Opt in to fail with `zipxDepCleanupFail := true`.
+""",
+      exampleValue {
+        val json  = SelectedLib("zioJson", "dev.zio", "zio-json", "1.0.0", "compile")
+        val theme = SelectedLib("specularTheme", "rocks.earlyeffect", "specular-theme", "0.1.0", "test")
+        val edge  = CallerEdge(
+          "dev.zio",
+          "zio-json_3",
+          "0.10.0",
+          "rocks.earlyeffect",
+          "specular-theme_3",
+          "test",
+        )
+        DepCleanup.analyze("docs", List(json, theme), List(edge)).render
+      }.assert(text =>
+        assertTrue(text.contains("zioJson"), text.contains("docs"), text.contains("already on the graph"))
+      ),
+    ),
   )
 end DependencyUpdates

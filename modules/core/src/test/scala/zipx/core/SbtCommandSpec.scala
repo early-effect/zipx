@@ -64,6 +64,12 @@ object SbtCommandSpec extends ZIOSpecDefault:
           SbtCommand.crossModule(api, SbtCommand.unsafeTask("publish")).text == "api/publish",
         )
       },
+      test("alwaysCrossModule prefixes + even when the module is Scala-3-only") {
+        assertTrue(
+          SbtCommand.alwaysCrossModule(api, SbtCommand.unsafeTask("publish")).text == "+api/publish",
+          SbtCommand.alwaysCrossModule(cross, SbtCommand.unsafeTask("publish")).text == "+api/publish",
+        )
+      },
       test("session and andThen join steps with '; '") {
         val joined = SbtCommand.session(SbtCommand.unsafeCommand("cleanFull"), SbtCommand.unsafeTask("test"))
         assertTrue(

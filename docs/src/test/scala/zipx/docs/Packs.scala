@@ -48,6 +48,9 @@ versions, not a registry pack; see **Independent versions**.
 // Aggregate (preferred for libraries / dogfood)
 zipxCapabilities += ZipxCentral.release   // GPG import + publishSigned; sonaRelease
 
+// Append without restating gpg-import (withExtraSteps would replace it)
+zipxCapabilities += ZipxCentral.release.plusExtraSteps(publishCleanFull)
+
 // Graph escape hatch
 zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
 ```

@@ -49,6 +49,7 @@ object MatrixCollapse:
           graph.directDeps(node.id).flatMap(graph.get).filter(capability.participates)
         case Ordering.DependencyOrdered =>
           nearestParticipatingAncestors(node, graph, capability)
+        case Ordering.Independent => Nil
       upstream.nonEmpty
     }
 

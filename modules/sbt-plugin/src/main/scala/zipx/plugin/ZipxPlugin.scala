@@ -336,8 +336,8 @@ object ZipxPlugin extends AutoPlugin:
     type Script = zipx.shell.Script
     val Script = zipx.shell.Script
     type Word = zipx.shell.Word
-    val Word = zipx.shell.Word
-    val Exec = zipx.shell.Exec
+    val Word   = zipx.shell.Word
+    val ShExec = zipx.shell.Exec
     export zipx.shell.sh
 
     type ShTest = zipx.shell.ShTest
@@ -352,8 +352,8 @@ object ZipxPlugin extends AutoPlugin:
     val GlobPattern = zipx.shell.GlobPattern
     val Raw         = zipx.shell.Raw
     val RawLine     = zipx.shell.RawLine
-    // `zipx.shell.Command` and `InlineCommand` stay unexported: `Command` is sbt's own name in a `build.sbt`
-    // (`commands += Command.command(…)`), and shadowing it would break that.
+    // `zipx.shell.Command`, `InlineCommand`, and `Exec` stay unexported: `Command` and `Exec` are sbt's own
+    // names in a `build.sbt` (`commands += Command.command(…)`, `sbt.Exec`). Use `ShExec` for the shell AST.
 
     val zipxTasks = zipx.plugin.CapabilityTasks
     export zipx.plugin.CapabilityTasks.cmd
@@ -422,6 +422,8 @@ object ZipxPlugin extends AutoPlugin:
     val zipxVersionsFile         = settingKey[String](ZipxSettings.versionsFile.description)
 
     val zipxGraph                = taskKey[Unit](ZipxSettings.graph.description)
+    val zipxDepCleanup           = taskKey[DepCleanupReport](ZipxSettings.depCleanup.description)
+    val zipxDepCleanupFail       = settingKey[Boolean](ZipxSettings.depCleanupFail.description)
     val zipxPublishOrder         = taskKey[Unit](ZipxSettings.publishOrder.description)
     val zipxCatalogGenerate      = taskKey[Unit](ZipxSettings.catalogGenerate.description)
     val zipxWorkflowGenerate     = taskKey[Unit](ZipxSettings.workflowGenerate.description)
@@ -441,6 +443,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxModverSuggest        = taskKey[Unit](ZipxSettings.modverSuggest.description)
     val zipxModverPublishModules = inputKey[Unit](ZipxSettings.modverPublishModules.description)
     val zipxModverPublishSigned  = taskKey[Unit](ZipxSettings.modverPublishSigned.description)
+    val zipxModverPublishMoved   = taskKey[Unit](ZipxSettings.modverPublishMoved.description)
 
     object ZipxModver:
       def publish(
@@ -500,6 +503,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxSbt                      := None,
     zipxScala                    := None,
     zipxCheckDeps                := false,
+    zipxDepCleanupFail           := false,
     zipxEmitSelf                 := true,
     zipxPluginVersion            := None,
     zipxSelfPlugins              := Seq.empty,
@@ -576,6 +580,8 @@ object ZipxPlugin extends AutoPlugin:
     zipxModverCheck                      := Def.uncached { modverCheckTask.value },
     zipxModverSuggest                    := Def.uncached { modverSuggestTask.value },
     zipxModverPublishModules             := modverPublishModulesTask.evaluated,
+    zipxModverPublishMoved               := Def.uncached { modverPublishMovedTask.value },
+    zipxModverPublishMoved / aggregate   := false,
     zipxDepUpdate / aggregate            := false,
     zipxActionUpdate / aggregate         := false,
     zipxPinUpdate / aggregate            := false,
@@ -595,6 +601,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxMatrixRoot                      := None,
     zipxModverPublishSigned             := Def.uncached { modverPublishSignedTask.value },
     zipxModverPublishSigned / aggregate := false,
+    zipxDepCleanup                      := Def.uncached { depCleanupTask.value },
   )
 
   /** A module opts into the docker capability by enabling sbt-native-packager's `DockerPlugin`, detected by label so
@@ -1218,6 +1225,50 @@ object ZipxPlugin extends AutoPlugin:
     val newlyAdded = user.filterNot(u => builtins.exists(_.name == u.name))
     overridden ++ newlyAdded
 
+  private def depCleanupTask: Def.Initialize[Task[DepCleanupReport]] = Def.task {
+    val id        = thisProject.value.id
+    val extracted = Project.extract(state.value)
+    val coords    = readBuildSetting(extracted, zipxVersions, Seq.empty)
+    val libs      = ZipxCatalog.libs(coords)
+    val report    = update.value
+    val selected  = libraryDependencies.value.iterator
+      .filterNot(m => isIgnoredDeclared(m) && !m.configurations.exists(_.toLowerCase == "provided"))
+      .flatMap { m =>
+        val art = FromGraph.artifactFamily(m.name)
+        libs.find(l => (l.group: String) == m.organization && (l.artifact: String) == art).map { l =>
+          SelectedLib(
+            valName = l.artifact,
+            group = l.group,
+            artifact = l.artifact,
+            revision = m.revision,
+            config = m.configurations.getOrElse("compile"),
+          )
+        }
+      }
+      .toList
+      .distinct
+    val edges = report.configurations.iterator.flatMap { cfg =>
+      cfg.modules.iterator.flatMap { mod =>
+        val m = mod.module
+        mod.callers.iterator.map { caller =>
+          CallerEdge(
+            organization = m.organization,
+            name = m.name,
+            revision = m.revision,
+            callerOrganization = caller.caller.organization,
+            callerName = caller.caller.name,
+            config = cfg.configuration.name,
+          )
+        }
+      }
+    }.toList
+    val analyzed = DepCleanup.analyze(id, selected, edges)
+    val log      = streams.value.log
+    log.info(analyzed.render)
+    if zipxDepCleanupFail.value && !analyzed.isEmpty then sys.error(s"zipx: zipxDepCleanup found issues in $id")
+    analyzed
+  }
+
   private def graphTask: Def.Initialize[Task[Unit]] = Def.task {
     val graph = buildGraph.value
     val log   = streams.value.log
@@ -1314,6 +1365,7 @@ object ZipxPlugin extends AutoPlugin:
     val scalaV = readBuildSetting(extracted, zipxScala, None)
     if check && coords.isEmpty && pins.isEmpty then
       log.warn("zipx: zipxCheckDeps is true but zipxVersions and zipxPins are empty")
+    ZipxCatalog.invalidFromGraph(coords).foreach(sys.error)
     if check then
       ZipxCatalog.scalaMismatch(declaredScalaVersion(extracted), scalaV).foreach(sys.error)
       val extra = ZipxCatalog.extraLibs(declaredGavs(extracted), coords)
@@ -1425,8 +1477,11 @@ object ZipxPlugin extends AutoPlugin:
             "zipx: zipxEmitSelf is true but the sbt-zipx version is unknown. Set zipxPluginVersion, or zipxEmitSelf := false when dogfooding from source."
           )
 
+  /** Root-project `scalaVersion`, then ThisBuild / Global via delegation. Preferring ThisBuild misses
+    * `MyVersions.settings`'s bare `scalaVersion :=` (sbt 2 common setting) and reads the metabuild default instead.
+    */
   private def declaredScalaVersion(extracted: Extracted): String =
-    extracted.getOpt(ThisBuild / scalaVersion).orElse(extracted.getOpt(LocalRootProject / scalaVersion)).getOrElse("")
+    readBuildSetting(extracted, scalaVersion, "")
 
   private def declaredGavs(extracted: Extracted): List[DeclaredGav] =
     extracted.structure.allProjectRefs.toList
@@ -1796,6 +1851,29 @@ object ZipxPlugin extends AutoPlugin:
     IO.write(root / ModverPublishFile.RelPath, ModverPublishFile.render(report) + "\n")
     IO.write(root / ModverPublishFile.ModulesRelPath, ModverPublishFile.modulesJson(report) + "\n")
     log.info(s"zipx: wrote ${ModverPublishFile.ModulesRelPath} (${report.missing.size} modules)")
+  }
+
+  private def modverPublishMovedTask: Def.Initialize[Task[Unit]] = Def.task {
+    val root = (LocalRootProject / baseDirectory).value
+    val file = root / ModverPublishFile.ModulesRelPath
+    if !file.exists then
+      sys.error(s"zipx: missing ${ModverPublishFile.ModulesRelPath}. Run zipxModverPublishModules first.")
+    val moved = orFail(ModverPublishMoved.parse(IO.read(file)))
+    val graph = buildGraph.value
+    val order =
+      graph.topologicalSort.filter(id => graph.get(id).exists(_.publishes)).map(id => id: String)
+    val ids = ModverPublishMoved.select(moved, order)
+    val log = streams.value.log
+    if ids.isEmpty then log.info("zipx: zipxModverPublishMoved: nothing to publish")
+    else
+      var st = state.value
+      ids.foreach { id =>
+        log.info(s"zipx: zipxModverPublishMoved: $id")
+        val extracted = Project.extract(st)
+        val (next, _) = extracted.runTask(LocalProject(id) / zipxModverPublishSigned, st)
+        st = next
+      }
+    ()
   }
 
   private def modverPublishSignedTask: Def.Initialize[Task[Unit]] = Def.taskDyn {

@@ -1,0 +1,5 @@
+> shexecProof
+> zipxWorkflowGenerate
+$ exists .github/workflows/ci.yml
+> assertNoopStep
+> zipxWorkflowCheck

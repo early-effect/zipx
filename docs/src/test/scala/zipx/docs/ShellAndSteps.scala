@@ -33,7 +33,8 @@ flowchart TD
 
 `zipx-shell` has no zipx or GitHub concepts in it at all and is publishable on its own; `Expr` knows Actions but not
 sbt. The jar you already depend on via `addSbtPlugin` carries both, and the plugin's `autoImport` re-exports them, so a
-`build.sbt` needs no `import`.
+`build.sbt` needs no `import`. Write `ShExec` there: autoImport cannot export `Exec`, because that is `sbt.Exec`. The
+shell AST type is still [[zipx.shell.Exec]].
 
 **Nothing here throws.** A failure is removed in the strongest form available: unrepresentable where a type can say it
 (a `Block` cannot be empty, a compound command cannot sit in a pipeline leg), otherwise checked at *compile* time for a
@@ -48,8 +49,8 @@ script should start with:
 Step
   .run(
     Script.strict(
-      Exec("mkdir", Word.lit("-p"), Word.lit("~/.gnupg")),
-      Exec("echo", Word.vq("PGP_SECRET")) | Exec("base64", Word.lit("--decode")) | Exec("gpg", Word.lit("--import")),
+      ShExec("mkdir", Word.lit("-p"), Word.lit("~/.gnupg")),
+      ShExec("echo", Word.vq("PGP_SECRET")) | ShExec("base64", Word.lit("--decode")) | ShExec("gpg", Word.lit("--import")),
     )
   )
   .named("Import signing key")
@@ -131,7 +132,7 @@ For the one-liner case, `sh"…"` concatenates literal text with typed splices:
 
 ```scala
 val dir = Word.vq("BROWSERS_DIR")
-Step.run(Script(Exec("npm", sh"--prefix=$$dir", Word.lit("ci")))).named("Install browsers").build
+Step.run(Script(ShExec("npm", sh"--prefix=$$dir", Word.lit("ci")))).named("Install browsers").build
 ```
 
 The signature is `sh(args: Word*)`, so a bare `String` splice **does not compile**, and there is deliberately no
@@ -252,7 +253,7 @@ would reject a value a codec is still filling in.
 
 ```scala
 val playwright = Steps.built("playwright")(
-  Step.run(Script(Exec("npx", Word.lit("playwright"), Word.lit("install")))).named("Install browsers")
+  Step.run(Script(ShExec("npx", Word.lit("playwright"), Word.lit("install")))).named("Install browsers")
 )
 ```
 
@@ -301,17 +302,18 @@ an ordinary published Scala value, versioned and resolved like any other depende
 object OrgSteps:
   val aptMirror: Steps = Steps.built("apt-mirror")(
     Step
-      .run(Script.strict(Exec("sudo", Word.lit("sed"), Word.lit("-i"), Word.squote("s|archive.ubuntu.com|mirror.corp|g"),
+      .run(Script.strict(ShExec("sudo", Word.lit("sed"), Word.lit("-i"), Word.squote("s|archive.ubuntu.com|mirror.corp|g"),
         Word.lit("/etc/apt/sources.list"))))
       .named("Point apt at the internal mirror")
   )
   val playwright: Steps = Steps.built("playwright")(
-    Step.run(Script(Exec("npx", Word.lit("playwright"), Word.lit("install")))).named("Install browsers")
+    Step.run(Script(ShExec("npx", Word.lit("playwright"), Word.lit("install")))).named("Install browsers")
   )
 
 // in a consumer build.sbt
 zipxCacheRehydrateExtraSteps := OrgSteps.aptMirror ++ OrgSteps.playwright
-zipxCapabilities += Capability.test.copy(extraSteps = OrgSteps.aptMirror)
+zipxCapabilities += Capability.test.withExtraSteps(OrgSteps.aptMirror)
+zipxCapabilities += ZipxCentral.release.plusExtraSteps(OrgSteps.playwright)
 ```
 
 A YAML resource file would have *relocated* the string splicing rather than removed it, and the composition operators

@@ -319,6 +319,14 @@ object ZipxSettings:
       ),
     )
 
+  val modverPublishMoved: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxModverPublishMoved"),
+      SettingPurpose(
+        "Publish every id in target/zipx-modver-modules.json, in zipxPublishOrder, in this sbt session. Missing JSON fails closed."
+      ),
+    )
+
   val sbtVersionCoord: SettingDef[Option[SbtVersion]] =
     SettingDef.setting(
       SettingName("zipxSbt"),
@@ -331,7 +339,7 @@ object ZipxSettings:
     SettingDef.setting(
       SettingName("zipxScala"),
       None,
-      SettingPurpose("When set with zipxCheckDeps, ThisBuild / scalaVersion must match."),
+      SettingPurpose("When set with zipxCheckDeps, scalaVersion must match."),
       Build,
     )
 
@@ -565,6 +573,22 @@ object ZipxSettings:
 
   // ---- Tasks / inputs ----
 
+  val depCleanup: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxDepCleanup"),
+      SettingPurpose(
+        "Doctor: selected catalog Libs that the Maven graph already pulls. Prints val names. Does not rewrite ZipxVersions."
+      ),
+    )
+
+  val depCleanupFail: SettingDef[Boolean] =
+    SettingDef.setting(
+      SettingName("zipxDepCleanupFail"),
+      false,
+      SettingPurpose("When true, zipxDepCleanup fails if the report is non-empty. Default false (doctor, not a gate)."),
+      Build,
+    )
+
   val graph: SettingDef[Unit] =
     SettingDef.task(SettingName("zipxGraph"), SettingPurpose("Print the resolved module graph and topological layers."))
 
@@ -691,6 +715,7 @@ object ZipxSettings:
     sbtVersionCoord,
     scalaVersionCoord,
     checkDeps,
+    depCleanupFail,
     emitSelf,
     pluginVersion,
     selfPlugins,
@@ -731,6 +756,7 @@ object ZipxSettings:
     workflowCheck,
     advisoryCheck,
     graph,
+    depCleanup,
     publishOrder,
     affectedModules,
     pinCheck,
@@ -746,6 +772,7 @@ object ZipxSettings:
     modverSuggest,
     modverPublishModules,
     modverPublishSigned,
+    modverPublishMoved,
   )
 
   /** Every public catalog entry, in docs-friendly order. */

@@ -75,6 +75,31 @@ object StepsSpec extends ZIOSpecDefault:
           Steps.all()(ctx).isEmpty,
         )
       },
+      test("leaves of an atomic bundle is itself; ++ records each leaf") {
+        val both = first ++ second
+        assertTrue(
+          first.leaves == List(first),
+          both.leaves.map(_.name) == List("first", "second"),
+          both.name == "first+second",
+        )
+      },
+      test("without drops a leaf by its own name, not the composed a+b string") {
+        val both = first ++ second
+        assertTrue(
+          both.without("first")(ctx) == List(named("two")),
+          both.without("first").name == "second",
+          both.without("second")(ctx) == List(named("one")),
+          both.without("first+second")(ctx) == both(ctx),
+          both.without("missing")(ctx) == both(ctx),
+          first.without("first")(ctx).isEmpty,
+        )
+      },
+      test("without on download-staging+gpg-import keeps download-staging") {
+        val download = Steps.of("download-staging")(named("download"))
+        val gpg      = Steps.of("gpg-import")(named("gpg"))
+        val kept     = (download ++ gpg).without("gpg-import")
+        assertTrue(kept.name == "download-staging", kept(ctx) == List(named("download")))
+      },
       test("++ accepts a bare lambda, so a half-migrated build still composes") {
         val legacy: StepContext => List[Step] = _ => List(named("legacy"))
         val mixed                             = first ++ legacy

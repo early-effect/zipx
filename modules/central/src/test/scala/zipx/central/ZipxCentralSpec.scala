@@ -38,6 +38,32 @@ object ZipxCentralSpec extends ZIOSpecDefault:
     }
 
   def spec = suite("ZipxCentral")(
+    test("plusExtraSteps keeps gpg-import and appends the new bundle in order") {
+      val clean = Steps.of("clean-full")(zipx.workflow.Step(name = Some("cleanFull"), run = Some("echo cleanFull")))
+      val cap   = ZipxCentral.release.plusExtraSteps(clean)
+      val names = cap.extraSteps(stepContext).flatMap(_.name)
+      val wf    = Planner.plan(sampleGraph, List(cap), config)
+      val job   = wf.jobs("publish")
+      val shown = job.steps.flatMap(_.name)
+      assertTrue(
+        names == List("Import signing key", "cleanFull"),
+        shown.indexOf("Import signing key") >= 0,
+        shown.indexOf("cleanFull") > shown.indexOf("Import signing key"),
+      )
+    },
+    test("dropExtraSteps(gpg-import) on releaseOnce keeps download-staging") {
+      val dropped = ZipxCentral.releaseOnce.dropExtraSteps("gpg-import")
+      val names   = dropped.extraSteps(stepContext).flatMap(_.name)
+      assertTrue(
+        names == List("Download sona staging"),
+        !names.exists(_.contains("Import signing key")),
+      )
+    },
+    test("withExtraSteps still replaces the pack extras") {
+      val clean = Steps.of("clean-full")(zipx.workflow.Step(name = Some("cleanFull"), run = Some("echo cleanFull")))
+      val names = ZipxCentral.release.withExtraSteps(clean).extraSteps(stepContext).flatMap(_.name)
+      assertTrue(names == List("cleanFull"))
+    },
     test("the typed gpg import script renders the exact bytes the hand-written one did") {
       val importRun = ZipxCentral.gpgImportSteps(stepContext).head.run.getOrElse("")
       assertTrue(

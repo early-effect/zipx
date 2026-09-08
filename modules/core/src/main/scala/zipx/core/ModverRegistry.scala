@@ -46,5 +46,5 @@ object ZipxModver:
     Capability.publishGraph
       .copy(gate = Gate.OnDefaultPush)
       .withMatrixCollapse(MatrixCollapse.Off)
-      .runningEachCross(command)
+      .runningPerModule(n => SbtCommand.alwaysCrossModule(n, command))
 end ZipxModver

@@ -364,6 +364,19 @@ refusal. Graph `if:` is `contains(fromJson(needs.modver.outputs.modules), '<id>'
 skipped `publish-coreLib` does not skip `publish-client`. `workflow_dispatch` runs `modver` in registry-only mode
 (every catalog GAV not on the registry). `gh run rerun` of the merge SHA is the other recovery path. See **Packs** and
 **Job conditions**.
+
+Default Graph waits on upstream publish jobs (`Ordering.DependencyOrdered`). That is the right default when a dependent
+must resolve the upstream POM from the registry (Central staging). GH Packages `publish` compiles `dependsOn` from the
+checkout, so the wait only serializes uploads. Combinators, not `.copy`:
+
+| Combinator | Jobs | When |
+|---|---|---|
+| `ZipxModver.publish()` | N Graph, `needs` upstream | Central / registry completeness |
+| `.withoutUpstreamJobs` | N Graph, `needs: [modver]` only | parallel GH Packages uploads, per-Ship checks |
+| `.withoutUpstreamJobs.withMatrixCollapse(Auto)` | 1 matrix job, step `if` on `matrix.module` | same, one check. Job `if` never uses `matrix.*` (GitHub rejects it). No `'all'`. |
+| `.inOneSession` | 1 Once job, `zipxModverPublishMoved` | one sbt JVM over the moved set |
+
+Do not bake Auto into `withoutUpstreamJobs`. Collapse is `withMatrixCollapse`. Job-level `if:` cannot mention `matrix`.
 """,
       exampleValue {
         DocsRender.jobs("modver", "publish-client", "modver-check")(
@@ -382,6 +395,29 @@ skipped `publish-coreLib` does not skip `publish-client`. `workflow_dispatch` ru
           yaml.contains("zipxModverCheck"),
           yaml.contains("pull_request"),
           yaml.contains("workflow_dispatch"),
+        )
+      ),
+      exampleValue {
+        val yaml = DocsRender.jobs("publish")(
+          ZipxModver.publish(publishCmd).withoutUpstreamJobs.withMatrixCollapse(MatrixCollapse.Auto)
+        )(using graph, independent)
+        s"$yaml"
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("publish:"),
+          !yaml.contains("publish-client:"),
+          yaml.contains("matrix.module"),
+          yaml.contains("zipxModverPublishSigned"),
+          !yaml.contains("'all'"),
+        )
+      ),
+      exampleValue {
+        DocsRender.job("publish")(ZipxModver.publish(publishCmd).inOneSession)(using graph, independent)
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("zipxModverPublishMoved"),
+          yaml.contains("needs.modver.outputs.modules"),
+          !yaml.contains("'all'"),
         )
       ),
       exampleValue {
