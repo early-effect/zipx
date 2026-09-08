@@ -2,8 +2,11 @@ package zipx.docs
 
 import specular.*
 import specular.ziotest.DocSpecSuite
+import zipx.central.ZipxCentral
 import zipx.core.*
 import zipx.core.EnvValue.secret
+import zipx.shell.{Exec, Script}
+import zipx.workflow.Step
 import zio.test.*
 
 /** Built-in capabilities and how they compose. */
@@ -90,6 +93,44 @@ zipxCapabilities += Capability.publish.copy(
         assertTrue(
           yaml.contains("PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}"),
           yaml.contains("SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}"),
+        )
+      ),
+    ),
+    section("Replace vs plus vs drop")(
+      md"""
+`withEnv` / `withExtraSteps` / `withPostSteps` **replace** the field. Packs already fill extras (`ZipxCentral.release`
+ships GPG import). To add a step without restating the pack bundle, use the layer combinators, the same split as
+`plusEnv` / `andCondition` / `thenOnce`:
+
+| Replace | Layer |
+|---|---|
+| `withEnv` | `plusEnv` |
+| `withExtraSteps` / `withPostSteps` | `plusExtraSteps` / `plusPostSteps` |
+| | `dropExtraSteps(name)` / `dropPostSteps(name)` (leaf [[Steps]] name, not the composed `a+b` string) |
+
+```scala
+zipxCapabilities += ZipxCentral.release.plusExtraSteps(publishCleanFull)
+
+zipxCapabilities += ZipxCentral.release
+  .dropExtraSteps("gpg-import")
+  .plusExtraSteps(customGpg ++ publishCleanFull)
+```
+""",
+      exampleValue {
+        val clean = Steps.of("clean-full")(
+          Step.run(Script(Exec("true"))).named("cleanFull").build
+        )
+        val yaml  = DocsRender.job("publish")(ZipxCentral.release.plusExtraSteps(clean))
+        val names =
+          ZipxCentral.release.plusExtraSteps(clean).extraSteps match
+            case s: Steps => s.leaves.map(_.name).mkString(",")
+            case _        => ""
+        s"leaves: $names\n---\n$yaml"
+      }.assert(text =>
+        assertTrue(
+          text.contains("leaves: gpg-import,clean-full"),
+          text.contains("Import signing key"),
+          text.contains("cleanFull"),
         )
       ),
     ),

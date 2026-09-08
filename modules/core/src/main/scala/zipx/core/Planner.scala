@@ -172,7 +172,7 @@ object Planner:
       capabilities.filter(_.name == Capability.PublishName).foreach { c =>
         if c.scope == CapabilityScope.Aggregate || c.scope == CapabilityScope.Layer then
           sys.error(
-            s"zipx: Ship rows require Graph publish (version-moved). Capability 'publish' is ${c.scope}. Use ZipxModver.publish (or Capability.publishGraph.copy(gate = Gate.OnDefaultPush))."
+            s"zipx: Ship rows require Graph publish (version-moved). Capability 'publish' is ${c.scope}. Use ZipxModver.publish, ZipxModver.publish(...).inOneSession, or Capability.publishGraph.copy(gate = Gate.OnDefaultPush)."
           )
         if c.gate == Gate.OnReleaseTag then
           sys.error(
@@ -415,7 +415,8 @@ object Planner:
 
     val usesModver =
       config.modverPublish && capabilities.exists(c =>
-        c.name == Capability.PublishName && c.scope == CapabilityScope.Graph
+        c.name == Capability.PublishName &&
+          (c.scope == CapabilityScope.Graph || c.scope == CapabilityScope.Once)
       )
     val modverGatedNames: Set[CapabilityName] =
       if usesModver then Set(Capability.PublishName) else Set.empty
@@ -842,9 +843,14 @@ object Planner:
   ): (JobId, Job) =
     val releaseCond   = gateCondition(capability, config)
     val crossNeeds    = crossCapabilityNeeds(capability, graph, byName, config)
-    val tolerance     = tolerateSkips(capability, crossNeeds, affectedGatedNames)
+    val gatedOnModver = config.modverPublish && capability.name == Capability.PublishName
+    val rawNeeds      =
+      (crossNeeds ++ (if gatedOnModver then List(modverJobId) else Nil)).distinct.sorted
+    val tolerance  = tolerateSkips(capability, rawNeeds.filterNot(_ == modverJobId), affectedGatedNames)
+    val withModver =
+      andConditions(andConditions(tolerance, releaseCond), Option.when(gatedOnModver)(modverModulesNonEmpty.unwrapped))
     val (needs, base) =
-      applyVerifyGate(crossNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
+      applyVerifyGate(rawNeeds, withModver, capability.phase, usesVerifyGate)
     val cond = andConditions(base, JobCondition.renderOpt(capability.condition))
     capability.workflowCall match
       case Some(call) =>
@@ -1273,11 +1279,14 @@ object Planner:
         yield id
 
       val gatedOnAffected = usesAffected && affectedGated(capability, config)
+      val gatedOnModver   = config.modverPublish && capability.name == Capability.PublishName
       val rawNeeds        =
-        (crossNeeds ++ (if gatedOnAffected then List(affectedJobId) else Nil)).distinct.sorted
+        (crossNeeds ++
+          (if gatedOnAffected then List(affectedJobId) else Nil) ++
+          (if gatedOnModver then List(modverJobId) else Nil)).distinct.sorted
       val cache        = cacheForCommand(config, commandOverride.isDefined)
-      val guardedNeeds = rawNeeds.filterNot(id => id == affectedJobId || id == verifyGateJobId)
-      val skipTolerant = dependsOnSkippable(capability, affectedGatedNames)
+      val guardedNeeds = rawNeeds.filterNot(id => id == affectedJobId || id == verifyGateJobId || id == modverJobId)
+      val skipTolerant = gatedOnAffected || gatedOnModver || dependsOnSkippable(capability, affectedGatedNames)
       val releaseGate  = gateCondition(capability, config)
       // Job-level `if` cannot use `matrix.*` (GitHub rejects the workflow). Skip the whole job when
       // affected found nothing; per-leg membership is enforced on each step below.
@@ -1287,9 +1296,15 @@ object Planner:
         Option.when(gatedOnAffected)(
           Expr.group(affectedContainsMatrixModule || affectedContainsAll).unwrapped
         )
+      val modverGate =
+        Option.when(gatedOnModver)(modverModulesNonEmpty.unwrapped)
+      val stepModverGate =
+        Option.when(gatedOnModver)(modverContainsMatrixModule.unwrapped)
       val tolerance =
-        if gatedOnAffected || skipTolerant then skipTolerantClauses(guardedNeeds) else Nil
-      val clauses        = tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ tolerance.drop(1)
+        if gatedOnAffected || gatedOnModver || skipTolerant then skipTolerantClauses(guardedNeeds) else Nil
+      val clauses =
+        tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ modverGate.toList ++
+          tolerance.drop(1)
       val baseCond       = if clauses.isEmpty then None else Some(clauses.mkString(" && "))
       val (needs, gated) =
         applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
@@ -1322,7 +1337,7 @@ object Planner:
         jobSuffix = capability.name.asJobId,
         destinations = shared,
         matrixAxes = axes,
-      ).map(andStepIf(_, stepAffectedGate))
+      ).map(andStepIf(_, stepAffectedGate)).map(andStepIf(_, stepModverGate))
 
       List(
         capability.name.asJobId -> Job(
@@ -1363,6 +1378,7 @@ object Planner:
         nearestParticipatingAncestors(node, graph, capability).flatMap { ancId =>
           graph.get(ancId).toList.flatMap(jobIdsForGraph(capability, _))
         }
+      case Ordering.Independent => Nil
 
     val crossNeeds =
       for
@@ -1606,6 +1622,17 @@ object Planner:
     */
   private val affectedModulesNonEmpty: Expr =
     Expr.JobOutput(affectedJobId, OutputName("modules")) !== Expr.lit("'[]'")
+
+  /** Job-level skip when modver found no version-moved modules. No `'all'` (fail-closed, unlike affected). */
+  private val modverModulesNonEmpty: Expr =
+    Expr.JobOutput(modverJobId, OutputName("modules")) !== Expr.lit("'[]'")
+
+  /** Per-leg modver membership for a Graph matrix-collapsed publish job. Step `if`, not job `if`. */
+  private val modverContainsMatrixModule: Expr =
+    Expr.contains(
+      Expr.fromJson(Expr.JobOutput(modverJobId, OutputName("modules"))),
+      Expr.matrix("module"),
+    )
 
   /** Per-leg affected membership for a Graph matrix-collapsed job. Must live on **step** `if`, not job `if`: GitHub
     * forbids `matrix` in `jobs.<job_id>.if` (workflow fails validation with 0 jobs).

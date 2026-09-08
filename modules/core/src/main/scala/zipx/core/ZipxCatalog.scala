@@ -26,8 +26,19 @@ object ZipxCatalog:
     * `ScalaArtifacts`.
     */
   def extraLibs(declared: Seq[DeclaredGav], catalog: Seq[ZipxCoord]): List[DeclaredGav] =
-    val allowed = libs(catalog).map(l => (l.group: String, l.artifact: String, l.version: String)).toSet
-    declared.filterNot(d => allowed.contains((d.group, d.artifact, d.revision))).toList
+    val rows    = libs(catalog)
+    val exact   = rows.filterNot(_.isAligned).map(l => (l.group: String, l.artifact: String, l.version: String)).toSet
+    val aligned = rows.filter(_.isAligned).map(l => (l.group: String, l.artifact: String)).toSet
+    declared.filterNot { d =>
+      exact.contains((d.group, d.artifact, d.revision)) || aligned.contains((d.group, d.artifact))
+    }.toList
+
+  /** `fromGraph` without `.mod` names no sibling. Marker revisions never leak into extraLibs. */
+  def invalidFromGraph(catalog: Seq[ZipxCoord]): Option[String] =
+    libs(catalog).collectFirst {
+      case l if l.isAligned && l.family.isEmpty =>
+        s"zipx: Lib '${l.artifact}'.fromGraph is only valid on a .mod copy"
+    }
 
   def scalaMismatch(declared: String, expected: Option[ScalaVersion]): Option[String] =
     expected.filter(exp => (exp: String) != declared).map { exp =>
@@ -90,23 +101,28 @@ object ZipxCatalog:
       classify: VersionStrategy = VersionStrategy.npm,
       preRelease: PreRelease = PreRelease.Skip,
   ): Either[String, List[DepBump]] =
-    coords.foldLeft[Either[String, List[DepBump]]](Right(Nil)) { (accE, coord) =>
-      accE.flatMap { acc =>
-        lookup(coord).map { latest =>
-          latest
-            .flatMap { candidate =>
-              val kind = classify.classify(coord.version, candidate)
-              Option.when(kind != BumpKind.None && preRelease.allows(kind)) {
-                val to =
-                  if kind == BumpKind.PreRelease then candidate
-                  else classify.latestStable(List(candidate)).getOrElse(candidate)
-                DepBump(coord, kind, to)
+    coords
+      .filter {
+        case l: Lib if l.isAligned => false
+        case _                     => true
+      }
+      .foldLeft[Either[String, List[DepBump]]](Right(Nil)) { (accE, coord) =>
+        accE.flatMap { acc =>
+          lookup(coord).map { latest =>
+            latest
+              .flatMap { candidate =>
+                val kind = classify.classify(coord.version, candidate)
+                Option.when(kind != BumpKind.None && preRelease.allows(kind)) {
+                  val to =
+                    if kind == BumpKind.PreRelease then candidate
+                    else classify.latestStable(List(candidate)).getOrElse(candidate)
+                  DepBump(coord, kind, to)
+                }
               }
-            }
-            .fold(acc)(acc :+ _)
+              .fold(acc)(acc :+ _)
+          }
         }
       }
-    }
 
   def formatBumps(bumps: List[DepBump]): String =
     if bumps.isEmpty then "no outdated catalog versions"

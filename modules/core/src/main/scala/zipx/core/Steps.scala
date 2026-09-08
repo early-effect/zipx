@@ -31,29 +31,55 @@ final case class Steps(
     name: String,
     build: StepContext => List[Step],
     rawFragments: List[String] = Nil,
+    /** Leaf bundles in `++` order. Empty means this value is the leaf. `dropExtraSteps` matches these names, not the
+      * composed `a+b` string.
+      */
+    parts: List[Steps] = Nil,
 ) extends (StepContext => List[Step]):
 
   def apply(ctx: StepContext): List[Step] = build(ctx)
 
+  def leaves: List[Steps] = if parts.isEmpty then List(this) else parts
+
   infix def ++(other: Steps): Steps =
-    Steps(s"$name+${other.name}", ctx => build(ctx) ++ other(ctx), rawFragments ++ other.rawFragments)
+    if isVacuous then other
+    else if other.isVacuous then this
+    else
+      Steps(
+        s"$name+${other.name}",
+        ctx => build(ctx) ++ other(ctx),
+        rawFragments ++ other.rawFragments,
+        leaves ++ other.leaves,
+      )
 
   /** Appends an unnamed lambda, keeping this bundle's name. The lambda contributes no `rawFragments`, since it has
     * nowhere to carry them, which is the practical reason to prefer a named [[Steps]] on both sides.
     */
   infix def ++(other: StepContext => List[Step]): Steps =
-    Steps(name, ctx => build(ctx) ++ other(ctx), rawFragments)
+    copy(build = ctx => build(ctx) ++ other(ctx))
+
+  /** Drops leaves whose [[name]] equals `dropName`. Unknown names are a no-op. Empty result is [[Steps.empty]]. */
+  def without(dropName: String): Steps =
+    leaves.filterNot(_.name == dropName) match
+      case Nil           => Steps.empty
+      case single :: Nil => single
+      case many          => many.reduce(_ ++ _)
+
+  private def isVacuous: Boolean = this eq Steps.empty
 
   /** ANDs `condition` into every step's `if:`, preserving any condition a step already has. GitHub has no bundle-level
     * `if:`, so gating is per-step by necessity; doing it here means the caller writes the condition once.
     */
   def when(condition: JobCondition): Steps =
-    copy(build = ctx => build(ctx).map(Steps.gate(_, condition)))
+    val gated = copy(build = ctx => build(ctx).map(Steps.gate(_, condition)))
+    if parts.isEmpty then gated else gated.copy(parts = parts.map(_.when(condition)))
 
   def named(newName: String): Steps = copy(name = newName)
 
   /** The hook for a cross-cutting tweak: a shared `env:` entry, a `working-directory`. */
-  def mapSteps(f: Step => Step): Steps = copy(build = ctx => build(ctx).map(f))
+  def mapSteps(f: Step => Step): Steps =
+    val mapped = copy(build = ctx => build(ctx).map(f))
+    if parts.isEmpty then mapped else mapped.copy(parts = parts.map(_.mapSteps(f)))
 
   /** Declares escape-hatch text for a hand-built step the builders did not produce, so it still reaches the warning. */
   def withRawFragments(fragments: List[String]): Steps = copy(rawFragments = rawFragments ++ fragments)

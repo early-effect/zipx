@@ -52,6 +52,23 @@ object ModverPublishSpec extends ZIOSpecDefault:
         iff.contains("workflow_dispatch"),
       )
     },
+    test("withoutUpstreamJobs needs modver only, not publish-coreLib") {
+      val wf = Planner.plan(graph, List(cap.withoutUpstreamJobs), independent)
+      assertTrue(
+        wf.jobs("publish-client").needs == List("modver"),
+        wf.jobs("publish-coreLib").needs == List("modver"),
+        wf.jobs.contains("modver"),
+        Planner.allJobIds(cap.withoutUpstreamJobs, graph, independent).map(id => id: String).sorted ==
+          wf.jobs.keys.filter(_.startsWith("publish-")).toList.sorted,
+      )
+    },
+    test("default ZipxModver still needs the upstream publish job") {
+      val wf = Planner.plan(graph, List(cap), independent)
+      assertTrue(
+        wf.jobs("publish-client").needs.contains("publish-coreLib"),
+        wf.jobs("publish-client").needs.contains("modver"),
+      )
+    },
     test("only client in JSON still lets publish-client run when coreLib skipped") {
       val wf  = Planner.plan(graph, List(cap), independent)
       val iff = wf.jobs("publish-client").`if`.getOrElse("")
@@ -84,6 +101,66 @@ object ModverPublishSpec extends ZIOSpecDefault:
         run.contains("exit 1"),
       )
     },
+    test("withoutUpstreamJobs plus Auto collapses a mixed + / non-cross graph") {
+      val mixed = GraphFixture(
+        List(
+          ModuleNode(ModuleId("models"), publishes = true, crossScalaVersions = List("3.3.6")),
+          ModuleNode(
+            ModuleId("client"),
+            dependsOn = List("models"),
+            publishes = true,
+            crossScalaVersions = List("3.3.6", "2.13.16"),
+          ),
+        )
+      )
+      val collapsed = cap.withoutUpstreamJobs.withMatrixCollapse(MatrixCollapse.Auto)
+      val wf        = Planner.plan(mixed, List(collapsed), independent)
+      val job       = wf.jobs("publish")
+      val iff       = job.`if`.getOrElse("")
+      val stepIfs   = job.steps.flatMap(_.`if`)
+      val run       = job.steps.flatMap(_.run).mkString
+      assertTrue(
+        wf.jobs.contains("publish"),
+        !wf.jobs.contains("publish-client"),
+        !wf.jobs.contains("publish-models"),
+        job.needs.contains("modver"),
+        iff.contains("needs.modver.outputs.modules"),
+        iff.contains("'[]'"),
+        !iff.contains("matrix"),
+        !iff.contains("'all'"),
+        stepIfs.exists(c => c.contains("matrix.module") && c.contains("needs.modver") && !c.contains("'all'")),
+        run.contains("+${{ matrix.module }}/zipxModverPublishSigned"),
+        Planner.allJobIds(collapsed, mixed, independent).map(id => id: String) == List("publish"),
+      )
+    },
+    test("Auto still expands default DependencyOrdered ZipxModver") {
+      val wf = Planner.plan(graph, List(cap.withMatrixCollapse(MatrixCollapse.Auto)), independent)
+      assertTrue(
+        wf.jobs.contains("publish-client"),
+        wf.jobs.contains("publish-coreLib"),
+        wf.jobs("publish-client").needs.contains("publish-coreLib"),
+      )
+    },
+    test("Strict Independent collapses; Strict DependencyOrdered refuses same-cap needs") {
+      val mixed = GraphFixture(
+        List(
+          ModuleNode(ModuleId("models"), publishes = true),
+          ModuleNode(ModuleId("client"), dependsOn = List("models"), publishes = true),
+        )
+      )
+      val ok = scala.util.Try(
+        Planner.plan(mixed, List(cap.withoutUpstreamJobs.withMatrixCollapse(MatrixCollapse.Strict)), independent)
+      )
+      val bad = scala.util.Try(
+        Planner.plan(graph, List(cap.withMatrixCollapse(MatrixCollapse.Strict)), independent)
+      )
+      assertTrue(
+        ok.isSuccess,
+        ok.get.jobs.contains("publish"),
+        bad.isFailure,
+        bad.failed.get.getMessage.contains("same-capability"),
+      )
+    },
     test("allJobIds matches emitted Graph publish keys") {
       val ids = Planner.allJobIds(cap, graph, independent).map(id => id: String).sorted
       val wf  = Planner.plan(graph, List(cap), independent)
@@ -100,6 +177,38 @@ object ModverPublishSpec extends ZIOSpecDefault:
     test("workflow_dispatch is on when modverPublish is on") {
       val wf = Planner.plan(graph, List(cap), independent)
       assertTrue(wf.on.workflowDispatch)
+    },
+    test("inOneSession is one publish job that needs modver and skips on empty JSON") {
+      val once = cap.inOneSession
+      val wf   = Planner.plan(graph, List(once), independent)
+      val job  = wf.jobs("publish")
+      val iff  = job.`if`.getOrElse("")
+      val run  = job.steps.flatMap(_.run).mkString
+      assertTrue(
+        !wf.jobs.contains("publish-client"),
+        job.needs.contains("modver"),
+        iff.contains("needs.modver.outputs.modules"),
+        iff.contains("'[]'"),
+        !iff.contains("'all'"),
+        !iff.contains("matrix"),
+        run.contains("zipxModverPublishMoved"),
+        Planner.allJobIds(once, graph, independent).map(id => id: String) == List("publish"),
+      )
+    },
+    test("inOneSession wins over withoutUpstreamJobs for job count") {
+      val wf = Planner.plan(graph, List(cap.withoutUpstreamJobs.inOneSession), independent)
+      assertTrue(wf.jobs.contains("publish"), !wf.jobs.contains("publish-client"))
+    },
+    test("ModverPublishMoved.select keeps publish order and drops ids not in the JSON") {
+      val selected = ModverPublishMoved.select(List("client", "models"), List("models", "coreLib", "client"))
+      assertTrue(selected == List("models", "client"), ModverPublishMoved.select(Nil, List("models")).isEmpty)
+    },
+    test("ModverPublishMoved.parse reads the compact id array") {
+      assertTrue(
+        ModverPublishMoved.parse("""["models","client"]""") == Right(List("models", "client")),
+        ModverPublishMoved.parse("[]") == Right(Nil),
+        ModverPublishMoved.parse("{").swap.exists(_.contains("zipx:")),
+      )
     },
     test("Aggregate library publish is refused when ships are present") {
       val err = scala.util.Try(Planner.plan(graph, List(Capability.publish), independent)).failed.get

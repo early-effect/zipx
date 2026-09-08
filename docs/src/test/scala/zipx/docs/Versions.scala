@@ -69,6 +69,7 @@ it is not a row. That is why groups are `def libraries = library(zio)`: selectio
 |---|---|
 | `val zio = Lib(...)` | yes |
 | `val zioTest = zio.mod("zio-test").test` | yes (`zipxCheckDeps` sees it; apply rewrites the parent constructor) |
+| `val zioHttpTestkit = zioHttp.mod("zio-http-testkit").test.fromGraph` | yes (revision from the selected parent GAV; Sunday does not bump this val) |
 | `val coursier = Lib(...).java.excluding(...)` | yes (excludes live on the row) |
 | `val scalafmt = Plugin(...)` | yes (generate writes `plugins.sbt`) |
 | `val preact = Pin("cdn", "preact", …)` | yes (`zipxPins`; apply rewrites version, sha256, and purl together) |
@@ -82,6 +83,33 @@ it is not a row. That is why groups are `def libraries = library(zio)`: selectio
 
 A row no module selects is still legal. Unused plugins still land in `plugins.sbt`.
 """
+    ),
+    section(".mod vs .fromGraph")(
+      md"""
+`.mod("zio-test")` is lockstep with the parent constructor. Sunday rewrites `Lib("dev.zio", "zio", "…")`; the copy
+keeps that version. Use it when you select the family.
+
+`.fromGraph` is for a sibling that must match a revision **already on the graph**, not Maven latest. Typical:
+`zio-http-testkit` while `zio-http` arrives only as a transitive of another selected row. Sunday does not bump the
+`.fromGraph` val. `zipxCheckDeps` matches group + artifact (the selected revision will not be the parent literal).
+
+```scala
+val zioHttp        = Lib("dev.zio", "zio-http", "3.11.4") // may stay unselected
+val zioHttpTestkit = zioHttp.mod("zio-http-testkit").test.fromGraph
+def tests          = library(zioHttpTestkit)
+```
+
+`.fromGraph` is only valid on a `.mod` copy. Do not use it to follow `zio-json` from `zio-schema-json`: those artifacts
+do not share a version number. That case is drop the extra `library()` selection (`zipxDepCleanup`).
+""",
+      exampleValue {
+        val http    = Lib("dev.zio", "zio-http", "3.11.4")
+        val testkit = http.mod("zio-http-testkit").test.fromGraph
+        ZipxCatalog
+          .extraLibs(List(DeclaredGav("dev.zio", "zio-http-testkit", "3.11.1")), List(http, testkit))
+          .map(_.render)
+          .mkString(",")
+      }.assert(text => assertTrue(text.isEmpty)),
     ),
     section("Select, do not paste")(
       md"""

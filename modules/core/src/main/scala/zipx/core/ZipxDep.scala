@@ -21,7 +21,7 @@ object DepVersion extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
     if input.nonEmpty then true else "a version must be non-empty"
 
-/** `ThisBuild / scalaVersion` literal. */
+/** `scalaVersion` literal (sbt 2 common setting; ThisBuild still matches via delegation). */
 type ScalaVersion = ScalaVersion.Type
 object ScalaVersion extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -165,12 +165,19 @@ final case class Lib(
     cross: Cross = Cross.Binary,
     config: Option[String] = None,
     excludes: List[ZipxExclude] = Nil,
+    /** Pre-mod artifact. Set by [[mod]] so [[fromGraph]] can name the probe GAV. */
+    family: Option[ArtifactId] = None,
+    /** When set, ModuleID revision comes from the selected family GAV on the probe graph. */
+    alignTo: Option[ArtifactId] = None,
 ) extends ZipxCoord:
-  inline def mod(inline artifact: String): Lib = copy(artifact = ArtifactId(artifact))
-  def test: Lib                                = copy(config = Some("test"))
-  def java: Lib                                = copy(cross = Cross.Java)
-  def full: Lib                                = copy(cross = Cross.Full)
-  def excluding(ex: ZipxExclude*): Lib         = copy(excludes = excludes ++ ex.toList)
+  inline def mod(inline artifact: String): Lib =
+    copy(artifact = ArtifactId(artifact), family = Some(this.artifact))
+  def test: Lib                        = copy(config = Some("test"))
+  def java: Lib                        = copy(cross = Cross.Java)
+  def full: Lib                        = copy(cross = Cross.Full)
+  def excluding(ex: ZipxExclude*): Lib = copy(excludes = excludes ++ ex.toList)
+  def fromGraph: Lib                   = copy(alignTo = Some(family.getOrElse(artifact)))
+  def isAligned: Boolean               = alignTo.nonEmpty
 end Lib
 
 object Lib:
@@ -179,7 +186,7 @@ object Lib:
     * method beats one that fills defaults. Supplying the defaults selects the case-class constructor.
     */
   inline def apply(inline group: String, inline artifact: String, inline version: String): Lib =
-    Lib(GroupId(group), ArtifactId(artifact), DepVersion(version), Cross.Binary, None, Nil)
+    Lib(GroupId(group), ArtifactId(artifact), DepVersion(version), Cross.Binary, None, Nil, None, None)
 
 final case class Plugin(
     group: GroupId,

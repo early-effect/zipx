@@ -91,9 +91,11 @@ enum Phase:
   *     runs as parallel as the dependency graph allows.
   *   - [[Ordering.DependencyOrdered]] needs the nearest *participating* ancestors, contracting away non-participating
   *     intermediates, which is what makes artifacts publish in true dependency order.
+  *   - [[Ordering.Independent]] needs no same-capability jobs. Use when the command compiles `dependsOn` from the
+  *     checkout (GH Packages `publish`) so waiting on an upstream job is only serializing uploads.
   */
 enum Ordering:
-  case ParallelWithUpstream, DependencyOrdered
+  case ParallelWithUpstream, DependencyOrdered, Independent
 
 /** When a capability's jobs may run, ANDed with [[Capability.condition]], [[Target.condition]] and affected-gating.
   *
@@ -260,8 +262,8 @@ final case class Capability(
     needsCapabilities: List[CapabilityName] = Nil,
     permissions: Map[String, String] = Map.empty,
     runsOn: Option[List[String]] = None,
-    extraSteps: StepContext => List[Step] = _ => Nil,
-    postSteps: StepContext => List[Step] = _ => Nil,
+    extraSteps: StepContext => List[Step] = Steps.empty,
+    postSteps: StepContext => List[Step] = Steps.empty,
     scope: CapabilityScope = CapabilityScope.Aggregate,
     env: Map[String, EnvValue] = Map.empty,
     container: Option[String] = None,
@@ -291,6 +293,30 @@ final case class Capability(
   /** Opt into (or veto) matrix-collapse for this capability; see [[MatrixCollapse]]. */
   def withMatrixCollapse(mode: MatrixCollapse): Capability =
     copy(matrixCollapse = Some(mode))
+
+  /** Graph same-capability `needs`. Prefer a pack combinator (`ZipxModver.publish(...).withoutUpstreamJobs`) when one
+    * exists; this is the hatch for a custom Graph capability.
+    */
+  def withOrdering(ordering: Ordering): Capability =
+    copy(ordering = ordering)
+
+  /** Graph jobs do not `needs` same-capability upstreams. The command still compiles `dependsOn` from the checkout. */
+  def withoutUpstreamJobs: Capability =
+    withOrdering(Ordering.Independent)
+
+  /** Replaces job `permissions`. Same bar as [[withEnv]]. */
+  def withPermissions(permissions: Map[String, String]): Capability =
+    copy(permissions = permissions)
+
+  /** One sbt JVM over the version-moved set. Job id is the capability name; the command is `zipxModverPublishMoved`. */
+  def inOneSession: Capability =
+    copy(
+      scope = CapabilityScope.Once,
+      matrixed = false,
+      matrixCollapse = None,
+      ordering = Ordering.Independent,
+      command = CommandSource.Fixed(SbtCommand.unsafeTask("zipxModverPublishMoved")),
+    )
 
   /** Destinations that share **one** job: [[TargetFanOut.SharedJob]] plus the targets, set together because setting
     * either alone is the mistake. The shape for registries; see [[TargetFanOut]].
@@ -374,6 +400,18 @@ final case class Capability(
   def withPostSteps(steps: Steps): Capability =
     copy(postSteps = steps)
 
+  def plusExtraSteps(steps: Steps): Capability =
+    copy(extraSteps = Capability.asSteps(extraSteps, "extra") ++ steps)
+
+  def plusPostSteps(steps: Steps): Capability =
+    copy(postSteps = Capability.asSteps(postSteps, "post") ++ steps)
+
+  def dropExtraSteps(name: String): Capability =
+    copy(extraSteps = Capability.asSteps(extraSteps, "extra").without(name))
+
+  def dropPostSteps(name: String): Capability =
+    copy(postSteps = Capability.asSteps(postSteps, "post").without(name))
+
   /** Declared command names from the command source and the session tail. */
   def declaredNames: List[SbtCommandName] =
     command.declaredNames ++ sessionTail.toList.flatMap(_.declaredNames)
@@ -389,6 +427,11 @@ final case class Capability(
 end Capability
 
 object Capability:
+
+  private def asSteps(field: StepContext => List[Step], fallback: String): Steps =
+    field match
+      case s: Steps => s
+      case f        => Steps(fallback)(f)
 
   /** Wire form for native-packager's `Docker / publish` until a build passes the real key via zipxTasks. */
   private val dockerPublish: SbtCommand = SbtCommand.unsafeTask("Docker/publish")
@@ -609,8 +652,8 @@ object Capability:
       needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
       runsOn: Option[List[String]] = None,
-      extraSteps: StepContext => List[Step] = _ => Nil,
-      postSteps: StepContext => List[Step] = _ => Nil,
+      extraSteps: StepContext => List[Step] = Steps.empty,
+      postSteps: StepContext => List[Step] = Steps.empty,
       env: Map[String, EnvValue] = Map.empty,
       scope: CapabilityScope = CapabilityScope.Graph,
       container: Option[String] = None,
@@ -652,8 +695,8 @@ object Capability:
       phase: Phase = Phase.Verify,
       gate: Gate = Gate.Always,
       runsOn: Option[List[String]] = None,
-      extraSteps: StepContext => List[Step] = _ => Nil,
-      postSteps: StepContext => List[Step] = _ => Nil,
+      extraSteps: StepContext => List[Step] = Steps.empty,
+      postSteps: StepContext => List[Step] = Steps.empty,
       env: Map[String, EnvValue] = Map.empty,
       needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,
@@ -690,7 +733,7 @@ object Capability:
       phase: Phase = Phase.Verify,
       gate: Gate = Gate.Always,
       runsOn: Option[List[String]] = None,
-      postSteps: StepContext => List[Step] = _ => Nil,
+      postSteps: StepContext => List[Step] = Steps.empty,
       env: Map[String, EnvValue] = Map.empty,
       needsCapabilities: List[CapabilityName] = Nil,
       permissions: Map[String, String] = Map.empty,

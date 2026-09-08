@@ -1,0 +1,5 @@
+# Catalog Scala off the sbt 2 metabuild default, only MyVersions.settings (no ThisBuild / scalaVersion).
+> assertScalaAxes
+> zipxWorkflowGenerate
+$ exists .github/workflows/ci.yml
+> zipxWorkflowCheck

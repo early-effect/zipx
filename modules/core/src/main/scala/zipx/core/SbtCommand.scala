@@ -104,6 +104,16 @@ object SbtCommand:
       })
     else scoped
 
+  /** [[module]] plus `cross = true` on every module-scoped task, including Scala-3-only modules. ZipxModver uses this
+    * so mixed graphs share one `+${{ matrix.module }}/task` template.
+    */
+  def alwaysCrossModule(node: ModuleNode, task: SbtCommand): SbtCommand =
+    fromSteps(module(node, task).steps.map {
+      case SbtStep.Task(label, scope @ TaskScope.Module(id), _) if id == node.id =>
+        SbtStep.Task(label, scope, cross = true)
+      case other => other
+    })
+
   /** A cross-version switch ahead of a command: `++X; a; b` so a compound session is unambiguous. */
   def underScalaVersion(version: Expr, command: SbtCommand): SbtCommand =
     val switch = SbtStep.Built(SbtCommandText.unsafeMake(s"++${version.render}"))

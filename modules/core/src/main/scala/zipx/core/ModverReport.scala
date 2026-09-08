@@ -48,3 +48,15 @@ object ModverPublishFile:
   def modulesJson(file: ModverPublishFile): String =
     file.missing.keys.toList.sorted.toJson
 end ModverPublishFile
+
+/** Select version-moved ids in publish order for [[Capability.inOneSession]]. */
+object ModverPublishMoved:
+
+  def parse(json: String): Either[String, List[String]] =
+    json.fromJson[List[String]].left.map(err => s"zipx: ${ModverPublishFile.ModulesRelPath}: $err")
+
+  /** Keep `publishOrder` (toposort of publishers); drop ids not in the JSON. Missing JSON is the plugin's job. */
+  def select(moved: List[String], publishOrder: List[String]): List[String] =
+    val wanted = moved.toSet
+    publishOrder.filter(wanted.contains)
+end ModverPublishMoved

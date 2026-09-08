@@ -136,6 +136,42 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
         extra.map(_.render).toSet == Set("dev.zio:zio:2.1.0", "org.slf4j:slf4j-simple:2.0.18")
       )
     },
+    test("extraLibs matches aligned rows on group and artifact only") {
+      val http    = Lib("dev.zio", "zio-http", "3.11.4")
+      val testkit = http.mod("zio-http-testkit").test.fromGraph
+      val extra   = ZipxCatalog.extraLibs(
+        List(DeclaredGav("dev.zio", "zio-http-testkit", "3.11.1")),
+        List(http, testkit),
+      )
+      assertTrue(
+        extra.isEmpty,
+        testkit.alignTo.contains(http.artifact),
+        testkit.family.contains(http.artifact),
+        ZipxCatalog
+          .invalidFromGraph(List(Lib("dev.zio", "zio-http", "3.11.4").fromGraph))
+          .exists(_.contains("fromGraph")),
+      )
+    },
+    test("outdated skips aligned rows and may still bump the parent") {
+      val http    = Lib("dev.zio", "zio-http", "3.11.4")
+      val testkit = http.mod("zio-http-testkit").test.fromGraph
+      ZipxCatalog.outdated(
+        List(http, testkit),
+        {
+          case l: Lib if (l.artifact: String) == "zio-http"         => Right(Some("3.12.0"))
+          case l: Lib if (l.artifact: String) == "zio-http-testkit" => Right(Some("9.9.9"))
+          case _                                                    => Right(None)
+        },
+      ) match
+        case Left(err)    => assertTrue(err.isEmpty)
+        case Right(bumps) =>
+          assertTrue(
+            bumps.size == 1,
+            bumps.head.artifact == "zio-http",
+            bumps.head.to == "3.12.0",
+          )
+      end match
+    },
     test("extraLibs ignores Plugin rows") {
       val plugin = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
       val extra  = ZipxCatalog.extraLibs(List(DeclaredGav("org.scalameta", "sbt-scalafmt", "2.6.2")), List(plugin))

@@ -1,10 +1,13 @@
 package zipx.core
 
 import zio.test.*
+import zipx.workflow.Step
 
 object CapabilitySpec extends ZIOSpecDefault:
 
   private val api = ModuleNode(ModuleId("api"), publishes = true, crossScalaVersions = List("3.3.6", "2.13.16"))
+
+  private def named(name: String): Step = Step(name = Some(name), run = Some(s"echo $name"))
 
   def spec = suite("Capability")(
     suite("CommandSource setters")(
@@ -89,6 +92,44 @@ object CapabilitySpec extends ZIOSpecDefault:
           .get
           .getMessage
         assertTrue(err.contains("Graph"), err.contains("per module"))
+      },
+      test("withPermissions replaces; a second call does not merge") {
+        val cap = Capability.publish
+          .withPermissions(Map("contents" -> "read"))
+          .withPermissions(Map("packages" -> "write"))
+        assertTrue(cap.permissions == Map("packages" -> "write"))
+      },
+      test("withOrdering Independent is withoutUpstreamJobs") {
+        assertTrue(
+          Capability.publishGraph.withoutUpstreamJobs.ordering == Ordering.Independent,
+          Capability.publishGraph.withOrdering(Ordering.Independent).ordering == Ordering.Independent,
+        )
+      },
+      test("plusExtraSteps appends; withExtraSteps still replaces") {
+        val gpg      = Steps.of("gpg-import")(named("gpg"))
+        val clean    = Steps.of("clean-full")(named("clean"))
+        val base     = Capability.publish.withExtraSteps(gpg)
+        val plus     = base.plusExtraSteps(clean).plusExtraSteps(Steps.of("more")(named("more")))
+        val replaced = plus.withExtraSteps(clean)
+        val ctx      = StepContext(api, None, matrixed = false)
+        assertTrue(
+          plus.extraSteps(ctx).flatMap(_.name) == List("gpg", "clean", "more"),
+          replaced.extraSteps(ctx).flatMap(_.name) == List("clean"),
+        )
+      },
+      test("dropExtraSteps matches the leaf name on a pack bundle") {
+        val gpg   = Steps.of("gpg-import")(named("gpg"))
+        val clean = Steps.of("clean-full")(named("clean"))
+        val cap   = Capability.publish.withExtraSteps(gpg).plusExtraSteps(clean).dropExtraSteps("gpg-import")
+        val ctx   = StepContext(api, None, matrixed = false)
+        assertTrue(cap.extraSteps(ctx).flatMap(_.name) == List("clean"))
+      },
+      test("plusPostSteps and dropPostSteps are the same trio") {
+        val upload = Steps.of("upload-staging")(named("upload"))
+        val extra  = Steps.of("notify")(named("notify"))
+        val cap    = Capability.publishGraph.withPostSteps(upload).plusPostSteps(extra).dropPostSteps("upload-staging")
+        val ctx    = StepContext(api, None, matrixed = false)
+        assertTrue(cap.postSteps(ctx).flatMap(_.name) == List("notify"))
       },
       test("ActionsOnly + thenOnce is rejected") {
         val err = scala.util
