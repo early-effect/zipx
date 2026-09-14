@@ -90,7 +90,7 @@ coordinates.
       md"""
 See [ROADMAP.md](https://github.com/early-effect/zipx/blob/main/ROADMAP.md) and
 [AGENTS.md](https://github.com/early-effect/zipx/blob/main/AGENTS.md) (verification blast radius for agents).
-The plugin targets sbt 2.x / Scala 3.8.4. License: Apache-2.0.
+The plugin targets sbt 2.x / Scala 3.9.0. License: Apache-2.0.
 """
     ),
   )

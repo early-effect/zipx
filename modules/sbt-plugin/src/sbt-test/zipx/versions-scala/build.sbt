@@ -1,4 +1,4 @@
-// Catalog Scala is not sbt 2.0.8's metabuild default (3.8.4). MyVersions.settings sets the
+// Catalog Scala is not sbt 2.1.0-M1's metabuild default (3.9.0). MyVersions.settings sets the
 // project-level common scalaVersion; this file must not also set ThisBuild / scalaVersion.
 MyVersions.settings
 version        := "1.0.0-ci"
@@ -16,7 +16,7 @@ assertScalaAxes := {
   val tbSv   = (ThisBuild / scalaVersion).value
   assert(rootSv == "3.7.3", s"root scalaVersion should be catalog 3.7.3, got $rootSv")
   assert(
-    tbSv == "3.8.4",
-    s"ThisBuild / scalaVersion should stay sbt 2's metabuild default 3.8.4, got $tbSv",
+    tbSv == "3.9.0",
+    s"ThisBuild / scalaVersion should stay sbt 2's metabuild default 3.9.0, got $tbSv",
   )
 }

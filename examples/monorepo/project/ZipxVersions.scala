@@ -9,8 +9,8 @@ import zipx.*
   */
 object MyVersions extends ZipxVersions:
 
-  val sbt: SbtVersion      = SbtVersion("2.0.8")
-  val scala: ScalaVersion  = ScalaVersion("3.8.4")
+  val sbt: SbtVersion      = SbtVersion("2.1.0-M1")
+  val scala: ScalaVersion  = ScalaVersion("3.9.0")
   val scala2: ScalaVersion = ScalaVersion("2.13.16")
 
   override def crossScala: Seq[ScalaVersion] = Seq(scala2, scala)
