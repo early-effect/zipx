@@ -34,6 +34,9 @@ ThisBuild / publishTo := {
 // CI-only publishing: key hex from PGP_KEY_HEX (org secret). Sentinel keeps local loads working.
 usePgpKeyHex(sys.env.getOrElse("PGP_KEY_HEX", "MISSING_KEY_HEX"))
 
+// specular-site still pins zio-json 0.10.0; take 1.1.0.
+ThisBuild / libraryDependencySchemes += "dev.zio" %% "zio-json" % "always"
+
 val commonSettings = Seq(
   scalacOptions ++= V.commonScalacOptions,
   libraryDependencies ++= V.zioDeps,

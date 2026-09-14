@@ -25,8 +25,8 @@ library versions (`Ship` / `ShipGroup`) live on **Independent versions**.
 import zipx.*
 
 object MyVersions extends ZipxVersions:
-  val sbt: SbtVersion     = SbtVersion("2.0.8")
-  val scala: ScalaVersion = ScalaVersion("3.8.4")
+  val sbt: SbtVersion     = SbtVersion("2.1.0-M1")
+  val scala: ScalaVersion = ScalaVersion("3.9.0")
   val zio                 = Lib("dev.zio", "zio", "2.1.26")
   val zioTest             = zio.mod("zio-test").test
   val slf4j               = Lib("org.slf4j", "slf4j-simple", "2.0.18").java
@@ -133,7 +133,7 @@ compares GAV only. Lib excludes never appear in `plugins.sbt`; that file is plug
       exampleValue {
         val coursier = Lib("io.get-coursier", "coursier-cache_2.13", "2.1.25-M26").java
           .excluding(ZipxExclude.org("org.scala-lang.modules"))
-        val remote = Plugin("org.scala-sbt", "sbt-remote-cache", "2.0.8")
+        val remote = Plugin("org.scala-sbt", "sbt-remote-cache", "2.1.0-M1")
           .excluding(ZipxExclude.org("org.scala-sbt"))
         val libEx =
           coursier.excludes
