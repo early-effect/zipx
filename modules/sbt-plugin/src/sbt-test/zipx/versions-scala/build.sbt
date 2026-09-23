@@ -1,5 +1,4 @@
-// Catalog Scala is not sbt 2.1.0-M1's metabuild default (3.9.0). MyVersions.settings sets the
-// project-level common scalaVersion; this file must not also set ThisBuild / scalaVersion.
+// MyVersions.settings sets the project-level scalaVersion. Do not also set ThisBuild / scalaVersion.
 MyVersions.settings
 version        := "1.0.0-ci"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")

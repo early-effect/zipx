@@ -79,7 +79,7 @@ sbt zipxWorkflowCheck   # fails CI when the committed YAML drifts""",
           """// project/ZipxVersions.scala
 import zipx.*
 object MyVersions extends ZipxVersions:
-  val sbt   = SbtVersion("2.1.0-M1")
+  val sbt   = SbtVersion("2.1.0-M2")
   val scala = ScalaVersion("3.9.0")
   val zio   = Lib("dev.zio", "zio", "2.1.26")
   val slf4j = Lib("org.slf4j", "slf4j-simple", "2.0.18").java
