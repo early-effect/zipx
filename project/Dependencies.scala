@@ -12,7 +12,7 @@ object Dependencies:
   val zioVersion         = "2.1.26"
   val zioJsonVersion     = "1.1.0"
   val zioBlocksVersion   = "0.0.51"
-  val remoteCacheVersion = "2.1.0-M1"
+  val remoteCacheVersion = "2.1.0-M2"
   val neotypeVersion     = "0.7.0"
 
   val commonScalacOptions: Seq[String] = Seq(
