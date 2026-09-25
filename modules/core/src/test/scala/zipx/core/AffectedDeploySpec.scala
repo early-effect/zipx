@@ -178,7 +178,7 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         val wf = plan(List(dockerExpanded, deployGraph()), on)
         assertTrue(
           cond(wf, "deploy-serviceA-prod").contains("github.ref == 'refs/heads/main'"),
-          wf.jobs("deploy-serviceA-prod").environment.contains("production"),
+          wf.jobs("deploy-serviceA-prod").environment.map(_.name).contains("production"),
           cond(wf, "deploy-serviceA-prod").contains("needs.affected.outputs.modules"),
         )
       },
@@ -199,8 +199,8 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         val wf = plan(List(dockerExpanded, twoTargets), on)
         assertTrue(
           wf.jobs.keys.count(_.startsWith("deploy-")) == 8, // 4 docker'd services x 2 targets
-          wf.jobs("deploy-serviceA-prd").environment.contains("PRD_AWS_BATCH_WORKER"),
-          wf.jobs("deploy-serviceA-stg").environment.contains("STG_AWS_BATCH_WORKER"),
+          wf.jobs("deploy-serviceA-prd").environment.map(_.name).contains("PRD_AWS_BATCH_WORKER"),
+          wf.jobs("deploy-serviceA-stg").environment.map(_.name).contains("STG_AWS_BATCH_WORKER"),
           cond(wf, "deploy-serviceA-stg").contains("'serviceA')"),
           cond(wf, "deploy-serviceA-prd").contains("'serviceA')"),
         )

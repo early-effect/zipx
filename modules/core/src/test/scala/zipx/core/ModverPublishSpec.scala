@@ -178,7 +178,7 @@ object ModverPublishSpec extends ZIOSpecDefault:
     },
     test("workflow_dispatch is on when modverPublish is on") {
       val wf = Planner.plan(graph, List(cap), independent)
-      assertTrue(wf.on.workflowDispatch)
+      assertTrue(wf.on.workflowDispatch.isDefined)
     },
     test("inOneSession is one publish job that needs modver and skips on empty JSON") {
       val once = cap.inOneSession

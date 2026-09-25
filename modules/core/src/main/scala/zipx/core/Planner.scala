@@ -858,7 +858,7 @@ object Planner:
         )
       ),
       pullRequest = Some(PullRequestTrigger()),
-      workflowDispatch = config.workflowDispatch || config.modverPublish,
+      workflowDispatch = Option.when(config.workflowDispatch || config.modverPublish)(WorkflowDispatch()),
     )
   end triggersFor
 
@@ -1011,7 +1011,7 @@ object Planner:
                   runsOn = runner,
                   needs = baseNeeds,
                   `if` = andConditions(baseCond, sharedCond),
-                  environment = envBinding,
+                  environment = envBinding.map(JobEnvironment(_)),
                   permissions = ListMap.from(capability.permissions),
                   strategy = Some(Strategy(matrix = ListMap("target" -> targets.map(_.name: String)))),
                   container = capability.container,
@@ -1040,7 +1040,7 @@ object Planner:
                   runsOn = runner,
                   needs = baseNeeds,
                   `if` = andConditions(baseCond, sharedCond),
-                  environment = envBinding,
+                  environment = envBinding.map(JobEnvironment(_)),
                   permissions = ListMap.from(capability.permissions),
                   strategy = Some(
                     Strategy(include = MatrixCollapse.includeRows(Nil, targets))
@@ -1069,7 +1069,7 @@ object Planner:
                   runsOn = runner,
                   needs = baseNeeds,
                   `if` = andConditions(baseCond, JobCondition.renderOpt(target.condition)),
-                  environment = target.environment,
+                  environment = target.environment.map(JobEnvironment(_)),
                   permissions = ListMap.from(capability.permissions),
                   container = capability.container,
                   services = mergeServices(capability, cache),
@@ -1151,7 +1151,7 @@ object Planner:
             runsOn = runner,
             needs = needs,
             `if` = ifCond,
-            environment = environment,
+            environment = environment.map(JobEnvironment(_)),
             permissions = ListMap.from(capability.permissions),
             strategy = strategy,
             container = capability.container,
@@ -1394,7 +1394,7 @@ object Planner:
           runsOn = runner,
           needs = needs,
           `if` = cond,
-          environment = envBinding,
+          environment = envBinding.map(JobEnvironment(_)),
           permissions = ListMap.from(capability.permissions),
           strategy = Some(Strategy(matrix = matrixMap, include = includeRows)),
           container = capability.container,
@@ -1484,7 +1484,7 @@ object Planner:
         runsOn = runner,
         needs = needs,
         `if` = cond,
-        environment = environment,
+        environment = environment.map(JobEnvironment(_)),
         permissions = ListMap.from(capability.permissions),
         strategy = matrix,
         container = capability.container,

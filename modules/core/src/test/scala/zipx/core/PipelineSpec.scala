@@ -112,7 +112,7 @@ object PipelineSpec extends ZIOSpecDefault:
     },
     test("only the prod target carries the approval environment") {
       assertTrue(
-        job("deploy-serviceA-prod").environment.contains("production"),
+        job("deploy-serviceA-prod").environment.map(_.name).contains("production"),
         job("deploy-serviceA-staging").environment.isEmpty,
       )
     },

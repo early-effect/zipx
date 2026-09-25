@@ -295,7 +295,7 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
           assertTrue(
             deployJobCount(wf) == 1,
             job.strategy.exists(_.include.sizeIs == targets.size),
-            job.environment.contains("${{ matrix.environment }}"),
+            job.environment.map(_.name).contains("${{ matrix.environment }}"),
           )
         }
       },
@@ -394,7 +394,7 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
           assertTrue(
             deployJobCount(wf) == 1,
             job.strategy.exists(s => s.matrix.contains("module") && s.matrix.contains("target")),
-            job.environment.contains("${{ matrix.target }}"),
+            job.environment.map(_.name).contains("${{ matrix.target }}"),
           )
         }
       },
@@ -405,7 +405,7 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
           assertTrue(
             deployJobCount(wf) == 1,
             job.strategy.exists(_.include.sizeIs == 3 * targets.size),
-            job.environment.contains("${{ matrix.environment }}"),
+            job.environment.map(_.name).contains("${{ matrix.environment }}"),
           )
         }
       },

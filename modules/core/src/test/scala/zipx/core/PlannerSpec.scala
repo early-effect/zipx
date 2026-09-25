@@ -553,7 +553,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("environment binds only on targets that declare one (the approval gate)") {
       val wf = Planner.plan(sampleGraph, List(deployCap(stagingProd)), config)
       assertTrue(
-        wf.jobs("deploy-serviceA-prod").environment.contains("production"),
+        wf.jobs("deploy-serviceA-prod").environment.map(_.name).contains("production"),
         wf.jobs("deploy-serviceA-staging").environment.isEmpty,
       )
     },
@@ -1101,7 +1101,7 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs.contains("deploy-staging"),
         wf.jobs.contains("deploy-prod"),
         !wf.jobs.contains("deploy-serviceA-staging"),
-        wf.jobs("deploy-prod").environment.contains("production"),
+        wf.jobs("deploy-prod").environment.map(_.name).contains("production"),
         wf.jobs("deploy-staging").environment.isEmpty,
         wf.jobs("deploy-prod").needs.contains("docker"),
         wf.jobs("deploy-staging")

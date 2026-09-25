@@ -14,7 +14,7 @@ object RenderSpec extends ZIOSpecDefault:
     on = Triggers(
       push = Some(BranchFilter(branches = List("main"), tags = List("v*"))),
       pullRequest = Some(PullRequestTrigger()),
-      workflowDispatch = true,
+      workflowDispatch = Some(WorkflowDispatch()),
     ),
     jobs = ListMap(
       "test-workflow" -> Job(
@@ -156,7 +156,7 @@ object RenderSpec extends ZIOSpecDefault:
         jobs = ListMap(
           "deploy-prod" -> Job(
             name = Some("deploy (prod)"),
-            environment = Some("production"),
+            environment = Some(JobEnvironment("production")),
             permissions = ListMap("id-token" -> "write", "contents" -> "read"),
             env = ListMap("DEPLOY_ROLE" -> "${{ secrets.PROD_ROLE }}", "TIER" -> "prod"),
             steps = List(Step(uses = Some(ActionRef("actions/checkout@v4")))),
@@ -170,6 +170,60 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("TIER: prod"),
         out.contains("id-token: write"),
         out.contains("contents: read"),
+      )
+    },
+    test("an environment with a url renders as a mapping, so GitHub shows the url on the deployment") {
+      val url = Expr.github("server_url") ++ Expr.lit("/") ++ Expr.github("repository")
+      val job = Job(
+        environment = Some(JobEnvironment("lab-stg", Some(url.render))),
+        steps = List(Step(run = Some("echo hi"))),
+      )
+      assertTrue(
+        Render
+          .renderJob("deploy", job)
+          .yaml
+          .contains(
+            "  environment:\n    name: lab-stg\n    url: ${{ github.server_url }}/${{ github.repository }}\n"
+          )
+      )
+    },
+    test("workflow_dispatch inputs render with type, requiredness, and a choice's options, first option default") {
+      val dispatch = WorkflowDispatch(
+        ListMap(
+          InputName("modules") -> DispatchInput.Choice("Modules to deploy", ::("changed", List("all", "svcA"))),
+          InputName("sha")     -> DispatchInput.Text("Commit to deploy"),
+        )
+      )
+      val out = Render.render(sample.copy(on = Triggers(workflowDispatch = Some(dispatch)))).yaml
+      assertTrue(
+        out.contains(
+          """|  workflow_dispatch:
+             |    inputs:
+             |      modules:
+             |        description: Modules to deploy
+             |        type: choice
+             |        required: true
+             |        default: changed
+             |        options:
+             |          - changed
+             |          - all
+             |          - svcA
+             |      sha:
+             |        description: Commit to deploy
+             |        type: string
+             |        required: false
+             |""".stripMargin
+        )
+      )
+    },
+    test("inputs, member access, and indexing render inside an expression") {
+      val plan = Expr.fromJson(Expr.jobOutput("resolve", "plan"))
+      assertTrue(
+        Expr.input("target").render == "${{ inputs.target }}",
+        plan.member(PropertyName("targets")).at(Expr.matrix("target")).unwrapped ==
+          "fromJson(needs.resolve.outputs.plan).targets[matrix.target]",
+        Expr.contains(plan.member(PropertyName("images")), Expr.quoted("svcA")).unwrapped ==
+          "contains(fromJson(needs.resolve.outputs.plan).images, 'svcA')",
       )
     },
     test("runs-on renders as a scalar for one label and a sequence for many") {
@@ -196,7 +250,7 @@ object RenderSpec extends ZIOSpecDefault:
     test("reusable workflow call jobs emit uses/with and omit runs-on/steps") {
       val wf = Workflow(
         name = "CI",
-        on = Triggers(workflowDispatch = true),
+        on = Triggers(workflowDispatch = Some(WorkflowDispatch())),
         jobs = ListMap(
           "docs" -> Job(
             name = Some("docs"),
@@ -220,7 +274,7 @@ object RenderSpec extends ZIOSpecDefault:
     test("schedule cron expressions render under on.schedule") {
       val wf = Workflow(
         name = "Pin check",
-        on = Triggers(schedule = List(Cron.weekly(DayOfWeek.Sunday)), workflowDispatch = true),
+        on = Triggers(schedule = List(Cron.weekly(DayOfWeek.Sunday)), workflowDispatch = Some(WorkflowDispatch())),
         jobs = ListMap(
           "pin-check" -> Job(steps = List(Step(uses = Some(ActionRef("actions/checkout@v4")))))
         ),

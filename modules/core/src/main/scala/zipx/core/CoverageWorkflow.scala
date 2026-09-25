@@ -50,7 +50,7 @@ object CoverageWorkflow:
       name = "zipx coverage",
       on = Triggers(
         pullRequest = Option.when(labels.nonEmpty)(PullRequestTrigger(types = labelActivities)),
-        workflowDispatch = triggers.contains(CoverageTrigger.Dispatch),
+        workflowDispatch = Option.when(triggers.contains(CoverageTrigger.Dispatch))(WorkflowDispatch()),
         schedule = triggers.collect { case CoverageTrigger.Scheduled(cron) => cron },
       ),
       permissions = ListMap("contents" -> "read"),
