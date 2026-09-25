@@ -277,9 +277,17 @@ final case class Capability(
     matrixCollapse: Option[MatrixCollapse] = None,
     /** Build-wide command appended once after joined module commands. See [[thenOnce]]. */
     sessionTail: Option[SbtCommand] = None,
+    /** What this capability's jobs do with the LocalDir build snapshot. Only the builtin test saves. */
+    localCache: LocalCacheMode = LocalCacheMode.Restore,
 ):
   def withCondition(condition: JobCondition): Capability =
     copy(condition = Some(condition))
+
+  /** [[LocalCacheMode.Save]] makes this capability the build snapshot's owner in place of the builtin test. At most one
+    * capability may save, and not a Graph one: its jobs would each write an entry.
+    */
+  def withLocalCache(mode: LocalCacheMode): Capability =
+    copy(localCache = mode)
 
   def withCondition(condition: Option[JobCondition]): Capability =
     copy(condition = condition)
@@ -460,6 +468,8 @@ object Capability:
     command = CommandSource.PerModule(n => SbtCommand.module(n, n.testTask)),
     matrixed = matrixed,
     scope = scope,
+    // Graph test jobs compile disjoint slices, so none of them is the build snapshot.
+    localCache = if scope == CapabilityScope.Graph then LocalCacheMode.Restore else LocalCacheMode.Save,
   )
 
   private def publishBody(scope: CapabilityScope): Capability = Capability(
@@ -542,7 +552,9 @@ object Capability:
     * prepends a clean.
     */
   val test: Capability =
-    Capability.once(name = TestName, command = ModuleNode.DefaultTestTask, phase = Phase.Verify, gate = Gate.Always)
+    Capability
+      .once(name = TestName, command = ModuleNode.DefaultTestTask, phase = Phase.Verify, gate = Gate.Always)
+      .withLocalCache(LocalCacheMode.Save)
 
   /** Joins per-module `<id>/<testTask>` commands instead of running one root task. The escape hatch for a build with
     * mixed `zipxTestTask` overrides, where a root aggregate task would run the wrong thing.

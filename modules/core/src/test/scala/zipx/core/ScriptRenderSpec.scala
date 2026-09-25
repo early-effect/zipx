@@ -160,13 +160,13 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       val restore = cache.`with`("restore-keys")
       assertTrue(
         key.startsWith("${{ inputs.runner-os }}-jdk${{ inputs.java-version }}-sbt-"),
-        key.contains("${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-"),
+        key.contains("${{ steps.cache-epoch.outputs.epoch }}-build-${{ github.run_id }}-"),
         key.endsWith("${{ inputs.cache-key-suffix }}"),
-        restore.contains("${{ steps.cache-epoch.outputs.epoch }}-${{ github.run_id }}-"),
-        restore.contains("${{ steps.cache-epoch.outputs.release }}-"),
+        restore.contains("${{ steps.cache-epoch.outputs.epoch }}-build-${{ github.run_id }}-"),
+        restore.contains("${{ steps.cache-epoch.outputs.release }}-build-"),
         cache.`with`("path") == "~/.sbt\n~/.cache/sbt\n~/.cache/coursier\ntarget",
-        fixed.`with`("key").contains("${{ inputs.cache-epoch }}-${{ github.run_id }}-"),
-        fixed.`with`("restore-keys").contains("${{ inputs.cache-epoch }}-"),
+        fixed.`with`("key").contains("${{ inputs.cache-epoch }}-build-${{ github.run_id }}-"),
+        fixed.`with`("restore-keys").contains("${{ inputs.cache-epoch }}-build-"),
       )
     },
     test("LocalDir jobs checkout then call the zipx-sbt-setup composite") {

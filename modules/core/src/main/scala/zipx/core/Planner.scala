@@ -137,8 +137,9 @@ object Planner:
 
   /** Rejects a `needsCapabilities` cycle, [[Gate.AffectedOnly]] (an unimplemented seam: honoring it silently as
     * [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run), a per-destination field a
-    * [[TargetFanOut.SharedJob]] job cannot honor, a gate/condition conjunction that can never be true, and a non-Graph
-    * consumer of an affected-gated publish, which would run against an artifact nobody built.
+    * [[TargetFanOut.SharedJob]] job cannot honor, a gate/condition conjunction that can never be true, a non-Graph
+    * consumer of an affected-gated publish, which would run against an artifact nobody built, and more than one
+    * LocalDir snapshot owner.
     */
   private def validateCapabilities(capabilities: List[Capability], graph: ModuleGraph, config: PlanConfig): Unit =
     capabilities.filter(_.gate == Gate.AffectedOnly) match
@@ -163,7 +164,35 @@ object Planner:
     capabilities.foreach(validateSessionTail)
     validateSkipConsumers(capabilities, config)
     validateModverPublish(capabilities, config)
+    validateLocalCacheOwner(capabilities, graph)
   end validateCapabilities
+
+  /** One capability owns the LocalDir build snapshot. Two owners race each other's entries, and an owner that spans
+    * several jobs writes one entry per job, which is the eviction [[LocalCacheMode]] exists to stop.
+    */
+  private def validateLocalCacheOwner(capabilities: List[Capability], graph: ModuleGraph): Unit =
+    val owners = capabilities.filter(_.localCache == LocalCacheMode.Save)
+    if owners.sizeIs > 1 then
+      sys.error(
+        s"zipx: LocalCacheMode.Save is set on ${owners.map(_.name).sorted.mkString(", ")}. One capability saves the " +
+          "build snapshot each run and every other job restores it. Keep Save on the test capability and set " +
+          "LocalCacheMode.Restore on the rest."
+      )
+    owners.foreach { c =>
+      val spread =
+        if c.scope == CapabilityScope.Graph then Some("is Graph-scoped")
+        else if c.matrixed then Some("is matrixed")
+        else if distinctFannedTargets(c, graph).nonEmpty then Some("fans out one job per target")
+        else None
+      spread.foreach(why =>
+        sys.error(
+          s"zipx: capability '${c.name}' has LocalCacheMode.Save but $why, so each of its jobs would save its own " +
+            "entry. Add .withLocalCache(LocalCacheMode.Restore) to it and keep Save on a single-session test " +
+            "capability (Capability.test, testJoined, or testLayers)."
+        )
+      )
+    }
+  end validateLocalCacheOwner
 
   /** Library `publish` must be Graph + OnDefaultPush when Ship rows are present. Docker is not this refusal. */
   private def validateModverPublish(capabilities: List[Capability], config: PlanConfig): Unit =
@@ -633,7 +662,8 @@ object Planner:
         ).unwrapped
       ),
       env = EnvValue.renderAll(config.env) ++ EnvValue.renderAll(config.cacheRehydrateEnv),
-      steps = checkoutThenSbtSetup(config, cacheRehydrateJobId, nodeVersion = None, localCache = true) ++
+      // The merge push's only save: Verify was skipped, so nothing else writes the default branch's build snapshot.
+      steps = checkoutThenSbtSetup(config, cacheRehydrateJobId, nodeVersion = None, LocalCacheMode.Save) ++
         config.cacheRehydrateExtraSteps(ctx) ++ List(
           Step.run(Script(config.cacheRehydrateTask.render)).named(cacheRehydrateJobId).build
         ),
@@ -687,7 +717,7 @@ object Planner:
       `if` = cond,
       env = EnvValue.renderAll(config.env),
       outputs = ListMap("modules" -> Expr.stepOutput("compute", "modules").render),
-      steps = checkoutThenSbtSetup(config, affectedJobId, nodeVersion = None, localCache = false) ++ List(
+      steps = checkoutThenSbtSetup(config, affectedJobId, nodeVersion = None, LocalCacheMode.Off) ++ List(
         Step
           .run(affectedScript(config.affectedOnPush))
           .withId("compute")
@@ -705,7 +735,7 @@ object Planner:
       permissions = ListMap("contents" -> "read"),
       env = EnvValue.renderAll(config.env),
       outputs = ListMap("modules" -> Expr.stepOutput("compute", "modules").render),
-      steps = checkoutThenSbtSetup(config, modverJobId, nodeVersion = None, localCache = false) ++ List(
+      steps = checkoutThenSbtSetup(config, modverJobId, nodeVersion = None, LocalCacheMode.Off) ++ List(
         Step
           .run(modverScript)
           .withId("compute")
@@ -1707,9 +1737,11 @@ object Planner:
         val commandStep =
           if capability.phase == Phase.Verify then verifyCommandStep(capability.name, onMatrixLeg, cmd, config)
           else Step.run(Script(onMatrixLeg(cmd).render)).named(capability.name).build
-        val localCache = config.cache == CacheBackend.LocalDir && cache.steps.isEmpty
+        val cacheMode =
+          if config.cache == CacheBackend.LocalDir && cache.steps.isEmpty then capability.localCache
+          else LocalCacheMode.Off
         // Local composites need the workspace on disk before `uses: ./.github/actions/…` can resolve.
-        checkoutThenSbtSetup(config, jobSuffix, capability.nodeVersion, localCache) ++ cache.steps ++
+        checkoutThenSbtSetup(config, jobSuffix, capability.nodeVersion, cacheMode) ++ cache.steps ++
           capability.extraSteps(ctx) ++ List(commandStep) ++ capability.postSteps(ctx)
     end match
   end stepsFor
@@ -1719,11 +1751,11 @@ object Planner:
       config: PlanConfig,
       jobSuffix: JobId,
       nodeVersion: Option[NodeVersion],
-      localCache: Boolean,
+      cacheMode: LocalCacheMode,
   ): List[Step] =
     List(
       checkoutStep(config),
-      ZipxComposites.sbtSetupStep(config, jobSuffix, nodeVersion, localCache),
+      ZipxComposites.sbtSetupStep(config, jobSuffix, nodeVersion, cacheMode),
     )
 
   private def checkoutStep(config: PlanConfig): Step =

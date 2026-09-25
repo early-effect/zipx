@@ -188,8 +188,9 @@ direct push and running Verify again.
 With **LocalDir**, that skip would otherwise leave `main` without an `actions/cache` save (PR caches are
 branch-scoped; later PRs only warm from the default branch). So by default zipx also emits a minimal
 `cache-rehydrate` job that runs **only** when verify-gate skips Verify: same checkout / JDK / LocalDir cache
-path, then `compile` (override with `zipxCacheRehydrateTask`). No full test, no `verifyClean`. Set
-`zipxCacheRehydrateOnMerge := false` to opt out; remote backends never emit it.
+path, then `Test/compile` (override with `zipxCacheRehydrateTask`), so the next PR's `test` job restores test classes
+as well as main ones. It is the merge push's only LocalDir save (see **Caching**, "Who saves"). No full test, no
+`verifyClean`. Set `zipxCacheRehydrateOnMerge := false` to opt out; remote backends never emit it.
 
 To also warm **non-sbt** blobs that live under `target/` (e.g. Playwright browsers), opt into rehydrate-only
 `extraSteps`. Prefer build-wide **`zipxEnv`** for vars needed on Verify **and** rehydrate; use
@@ -203,11 +204,11 @@ val browserSetup = Steps.built("browsers")(
 
 zipxSkipMergedPrPush := true  // default
 zipxCacheRehydrateOnMerge := true  // default; LocalDir only
-zipxCacheRehydrateTask := zipxTasks.of(compile)  // default
+zipxCacheRehydrateTask := zipxTasks.of(Test / compile)  // default
 zipxEnv := Map(
   "PLAYWRIGHT_BROWSERS_PATH" -> EnvValue.typed(Expr.github("workspace") ++ Expr.lit("/target/ms-playwright")),
 )
-zipxCacheRehydrateExtraSteps := browserSetup  // after cache restore, before compile
+zipxCacheRehydrateExtraSteps := browserSetup  // after cache restore, before Test/compile
 ```
 
 `EnvValue.typed` takes any `Expr`, so `++` concatenates a context reference with literal text instead of spelling the
@@ -245,7 +246,7 @@ nothing here is a hand-written shell string. See **Shell and steps** for the who
           yaml.contains("Install browsers"),
           yaml.contains("PLAYWRIGHT_BROWSERS_PATH"),
           yaml.contains("npm ci"),
-          yaml.contains("sbt 'compile'"),
+          yaml.contains("sbt 'Test/compile'"),
         )
       ),
     ),

@@ -75,14 +75,17 @@ lazy val root = (project in file("."))
         // Override Aggregate `test` so consumer proofs share the verify job: unit/IT tests, then plugin scripted,
         // then publishLocal + examples/monorepo zipxWorkflowCheck (former consumer-verify job).
         // extraSteps: saferis-style pre-pull so Testcontainers does not hit Hub mid-suite (Ryuk stays on).
-        Capability.once(
-          name = Capability.TestName,
-          command = zipxTasks.session(test, LocalProject("plugin") / scripted),
-          phase = Phase.Verify,
-          gate = Gate.Always,
-          extraSteps = RemoteCacheItSteps.prePull,
-          postSteps = zipx.ExampleCheck.steps,
-        ),
+        Capability
+          .once(
+            name = Capability.TestName,
+            command = zipxTasks.session(test, LocalProject("plugin") / scripted),
+            phase = Phase.Verify,
+            gate = Gate.Always,
+            extraSteps = RemoteCacheItSteps.prePull,
+            postSteps = zipx.ExampleCheck.steps,
+          )
+          // Replaces the builtin test by name, so it has to claim the LocalDir snapshot itself.
+          .withLocalCache(LocalCacheMode.Save),
       )
     },
     zipxJavaVersion                := JdkVersion("25"),

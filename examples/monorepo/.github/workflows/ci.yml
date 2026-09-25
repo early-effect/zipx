@@ -72,10 +72,10 @@ jobs:
           cache-key-suffix: cache-rehydrate
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: save
           cache-epoch: "8f2e77a00c7c0f58"
       - name: cache-rehydrate
-        run: sbt 'compile'
+        run: sbt 'Test/compile'
   modver:
     name: modver
     runs-on: ubuntu-latest
@@ -97,7 +97,7 @@ jobs:
           cache-key-suffix: modver
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "false"
+          cache-mode: "off"
           cache-epoch: "8f2e77a00c7c0f58"
       - name: Compute version-moved modules
         id: compute
@@ -138,7 +138,7 @@ jobs:
           cache-key-suffix: test-L0
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: save
           cache-epoch: "8f2e77a00c7c0f58"
       - name: test
         run: |
@@ -167,7 +167,7 @@ jobs:
           cache-key-suffix: test-L1
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: save
           cache-epoch: "8f2e77a00c7c0f58"
       - name: test
         run: |
@@ -196,7 +196,7 @@ jobs:
           cache-key-suffix: test-L2
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: save
           cache-epoch: "8f2e77a00c7c0f58"
       - name: test
         run: |
@@ -226,7 +226,7 @@ jobs:
           cache-key-suffix: fmt
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: fmt
         run: |
@@ -256,7 +256,7 @@ jobs:
           cache-key-suffix: workflow-check
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: workflow-check
         run: |
@@ -286,7 +286,7 @@ jobs:
           cache-key-suffix: advisories
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: advisories
         run: |
@@ -321,7 +321,7 @@ jobs:
           cache-key-suffix: modver-suggest
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
@@ -357,7 +357,7 @@ jobs:
           cache-key-suffix: modver-check
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
@@ -391,7 +391,7 @@ jobs:
           cache-key-suffix: publish-models
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: publish
         run: sbt '+models/zipxModverPublishSigned'
@@ -417,7 +417,7 @@ jobs:
           cache-key-suffix: publish-coreLib
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: publish
         run: sbt '+coreLib/zipxModverPublishSigned'
@@ -443,7 +443,7 @@ jobs:
           cache-key-suffix: publish-client
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: publish
         run: sbt '+client/zipxModverPublishSigned'
@@ -476,7 +476,7 @@ jobs:
           cache-key-suffix: docker
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: zipx AWS login (eu)
         uses: ./.github/actions/zipx-aws-login
@@ -536,7 +536,7 @@ jobs:
           cache-key-suffix: deploy
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: "8f2e77a00c7c0f58"
       - name: zipx AWS login
         uses: ./.github/actions/zipx-aws-login

@@ -457,7 +457,9 @@ object ZipxSettings:
     SettingDef.setting(
       SettingName("zipxCacheRehydrateTask"),
       PlanConfig.DefaultCacheRehydrateTask,
-      SettingPurpose("sbt command for the cache-rehydrate job (default compile). Not full Verify."),
+      SettingPurpose(
+        "sbt command for the cache-rehydrate job (default Test/compile, so the next PR's test job restores test classes too). Not full Verify."
+      ),
       Build,
     )
 

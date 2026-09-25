@@ -303,6 +303,7 @@ object ActionPinFile:
   def annotateUses(yaml: String, pins: ActionPins): String =
     val labelled: List[(String, String)] =
       ActionPins.Field.values.toList.flatMap(f => pins.version(f).map(pins.field(f).unwrap -> _)) ++
+        pins.version(ActionPins.Field.Cache).map(pins.cacheRestore.unwrap -> _).toList ++
         pins.extra.toList.flatMap { case (key, ref) => pins.extraVersion(key).map(ref.unwrap -> _) }
 
     val trailingNl = yaml.endsWith("\n")

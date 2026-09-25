@@ -50,13 +50,15 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
         assertRuntime(plan(withRuntime(Capability.testJoined)).jobs("test"))
       },
       test("Aggregate fanned out per target, where each target's job needs the same sidecar") {
-        val cap =
-          withRuntime(Capability.testJoined).withTargets(_ => List(Target(TargetName("a")), Target(TargetName("b"))))
+        // One job per target cannot own the LocalDir snapshot, so these restore it.
+        val cap = withRuntime(Capability.testJoined.withLocalCache(LocalCacheMode.Restore))
+          .withTargets(_ => List(Target(TargetName("a")), Target(TargetName("b"))))
         val wf = plan(cap)
         assertRuntime(wf.jobs("test-a")) && assertRuntime(wf.jobs("test-b"))
       },
       test("Auto Aggregate target fan-out still carries runtime on the collapsed job") {
         val cap = Capability.testJoined
+          .withLocalCache(LocalCacheMode.Restore)
           .withService("postgres", postgres)
           .inContainer(image)
           .withTargets(_ => List(Target(TargetName("a")), Target(TargetName("b"))))

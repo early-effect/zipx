@@ -57,7 +57,7 @@ object VersionUpdatesWorkflow:
           "cache-key-suffix" -> "version-updates",
           "node-version"     -> "",
           "sbt-disk-cache"   -> "false",
-          "local-cache"      -> "true",
+          "cache-mode"       -> LocalCacheMode.Restore.input,
           "coursier"         -> "true",
         )
       )

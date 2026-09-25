@@ -55,7 +55,7 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
         PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.0.0")),
         JobId("test"),
         None,
-        localCache = true,
+        cacheMode = LocalCacheMode.Save,
       )
       val without = workflowWith(List(setup))
       assertTrue(ZipxComposites.usesAwsLogin(withAws), !ZipxComposites.usesAwsLogin(without))
@@ -73,12 +73,37 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
         PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.0.0")),
         JobId("test"),
         None,
-        localCache = true,
+        cacheMode = LocalCacheMode.Save,
       )
       assertTrue(
         step.uses.contains(ZipxComposites.SbtSetupRef),
         step.`with`.get("cache-epoch").contains("1.0.0"),
-        step.`with`.get("local-cache").contains("true"),
+        step.`with`.get("cache-mode").contains("save"),
+      )
+    },
+    test("only a save step writes the cache; restore steps use actions/cache/restore at the same pin") {
+      val steps                    = ZipxComposites.sbtSetup(pins).steps
+      def cacheSteps(mode: String) = steps.filter(_.`if`.exists(_.contains(s"inputs.cache-mode == '$mode'")))
+      assertTrue(
+        cacheSteps("save").nonEmpty,
+        cacheSteps("save").forall(_.uses.contains(pins.cache)),
+        cacheSteps("restore").nonEmpty,
+        cacheSteps("restore").forall(_.uses.contains(pins.cacheRestore)),
+        pins.cacheRestore.unwrap == pins.cache.unwrap.replace("actions/cache@", "actions/cache/restore@"),
+        !steps.exists(_.`if`.exists(_.contains("inputs.cache-mode == 'off'"))),
+      )
+    },
+    test("every cache key and restore key but the OS+JDK fallback carries the build role") {
+      val prefix = "${{ inputs.runner-os }}-jdk${{ inputs.java-version }}-sbt-"
+      val keys   = ZipxComposites
+        .sbtSetup(pins)
+        .steps
+        .filter(_.`with`.contains("key"))
+        .flatMap(s => s.`with`("key") :: s.`with`("restore-keys").linesIterator.toList)
+      assertTrue(
+        keys.nonEmpty,
+        keys.filterNot(_ == prefix).forall(_.contains("-build-")),
+        keys.contains(prefix),
       )
     },
   )

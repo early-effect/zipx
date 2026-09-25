@@ -95,12 +95,14 @@ zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUD
 ```
 
 - **LocalDir**: persist local cache dirs and `target/` with `actions/cache` inside the generated `zipx-sbt-setup`
-  composite. Primary key is OS + JDK + epoch + run id + job id; restore-keys prefer the same run, then the epoch, then
-  the prior release epoch (Fixed: strip `-ci` / `-SNAPSHOT`; GitTags/Script: `steps.*.outputs.release`) so the first
-  post-tag PR can warm from the tag build, then any older OS+JDK sbt cache. No infrastructure. GitHub scopes cache
-  entries to the branch that saved them; other PRs restore from the **default branch**. With `zipxSkipMergedPrPush`,
-  Verify does not run on the merge push, so by default a minimal `cache-rehydrate` job recreates a main-scoped save
-  (see **Verify**). You cannot copy a PR cache onto main via the API.
+  composite. One job owns the **build snapshot** and saves it; every other sbt job restores it and saves nothing (see
+  **Who saves** below). Keys are OS + JDK + epoch + `build` + run id + job id; restore-keys prefer this run's build
+  saves, then the epoch's latest build save, then (GitTags/Script) the release epoch's
+  (`steps.*.outputs.release`) so the first post-tag PR can warm from the tag build, then any older OS+JDK sbt cache.
+  No infrastructure. GitHub scopes cache entries to the branch that saved them; other PRs restore from the **default
+  branch**. With `zipxSkipMergedPrPush`, Verify does not run on the merge push, so by default a minimal
+  `cache-rehydrate` job recreates a main-scoped save (see **Verify**). You cannot copy a PR cache onto main via the
+  API.
 - **BazelRemoteSidecar**: pinned `buchgr/bazel-remote-cache` as a job service; shared across the run via Bazel gRPC.
   Proof pins live in `RemoteCacheProof` (docs, planner tests, and `RemoteCacheItSpec` share them).
 - **ManagedRemote**: point sbt at BuildBuddy / EngFlow / NativeLink; auth header from a named repository secret.
@@ -109,8 +111,8 @@ zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUD
 The remote-cache transport is bundled with zipx. For remote backends zipx also sets `Global / cacheVersion` from
 `(JDK, OS)` so heterogeneous runners cannot poison the shared cache. **`CacheEpoch.ShipCatalog` does not fold the Ship
 hash into that value.** A bump already changes that module's `version`, which is a digest input, so only that module's
-remote entries miss. Remote backends turn off LocalDir cache in `zipx-sbt-setup` (the gRPC store is the persistence);
-LocalDir passes `local-cache: true` so the composite runs epoch-keyed `actions/cache`.
+remote entries miss. Remote backends pass `cache-mode: off` to `zipx-sbt-setup` (the gRPC store is the persistence);
+LocalDir passes `save` or `restore`, so the composite runs epoch-keyed `actions/cache` or `actions/cache/restore`.
 """,
       exampleValue {
         val local = DocsRender.job("test")(Capability.test)(using
@@ -134,15 +136,47 @@ LocalDir passes `local-cache: true` so the composite runs epoch-keyed `actions/c
             yaml.contains(s"${RemoteCacheProof.envUri}: \"grpcs://cache.example\""),
           yaml.split("---").toList match
             case local :: sidecar :: managed :: Nil =>
-              local.contains("local-cache: \"true\"") &&
+              local.contains("cache-mode: save") &&
               !local.contains("actions/cache") &&
-              sidecar.contains("local-cache: \"false\"") &&
-              managed.contains("local-cache: \"false\"") &&
+              // Quoted, since a bare `off` is a YAML 1.1 boolean.
+              sidecar.contains("cache-mode: \"off\"") &&
+              managed.contains("cache-mode: \"off\"") &&
               !sidecar.contains("actions/cache") &&
               !managed.contains("actions/cache") &&
               sidecar.contains(RemoteCacheProof.image)
             case _ => false,
         )
+      ),
+    ),
+    section("Who saves")(
+      md"""
+Every sbt job restores the LocalDir build snapshot. Only its **owner** saves one. The builtin `test` owns it on PRs
+and direct pushes, and `cache-rehydrate` owns it on a merge push, where Verify is skipped. `testLayers` saves once per
+wave, so each wave warms the next through the same-run key. Graph test jobs, coverage, publish, docker, and deploy
+jobs restore through `actions/cache/restore` and never save.
+
+```scala
+Capability.test                              // LocalCacheMode.Save: the default owner
+Capability.testGraph                         // Restore: its jobs compile disjoint slices of the build
+myCheck.withLocalCache(LocalCacheMode.Save)  // take ownership in place of the builtin test
+```
+
+A capability that replaces the builtin `test` by name decides for itself. `Coverage.once(name = Capability.TestName)`
+restores and never saves, because an instrumented snapshot is not the build. Generate refuses two owners, and an owner
+that would save once per job (Graph-scoped, matrixed, or fanned out per target).
+
+**Budget.** GitHub gives a repository 10 GB of `actions/cache` and evicts the least recently used entries past that.
+One save per run means the quota holds about `10 GB / snapshot size` runs, and the default branch's snapshot stays
+fresh because every PR restores it. When every sbt job saved its own entry, one PR run of a small nine-job build wrote
+about 3 GB, and a single wave of four PRs evicted the default branch's snapshot.
+""",
+      exampleValue {
+        DocsRender.jobs("test", "publish")(Capability.test, Capability.publish.copy(gate = Gate.Always))
+      }.assert(yaml =>
+        yaml.split("(?m)^\\s*publish:").toList match
+          case test :: publish :: Nil =>
+            assertTrue(test.contains("cache-mode: save"), publish.contains("cache-mode: restore"))
+          case _ => assertTrue(false)
       ),
     ),
     section("Action pins")(
