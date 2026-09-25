@@ -23,6 +23,8 @@ object ZipxPlugin extends AutoPlugin:
     val CacheBackend = zipx.core.CacheBackend
     type CacheEpoch = zipx.core.CacheEpoch
     val CacheEpoch = zipx.core.CacheEpoch
+    type LocalCacheMode = zipx.core.LocalCacheMode
+    val LocalCacheMode = zipx.core.LocalCacheMode
     type ActionPins = zipx.core.ActionPins
     val ActionPins = zipx.core.ActionPins
     type Cron = zipx.workflow.Cron
@@ -476,7 +478,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxAffectedDeploy           := false,
     zipxSkipMergedPrPush         := true,
     zipxCacheRehydrateOnMerge    := true,
-    zipxCacheRehydrateTask       := CapabilityTasks.of(compile),
+    zipxCacheRehydrateTask       := CapabilityTasks.of(Test / compile),
     zipxCacheRehydrateExtraSteps := (_ => Nil),
     zipxCacheRehydrateEnv        := Map.empty,
     zipxEnv                      := Map.empty,
@@ -752,7 +754,7 @@ object ZipxPlugin extends AutoPlugin:
       workflowDispatch = read(zipxWorkflowDispatch, false),
       skipMergedPrPush = read(zipxSkipMergedPrPush, true),
       cacheRehydrateOnMerge = read(zipxCacheRehydrateOnMerge, true),
-      cacheRehydrateTask = read(zipxCacheRehydrateTask, CapabilityTasks.of(compile)),
+      cacheRehydrateTask = read(zipxCacheRehydrateTask, CapabilityTasks.of(Test / compile)),
       cacheRehydrateExtraSteps = read(zipxCacheRehydrateExtraSteps, (_ => Nil)),
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
       env = read(zipxEnv, Map.empty),
@@ -787,7 +789,9 @@ object ZipxPlugin extends AutoPlugin:
       verify: ZipxVerify,
   ): List[Capability] =
     val test =
-      Capability.once(name = Capability.TestName, command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
+      Capability
+        .once(name = Capability.TestName, command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
+        .withLocalCache(LocalCacheMode.Save)
     val fmt = verifyGate(
       verify.fmt,
       Capability.FmtName,

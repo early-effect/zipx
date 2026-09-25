@@ -79,6 +79,26 @@ object ZipxComposites:
     val keySuffix  = input("cache-key-suffix")
     val runId      = "${{ github.run_id }}"
 
+    // Only `build` snapshots are ever saved, so a restore can never pick up another job's partial one. Save and restore
+    // share keys: an earlier Layer wave's save warms the next wave through the same-run key.
+    def cacheStep(mode: LocalCacheMode, resolved: Boolean): Step =
+      val epoch = if resolved then epochOut else fixedEpoch
+      val build = s"$prefix$epoch-build-"
+      // A Fixed epoch is baked at generate time, so there is no runtime release output to fall back to.
+      val older = if resolved then List(s"$prefix$releaseOut-build-", prefix) else List(prefix)
+      Step(
+        name = Some(if mode == LocalCacheMode.Save then "Cache sbt" else "Restore sbt cache"),
+        `if` =
+          Some(s"inputs.cache-mode == '${mode.input}' && inputs.cache-epoch ${if resolved then "==" else "!="} ''"),
+        uses = Some(if mode == LocalCacheMode.Save then pins.cache else pins.cacheRestore),
+        `with` = ListMap(
+          "path"         -> cachePaths,
+          "key"          -> s"$build$runId-$keySuffix",
+          "restore-keys" -> (s"$build$runId-" :: build :: older).mkString("\n"),
+        ),
+      )
+    end cacheStep
+
     val steps: List[Step] = List(
       Step(
         name = Some("Setup JDK"),
@@ -107,42 +127,14 @@ object ZipxComposites:
       Step(
         id = Some(resolveId),
         name = Some("Resolve cache epoch"),
-        `if` = Some("inputs.local-cache == 'true' && inputs.cache-epoch == ''"),
+        `if` = Some("inputs.cache-mode != 'off' && inputs.cache-epoch == ''"),
         run = Some(resolveScript),
         shell = Some("bash"),
       ),
-      Step(
-        name = Some("Cache sbt"),
-        `if` = Some("inputs.local-cache == 'true' && inputs.cache-epoch == ''"),
-        uses = Some(pins.cache),
-        `with` = ListMap(
-          "path"         -> cachePaths,
-          "key"          -> s"$prefix$epochOut-$runId-$keySuffix",
-          "restore-keys" -> List(
-            s"$prefix$epochOut-$runId-",
-            s"$prefix$epochOut-",
-            s"$prefix$releaseOut-",
-            prefix,
-          ).mkString("\n"),
-        ),
-      ),
-      Step(
-        name = Some("Cache sbt"),
-        `if` = Some("inputs.local-cache == 'true' && inputs.cache-epoch != ''"),
-        uses = Some(pins.cache),
-        `with` = ListMap(
-          "path"         -> cachePaths,
-          "key"          -> s"$prefix$fixedEpoch-$runId-$keySuffix",
-          "restore-keys" -> List(
-            s"$prefix$fixedEpoch-$runId-",
-            s"$prefix$fixedEpoch-",
-            // Prior-release fallback is resolved at generate time when the caller passes a Fixed epoch; for a runtime
-            // input we cannot strip -ci here, so callers that need it pass the release epoch as a separate restore via
-            // regenerate. The common GitTags path above already restores from steps.cache-epoch.outputs.release.
-            prefix,
-          ).mkString("\n"),
-        ),
-      ),
+      cacheStep(LocalCacheMode.Save, resolved = true),
+      cacheStep(LocalCacheMode.Save, resolved = false),
+      cacheStep(LocalCacheMode.Restore, resolved = true),
+      cacheStep(LocalCacheMode.Restore, resolved = false),
     )
 
     CompositeAction(
@@ -153,14 +145,14 @@ object ZipxComposites:
         "java-version"     -> CompositeInput("Temurin JDK version", required = true),
         "runner-os"        -> CompositeInput("Runner OS label used in the cache key prefix", required = true),
         "cache-key-suffix" -> CompositeInput(
-          "Per-job suffix so same-run jobs do not race on one cache key",
+          "Per-job suffix so same-run saves (one per Layer wave) do not race on one cache key",
           required = true,
         ),
         "node-version"   -> CompositeInput("Optional Node version; empty skips setup-node", default = Some("")),
         "sbt-disk-cache" -> CompositeInput("Passed to sbt/setup-sbt disk-cache", default = Some("false")),
-        "local-cache"    -> CompositeInput(
-          "When true, resolve epoch and restore/save the LocalDir sbt cache",
-          default = Some("true"),
+        "cache-mode"     -> CompositeInput(
+          "LocalDir sbt cache: save (restore, then save this job's build snapshot), restore (restore only), or off",
+          default = Some(LocalCacheMode.Restore.input),
         ),
         "cache-epoch" -> CompositeInput(
           "Fixed cache epoch; when non-empty skips git-tag resolve and keys the cache with this value",
@@ -228,7 +220,7 @@ object ZipxComposites:
       config: PlanConfig,
       jobSuffix: JobId,
       nodeVersion: Option[NodeVersion],
-      localCache: Boolean,
+      cacheMode: LocalCacheMode,
   ): Step =
     val fixedEpoch = config.cacheEpoch match
       case CacheEpoch.Fixed(value) => value
@@ -247,7 +239,7 @@ object ZipxComposites:
           "cache-key-suffix" -> (jobSuffix: String),
           "node-version"     -> nodeVersion.getOrElse(""),
           "sbt-disk-cache"   -> diskCache,
-          "local-cache"      -> (if localCache then "true" else "false"),
+          "cache-mode"       -> cacheMode.input,
           "cache-epoch"      -> fixedEpoch,
         )
       )

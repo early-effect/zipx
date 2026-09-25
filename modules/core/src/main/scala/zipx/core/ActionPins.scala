@@ -74,6 +74,15 @@ final case class ActionPins(
 
   def version(f: Field): Option[String] = versions.get(f.key)
 
+  /** `actions/cache/restore` at the [[cache]] pin's own ref, so the restore-only half can never drift from it.
+    *
+    * `unsafeMake` because inserting a path segment before `@` keeps every shape [[zipx.workflow.ActionRef]] accepts
+    * valid.
+    */
+  def cacheRestore: ActionRef =
+    val (action, ref) = cache.unwrap.span(_ != '@')
+    ActionRef.unsafeMake(s"$action/restore$ref")
+
   /** Pins an action zipx does not emit, for a step a consumer or a pack writes.
     *
     * `version` is the `# vX.Y.Z` label. Key is the action name (`owner/repo`) so [[extraByPrefix]] can find it.

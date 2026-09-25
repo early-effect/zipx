@@ -35,6 +35,9 @@ object PlannerSpec extends ZIOSpecDefault:
     */
   private val prodOnly: JobCondition = JobCondition.varNonEmpty("DEPLOY_PROD_ENABLED")
 
+  private def cacheModeOf(job: Job): Option[String] =
+    job.steps.find(_.uses.contains(ZipxComposites.SbtSetupRef)).flatMap(_.`with`.get("cache-mode"))
+
   private val stagingProd = List(
     Target(
       TargetName("staging"),
@@ -300,7 +303,7 @@ object PlannerSpec extends ZIOSpecDefault:
         PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci")),
         zipx.workflow.JobId("test"),
         None,
-        localCache = true,
+        cacheMode = LocalCacheMode.Save,
       )
       assertTrue(
         Planner.priorReleaseEpochKey(prefix, "1.2.3-ci").contains(s"${prefix}1.2.3-"),
@@ -327,7 +330,7 @@ object PlannerSpec extends ZIOSpecDefault:
         PlanConfig(cacheEpoch = CacheEpoch.GitTags()),
         zipx.workflow.JobId("test"),
         None,
-        localCache = true,
+        cacheMode = LocalCacheMode.Save,
       )
       val checkout = steps.find(_.uses.exists(_.unwrap.contains("checkout")))
       assertTrue(
@@ -479,7 +482,7 @@ object PlannerSpec extends ZIOSpecDefault:
         job.env.isEmpty,
         job.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
         job.steps.exists(s =>
-          s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("local-cache").contains("true")
+          s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("cache-mode").contains("restore")
         ),
         job.steps.exists(s =>
           s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("sbt-disk-cache").contains("false")
@@ -499,9 +502,7 @@ object PlannerSpec extends ZIOSpecDefault:
         job.services(RemoteCacheProof.serviceName).ports == List(RemoteCacheProof.portMapping),
         job.env.get(RemoteCacheProof.envUri).contains(RemoteCacheProof.grpcLocalhost),
         job.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
-        job.steps.exists(s =>
-          s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("local-cache").contains("false")
-        ),
+        job.steps.exists(s => s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("cache-mode").contains("off")),
       )
     },
     test("ManagedRemote backend sets the endpoint + header-from-secret env, no service") {
@@ -1214,22 +1215,64 @@ object PlannerSpec extends ZIOSpecDefault:
           "needs.verify-gate.result == 'success' && needs.verify-gate.outputs.run == 'false'"
         ),
         rehydrate.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
-        rehydrate.steps.exists(_.run.contains("sbt 'compile'")),
-        !rehydrate.steps.exists(_.run.exists(_.contains("test"))),
+        rehydrate.steps.exists(_.run.contains("sbt 'Test/compile'")),
+        !rehydrate.steps.exists(_.run.exists(_.contains("testFull"))),
       )
     },
     test("cacheRehydrateOnMerge uses configurable task and does not gate Publish") {
       val wf = Planner.plan(
         sampleGraph,
         List(Capability.test, Capability.publish),
-        config.copy(skipMergedPrPush = true, cacheRehydrateTask = SbtCommand.unsafeTask("Test/compile")),
+        config.copy(skipMergedPrPush = true, cacheRehydrateTask = SbtCommand.unsafeTask("compile")),
       )
       assertTrue(
-        wf.jobs("cache-rehydrate").steps.exists(_.run.contains("sbt 'Test/compile'")),
+        wf.jobs("cache-rehydrate").steps.exists(_.run.contains("sbt 'compile'")),
         !wf.jobs("publish").needs.contains("cache-rehydrate"),
         !wf.jobs("publish").needs.contains("verify-gate"),
       )
     },
+    suite("LocalDir snapshot ownership")(
+      test("the builtin test and cache-rehydrate are the only jobs that save; setup jobs skip the cache") {
+        val wf = Planner.plan(
+          sampleGraph,
+          List(Capability.test, Capability.publish, Capability.testGraph.copy(name = CapabilityName("check"))),
+          config.copy(skipMergedPrPush = true),
+        )
+        val saving = wf.jobs.collect { case (id, job) if cacheModeOf(job).contains("save") => id }.toSet
+        assertTrue(
+          saving == Set("test", "cache-rehydrate"),
+          wf.jobs.filter((id, _) => id.startsWith("check-")).values.forall(j => cacheModeOf(j).contains("restore")),
+          cacheModeOf(wf.jobs("publish")).contains("restore"),
+          wf.jobs.get("affected").forall(j => cacheModeOf(j).contains("off")),
+        )
+      },
+      test("testLayers saves once per wave, so each wave warms the next through the same-run key") {
+        val wf    = Planner.plan(sampleGraph, List(Capability.testLayers), config)
+        val waves = wf.jobs.filter((id, _) => id.startsWith("test-L"))
+        assertTrue(waves.size > 1, waves.values.forall(j => cacheModeOf(j).contains("save")))
+      },
+      test("a capability that replaces the builtin test by name decides for itself, so coverage never saves") {
+        val coverage = Coverage.once(name = Capability.TestName)
+        val wf       = Planner.plan(sampleGraph, List(coverage), config)
+        assertTrue(coverage.localCache == LocalCacheMode.Restore, cacheModeOf(wf.jobs("test")).contains("restore"))
+      },
+      test("remote backends turn the LocalDir cache off even on the owner") {
+        val wf = Planner.plan(sampleGraph, List(Capability.test), config.copy(cache = RemoteCacheProof.sidecar))
+        assertTrue(cacheModeOf(wf.jobs("test")).contains("off"))
+      },
+      test("two owners are refused") {
+        val second = Capability.testJoined.copy(name = CapabilityName("smoke"))
+        val result = scala.util.Try(Planner.plan(sampleGraph, List(Capability.test, second), config))
+        assertTrue(
+          result.failed.toOption.exists(e => e.getMessage.contains("LocalCacheMode.Save is set on smoke, test"))
+        )
+      },
+      test("a Graph owner is refused, since each of its jobs would save") {
+        val graphOwner = Capability.testGraph.withLocalCache(LocalCacheMode.Save)
+        val result     = scala.util.Try(Planner.plan(sampleGraph, List(graphOwner), config))
+        assertTrue(result.failed.toOption.exists(e => e.getMessage.contains("is Graph-scoped")))
+      },
+    ),
     test("cacheRehydrateOnMerge false or remote cache omits rehydrate job") {
       val off = Planner.plan(
         sampleGraph,
@@ -1264,7 +1307,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val names     = rehydrate.steps.flatMap(_.name)
       val setupIdx  = rehydrate.steps.indexWhere(_.uses.contains(ZipxComposites.SbtSetupRef))
       val extraIdx  = rehydrate.steps.indexWhere(_.name.contains("Install browsers"))
-      val cmdIdx    = rehydrate.steps.indexWhere(_.run.exists(_.contains("sbt 'compile'")))
+      val cmdIdx    = rehydrate.steps.indexWhere(_.run.exists(_.contains("sbt 'Test/compile'")))
       val plain     = Planner.plan(sampleGraph, List(Capability.test), config.copy(skipMergedPrPush = true))
       assertTrue(
         rehydrate.env.get("PLAYWRIGHT_BROWSERS_PATH").contains("${{ github.workspace }}/target/ms-playwright"),

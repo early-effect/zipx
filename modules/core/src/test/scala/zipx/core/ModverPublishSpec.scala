@@ -252,7 +252,7 @@ object ModverPublishSpec extends ZIOSpecDefault:
         PlanConfig(cacheEpoch = CacheEpoch.ShipCatalog, shipEpochHash = Some(hash)),
         JobId("test"),
         None,
-        localCache = true,
+        cacheMode = LocalCacheMode.Save,
       )
       assertTrue(step.`with`.get("cache-epoch").contains(hash))
     },

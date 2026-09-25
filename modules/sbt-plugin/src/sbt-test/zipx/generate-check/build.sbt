@@ -128,16 +128,20 @@ assertGraph := {
   assert(content.contains("uses: ./.github/actions/zipx-sbt-setup"), "expected zipx-sbt-setup composite")
   assert(content.contains("cache-key-suffix: test-schema"), "cache-key-suffix should be the job id")
   assert(content.contains("cache-epoch: \"1.0.0-ci\""), "Fixed epoch should be passed into the composite")
-  assert(content.contains("local-cache: \"true\""), "LocalDir must enable local-cache on the composite")
+  assert(content.contains("cache-mode: restore"), "Graph test jobs must restore the LocalDir snapshot, never save it")
+  assert(
+    content.split("cache-mode: save", -1).length - 1 == 1,
+    "with Graph test replacing the builtin test, cache-rehydrate must be the only job that saves",
+  )
   assert(content.contains("sbt-disk-cache: \"false\""), "LocalDir must disable setup-sbt hashFiles disk-cache")
   assert(!content.contains("cache: sbt"), "LocalDir must not enable setup-java cache:sbt")
   val setup =
     IO.read((LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-sbt-setup" / "action.yml")
   assert(
     setup.contains(
-      "key: ${{ inputs.runner-os }}-jdk${{ inputs.java-version }}-sbt-${{ inputs.cache-epoch }}-${{ github.run_id }}-${{ inputs.cache-key-suffix }}"
+      "key: ${{ inputs.runner-os }}-jdk${{ inputs.java-version }}-sbt-${{ inputs.cache-epoch }}-build-${{ github.run_id }}-${{ inputs.cache-key-suffix }}"
     ),
-    "composite cache key should embed epoch + run_id + job suffix",
+    "composite cache key should embed epoch + build role + run_id + job suffix",
   )
   assert(setup.contains("target"), "cache path should include target/ for compile + sona-staging reuse")
   val awsLogin = (LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-aws-login"
