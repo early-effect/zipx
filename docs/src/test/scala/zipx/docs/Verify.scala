@@ -4,8 +4,9 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zipx.docs.DocsFixtures.*
+import zipx.docs.DocsRender.yaml
 import zipx.shell.{Exec, Script, Word}
-import zipx.workflow.{Expr, Step}
+import zipx.workflow.{Cron, Expr, Step}
 import zio.test.*
 
 /** Verify-phase knobs shared by Aggregate, Layer, and Graph. */
@@ -85,7 +86,33 @@ addCommandAlias("testWithCoverage", "cleanFull; coverage; compile; test; coverag
 ```
 
 measures whichever tests sbt happened to run, satisfies `coverageMinimum` on near-zero data, and goes green. So zipx
-builds the command instead of taking one:
+builds the command instead of taking one. Prefer the companion workflow, which keeps coverage off every PR's
+required checks:
+
+```scala
+zipxCoverageWorkflow := Some(
+  Coverage.workflow(
+    CoverageTrigger.Scheduled(Cron.daily(hour = 3)),
+    CoverageTrigger.Dispatch,
+    CoverageTrigger.prLabel("coverage"),
+  )
+)
+```
+
+That writes `.github/workflows/zipx-coverage.yml`, one job running `coverage; testFull; coverageAggregate`:
+
+- `Scheduled` runs on the default branch, the only branch GitHub runs schedules on. `Dispatch` is **Actions → Run
+  workflow**, on any branch.
+- `prLabel("coverage")` runs on a PR once the label goes on, and on every push while it stays. A PR without the
+  label skips the job, and so does adding some other label to a PR that has it.
+- The job restores the build cache and never saves it, and nothing else runs in that workflow. An instrumented class
+  therefore never reaches `test`, an image, or a publish.
+
+The builtin `test` stays the PR's required check and the build cache's owner. Generate refuses a coverage capability
+named `test`, which would make every PR wait on an instrumented build, and a coverage capability that saves the
+cache. Setting `zipxCoverageWorkflow := None` (the default) deletes the file on the next generate.
+
+To measure in `ci.yml` instead, add a capability:
 
 ```scala
 zipxCapabilities += Coverage.once()   // coverage; testFull; coverageAggregate  (one session)
@@ -114,8 +141,26 @@ build-wide one.
 
 The report is uploaded with the already-pinned `actions/upload-artifact`, per module under `graph` so N jobs do not
 collide on one artifact name. `if-no-files-found: error`, on purpose: a run that measured nothing produces no report,
-and that should be a red job rather than an empty upload. Turn it off with `uploadReport = false`.
+and that should be a red job rather than an empty upload. Turn it off with `uploadReport = false` on the capabilities.
 """,
+      exampleValue {
+        val coverage = Coverage.workflow(
+          CoverageTrigger.Scheduled(Cron.daily(hour = 3)),
+          CoverageTrigger.Dispatch,
+          CoverageTrigger.prLabel("coverage"),
+        )
+        CoverageWorkflow.render(coverage, config).yaml
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("- labeled"),
+          yaml.contains("cron: \"0 3 * * *\""),
+          yaml.contains("workflow_dispatch: null"),
+          yaml.contains("cache-mode: restore"),
+          !yaml.contains("cache-mode: save"),
+          yaml.contains("sbt 'coverage; testFull; coverageAggregate'"),
+          yaml.contains("github.event.label.name == 'coverage'"),
+        )
+      ),
       exampleValue {
         DocsRender.jobs("coverage")(Coverage.once())
       }.assert(yaml =>

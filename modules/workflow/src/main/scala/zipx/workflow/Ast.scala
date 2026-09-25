@@ -25,11 +25,26 @@ final case class Workflow(
 /** See [[Render.triggersYaml]] for why this one block is rendered by hand. */
 final case class Triggers(
     push: Option[BranchFilter] = None,
-    pullRequest: Option[BranchFilter] = None,
+    pullRequest: Option[PullRequestTrigger] = None,
     workflowDispatch: Boolean = false,
     workflowCall: Boolean = false,
     schedule: List[Cron] = Nil,
 )
+
+/** @param types
+  *   empty keeps GitHub's default: opened, synchronize, reopened.
+  */
+final case class PullRequestTrigger(
+    filter: BranchFilter = BranchFilter(),
+    types: List[PullRequestActivity] = Nil,
+)
+
+/** `wire` is GitHub's spelling. */
+enum PullRequestActivity(val wire: String):
+  case Opened      extends PullRequestActivity("opened")
+  case Synchronize extends PullRequestActivity("synchronize")
+  case Reopened    extends PullRequestActivity("reopened")
+  case Labeled     extends PullRequestActivity("labeled")
 
 /** GitHub Actions numbers cron days `0` = Sunday through `6` = Saturday, which is this enum's declaration order. */
 enum DayOfWeek:

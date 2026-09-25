@@ -93,7 +93,7 @@ object Render:
         )
     val entries =
       t.push.map(b => "push" -> branchFilterYaml(b)).toSeq ++
-        t.pullRequest.map(b => "pull_request" -> branchFilterYaml(b)) ++
+        t.pullRequest.map(p => "pull_request" -> pullRequestYaml(p)) ++
         scheduleEntry ++
         (if t.workflowDispatch then Seq("workflow_dispatch" -> Yaml.NullValue) else Nil) ++
         (if t.workflowCall then Seq("workflow_call" -> Yaml.NullValue) else Nil)
@@ -101,10 +101,17 @@ object Render:
   end triggersYaml
 
   private def branchFilterYaml(b: BranchFilter): Yaml =
-    val entries =
-      seqEntry("branches", b.branches) ++
-        seqEntry("tags", b.tags) ++
-        seqEntry("paths", b.paths)
+    filterMapping(branchFilterEntries(b))
+
+  private def pullRequestYaml(p: PullRequestTrigger): Yaml =
+    filterMapping(seqEntry("types", p.types.map(_.wire)) ++ branchFilterEntries(p.filter))
+
+  private def branchFilterEntries(b: BranchFilter): Seq[(String, Yaml)] =
+    seqEntry("branches", b.branches) ++
+      seqEntry("tags", b.tags) ++
+      seqEntry("paths", b.paths)
+
+  private def filterMapping(entries: Seq[(String, Yaml)]): Yaml =
     if entries.isEmpty then Yaml.NullValue else Yaml.Mapping.fromStringKeys(entries*)
 
   private def jobsYaml(jobs: ListMap[String, Job]): Yaml =

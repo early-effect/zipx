@@ -95,6 +95,7 @@ writing a file:
 | `validateWorkflowCall` | `container:` / `services:` beside `workflowCall`, which GitHub rejects |
 | `validateSharedTargets` | a per-destination `condition` or `environment` on a `SharedJob` capability |
 | `validateSatisfiable` | a gate/condition conjunction that can never be true (see **Job conditions**) |
+| `validateCoverage` | a coverage capability named `test`, or one that saves the build cache (see **Verify**) |
 | `ModuleGraph.make` | a dependency cycle, or two modules with one id |
 | `ModuleId.make` on every sbt project id | a project id sbt allows and a GitHub job id does not |
 | `Step.validate` / `YamlPrinter.problem` at render | a hand-built step, or content YAML would mangle |

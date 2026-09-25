@@ -324,10 +324,15 @@ object ZipxPlugin extends AutoPlugin:
       def PublishFlagEnv      = zipx.github.ZipxGitHubPackages.PublishFlagEnv
     end ZipxGitHubPackages
 
-    /** scoverage, as `zipxCapabilities += Coverage.once()`. In `zipx-core` rather than a pack because the thing it
-      * guards against, sbt 2's `test` being `testQuick`, is a core concern; see [[zipx.core.Coverage]].
+    /** scoverage, as `zipxCoverageWorkflow := Some(Coverage.workflow(...))` or `zipxCapabilities += Coverage.once()`.
+      * In `zipx-core` rather than a pack because the thing it guards against, sbt 2's `test` being `testQuick`, is a
+      * core concern; see [[zipx.core.Coverage]].
       */
     val Coverage = zipx.core.Coverage
+    type CoverageTrigger = zipx.core.CoverageTrigger
+    val CoverageTrigger = zipx.core.CoverageTrigger
+    type CoverageWorkflow = zipx.core.CoverageWorkflow
+
     type Step = zipx.workflow.Step
     val Step = zipx.workflow.Step
     type Expr = zipx.workflow.Expr
@@ -386,6 +391,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxVersionUpdatesSchedule   = settingKey[Cron](ZipxSettings.versionUpdatesSchedule.description)
     val zipxVersionUpdatesPreSteps   = settingKey[Seq[Step]](ZipxSettings.versionUpdatesPreSteps.description)
     val zipxVersionUpdatesExtraSteps = settingKey[Seq[Step]](ZipxSettings.versionUpdatesExtraSteps.description)
+    val zipxCoverageWorkflow         = settingKey[Option[CoverageWorkflow]](ZipxSettings.coverageWorkflow.description)
     val zipxWorkflowDispatch         = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
     val zipxCiRelevant               = settingKey[Boolean](ZipxSettings.ciRelevant.description)
     val zipxPublish                  = settingKey[Option[Boolean]](ZipxSettings.publish.description)
@@ -495,6 +501,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxVersionUpdatesSchedule   := VersionUpdatesWorkflow.DefaultSchedule,
     zipxVersionUpdatesPreSteps   := Seq.empty,
     zipxVersionUpdatesExtraSteps := Seq.empty,
+    zipxCoverageWorkflow         := None,
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
     zipxPreRelease               := PreRelease.Skip,
@@ -855,7 +862,7 @@ object ZipxPlugin extends AutoPlugin:
 
   /** Fail generate/check when a capability declares a command name sbt does not know (aliases, `sonaRelease`, …). */
   private def checkCommandNames(
-      capabilities: List[Capability],
+      declared: List[SbtCommandName],
       st: State,
       extracted: Extracted,
   ): Unit =
@@ -864,8 +871,7 @@ object ZipxPlugin extends AutoPlugin:
       val known = knownCommandNames(st, extracted)
       if known.isEmpty then ()
       else
-        val missing = capabilities
-          .flatMap(_.declaredNames)
+        val missing = declared
           .map(n => n: String)
           .distinct
           .filterNot(known.contains)
@@ -931,7 +937,7 @@ object ZipxPlugin extends AutoPlugin:
     val capabilities = capabilitiesOf(extracted, graph)
     val verify       = orFail(ZipxVerify.validate(readBuildSetting(extracted, zipxVerify, ZipxVerify.Strict)))
     checkFmtPlugin(verify, extracted)
-    checkCommandNames(capabilities, st, extracted)
+    checkCommandNames(capabilities.flatMap(_.declaredNames), st, extracted)
     val yaml = orFail(Render.render(Planner.plan(graph, capabilities, cfg)))
     ActionPinFile.annotateUses(yaml, cfg.actions)
   }
@@ -953,6 +959,7 @@ object ZipxPlugin extends AutoPlugin:
     checkLeftoverSteward(Project.extract(state.value), (LocalRootProject / baseDirectory).value, streams.value.log)
     writePinWorkflowsIfEnabled.value
     writeVersionUpdatesIfEnabled.value
+    writeCoverageWorkflow.value
   }
 
   private def writeCiParams: Def.Initialize[Task[Unit]] = Def.task {
@@ -1079,6 +1086,35 @@ object ZipxPlugin extends AutoPlugin:
       )
     end if
   end checkVersionUpdates
+
+  /** Checks command names itself: this task runs beside `renderWorkflow`, so that one failing does not stop the write.
+    */
+  private def coverageYaml(st: State, cfg: PlanConfig): Option[String] =
+    val extracted = Project.extract(st)
+    readBuildSetting(extracted, zipxCoverageWorkflow, None).map { coverage =>
+      checkCommandNames(coverage.command.declaredNames, st, extracted)
+      orFail(CoverageWorkflow.render(coverage, cfg))
+    }
+
+  private def writeCoverageWorkflow: Def.Initialize[Task[Unit]] = Def.task {
+    val root = (LocalRootProject / baseDirectory).value
+    val log  = streams.value.log
+    val file = root / CoverageWorkflow.DefaultPath
+    coverageYaml(state.value, planConfig.value) match
+      case Some(body)          => writeCompanion(root, CoverageWorkflow.DefaultPath, body, log)
+      case None if file.exists =>
+        IO.delete(file)
+        log.info(s"zipx deleted ${file.getPath}")
+      case None => ()
+  }
+
+  private def checkCoverageWorkflow(root: File, cfg: PlanConfig, st: State, log: Logger): Unit =
+    val rel = CoverageWorkflow.DefaultPath
+    coverageYaml(st, cfg) match
+      case Some(expected)              => checkCompanion(root, rel, expected, log)
+      case None if (root / rel).exists =>
+        sys.error(s"zipx: $rel is leftover. Set zipxCoverageWorkflow or delete $rel, then sbt zipxWorkflowGenerate.")
+      case None => ()
 
   private def writeCompanion(root: File, rel: String, body: String, log: Logger): Unit =
     val file = root / rel
@@ -1338,6 +1374,7 @@ object ZipxPlugin extends AutoPlugin:
     checkLeftoverSteward(extracted, root, streams.value.log)
     checkPinWorkflows(root, cfg, extracted, streams.value.log)
     checkVersionUpdates(root, cfg, extracted, streams.value.log)
+    checkCoverageWorkflow(root, cfg, state.value, streams.value.log)
     validateCatalog(extracted, buildGraph.value, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
     checkCiParams(root, cfg, extracted, streams.value.log)

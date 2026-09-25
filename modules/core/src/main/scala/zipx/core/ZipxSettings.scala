@@ -191,6 +191,16 @@ object ZipxSettings:
       Build,
     )
 
+  val coverageWorkflow: SettingDef[Option[CoverageWorkflow]] =
+    SettingDef.setting(
+      SettingName("zipxCoverageWorkflow"),
+      None,
+      SettingPurpose(
+        "Emit .github/workflows/zipx-coverage.yml from Coverage.workflow(triggers): coverage; testFull; coverageAggregate on CoverageTrigger.Scheduled / Dispatch / PrLabel, restoring the build cache and never saving it. Default None. None deletes the companion."
+      ),
+      Build,
+    )
+
   val pinFeeds: SettingDef[Seq[PinFeed]] =
     SettingDef.setting(
       SettingName("zipxPinFeeds"),
@@ -707,6 +717,7 @@ object ZipxSettings:
     versionUpdatesSchedule,
     versionUpdatesPreSteps,
     versionUpdatesExtraSteps,
+    coverageWorkflow,
     pinFeeds,
     pinPrGate,
     preRelease,

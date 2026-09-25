@@ -13,7 +13,7 @@ object RenderSpec extends ZIOSpecDefault:
     name = "CI",
     on = Triggers(
       push = Some(BranchFilter(branches = List("main"), tags = List("v*"))),
-      pullRequest = Some(BranchFilter()),
+      pullRequest = Some(PullRequestTrigger()),
       workflowDispatch = true,
     ),
     jobs = ListMap(
@@ -333,7 +333,7 @@ object RenderSpec extends ZIOSpecDefault:
         name = "CI",
         on = Triggers(
           push = Some(BranchFilter(paths = List(".github/**", "modules/**"))),
-          pullRequest = Some(BranchFilter(paths = List("modules/**"))),
+          pullRequest = Some(PullRequestTrigger(BranchFilter(paths = List("modules/**")))),
         ),
         jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
       )
@@ -342,6 +342,32 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("paths:"),
         out.contains(".github/**"),
         out.contains("modules/**"),
+      )
+    },
+    test("pull_request types render ahead of its filters, in declaration order") {
+      val wf = Workflow(
+        name = "CI",
+        on = Triggers(
+          pullRequest = Some(
+            PullRequestTrigger(
+              BranchFilter(branches = List("main")),
+              List(PullRequestActivity.Opened, PullRequestActivity.Labeled),
+            )
+          )
+        ),
+        jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
+      )
+      val out = Render.render(wf).yaml
+      assertTrue(
+        out.contains(
+          """|  pull_request:
+             |    types:
+             |      - opened
+             |      - labeled
+             |    branches:
+             |      - main
+             |""".stripMargin
+        )
       )
     },
 

@@ -1251,10 +1251,12 @@ object PlannerSpec extends ZIOSpecDefault:
         val waves = wf.jobs.filter((id, _) => id.startsWith("test-L"))
         assertTrue(waves.size > 1, waves.values.forall(j => cacheModeOf(j).contains("save")))
       },
-      test("a capability that replaces the builtin test by name decides for itself, so coverage never saves") {
-        val coverage = Coverage.once(name = Capability.TestName)
-        val wf       = Planner.plan(sampleGraph, List(coverage), config)
-        assertTrue(coverage.localCache == LocalCacheMode.Restore, cacheModeOf(wf.jobs("test")).contains("restore"))
+      test("coverage restores beside the builtin test, which stays the one owner") {
+        val wf = Planner.plan(sampleGraph, List(Capability.test, Coverage.once()), config)
+        assertTrue(
+          cacheModeOf(wf.jobs("test")).contains("save"),
+          cacheModeOf(wf.jobs("coverage")).contains("restore"),
+        )
       },
       test("remote backends turn the LocalDir cache off even on the owner") {
         val wf = Planner.plan(sampleGraph, List(Capability.test), config.copy(cache = RemoteCacheProof.sidecar))

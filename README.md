@@ -82,7 +82,7 @@ What's covered:
 - Quick start, **Versions** (`ZipxVersions` catalog), **Extending Versions** (plugins that sit on zipx), and self-checking
 - **Execution modes** (Aggregate / Layer / Graph)
 - Built-in **capabilities**, **custom capabilities**, and **composing sbt commands** (`zipxTasks`, `thenOnce`, `ZipxCentral.release`)
-- Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge)
+- Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge) and coverage (`zipx-coverage.yml` on a schedule, dispatch, or PR label)
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate Verify via Testcontainers)
 - **Action pins** (catalog `Action` vals, `zipxActionUpdate`, jar defaults)
 - **Dependency updates** (scheduled `zipx-version-updates.yml` opens the catalog PR; local `zipxDepUpdate` / `zipxActionUpdate` / `zipxPinUpdate`) and **Pin feeds**
