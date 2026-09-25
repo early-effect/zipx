@@ -168,10 +168,12 @@ object ModverPublishSpec extends ZIOSpecDefault:
       assertTrue(ids == pub, wf.jobs.contains("modver"))
     },
     test("default-branch runs are not cancelled when modverPublish is on") {
-      val c = Planner.plan(graph, List(cap), independent).concurrency
+      val cancel = Planner.plan(graph, List(cap), independent).concurrency.map(_.cancelInProgress).collect {
+        case CancelInProgress.When(e) => e.render
+      }
       assertTrue(
-        c.exists(_.cancelInProgress.contains("refs/heads/main")),
-        c.exists(_.cancelInProgress.contains("refs/tags/")),
+        cancel.exists(_.contains("refs/heads/main")),
+        cancel.exists(_.contains("refs/tags/")),
       )
     },
     test("workflow_dispatch is on when modverPublish is on") {

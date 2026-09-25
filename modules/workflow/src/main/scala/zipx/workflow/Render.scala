@@ -17,9 +17,8 @@ import scala.collection.immutable.ListMap
   */
 object Render:
 
-  private val jobCodec: YamlCodec[Job]                 = Schema[Job].derive(YamlFormat)
-  private val stepCodec: YamlCodec[Step]               = Schema[Step].derive(YamlFormat)
-  private val concurrencyCodec: YamlCodec[Concurrency] = Schema[Concurrency].derive(YamlFormat)
+  private val jobCodec: YamlCodec[Job]   = Schema[Job].derive(YamlFormat)
+  private val stepCodec: YamlCodec[Step] = Schema[Step].derive(YamlFormat)
 
   /** The file as written to `.github/workflows`, header included. */
   def render(wf: Workflow): Either[String, String] =
@@ -73,11 +72,21 @@ object Render:
         Seq("on" -> triggersYaml(wf.on)) ++
         mapEntry("permissions", wf.permissions) ++
         mapEntry("env", wf.env) ++
-        wf.concurrency.map(c => "concurrency" -> concurrencyCodec.encodeValue(c)) ++
+        wf.concurrency.map(c => "concurrency" -> concurrencyYaml(c)) ++
         Seq("jobs" -> jobsYaml(wf.jobs))
     )
     Yaml.Mapping(entries.map((k, v) => (Yaml.Scalar(k), v)))
   end workflowYaml
+
+  private def concurrencyYaml(c: Concurrency): Yaml =
+    val cancel = c.cancelInProgress match
+      case CancelInProgress.Never           => bool(false)
+      case CancelInProgress.Always          => bool(true)
+      case CancelInProgress.When(condition) => Yaml.Scalar(condition.render)
+    Yaml.Mapping.fromStringKeys("group" -> Yaml.Scalar(c.group), "cancel-in-progress" -> cancel)
+
+  /** Unquoted: GitHub's schema wants a boolean where the derived codec would print the string `"true"`. */
+  private def bool(value: Boolean): Yaml = Yaml.Scalar(value.toString, Some(YamlTag.Bool))
 
   /** Hand-built because GitHub's event keys are `pull_request` and `workflow_dispatch`, which kebab-casing would
     * mangle.
@@ -163,7 +172,7 @@ object Render:
     val inputEntries = action.inputs.map { (id, input) =>
       val fields =
         scalar("description", input.description) ++
-          Seq("required" -> Yaml.Scalar(input.required.toString)) ++
+          Seq("required" -> bool(input.required)) ++
           input.default.toSeq.flatMap(d => scalar("default", d))
       Yaml.Scalar(id) -> Yaml.Mapping.fromStringKeys(fields*)
     }

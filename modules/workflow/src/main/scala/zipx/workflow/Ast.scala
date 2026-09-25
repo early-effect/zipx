@@ -218,11 +218,17 @@ object Step:
 
 end Step
 
-/** `cancelInProgress` is a String, not a Boolean, because GitHub accepts an expression there and the useful policies
-  * need one: "cancel superseded runs, but never a release publish" is `${{ !startsWith(github.ref, 'refs/tags/') }}`.
-  * Pass `"true"` / `"false"` for the constant cases.
-  */
 final case class Concurrency(
     group: String,
-    cancelInProgress: String = "false",
-) derives Schema
+    cancelInProgress: CancelInProgress = CancelInProgress.Never,
+)
+
+/** `concurrency.cancel-in-progress`. GitHub rejects the constants as strings, so they render as YAML booleans. */
+enum CancelInProgress:
+  case Never
+  case Always
+
+  /** The useful policies need an expression: "cancel superseded runs, but never a release publish" is
+    * `!startsWith(github.ref, 'refs/tags/')`.
+    */
+  case When(condition: Expr)

@@ -57,7 +57,7 @@ object CoverageWorkflow:
       concurrency = Some(
         Concurrency(
           group = (Expr.lit("zipx-coverage-") ++ Expr.github("ref")).render,
-          cancelInProgress = "true",
+          cancelInProgress = CancelInProgress.Always,
         )
       ),
       jobs = ListMap(

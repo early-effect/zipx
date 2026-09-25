@@ -533,16 +533,15 @@ object Planner:
     */
   private def concurrencyFor(config: PlanConfig): Concurrency =
     val cancel =
-      if !config.modverPublish then (!onAnyTagPush).render
+      if !config.modverPublish then !onAnyTagPush
       else
         val notDefault = config.pushBranches.flatMap { b =>
           Expr.quotedMake(s"refs/heads/$b").toOption.map(q => Expr.github("ref") !== q)
         }
-        notDefault.foldLeft[Expr](!onAnyTagPush)(_ && _).render
+        notDefault.foldLeft[Expr](!onAnyTagPush)(_ && _)
     Concurrency(
       group = (lit(config.workflowName + "-") ++ Expr.github("ref")).render,
-      // `render`, not `unwrapped`: `cancel-in-progress` is a plain field, so the expression needs its `${{ }}`.
-      cancelInProgress = cancel,
+      cancelInProgress = CancelInProgress.When(cancel),
     )
   end concurrencyFor
 

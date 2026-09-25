@@ -4,23 +4,23 @@ description: Assume an AWS role via OIDC and optionally log in to ECR. Generated
 inputs:
   role-env:
     description: Env var holding the role ARN
-    required: "false"
+    required: false
     default: AWS_ROLE_TO_ASSUME
   region-env:
     description: Env var holding the AWS region
-    required: "false"
+    required: false
     default: AWS_REGION
   account-env:
     description: Env var holding the 12-digit account id for ECR
-    required: "false"
+    required: false
     default: AWS_ACCOUNT_ID
   login-ecr:
     description: When true, also run amazon-ecr-login
-    required: "false"
+    required: false
     default: "true"
   name-suffix:
     description: Optional label suffix for step names
-    required: "false"
+    required: false
     default: ""
 runs:
   using: composite

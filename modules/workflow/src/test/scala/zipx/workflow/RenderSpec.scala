@@ -77,16 +77,27 @@ object RenderSpec extends ZIOSpecDefault:
       assertTrue(Render.render(sample).yaml == Render.render(sample).yaml)
     },
     test("renders the concurrency block, keeping an expression in cancel-in-progress unquoted-safe") {
-      val wf = sample.copy(concurrency =
-        Some(Concurrency("CI-${{ github.ref }}", "${{ !startsWith(github.ref, 'refs/tags/') }}"))
-      )
+      val notOnTag = !Expr.startsWith(Expr.github("ref"), Expr.quoted("refs/tags/"))
+      val wf  = sample.copy(concurrency = Some(Concurrency("CI-${{ github.ref }}", CancelInProgress.When(notOnTag))))
       val out = Render.render(wf).yaml
       assertTrue(
         out.contains("concurrency:"),
         out.contains("group: CI-${{ github.ref }}"),
-        out.contains("cancel-in-progress:"),
-        out.contains("!startsWith(github.ref, 'refs/tags/')"),
+        out.contains("cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}"),
         !Render.render(sample).yaml.contains("concurrency"),
+      )
+    },
+    test("constant cancel-in-progress renders as a YAML boolean, since GitHub rejects the string") {
+      def cancelLine(cancel: CancelInProgress): Option[String] =
+        Render
+          .render(sample.copy(concurrency = Some(Concurrency("g", cancel))))
+          .yaml
+          .linesIterator
+          .find(_.contains("cancel-in-progress"))
+          .map(_.trim)
+      assertTrue(
+        cancelLine(CancelInProgress.Always).contains("cancel-in-progress: true"),
+        cancelLine(CancelInProgress.Never).contains("cancel-in-progress: false"),
       )
     },
     test("prunes empty collections (no `{}` or `[]` in output)") {

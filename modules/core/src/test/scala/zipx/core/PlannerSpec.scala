@@ -62,10 +62,11 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("concurrency never cancels a release-tag run") {
-      val c = Planner.plan(sampleGraph, List(Capability.testGraph), config).concurrency
+      val cancel = Planner.plan(sampleGraph, List(Capability.testGraph), config).concurrency.map(_.cancelInProgress)
       assertTrue(
-        c.exists(_.cancelInProgress == "${{ !startsWith(github.ref, 'refs/tags/') }}"),
-        c.exists(_.cancelInProgress != "true"),
+        cancel
+          .collect { case CancelInProgress.When(e) => e.render }
+          .contains("${{ !startsWith(github.ref, 'refs/tags/') }}")
       )
     },
     test("concurrency is omitted when cancelSupersededRuns is off") {

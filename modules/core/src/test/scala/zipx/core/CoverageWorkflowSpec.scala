@@ -1,7 +1,7 @@
 package zipx.core
 
 import zipx.core.Rendered.yaml
-import zipx.workflow.{Cron, Job, PullRequestActivity, Workflow}
+import zipx.workflow.{CancelInProgress, Cron, Job, PullRequestActivity, Workflow}
 import zio.test.*
 
 object CoverageWorkflowSpec extends ZIOSpecDefault:
@@ -117,13 +117,14 @@ object CoverageWorkflowSpec extends ZIOSpecDefault:
       assertTrue(
         wf.permissions == Map("contents" -> "read"),
         wf.concurrency.map(_.group).contains("zipx-coverage-${{ github.ref }}"),
-        wf.concurrency.map(_.cancelInProgress).contains("true"),
+        wf.concurrency.map(_.cancelInProgress).contains(CancelInProgress.Always),
       )
     },
     test("renders the pinned upload-artifact with its version label") {
       val out = CoverageWorkflow.render(Coverage.workflow(coverageLabel), config).yaml
       assertTrue(
         out.contains("  pull_request:\n    types:\n      - opened\n"),
+        out.contains("  cancel-in-progress: true\n"),
         out.contains(s"uses: ${ActionPins.Defaults.uploadArtifact} #"),
       )
     },
