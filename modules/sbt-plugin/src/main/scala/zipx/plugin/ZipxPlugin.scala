@@ -660,6 +660,14 @@ object ZipxPlugin extends AutoPlugin:
       val baseDir      = resolvedById.get(ref.project).map(p => relativeToRoot(buildRoot, p.base)).getOrElse("")
       val sourcePaths  = sourcePathsFor(ref, extracted, buildRoot)
       val overrideRoot = read[Option[ModuleId]](zipxMatrixRoot, None)
+      val libraries    = read(libraryDependencies, Nil)
+        .filterNot(isIgnoredDeclared)
+        .flatMap { m =>
+          (GroupId.make(m.organization), ArtifactId.make(m.name)) match
+            case (Right(g), Right(a)) => Some(LibCoordinate(g, a))
+            case _                    => None
+        }
+        .toSet
       (
         orFail(ModuleId.make(ref.project)),
         deps.classpathRefs(ref).map(_.project).toList.distinct,
@@ -672,6 +680,7 @@ object ZipxPlugin extends AutoPlugin:
         sourcePaths,
         read(zipxDocker, false),
         overrideRoot,
+        libraries,
       )
     }
     val ids         = prelim.map(_._1).map(id => id: String).toSet
@@ -689,6 +698,7 @@ object ZipxPlugin extends AutoPlugin:
             sourcePaths,
             docker,
             overrideRoot,
+            libraries,
           ) =>
         val root = inferMatrixRoot(id, overrideRoot, ids, sourcePaths, sourcesById)
         ModuleNode(
@@ -703,6 +713,7 @@ object ZipxPlugin extends AutoPlugin:
           sourcePaths = sourcePaths,
           docker = docker,
           matrixRootOpt = Option.when(root != id)(root),
+          libraries = libraries,
         )
     }.toList
 
@@ -1814,18 +1825,17 @@ object ZipxPlugin extends AutoPlugin:
     */
   private def affectedModulesTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
-      val base         = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
-      val graph        = buildGraph.value
-      val root         = (LocalRootProject / baseDirectory).value
-      val baseRef      = if base.isEmpty then "HEAD^" else base
-      val changedFiles = gitDiffNames(root, baseRef)
-      val diffFailed   = changedFiles.isEmpty
-      if diffFailed then
-        streams.value.log.warn(
+      val base    = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+      val graph   = buildGraph.value
+      val root    = (LocalRootProject / baseDirectory).value
+      val log     = streams.value.log
+      val baseRef = if base.isEmpty then "HEAD^" else base
+      if gitDiffNames(root, baseRef).isEmpty then
+        log.warn(
           s"zipx: could not diff against '$baseRef', emitting ${List(Affected.AllSentinel).toJson} so every job runs. " +
             "Affected-only gating is disabled for this run."
         )
-      val json = Affected.outputModules(graph, changedFiles).toJson
+      val json = affectedSinceMergeBase(root, Project.extract(state.value), graph, baseRef, log).toJson
       IO.write(root / "target" / "zipx-affected.json", json + "\n")
       println(json)
     }
@@ -1846,9 +1856,9 @@ object ZipxPlugin extends AutoPlugin:
     val root          = extracted.get(LocalRootProject / baseDirectory)
     val full          = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
     val base          = args.headOption.map(_.trim).filter(b => b.nonEmpty && b.exists(_ != '0'))
-    val affected      = base.fold(Affected.AllSentinel)(b => Affected.outputModules(graph, gitDiffNames(root, b)))
-    val byId          = extracted.structure.allProjects.map(p => p.id -> p).toMap
-    val rootId        = extracted.rootProject(extracted.structure.root)
+    val affected = base.fold(Affected.AllSentinel)(b => affectedSinceMergeBase(root, extracted, graph, b, next.log))
+    val byId     = extracted.structure.allProjects.map(p => p.id -> p).toMap
+    val rootId   = extracted.rootProject(extracted.structure.root)
     def reach(ids: List[String], seen: Set[String]): Set[String] = ids match
       case Nil                             => seen
       case id :: rest if seen.contains(id) => reach(rest, seen)
@@ -1913,7 +1923,12 @@ object ZipxPlugin extends AutoPlugin:
       modules,
       sha,
       last,
-      base => gitDiffBetween(root, base, sha).map(Affected.affectedModules(graph, _).map(ModuleId.unsafeMake)),
+      base =>
+        gitDiffBetween(root, base, sha).map { files =>
+          val edit = catalogEdit(root, extracted, base, sha, files)
+          edit.foreach(e => log.info(describeCatalog(e)))
+          Affected.affectedModules(graph, files, edit).map(ModuleId.unsafeMake)
+        },
     )
     IO.write(root / DeployWorkflow.ShaFile, s"${plan.sha}\n")
     IO.write(root / DeployWorkflow.ImagesFile, plan.imagesJson + "\n")
@@ -1981,6 +1996,56 @@ object ZipxPlugin extends AutoPlugin:
     refs.foreach(ref => log.info(s"zipx: $ref ${if missing.contains(ref) then "is missing" else "exists"}"))
     IO.write(root / DeployWorkflow.ImageMissingFile, s"${missing.nonEmpty}\n")
   }
+
+  /** [[Affected.outputModules]] for HEAD since its merge-base with `baseRef`, reading a catalog diff as
+    * [[CatalogChange]]s. The catalog is compared at that merge-base, the commit the three-dot diff compares against.
+    */
+  private def affectedSinceMergeBase(
+      root: File,
+      extracted: Extracted,
+      graph: ModuleGraph,
+      baseRef: String,
+      log: Logger,
+  ): List[String] =
+    val changed = gitDiffNames(root, baseRef)
+    val edit    =
+      for
+        files <- changed
+        from  <- git(root, "merge-base", baseRef, "HEAD")
+        e     <- catalogEdit(root, extracted, from, "HEAD", files)
+      yield e
+    edit.foreach(e => log.info(describeCatalog(e)))
+    Affected.outputModules(graph, changed, edit)
+  end affectedSinceMergeBase
+
+  /** How the catalog file reads between two commits, when it is among `changed`. Unreadable at either commit is
+    * build-wide, as the file was before zipx could read it.
+    */
+  private def catalogEdit(
+      root: File,
+      extracted: Extracted,
+      from: String,
+      to: String,
+      changed: List[String],
+  ): Option[CatalogEdit] =
+    val rel = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
+    Option.when(changed.contains(rel)) {
+      val rows    = ZipxCatalog.libs(readBuildSetting(extracted, zipxVersions, Seq.empty))
+      val changes = (ModverRelease.gitShow(root, from, rel), ModverRelease.gitShow(root, to, rel)) match
+        case (Right(Some(base)), Right(Some(head))) =>
+          CatalogChange.withFamilies(zipx.syntax.CatalogDiff.between(base, head, rel), rows)
+        case _ => List(CatalogChange.BuildWide(s"$rel is unreadable at $from or $to"))
+      CatalogEdit(rel, changes)
+    }
+  end catalogEdit
+
+  private def describeCatalog(edit: CatalogEdit): String =
+    val readings = edit.changes.map {
+      case CatalogChange.LibMoved(c)       => s"${c.group}:${c.artifact} moved"
+      case CatalogChange.ActionMoved(name) => s"Action $name moved"
+      case CatalogChange.BuildWide(reason) => s"build-wide ($reason)"
+    }
+    s"zipx: ${edit.path}: ${readings.mkString(", ")}"
 
   /** Files changed on HEAD since its merge-base with `baseRef`, repo-root-relative with forward slashes.
     *

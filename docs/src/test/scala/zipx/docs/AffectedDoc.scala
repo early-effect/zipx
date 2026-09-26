@@ -44,7 +44,7 @@ ref) and maps each file to the module or modules that own it:
 
 1. **Build files force everything.** If any path ends in `.sbt` or sits under a `project/` directory
    (root or nested), the whole module set is affected. Plugins and the graph may have changed, so nothing
-   is safe to skip.
+   is safe to skip. The one exception is the versions catalog; see *Catalog bumps* below.
 2. **Otherwise: longest owned-path prefix.** A module owns its `baseDir` *and* its source directories
    (sbt's `unmanagedSourceDirectories`, Compile and Test). A file is owned by every module whose longest
    matching prefix is the longest match overall. Matching is directory-aware: `core/` owns
@@ -67,6 +67,7 @@ runs the closure's CI-relevant aggregated modules.
 | `mods/inner/X.scala` | `inner` (longer than `mods`) | `inner` + dependents |
 | `README.md` | none | empty (no Graph Verify) |
 | `build.sbt` / `project/plugins.sbt` | (build file) | **all** modules |
+| `project/ZipxVersions.scala`, one `Lib` version moved | the modules that declare that library | those modules + dependents |
 
 ```scala
 zipxAffectedOnPR   := true   // default: test runs zipxTestAffected; `affected` is emitted when a Graph or
@@ -84,6 +85,32 @@ zipxAffectedOnPush := false  // opt-in: also scope branch pushes via before-sha
           yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'all')"),
         )
       ),
+    ),
+    section("Catalog bumps")(
+      md"""
+Most dependency PRs change one line: a version literal in the catalog. Treating the catalog as an ordinary build file
+would test and rebuild every module for a library only one of them uses, so zipx reads the catalog's diff instead.
+
+It parses `zipxVersionsFile` at both commits and reads each change:
+
+| Change | Affects |
+| --- | --- |
+| A `Lib` version (with its `.mod` copies and `fromGraph` rows) | The modules whose `libraryDependencies` declare it, then their dependents |
+| An `Action` pin | No module: it changes generated workflows, which no module owns |
+| sbt, Scala, or a `Plugin` version; a `Ship` row | Every module |
+| A row added or removed, a group edited, or any other text | Every module |
+| A `Lib` no module declares | Every module: something the graph cannot see uses it, such as the meta-build |
+
+A narrowed reading needs proof that nothing else moved. The parser sees constructors only, and an edit to a group
+such as `def service = library(fansi, upickle)` changes which modules get a row without moving any constructor. So
+after reading the moved versions, zipx puts each one's old version back into the new file and requires the old file,
+exactly. Anything short of that is every module. The catalog is read at the commit the diff compares against: the
+merge base for a PR, and each Environment's last deployed commit for a deploy. The job log names each reading
+(`zipx: project/ZipxVersions.scala: com.lihaoyi:fansi moved`).
+
+Rows that `zipxDepUpdate` and the version-updates companion rewrite always match, since they rewrite the version
+literal in place. A hand edit that also reformats the constructor reads as every module, which is the safe answer.
+"""
     ),
     section("Cross-built modules (projectMatrix)")(
       md"""

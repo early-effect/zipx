@@ -87,6 +87,8 @@ end ModuleId
   *   the docker capability's per-module jobs.
   * @param matrixRootOpt
   *   override for [[matrixRoot]]. `None` means the root is [[id]].
+  * @param libraries
+  *   the libraries this module declares, so a catalog bump affects the modules that use the row. See [[CatalogChange]].
   */
 final case class ModuleNode(
     id: ModuleId,
@@ -100,6 +102,7 @@ final case class ModuleNode(
     sourcePaths: List[String] = Nil,
     docker: Boolean = false,
     matrixRootOpt: Option[ModuleId] = None,
+    libraries: Set[LibCoordinate] = Set.empty,
 ):
 
   /** The sbt project id a [[Ship]] names. A `projectMatrix` JVM row is `core` and its JS row is `coreJS`; both share
