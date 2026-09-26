@@ -30,14 +30,15 @@ Aggregate is not "rebuild the world in one job." On sbt 2.x, a root `.aggregate`
 independent subprojects and incrementally recompiles only invalidated sources (Zinc). Task results are content-addressed
 and **survive JVM restarts**: sbt's machine-wide cache, plus zipx's **epoch-keyed** CI restore (`zipxCacheEpoch`),
 means a cold runner still hits prior compile results across pushes in the same epoch. Remote cache backends push
-that reuse across machines. The plugin default is `testFull`, so CI still runs every suite; Zinc and the task cache
-are what skip compile (and a whole-task cache hit can skip redo). You get a large share of "don't redo unaffected
-work" from **one Aggregate job**, without paying for N runners. Pair that with a CI-hydrated remote cache so teammate
+that reuse across machines. Zinc and the task cache are what skip compile (and a whole-task cache hit can skip redo).
+On a PR, the one `test` job also skips the suites of modules the PR cannot have broken, by running `zipxTestAffected`
+(see *Two kinds of affected* below). You get a large share of "don't redo unaffected work" from **one Aggregate job**,
+without paying for N runners. Pair that with a CI-hydrated remote cache so teammate
 laptops share the same digests (see **Remote cache for teams**).
 
-Graph mode buys a different kind of selectivity: path-based **affected** gating, per-module `needs`, Scala matrix
-isolation, and independent logs/statuses. Pick Graph when the **workflow** needs those boundaries, not merely to avoid
-compile/test work that sbt (and the restored/remote cache) can already skip.
+Graph mode buys a different kind of selectivity: whole GitHub jobs skipped per module, per-module `needs`, Scala
+matrix isolation, and independent logs/statuses. Pick Graph when the **workflow** needs those boundaries, not merely
+to avoid compile/test work that the Aggregate `test` job (with the restored or remote cache) already skips.
 """
     ),
     section("Two kinds of affected")(

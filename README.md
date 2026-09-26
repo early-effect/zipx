@@ -9,11 +9,13 @@
 
 You declare modules and `dependsOn` once. zipx emits a workflow that:
 
-- **defaults to Aggregate mode** (few sbt sessions: root `testFull`, parallel fmt / workflow-check / advisories, one publish/release job);
-- **offers Layer and Graph modes** for dependency-ordered waves or per-module fan-out (affected-only PRs, matrix isolation);
-- **caches sbt's build state** with a commit-stable key (local or remote);
+- **defaults to Aggregate mode** (few sbt sessions: one `test` job, parallel fmt / workflow-check / advisories, one publish/release job);
+- **tests only what a PR can have broken**: on a PR, `test` runs the changed modules and their dependents, in parallel, in one job;
+- **offers Layer and Graph modes** for dependency-ordered waves or per-module fan-out (per-module job skipping, matrix isolation);
+- **caches sbt's build state** with a commit-stable key (local or remote), saved once per run;
 - **builds & publishes docker images** via sbt-native-packager when `DockerPlugin` is enabled;
-- **deploys to multiple environments** with GitHub Environment approval (targets fan out; modules can batch);
+- **deploys to multiple environments** with GitHub Environment approval, on merge or from a dispatched `zipx-deploy.yml` that ships only what changed since each environment's last deploy;
+- **measures coverage off the required path** in `zipx-coverage.yml`, on a schedule, on demand, or on a labeled PR;
 - **extends with custom capabilities**: lint gates, multi-registry pushes, stages you invent in Scala;
 - **checks itself in CI**: a committed workflow that drifts from the build fails the build;
 - **pins GitHub Actions to commit SHAs**, with catalog `Action` vals so you can bump them without waiting on a zipx release.
@@ -32,7 +34,19 @@ sbt zipxWorkflowGenerate
 git add .github/workflows/ci.yml && git commit -m "ci: generate with zipx"
 ```
 
-Defaults are Aggregate: parallel Verify jobs (`testFull`, `fmt`, `workflow-check`, `advisories`) and one publish job (plus docker when any module enables `DockerPlugin`). Write bare settings in `build.sbt` (no `ThisBuild /`); e.g. `zipxTestTask := zipxTasks.of(testFull)` is the plugin default and any module can override it.
+Defaults are Aggregate: parallel Verify jobs (`test`, `fmt`, `workflow-check`, `advisories`) and one publish job (plus docker when any module enables `DockerPlugin`). On a PR, `test` runs `zipxTestAffected`, which tests the changed modules and their dependents; everywhere else it runs every module's `testFull`. Write bare settings in `build.sbt` (no `ThisBuild /`); e.g. `zipxTestTask := zipxTasks.of(testFull)` is the plugin default and any module can override it.
+
+### A busy monorepo
+
+Three settings keep a large repo's CI fast and its merges unblocked:
+
+```scala
+zipxCoverageWorkflow := Some(Coverage.workflow(CoverageTrigger.Dispatch, CoverageTrigger.prLabel("coverage")))
+zipxDeployTrigger    := DeployTrigger.Manual()          // images and deploys from zipx-deploy.yml, never on a merge
+zipxImageRefs        := (Docker / dockerAliases).value.map(_.toString)  // on each image module
+```
+
+Add `withAffectedBy` to integration jobs the classpath graph cannot see. The **CI for a busy monorepo** docs page covers the whole setup and the measurements behind it, from [zipx-ci-lab](https://github.com/early-effect/zipx-ci-lab).
 
 ### Action pins
 
@@ -80,13 +94,13 @@ What's covered:
 
 - Overview, **Why zipx**, and **From Bazel** (strategy vs second graphs / acceleration layers)
 - Quick start, **Versions** (`ZipxVersions` catalog), **Extending Versions** (plugins that sit on zipx), and self-checking
-- **Execution modes** (Aggregate / Layer / Graph)
+- **Execution modes** (Aggregate / Layer / Graph) and **CI for a busy monorepo** (affected-scoped tests, coverage and deploy workflows, the per-run cache, with lab measurements)
 - Built-in **capabilities**, **custom capabilities**, and **composing sbt commands** (`zipxTasks`, `thenOnce`, `ZipxCentral.release`)
-- Verify knobs (`zipxTestTask`, `zipxVerifyClean`, affected, skip-after-merge) and coverage (`zipx-coverage.yml` on a schedule, dispatch, or PR label)
+- Verify knobs (`zipxTestTask`, `zipxVerifyClean`, `zipxTestAffected`, `withAffectedBy`, skip-after-merge) and coverage (`zipx-coverage.yml` on a schedule, dispatch, or PR label)
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate Verify via Testcontainers)
 - **Action pins** (catalog `Action` vals, `zipxActionUpdate`, jar defaults)
 - **Dependency updates** (scheduled `zipx-version-updates.yml` opens the catalog PR; local `zipxDepUpdate` / `zipxActionUpdate` / `zipxPinUpdate`) and **Pin feeds**
-- Docker and multi-target deploy
+- Docker and multi-target deploy, on merge or dispatched (`DeployTrigger.Manual`, `zipx-deploy.yml`)
 - `ZipxCentral` / `ZipxDocs` packs
 - Settings reference and dogfood notes
 

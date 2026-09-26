@@ -811,13 +811,8 @@ object ZipxPlugin extends AutoPlugin:
       affectedOnPR: Boolean,
       affectedOnPush: Boolean,
   ): List[Capability] =
-    val prBase   = Expr.github("event.pull_request.base.sha")
-    val testBase = if affectedOnPush then prBase || Expr.github("event.before") else prBase
-    val test     =
-      val full = Capability
-        .once(name = Capability.TestName, command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
-        .withLocalCache(LocalCacheMode.Save)
-      if !affectedOnPR then full else full.running(TestAffected.command(testBase))
+    val test =
+      if affectedOnPR then Capability.testAffected(affectedOnPush) else Capability.test.running(verifyTask)
     val fmt = verifyGate(
       verify.fmt,
       Capability.FmtName,

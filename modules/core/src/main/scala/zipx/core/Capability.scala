@@ -588,6 +588,13 @@ object Capability:
       .once(name = TestName, command = ModuleNode.DefaultTestTask, phase = Phase.Verify, gate = Gate.Always)
       .withLocalCache(LocalCacheMode.Save)
 
+  /** The builtin `test` under [[AffectedMode.AffectedOnPR]], which is what a build gets by default: `zipxTestAffected`
+    * against the PR base, or also the pushed-over commit when `onPush`. See [[TestAffected]].
+    */
+  def testAffected(onPush: Boolean): Capability =
+    val prBase = Expr.github("event.pull_request.base.sha")
+    test.running(TestAffected.command(if onPush then prBase || Expr.github("event.before") else prBase))
+
   /** Joins per-module `<id>/<testTask>` commands instead of running one root task. The escape hatch for a build with
     * mixed `zipxTestTask` overrides, where a root aggregate task would run the wrong thing.
     */
