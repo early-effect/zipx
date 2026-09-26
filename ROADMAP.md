@@ -86,13 +86,11 @@ the in-sbt apply. Pin policy (lookup, OSV, Update) still lives on `PinFeed`. Zip
 
 ### CI at scale
 
-The builtin `test` is affected-scoped, a catalog bump affects the modules that declare the library, coverage and
-deploys have their own workflows, and the cache saves once per run (Specular **CI for a busy monorepo**). What is left, each proven in
+The builtin `test` is affected-scoped, a catalog bump affects the modules that declare the library, an edit inside
+one project's `build.sbt` definition affects that project, coverage and deploys have their own workflows, and the
+cache saves once per run (Specular **CI for a busy monorepo**). What is left, each proven in
 [zipx-ci-lab](https://github.com/early-effect/zipx-ci-lab) before it ships:
 
-- **Setting-level `build.sbt` precision** (lab L7): an edit inside one project's settings affects that project and its
-  dependents, where today any `build.sbt` edit affects every module. Starts with a scripted spike on sbt 2's setting
-  source positions.
 - **`zipxAffected <capability>`**: scope user Aggregate capabilities with per-module commands the way
   `zipxTestAffected` scopes the builtin `test`, if a build needs it.
 

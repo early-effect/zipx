@@ -1,0 +1,21 @@
+# Real git history, so build.sbt is read at both commits exactly as CI reads it.
+$ exec git init -q .
+$ exec git config user.email scripted@example.com
+$ exec git config user.name scripted
+$ exec git config commit.gpgsign false
+$ exec git add .
+$ exec git commit -q -m fixture
+# L7a: a setting inside app's definition affects app alone.
+$ copy-file changes/app-setting.txt build.sbt
+$ exec git add .
+$ exec git commit -q -m app-setting
+> reload
+> zipxAffectedModules HEAD^
+> assertAffected app
+# L7b: the shared helper every project uses affects everything.
+$ copy-file changes/shared-helper.txt build.sbt
+$ exec git add .
+$ exec git commit -q -m shared-helper
+> reload
+> zipxAffectedModules HEAD^
+> assertAffected core app svc
