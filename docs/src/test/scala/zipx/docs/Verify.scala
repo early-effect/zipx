@@ -18,8 +18,10 @@ Verify is several Once jobs with **no `needs` between them**, so GitHub runs the
 `workflow-check`, and `advisories`. Publish does not wait on them in-workflow (tag runs already do not `need` test);
 PR merge is the required-checks story.
 
-On sbt 2, plain `sbt test` can skip suites it thinks are unaffected. zipx defaults to `testFull` so CI actually runs
-every suite. Path-based job skipping (only run jobs this PR touched) lives on **Affected**, and only in Graph mode.
+On sbt 2, plain `sbt test` can skip suites it thinks are unaffected. zipx defaults to `testFull`, so the suites it runs
+really run. On a PR it chooses them from the diff: the builtin `test` runs `zipxTestAffected`, which tests each module
+the PR can have broken and nothing else (see *Affected-only PRs* below, and **Affected**). A push, a dispatch, or a diff
+that cannot run tests everything.
 
 ```scala
 zipxVerify := ZipxVerify.Strict   // all On; the default
@@ -186,10 +188,12 @@ and that should be a red job rather than an empty upload. Turn it off with `uplo
 `zipxAffectedOnPR` (default `true`) narrows Verify to what a PR can have broken, in three ways:
 
 - **The builtin `test`** runs `sbt 'zipxTestAffected <PR base>'`. The command diffs against the same base as the
-  `affected` job, then runs, in the same sbt session, each affected module's own `zipxTestTask`. It runs only modules
-  the root aggregate reaches, since a root `test` never reaches the others. No base, an all-zero one, or a diff that
-  fails runs the full command as before, and an empty affected set tests nothing. `test` takes no `needs: affected`,
-  so it neither waits on that job nor pays a second sbt load.
+  `affected` job, then runs each affected module's own `zipxTestTask` in the same sbt session, as one `all a/testFull
+  b/testFull` command: a single parallel task graph, as a root `testFull` is. It runs only CI-relevant modules the
+  root aggregate reaches, since a root `testFull` never reaches the others and an aggregator's own test task would
+  rerun what it aggregates. No base, an all-zero one, or a diff that fails runs the full command as before, and an
+  empty affected set tests nothing. `test` takes no `needs: affected`, so it neither waits on that job nor pays a
+  second sbt load. Locally, `sbt "zipxTestAffected origin/main"` runs the same selection.
 - **A Graph Verify capability** gets an `affected` setup job, and each per-module job skips when its module is not
   affected.
 - **A Once job whose inputs the classpath cannot see**, such as an integration test over images `Docker/publishLocal`
@@ -225,11 +229,15 @@ flowchart TD
             gate = Gate.Always,
           )
           .withAffectedBy(_.id == "service")
-        DocsRender.body(Capability.testGraph) + "\n---\n" + DocsRender.body(imageIt)
+        DocsRender.jobs("test")(Capability.testAffected(onPush = false)) + "\n---\n" +
+          DocsRender.body(Capability.testGraph) + "\n---\n" + DocsRender.body(imageIt)
       }.assert(yaml =>
+        val parts = yaml.split("---")
         assertTrue(
-          yaml.split("---")(0).contains("affected:"),
-          yaml.split("---")(1).contains("contains(fromJson(needs.affected.outputs.modules), 'service')"),
+          parts(0).contains("sbt 'zipxTestAffected ${{ github.event.pull_request.base.sha }}'"),
+          !parts(0).contains("needs.affected"),
+          parts(1).contains("affected:"),
+          parts(2).contains("contains(fromJson(needs.affected.outputs.modules), 'service')"),
         )
       ),
       md"""

@@ -73,7 +73,7 @@ Generated Aggregate jobs (live output from the planner):
 """,
       exampleValue {
         DocsRender.jobs("test", "fmt", "workflow-check", "advisories", "publish")(
-          Capability.test,
+          Capability.testAffected(onPush = false),
           Capability.once(Capability.FmtName, SbtCommand.unsafeCommand("scalafmtCheckAll")),
           Capability.once(Capability.WorkflowCheckName, SbtCommand.unsafeTask("zipxWorkflowCheck")),
           Capability.once(Capability.AdvisoriesName, SbtCommand.unsafeTask("zipxAdvisoryCheck")),
@@ -82,6 +82,7 @@ Generated Aggregate jobs (live output from the planner):
       }.assert(yaml =>
         assertTrue(
           yaml.contains("test:"),
+          yaml.contains("zipxTestAffected"),
           yaml.contains("fmt:"),
           yaml.contains("workflow-check:"),
           yaml.contains("advisories:"),
@@ -231,7 +232,8 @@ A map of later pages. On day one you can ignore everything except Aggregate Veri
 | **Composites** | `.github/actions/zipx-sbt-setup` (and `zipx-aws-login` if you use AWS packs) |
 | **Capabilities** | Built-in test / publish / docker / deploy; packs for Central, Packages, docs, AWS |
 | **Ordering and gates** | Publish on a version tag; deploy destinations are never skipped by path |
-| **Affected** | Graph only: skip jobs this PR did not touch |
+| **Affected** | On a PR, `test` runs only the suites the diff can have broken; Graph jobs skip whole modules |
+| **CI for a busy monorepo** | Coverage off the required path, deploys by dispatch, one cache save per run: what a large repo turns on |
 | **Caching** | Restore sbt's cache on the runner so test does not start from zero |
 | **Action pins** | Exact Action commits in the generated YAML; catalog rows when you want to bump without a zipx release |
 | **Pin feeds** | Pins that are not Maven and not Actions; see **Pin feeds** |

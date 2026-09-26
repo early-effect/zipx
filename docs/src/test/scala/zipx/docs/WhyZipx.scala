@@ -106,7 +106,7 @@ job per module. Reach for Graph when the **workflow** needs isolation, not when 
 feel less lonely. `MatrixCollapse.Auto` keeps Graph / multi-target fan-out readable when legs are isomorphic.
 """,
       exampleValue {
-        val aggregate = DocsRender.body(Capability.test, Capability.publish)
+        val aggregate = DocsRender.body(Capability.testAffected(onPush = false), Capability.publish)
         val graph     = DocsRender.body(Capability.testGraph)
         aggregate + "\n---\n" + graph
       }.assert(yaml =>

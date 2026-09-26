@@ -6,17 +6,23 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zio.test.*
 
-/** Path-based affected gating: fail-open handoff, who is gated today, and what comes next. */
+/** Path-based affected gating: the one closure, who reads it, the fail-open handoff. */
 object AffectedDoc extends DocSpecSuite:
 
   def doc = page("Affected")(
     md"""
-Skip this page unless you opted into **Graph** mode. **Affected** means: only run GitHub jobs for modules this PR
-touched. Aggregate (the default) does not skip jobs this way; Zinc and the task cache skip compile *inside* the one
-test job instead (see **Execution modes**). Verify still defaults to `testFull`.
+**Affected** means: test and ship only what a PR can have broken. zipx turns the PR's diff into a set of modules (the
+changed ones plus everything that depends on them), and three kinds of job read that one set:
 
-**Graph Verify** jobs are path-gated by default. **Graph Publish** and **Graph Deploy** can be, under the
-`zipxAffectedPublish` and `zipxAffectedDeploy` opt-ins below. Aggregate and Layer jobs never are.
+| Reader | What it does with the set | On by default? |
+|---|---|---|
+| The builtin **`test`** | `zipxTestAffected` runs those modules' test tasks inside the one Aggregate job | Yes, on PRs |
+| **Graph** jobs (`testGraph`, `publishGraph`, `deployGraph`) | Each per-module job skips when its module is not in the set | Verify yes; Publish and Deploy are opt-ins |
+| **Once** jobs with `withAffectedBy` | Skip unless one of their named modules is in the set | Per capability |
+
+`test` computes the set inside its own sbt session; the other two read the `affected` job's output. Both take the same
+diff against the same base, so they always agree. Everything below is about how that set is computed, and why a diff
+that cannot run makes it `all` rather than empty.
 """,
     section("Closure flow")(
       md"""
@@ -25,9 +31,10 @@ flowchart TD
   Diff([1 · git diff]) --> Own[2 · owning module]
   Own --> Closure[3 · reverse-dep closure]
   Closure --> Json[4 · modules JSON]
-  Json --> Gate([5 · Graph Verify gate])
+  Json --> Gate([5 · Graph and withAffectedBy gates])
+  Closure --> Test([5 · zipxTestAffected · all a/testFull b/testFull])
   class Diff,Own,Closure,Json warn
-  class Gate happy
+  class Gate,Test happy
 ```
 
 ### From git diff to owning module
@@ -50,7 +57,8 @@ Step 2 returns a **set**, not a single module. One file can genuinely belong to 
 next section is the case where it always does.
 
 Those owning modules are the **seeds**. Step 3 of the chart expands them to the reverse-dependency
-closure; step 5 gates each Graph Verify job on whether its id (or `all`) appears in the published JSON.
+closure. Step 5 gates each Graph job on whether its id (or `all`) appears in the published JSON, and, inside `test`,
+runs the closure's CI-relevant aggregated modules.
 
 | Changed path | Owning module | After closure (example) |
 |---|---|---|
@@ -61,7 +69,8 @@ closure; step 5 gates each Graph Verify job on whether its id (or `all`) appears
 | `build.sbt` / `project/plugins.sbt` | (build file) | **all** modules |
 
 ```scala
-zipxAffectedOnPR   := true   // default; emits `affected` only when Graph Verify is present
+zipxAffectedOnPR   := true   // default: test runs zipxTestAffected; `affected` is emitted when a Graph or
+                             // withAffectedBy job reads it
 zipxAffectedOnPush := false  // opt-in: also scope branch pushes via before-sha
 ```
 """,
@@ -141,9 +150,9 @@ flowchart TD
 
 | Diff outcome | Value | Emitted | CI result |
 |---|---|---|---|
-| Succeeded, no changes | `Some(Nil)` | `[]` | Skip Graph Verify (deliberate) |
-| Could not run (bad ref, no git, …) | `None` | `["all"]` | Run everything |
-| Succeeded with files | `Some(files)` | affected closure | Gate per module |
+| Succeeded, no changes | `Some(Nil)` | `[]` | Skip Graph Verify, and `test` tests nothing (deliberate) |
+| Could not run (bad ref, no git, …) | `None` | `["all"]` | Run everything, and `test` runs its full command |
+| Succeeded with files | `Some(files)` | affected closure | Gate per module, and `test` runs the closure |
 
 A broken base ref costs runner minutes, not coverage. The `affected` job logs a warning when it disables gating for
 that run.
@@ -153,7 +162,7 @@ that run.
       md"""
 | Capability shape | Path-affected? | Why |
 |---|---|---|
-| The builtin `test` | Yes, by default | `zipxTestAffected` tests the affected modules the root aggregate reaches, in one session |
+| The builtin `test` | Yes, by default | `zipxTestAffected` tests the affected modules the root aggregate reaches, as one parallel `all` command |
 | `Capability.testGraph` (and other Graph + Verify) | Yes, by default | Per-module jobs can skip |
 | A Once job with `withAffectedBy` | Yes, when one of its modules is affected | For inputs the classpath graph cannot see |
 | Graph Publish (`publishGraph`, `dockerGraph`) | Only under `zipxAffectedPublish` | See the next section: the two risks are not symmetric |

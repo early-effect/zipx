@@ -17,8 +17,9 @@ Three steps. You do not write GitHub Actions YAML.
 3. Open a pull request. GitHub runs the workflow.
 
 Defaults: **test**, **fmt**, **workflow-check**, and **advisories** in parallel on every PR and push, and a publish
-job when you push a version tag (`v*`). That is enough for most libraries. A monorepo uses the same loop; you still do
-not list modules in YAML.
+job when you push a version tag (`v*`). On a PR, `test` runs only the suites of modules the PR can have broken. That is
+enough for most libraries. A monorepo uses the same loop; you still do not list modules in YAML, and **CI for a busy
+monorepo** covers what to turn on as it grows.
 
 ```mermaid
 flowchart LR
@@ -76,7 +77,7 @@ lazy val root = (project in file("."))
       exampleValue {
         val g = GraphFixture(List(ModuleNode(ModuleId("lib"), publishes = true, crossScalaVersions = List("3.8.4"))))
         DocsRender.jobs("test", "fmt", "workflow-check", "advisories", "publish")(
-          Capability.test,
+          Capability.testAffected(onPush = false),
           Capability.once(Capability.FmtName, SbtCommand.unsafeCommand("scalafmtCheckAll")),
           Capability.once(Capability.WorkflowCheckName, SbtCommand.unsafeTask("zipxWorkflowCheck")),
           Capability.once(Capability.AdvisoriesName, SbtCommand.unsafeTask("zipxAdvisoryCheck")),
@@ -85,6 +86,7 @@ lazy val root = (project in file("."))
       }.assert(yaml =>
         assertTrue(
           yaml.contains("test:"),
+          yaml.contains("zipxTestAffected"),
           yaml.contains("fmt:"),
           yaml.contains("workflow-check:"),
           yaml.contains("advisories:"),
@@ -139,7 +141,9 @@ zipx reads these settings from the **root** project, so write them without a `Th
 habit, not a zipx quirk.
 
 A bare `zipxTestTask := zipxTasks.of(testFull)` is the plugin default. On sbt 2, plain `sbt test` can skip suites; CI
-uses `testFull` so every suite actually runs. Any module can override the task in its own `.settings(...)`.
+uses `testFull` so the suites it chooses really run. On a PR it chooses by the diff: `test` runs each changed module's
+test task and those of its dependents (see **Affected**). Any module can override the task in its own
+`.settings(...)`.
 
 ```scala
 zipxJavaVersion := JdkVersion("25")

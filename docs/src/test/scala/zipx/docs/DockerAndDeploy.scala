@@ -30,6 +30,12 @@ flowchart TD
 
 Green is the image path (plugin → Aggregate `Docker/publish`). Amber is the target fan-out: one deploy job per
 `Target`, each wired to its own GitHub Environment (approvals stay independent).
+
+**Where they run is one setting.** By default (`DeployTrigger.OnMerge`) images and deploys are jobs in `ci.yml`, gated
+like any other job: on a release tag, or on a condition you add. `DeployTrigger.Manual` moves them into a dispatched
+`zipx-deploy.yml` that ships only what changed since each Environment's last deploy, so a merge ships nothing and a
+pending production approval never holds up the next merge. The sections below apply to both; the last one covers
+Manual. **CI for a busy monorepo** shows it beside the other settings a large repo turns on.
 """,
     section("Docker paved path")(
       md"""
