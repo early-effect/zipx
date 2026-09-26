@@ -200,6 +200,9 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     // JVM args for the sbt subprocess that runs scripted tests: suppress Unsafe/JNA warnings.
     scriptedLaunchOpts ++= Seq(
       "-Xmx1024m",
+      // Every test boots a cold sbt, four at a time on a four-core runner, so JIT compilation competes with the tests
+      // for CPU. C1 alone warms up fastest, and no scripted launch lives long enough to repay C2.
+      "-XX:TieredStopAtLevel=1",
       "-XX:+IgnoreUnrecognizedVMOptions",
       "--add-opens=java.base/sun.misc=ALL-UNNAMED",
       "--sun-misc-unsafe-memory-access=allow",
