@@ -131,6 +131,8 @@ final case class Job(
     needs: List[String] = Nil,
     `if`: Option[String] = None,
     environment: Option[JobEnvironment] = None,
+    /** The job's own concurrency group. GitHub's default for a job-level group is never to cancel in progress. */
+    concurrency: Option[String] = None,
     permissions: Map[String, String] = ListMap.empty,
     strategy: Option[Strategy] = None,
     container: Option[String] = None,

@@ -34,8 +34,9 @@ Green is the image path (plugin → Aggregate `Docker/publish`). Amber is the ta
 **Where they run is one setting.** By default (`DeployTrigger.OnMerge`) images and deploys are jobs in `ci.yml`, gated
 like any other job: on a release tag, or on a condition you add. `DeployTrigger.Manual` moves them into a dispatched
 `zipx-deploy.yml` that ships only what changed since each Environment's last deploy, so a merge ships nothing and a
-pending production approval never holds up the next merge. The sections below apply to both; the last one covers
-Manual. **CI for a busy monorepo** shows it beside the other settings a large repo turns on.
+pending production approval never holds up the next merge. `DeployTrigger.Staged` runs the same workflow on every merge
+and on labeled PRs too, for pre-production targets only. The sections below apply to all three; the last two cover
+Manual and Staged. **CI for a busy monorepo** shows them beside the other settings a large repo turns on.
 """,
     section("Docker paved path")(
       md"""
@@ -233,8 +234,8 @@ workflow** with three inputs:
 | Input | Values |
 | --- | --- |
 | `modules` | `changed` (default), `all`, or one module |
-| `target` | a target name, or a `Target.group` that deploys every target in it |
-| `sha` | a commit to deploy, for a rollback; empty deploys the branch head |
+| `target` | `choose` (the default, which deploys nothing), a target name, or a `Target.group` that deploys every target in it |
+| `sha` | a commit on the dispatched branch, for a rollback; empty deploys the branch head |
 
 **`changed` is per Environment.** The `resolve` job reads each Environment's deployments from GitHub and diffs the last
 successful deploy of each module against the commit being deployed. A module never deployed there is deployed, and so
@@ -248,13 +249,22 @@ run `<module>/zipxImageMissing` first: it checks every `zipxImageRefs` entry wit
 runs only when one is missing. A rebuild is not byte-identical, and an immutable-tag registry rejects a second push.
 
 Every job checks out the plan's commit and exports it as `ZIPX_DEPLOY_SHA`; a build that tags images by commit should
-read it before `GITHUB_SHA`. Deploys to one target queue behind each other and are never cancelled.
+read it before `GITHUB_SHA`. Each job that binds an Environment is its own concurrency group across runs, so two
+dispatches reaching one Environment by different choices (`prod`, or a group containing it) queue instead of
+interleaving, and two pushes of one image never race. Nothing is cancelled in progress.
+
+**Production deploys only from the default branch.** A `Target`'s `stage` is `DeployStage.Production` unless it says
+otherwise, and `resolve` refuses a dispatch from any other branch that selects one. The `sha` input must be an ancestor
+of the dispatched branch's head, so a dispatch from `main` cannot name an unmerged commit. Pair each production
+Environment with a deployment branch policy on the default branch: GitHub enforces it even against a workflow edited on
+a branch, which no check inside the workflow can.
 
 Generate refuses what the deploy workflow could not run as declared: a capability that is not Graph-scoped, a Verify
 capability that needs an image, a need on a capability left in `ci.yml`, a condition that requires a push (a dispatch
-never is one), a deploy target with no Environment, and a group named like a target. Release gates do not apply there,
-since the dispatch is the gate. Jobs are always one per module and target: a collapsed matrix binds its Environment on
-every leg, so a skipped leg would still wait for approval and record a deploy that never happened.
+never is one), a deploy target with no Environment, a group named like a target, a target named `choose`, and a target
+declared Production in one capability and PreProduction in another. Release gates do not apply there, since the plan
+is the gate. Jobs are always one per module and target: a collapsed matrix binds its Environment on every leg, so a
+skipped leg would still wait for approval and record a deploy that never happened.
 """,
       exampleValue {
         val targets = List(
@@ -270,7 +280,7 @@ every leg, so a skipped leg would still wait for approval and record a deploy th
             gate = Gate.Always,
           ),
         )
-        DeployWorkflow.render(libGraph, deploys, config, DeployWorkflow.ImagesEnvironment).yaml
+        DeployWorkflow.render(libGraph, deploys, config, DeployTrigger.Manual()).yaml
       }.assert(yaml =>
         assertTrue(
           yaml.contains("workflow_dispatch:"),
@@ -282,6 +292,68 @@ every leg, so a skipped leg would still wait for approval and record a deploy th
           yaml.contains("name: production"),
           yaml.contains("/commit/${{ needs.resolve.outputs.sha }}#service"),
           yaml.contains("cancel-in-progress: false"),
+          yaml.contains("- choose"),
+          yaml.contains("concurrency: zipx-deploy-deploy-service-prod"),
+        )
+      ),
+    ),
+    section("Staging on merge, branches by label (DeployTrigger.Staged)")(
+      md"""
+`Manual` makes every deploy a dispatch. Most teams want staging to follow `main` on its own, a way to try a branch on
+staging, and production only when someone asks. `DeployTrigger.Staged` is that, in the same `zipx-deploy.yml`:
+
+```scala
+zipxDeployTrigger := DeployTrigger.staged(deployLabel = "deploy-stg", skipLabel = "no-deploy")
+
+Target(TargetName("stg"), environment = Some("staging"), stage = DeployStage.PreProduction)
+Target(TargetName("prod"), environment = Some("production")) // Production, the default
+```
+
+| What happens | What it deploys | To |
+| --- | --- | --- |
+| A merge to the default branch | Its `changed` modules, unless the merged PR carries `skipLabel` | Every `PreProduction` target |
+| A push to a PR carrying `deployLabel` (or adding the label) | The PR head's `changed` modules, and only the images those need | Every `PreProduction` target |
+| A dispatch from the default branch | Whatever the form selects | Any target |
+
+A branch reaches nothing without the label: an unlabeled PR's run stops at `resolve`'s job condition before a runner
+boots sbt, and a dispatch from a branch is refused (the label is the one way a branch deploys). Nothing but a dispatch
+from the default branch reaches a `Production` target; no merge or PR plan can contain one. Generate refuses a
+`Staged` build with no `PreProduction` target, and one label used for both deploying and skipping.
+
+**`skipLabel` defers; it does not exclude.** A merge labeled `no-deploy` deploys nothing, but staging always deploys
+the default branch's head, so the next merge that deploys ships that code too, because `changed` compares each module's
+last deploy with the new commit. That comparison runs in both directions, so the merge after a labeled PR's deploy also
+puts the default branch back on every module the branch changed.
+
+Runs from one source share a group: a PR's runs replace each other, merges replace each other, and neither replaces a
+pending dispatch. The per-Environment job groups from **Deploy by hand** still order everything that reaches one
+Environment. `resolve` reads the merged PR's labels through GitHub's GraphQL API, so it needs `pull-requests: read`,
+which zipx emits.
+""",
+      exampleValue {
+        val targets = List(
+          Target(TargetName("stg"), environment = Some("staging"), stage = DeployStage.PreProduction),
+          Target(TargetName("prod"), environment = Some("production")),
+        )
+        val deploys = List(
+          Capability.dockerGraph.copy(gate = Gate.Always),
+          Capability.deployGraph(
+            participates = _.id == "service",
+            command = n => SbtCommand.module(n, SbtCommand.unsafeTask("promote")),
+            targets = _ => targets,
+            gate = Gate.Always,
+          ),
+        )
+        DeployWorkflow.render(libGraph, deploys, config, DeployTrigger.staged("deploy-stg", "no-deploy")).yaml
+      }.assert(yaml =>
+        assertTrue(
+          yaml.contains("push:"),
+          yaml.contains("pull_request:"),
+          yaml.contains("- labeled"),
+          yaml.contains("contains(github.event.pull_request.labels.*.name, 'deploy-stg')"),
+          yaml.contains("pull-requests: read"),
+          yaml.contains("inputs.sha || github.event.pull_request.head.sha"),
+          yaml.contains("needs.resolve.result == 'success'"),
         )
       ),
     ),

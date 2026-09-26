@@ -71,6 +71,7 @@ object DeployPlan:
       sha: GitSha,
       lastDeploys: List[LastDeploy],
       changedSince: GitSha => Option[Set[ModuleId]],
+      imageScope: DeployImages = DeployImages.Changed,
   ): DeployPlan =
     val last = lastDeploys.map(d => (d.environment, d.module) -> d.sha).toMap
 
@@ -94,8 +95,13 @@ object DeployPlan:
     )
     // Tags are per commit, so every module a target deploys needs an image at `sha` whether or not its content moved.
     val deployed = targets.values.flatten.toSet
-    val images   = (pick(scope.imagesEnvironment, scope.images) ++ scope.images.filter(deployed)).distinct.sorted
-    DeployPlan(sha, images, targets)
+    val changed  = imageScope match
+      case DeployImages.Changed    => pick(scope.imagesEnvironment, scope.images)
+      case DeployImages.ForTargets => Nil
+    DeployPlan(sha, (changed ++ scope.images.filter(deployed)).distinct.sorted, targets)
   end resolve
+
+  /** A run that deploys nothing. */
+  def empty(sha: GitSha): DeployPlan = DeployPlan(sha, Nil, ListMap.empty)
 
 end DeployPlan

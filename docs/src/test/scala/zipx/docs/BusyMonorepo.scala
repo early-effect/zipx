@@ -110,7 +110,7 @@ zipxImageRefs := (Docker / dockerAliases).value.map(_.toString)
 """,
       exampleValue {
         val ci     = Planner.plan(libGraph, split.ci, config)
-        val deploy = DeployWorkflow.plan(libGraph, split.deploy, config, DeployWorkflow.ImagesEnvironment)
+        val deploy = DeployWorkflow.plan(libGraph, split.deploy, config, DeployTrigger.Manual())
         val cov    = CoverageWorkflow.plan(coverage, config)
         s"""|ci.yml:            ${ci.jobs.keys.mkString(", ")}
             |zipx-coverage.yml: ${cov.jobs.keys.mkString(", ")}
@@ -184,10 +184,13 @@ In order, one PR each, so each step's effect on required checks is visible on it
    replaces `test` by name keeps its own command.
 2. **Coverage.** If coverage replaced `test` (`Coverage.once(name = Capability.TestName)`), generate now refuses it.
    Set `zipxCoverageWorkflow`, drop the capability, and remove `coverage` from the required checks if it was there.
-3. **Deploys.** Set `zipxDeployTrigger := DeployTrigger.Manual()` and regenerate. Generate names each fix it needs:
-   drop push-only conditions such as `onMainPush`, give every deploy target an Environment, and keep image and
-   deploy capabilities Graph-scoped. Set `zipxImageRefs` on image modules, tag images from `ZIPX_DEPLOY_SHA` before
-   `GITHUB_SHA`, and give each tier a `Target.group` if you deploy several targets at once.
+3. **Deploys.** Set `zipxDeployTrigger := DeployTrigger.Manual()` (every deploy a dispatch), or
+   `DeployTrigger.staged(deployLabel, skipLabel)` (staging on every merge and on labeled PRs, production by dispatch),
+   and regenerate. Generate names each fix it needs: drop push-only conditions such as `onMainPush`, give every deploy
+   target an Environment, keep image and deploy capabilities Graph-scoped, and under `Staged` mark the staging targets
+   `DeployStage.PreProduction`. Set `zipxImageRefs` on image modules, tag images from `ZIPX_DEPLOY_SHA` before
+   `GITHUB_SHA`, and give each tier a `Target.group` if you deploy several targets at once. Give each production
+   Environment a deployment branch policy on the default branch.
 4. **Integration jobs.** Add `withAffectedBy` to each Once job whose inputs the classpath graph cannot see.
 5. **Check the output.** `zipxWorkflowCheck` in CI keeps the committed workflows honest; `actionlint` in the repo root
    catches anything GitHub would reject before a push does.

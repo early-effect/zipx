@@ -132,6 +132,8 @@ object ZipxPlugin extends AutoPlugin:
     val TargetGroup = zipx.core.TargetGroup
     type DeployTrigger = zipx.core.DeployTrigger
     val DeployTrigger = zipx.core.DeployTrigger
+    type DeployStage = zipx.core.DeployStage
+    val DeployStage = zipx.core.DeployStage
 
     /** The validated settings types: see [[zipxWorkflowName]], [[zipxJavaVersion]] and [[zipxRunnerOs]]. A build names
       * one when it overrides the setting, `zipxJavaVersion := JdkVersion("17")`, and gets the check at the point of
@@ -952,16 +954,16 @@ object ZipxPlugin extends AutoPlugin:
     combineCapabilities(builtins ++ modver, userCaps.toList)
   end capabilitiesOf
 
-  /** Under [[DeployTrigger.Manual]], the images-and-deploys half of the build's capabilities, refused when
-    * `zipx-deploy.yml` could not run it as declared. `None` under [[DeployTrigger.OnMerge]].
+  /** Under [[DeployTrigger.Manual]] or [[DeployTrigger.Staged]], the images-and-deploys half of the build's
+    * capabilities, refused when `zipx-deploy.yml` could not run it as declared. `None` under [[DeployTrigger.OnMerge]].
     */
-  private def deploySplit(extracted: Extracted, graph: ModuleGraph): Option[(DeployWorkflow.Split, String)] =
+  private def deploySplit(extracted: Extracted, graph: ModuleGraph): Option[(DeployWorkflow.Split, DeployTrigger)] =
     readBuildSetting(extracted, zipxDeployTrigger, DeployTrigger.OnMerge) match
-      case DeployTrigger.OnMerge        => None
-      case DeployTrigger.Manual(images) =>
+      case DeployTrigger.OnMerge => None
+      case trigger               =>
         val split = DeployWorkflow.split(capabilitiesOf(extracted, graph))
-        DeployWorkflow.problems(split, graph).headOption.foreach(sys.error)
-        Some(split -> images)
+        DeployWorkflow.problems(split, graph, trigger).headOption.foreach(sys.error)
+        Some(split -> trigger)
 
   /** What `ci.yml` plans: every capability, less what [[deploySplit]] moved to `zipx-deploy.yml`. */
   private def ciCapabilitiesOf(extracted: Extracted, graph: ModuleGraph): List[Capability] =
@@ -1165,9 +1167,9 @@ object ZipxPlugin extends AutoPlugin:
 
   private def deployYaml(st: State, graph: ModuleGraph, cfg: PlanConfig): Option[String] =
     val extracted = Project.extract(st)
-    deploySplit(extracted, graph).map { (split, images) =>
+    deploySplit(extracted, graph).map { (split, trigger) =>
       checkCommandNames(split.deploy.flatMap(_.declaredNames), st, extracted)
-      orFail(DeployWorkflow.render(graph, split.deploy, cfg, images))
+      orFail(DeployWorkflow.render(graph, split.deploy, cfg, trigger))
     }
 
   private def writeDeployWorkflow: Def.Initialize[Task[Unit]] = Def.task {
@@ -1882,53 +1884,85 @@ object ZipxPlugin extends AutoPlugin:
     * [[DeployWorkflow.ShaFile]] and its siblings, for the reason [[affectedModulesTask]] writes a file.
     */
   private def deployPlanTask: Def.Initialize[Task[Unit]] = Def.task {
-    val st              = state.value
-    val extracted       = Project.extract(st)
-    val graph           = buildGraph.value
-    val root            = (LocalRootProject / baseDirectory).value
-    val log             = streams.value.log
-    val (split, images) = deploySplit(extracted, graph).getOrElse(
-      sys.error("zipx: zipxDeployPlan runs under zipxDeployTrigger := DeployTrigger.Manual()")
+    val st               = state.value
+    val extracted        = Project.extract(st)
+    val graph            = buildGraph.value
+    val root             = (LocalRootProject / baseDirectory).value
+    val log              = streams.value.log
+    val (split, trigger) = deploySplit(extracted, graph).getOrElse(
+      sys.error("zipx: zipxDeployPlan runs under zipxDeployTrigger := DeployTrigger.Manual() or DeployTrigger.staged")
     )
-    def env(name: String): Option[String] = sys.env.get(name).map(_.trim).filter(_.nonEmpty)
-    val sha                               = orFail(deploySha(root, env(DeployWorkflow.RequestedShaEnv)))
-    val scope                             = DeployWorkflow.scope(graph, split.deploy, images)
-    val known                             = (scope.images ++ scope.targets.flatMap(_.modules)).toSet
-    val modules                           =
+    def env(name: String): Option[String]              = sys.env.get(name).map(_.trim).filter(_.nonEmpty)
+    def required(name: String): Either[String, String] = env(name).toRight(s"zipx: $name is unset")
+    val graphql = env("GITHUB_GRAPHQL_URL").getOrElse("https://api.github.com/graphql")
+    val sha     = orFail(deploySha(root, env(DeployWorkflow.RequestedShaEnv)))
+    val scope   =
+      DeployWorkflow.scope(graph, split.deploy, trigger.imagesEnvironment.getOrElse(DeployWorkflow.ImagesEnvironment))
+    val known   = (scope.images ++ scope.targets.flatMap(_.modules)).toSet
+    val modules =
       orFail(DeployModules.parse(env(DeployWorkflow.ModulesEnv).getOrElse(DeployModules.ChangedWire), known))
-    val selected = orFail(env(DeployWorkflow.TargetEnv) match
-      case Some(choice)                  => DeployWorkflow.selectedTargets(graph, split.deploy, choice)
-      case None if scope.targets.isEmpty => Right(Set.empty[TargetName])
-      case None => Left(s"zipx: ${DeployWorkflow.TargetEnv} is unset; zipx-deploy.yml passes the target input"))
-    val last = modules match
-      case DeployModules.Changed =>
-        val environments =
-          scope.imagesEnvironment :: scope.targets.filter(t => selected.contains(t.target)).map(_.environment)
-        orFail(
-          for
-            token <- env(DeployWorkflow.TokenEnv).toRight(s"zipx: ${DeployWorkflow.TokenEnv} is unset")
-            repo  <- env("GITHUB_REPOSITORY").toRight("zipx: GITHUB_REPOSITORY is unset")
-            found <- GitHubDeployments.lookup(
-              repo,
-              token,
-              environments,
-              env("GITHUB_GRAPHQL_URL").getOrElse("https://api.github.com/graphql"),
-            )
-          yield found
+    val event: Either[String, DeployEvent] =
+      for
+        name  <- required("GITHUB_EVENT_NAME")
+        ref   <- required("GITHUB_REF")
+        event <- name match
+          case "workflow_dispatch" => Right(DeployEvent.Dispatch(ref, env(DeployWorkflow.TargetEnv)))
+          case "pull_request"      =>
+            DeployRequest
+              .labelsFromJson(env(DeployWorkflow.PrLabelsEnv).getOrElse("[]"))
+              .map(DeployEvent.PullRequest(_))
+          case "push" =>
+            for
+              token  <- required(DeployWorkflow.TokenEnv)
+              repo   <- required("GITHUB_REPOSITORY")
+              labels <- GitHubPullRequests.mergedLabels(repo, token, sha, graphql)
+            yield DeployEvent.Merge(ref, labels)
+          case other => Left(s"zipx: zipx-deploy.yml does not deploy on a '$other' event")
+      yield event
+    val selection = orFail(
+      for
+        e             <- event
+        defaultBranch <- required(DeployWorkflow.DefaultBranchEnv)
+        s             <- DeployRequest.select(
+          trigger,
+          e,
+          defaultBranch,
+          DeployWorkflow.stages(graph, split.deploy),
+          DeployWorkflow.selectedTargets(graph, split.deploy, _),
         )
-      case _ => Nil
-    val plan = DeployPlan.resolve(
-      scope,
-      selected,
-      modules,
-      sha,
-      last,
-      base =>
-        gitDiffBetween(root, base, sha).map { files =>
-          val readings = buildFileReadings(root, extracted, graph, base, sha, files, log)
-          Affected.affectedModules(graph, files, readings).map(ModuleId.unsafeMake)
-        },
+      yield s
     )
+    val (plan, last) = selection match
+      case DeploySelection.Skip(reason) =>
+        log.info(s"zipx deploy: nothing to deploy, because $reason")
+        (DeployPlan.empty(sha), Nil)
+      case DeploySelection.Targets(selected, images) =>
+        val last = modules match
+          case DeployModules.Changed =>
+            val environments =
+              scope.imagesEnvironment :: scope.targets.filter(t => selected.contains(t.target)).map(_.environment)
+            orFail(
+              for
+                token <- required(DeployWorkflow.TokenEnv)
+                repo  <- required("GITHUB_REPOSITORY")
+                found <- GitHubDeployments.lookup(repo, token, environments, graphql)
+              yield found
+            )
+          case _ => Nil
+        val plan = DeployPlan.resolve(
+          scope,
+          selected,
+          modules,
+          sha,
+          last,
+          base =>
+            gitDiffBetween(root, base, sha).map { files =>
+              val readings = buildFileReadings(root, extracted, graph, base, sha, files, log)
+              Affected.affectedModules(graph, files, readings).map(ModuleId.unsafeMake)
+            },
+          images,
+        )
+        (plan, last)
     IO.write(root / DeployWorkflow.ShaFile, s"${plan.sha}\n")
     IO.write(root / DeployWorkflow.ImagesFile, plan.imagesJson + "\n")
     IO.write(root / DeployWorkflow.TargetsFile, plan.targetsJson + "\n")
@@ -1936,7 +1970,9 @@ object ZipxPlugin extends AutoPlugin:
     last.foreach(d => log.info(s"zipx: last deploy of ${d.module} to ${d.environment} was ${d.sha}"))
   }
 
-  /** The `sha` input, checked to be a commit in this checkout, or the checked-out head when it is empty. */
+  /** The `sha` input, checked to be a commit reachable from the checked-out head (so a dispatch from the default branch
+    * can only name a commit on it), or that head when the input is empty.
+    */
   private def deploySha(root: File, requested: Option[String]): Either[String, GitSha] =
     requested match
       case Some(raw) =>
@@ -1947,6 +1983,10 @@ object ZipxPlugin extends AutoPlugin:
           .filterOrElse(
             sha => git(root, "cat-file", "-e", s"$sha^{commit}").isDefined,
             s"zipx: sha input $raw is not a commit in this checkout",
+          )
+          .filterOrElse(
+            sha => git(root, "merge-base", "--is-ancestor", sha, "HEAD").isDefined,
+            s"zipx: sha input $raw is not an ancestor of the dispatched branch's head; deploy only what it contains",
           )
       case None =>
         git(root, "rev-parse", "HEAD").flatMap(GitSha.make(_).toOption).toRight("zipx: git rev-parse HEAD failed")

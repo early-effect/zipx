@@ -182,7 +182,11 @@ enum TargetFanOut:
   *   merged *after* [[Capability.env]], so a target wins on a key clash. Under [[TargetFanOut.SharedJob]] every key is
   *   prefixed (see [[envKey]]) instead, since several destinations' values coexist in one job.
   * @param group
-  *   under [[DeployTrigger.Manual]], a dispatch choice that deploys every target in the group at once.
+  *   under [[DeployTrigger.Manual]] and [[DeployTrigger.Staged]], a dispatch choice that deploys every target in the
+  *   group at once.
+  * @param stage
+  *   under [[DeployTrigger.Manual]] and [[DeployTrigger.Staged]], which commits may reach this target; see
+  *   [[DeployStage]]. `Production` unless a target opts out, so forgetting it never widens a production gate.
   */
 final case class Target(
     name: TargetName,
@@ -190,6 +194,7 @@ final case class Target(
     env: Map[String, EnvValue] = Map.empty,
     condition: Option[JobCondition] = None,
     group: Option[TargetGroup] = None,
+    stage: DeployStage = DeployStage.Production,
 ):
 
   /** This target's `env:`-key prefix under [[TargetFanOut.SharedJob]]: `ZIPX_` then the name upper-cased with `-`

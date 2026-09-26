@@ -14,17 +14,33 @@ zipxCheckCommandNames := false
 
 val stg = Target(TargetName("stg"), environment = Some("fixture-stg"), group = Some(TargetGroup("staging")))
 
-zipxCapabilities ++= Seq(
-  Capability.dockerGraph.copy(gate = Gate.Always).withMatrixCollapse(MatrixCollapse.Off),
-  Capability
-    .deployGraph(
-      participates = _.docker,
-      command = n => SbtCommand.module(n, zipxTasks.of(Compile / compile)),
-      targets = _ => List(stg),
-      gate = Gate.Always,
-    )
-    .withMatrixCollapse(MatrixCollapse.Off),
-)
+val stgStage = settingKey[DeployStage]("the stg target's stage")
+stgStage := DeployStage.Production
+
+zipxCapabilities ++= {
+  val stage = stgStage.value
+  Seq(
+    Capability.dockerGraph.copy(gate = Gate.Always).withMatrixCollapse(MatrixCollapse.Off),
+    Capability
+      .deployGraph(
+        participates = _.docker,
+        command = n => SbtCommand.module(n, zipxTasks.of(Compile / compile)),
+        targets = _ => List(stg.copy(stage = stage)),
+        gate = Gate.Always,
+      )
+      .withMatrixCollapse(MatrixCollapse.Off),
+  )
+}
+
+val assertStaged = taskKey[Unit]("merges and labeled PRs deploy to staging from zipx-deploy.yml")
+assertStaged := {
+  val deploy = IO.read((LocalRootProject / baseDirectory).value / ".github" / "workflows" / "zipx-deploy.yml")
+  assert(deploy.contains("pull_request:") && deploy.contains("- labeled"), "a labeled PR starts a deploy")
+  assert(deploy.contains("'deploy-stg'"), "resolve runs only for a PR carrying the deploy label")
+  assert(deploy.contains("pull-requests: read"), "resolve reads the merged PR's labels")
+  assert(deploy.contains("- choose"), "the dispatch form's default deploys nothing")
+  assert(deploy.contains("concurrency: zipx-deploy-deploy-svc-stg"), "each deploy job is its own group")
+}
 
 val assertManual = taskKey[Unit]("images and deploys moved to zipx-deploy.yml")
 assertManual := {

@@ -14,6 +14,13 @@ $ exists .github/workflows/zipx-deploy.yml
 > set zipxCapabilities := zipxCapabilities.value.map(c => if c.name == Capability.DockerName then c.withCondition(JobCondition.eventIs("push")) else c)
 -> zipxWorkflowGenerate
 > set zipxCapabilities := zipxCapabilities.value.map(c => if c.name == Capability.DockerName then c.copy(condition = None) else c)
+# Staged deploys merges and labeled PRs only to PreProduction targets, so it refuses a build with none.
+> set zipxDeployTrigger := DeployTrigger.staged(deployLabel = "deploy-stg", skipLabel = "no-deploy")
+-> zipxWorkflowGenerate
+> set stgStage := DeployStage.PreProduction
+> zipxWorkflowGenerate
+> assertStaged
+> zipxWorkflowCheck
 # Back to OnMerge: check refuses the leftover deploy workflow, and generate deletes it.
 > set zipxDeployTrigger := DeployTrigger.OnMerge
 -> zipxWorkflowCheck

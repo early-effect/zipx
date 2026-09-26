@@ -100,6 +100,20 @@ object DeployPlanSpec extends ZIOSpecDefault:
         plan.targetsJson == "{}",
       )
     },
+    test("a labeled PR builds only the images its deploys ship, never a changed image nothing deploys") {
+      check(genSelected, genLast, genModules) { (selected, last, changed) =>
+        val plan = DeployPlan.resolve(
+          scope,
+          selected,
+          DeployModules.Changed,
+          head,
+          last,
+          _ => Some(changed),
+          DeployImages.ForTargets,
+        )
+        assertTrue(plan.images.toSet == plan.targets.values.flatten.toSet)
+      }
+    },
     test("a worker changed since stg's deploy needs its image even when the images record says it is current") {
       val last = List(LastDeploy("zipx-images", workerA, head), LastDeploy("lab-stg", workerA, sha('a')))
       val plan = resolve(DeployModules.Changed, Set(stg), last, _ => Some(Set(workerA)))
