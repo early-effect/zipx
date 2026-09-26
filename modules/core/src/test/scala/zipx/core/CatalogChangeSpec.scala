@@ -22,7 +22,7 @@ object CatalogChangeSpec extends ZIOSpecDefault:
   private val catalogPath = "project/ZipxVersions.scala"
 
   private def affected(changes: List[CatalogChange], files: List[String] = List(catalogPath)): Set[String] =
-    Affected.affectedModules(graph, files, Some(CatalogEdit(catalogPath, changes)))
+    Affected.affectedModules(graph, files, List(CatalogEdit(catalogPath, changes).reading(graph)))
 
   def spec = suite("CatalogChange")(
     test("L6: bumping a row only svcB declares affects svcB alone") {

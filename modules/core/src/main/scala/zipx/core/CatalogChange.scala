@@ -51,4 +51,12 @@ end CatalogChange
   * @param path
   *   repo-root-relative, as `git diff --name-only` reports it.
   */
-final case class CatalogEdit(path: String, changes: List[CatalogChange])
+final case class CatalogEdit(path: String, changes: List[CatalogChange]):
+  def reading(graph: ModuleGraph): BuildFileReading = BuildFileReading(path, CatalogChange.seeds(changes, graph))
+
+/** What one changed build file affects, when zipx could read its diff.
+  *
+  * @param seeds
+  *   the modules it affects directly, before the reverse closure, or `None` for every module.
+  */
+final case class BuildFileReading(path: String, seeds: Option[Set[String]])

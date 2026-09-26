@@ -195,8 +195,9 @@ In order, one PR each, so each step's effect on required checks is visible on it
     ),
     section("Limits")(
       md"""
-- Any edit to `build.sbt` affects every module, because it is a build file. A catalog bump is the exception: it affects
-  the modules that declare the library (see **Affected**, *Catalog bumps*).
+- An edit to a shared helper or bare setting in `build.sbt`, or to any file under `project/` other than the catalog,
+  affects every module. An edit inside one project's definition affects that project, and a catalog bump the modules
+  that declare the library (see **Affected**).
 - `zipxTestAffected` scopes the builtin `test` only. A user Aggregate capability with per-module commands still runs
   all of them.
 - Registry-style steps that need an image (LaunchPad, a manifest registry) run whenever their module's image is in the

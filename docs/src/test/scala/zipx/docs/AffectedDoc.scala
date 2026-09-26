@@ -44,7 +44,8 @@ ref) and maps each file to the module or modules that own it:
 
 1. **Build files force everything.** If any path ends in `.sbt` or sits under a `project/` directory
    (root or nested), the whole module set is affected. Plugins and the graph may have changed, so nothing
-   is safe to skip. The one exception is the versions catalog; see *Catalog bumps* below.
+   is safe to skip. The exceptions are the versions catalog and the root `build.sbt`, whose diffs zipx reads;
+   see *Catalog bumps* and *build.sbt edits* below.
 2. **Otherwise: longest owned-path prefix.** A module owns its `baseDir` *and* its source directories
    (sbt's `unmanagedSourceDirectories`, Compile and Test). A file is owned by every module whose longest
    matching prefix is the longest match overall. Matching is directory-aware: `core/` owns
@@ -66,7 +67,9 @@ runs the closure's CI-relevant aggregated modules.
 | `models/src/…` | `models` | `models` + every transitive dependent |
 | `mods/inner/X.scala` | `inner` (longer than `mods`) | `inner` + dependents |
 | `README.md` | none | empty (no Graph Verify) |
-| `build.sbt` / `project/plugins.sbt` | (build file) | **all** modules |
+| `project/plugins.sbt`, `project/*.scala` | (build file) | **all** modules |
+| `build.sbt`, inside one project's definition | that project | that project + dependents |
+| `build.sbt`, a shared helper or bare setting | (build-wide) | **all** modules |
 | `project/ZipxVersions.scala`, one `Lib` version moved | the modules that declare that library | those modules + dependents |
 
 ```scala
@@ -110,6 +113,29 @@ merge base for a PR, and each Environment's last deployed commit for a deploy. T
 
 Rows that `zipxDepUpdate` and the version-updates companion rewrite always match, since they rewrite the version
 literal in place. A hand edit that also reformats the constructor reads as every module, which is the safe answer.
+"""
+    ),
+    section("build.sbt edits")(
+      md"""
+An edit to the root `build.sbt` usually touches one project's definition: a setting added to its `.settings(...)`, a
+plugin enabled. zipx compares `build.sbt` statement by statement between the two commits and reads each change:
+
+| Change | Affects |
+| --- | --- |
+| Inside one project's definition (`lazy val svcA = project…`) | That project's modules (every `projectMatrix` row), every other project whose definition names it, then dependents |
+| A shared helper (`def publishedLibrary = …`, `val common = …`) | Every module |
+| A bare setting (`scalaVersion := …`) or an import | Every module: sbt 2 applies bare settings to every project |
+| An aggregator's definition, a definition added or removed | Every module |
+| A comment or blank line | Nothing |
+
+"Names it" includes a string: `val svcAJvm = LocalProject("svcA")` stands for `svcA`, so a project that reads
+`(svcAJvm / dockerAlias).value` is affected by a change to `svcA`. An aggregator that only lists a project in
+`.aggregate(...)` is not, since it runs nothing of its own. A file that does not parse at either commit, and any
+`.sbt` file other than the root `build.sbt`, affects every module.
+
+This compares source rather than asking sbt, because sbt 2 does not record where a setting inside
+`project.settings(...)` is: it keeps one line, offset from the definition, and none at all for a multi-line setting.
+The job log names each reading (`zipx: build.sbt: affects svcA, svcAJS, imageIt`).
 """
     ),
     section("Cross-built modules (projectMatrix)")(

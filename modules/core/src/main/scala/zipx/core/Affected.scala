@@ -33,22 +33,19 @@ object Affected:
     * Returns all module ids when a build file changed. Files under no module are ignored (unless a build file). Seeds
     * are expanded via the reverse-dependency closure.
     *
-    * The catalog file is a build file, except when `catalog` reads its diff: then its [[CatalogChange]]s seed modules
-    * instead, and only a [[CatalogChange.BuildWide]] one affects everything.
+    * A build file with a [[BuildFileReading]] seeds what the reading says instead; see [[CatalogChange]] and
+    * `BuildSbtDiff`. A build file without one still affects everything.
     */
   def affectedModules(
       graph: ModuleGraph,
       changedFiles: List[String],
-      catalog: Option[CatalogEdit] = None,
+      readings: List[BuildFileReading] = Nil,
   ): Set[String] =
-    val (catalogFiles, others) = changedFiles.partition(f => catalog.exists(_.path == f))
-    val catalogSeeds           = catalog match
-      case Some(edit) if catalogFiles.nonEmpty => CatalogChange.seeds(edit.changes, graph)
-      case _                                   => Some(Set.empty[String])
-    catalogSeeds match
-      case Some(seeds) if !others.exists(isBuildFile) =>
-        graph.affectedClosure(seeds ++ others.flatMap(owningModules(graph, _)))
-      case _ => graph.ids.toSet
+    val byPath              = readings.map(r => r.path -> r.seeds).toMap
+    val (readFiles, others) = changedFiles.partition(byPath.contains)
+    val readSeeds           = readFiles.map(byPath)
+    if others.exists(isBuildFile) || readSeeds.exists(_.isEmpty) then graph.ids.toSet
+    else graph.affectedClosure(readSeeds.flatten.flatten.toSet ++ others.flatMap(owningModules(graph, _)))
   end affectedModules
 
   /** The module ids the `affected` job should publish, given a diff that may have failed.
@@ -65,11 +62,11 @@ object Affected:
   def outputModules(
       graph: ModuleGraph,
       changedFiles: Option[List[String]],
-      catalog: Option[CatalogEdit] = None,
+      readings: List[BuildFileReading] = Nil,
   ): List[String] =
     changedFiles match
       case None        => AllSentinel
-      case Some(files) => affectedModules(graph, files, catalog).toList.sorted
+      case Some(files) => affectedModules(graph, files, readings).toList.sorted
 
   /** Every module owning a file, by longest matching prefix over [[ModuleNode.ownedPaths]].
     *

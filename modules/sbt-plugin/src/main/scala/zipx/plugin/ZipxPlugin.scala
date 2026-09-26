@@ -1925,9 +1925,8 @@ object ZipxPlugin extends AutoPlugin:
       last,
       base =>
         gitDiffBetween(root, base, sha).map { files =>
-          val edit = catalogEdit(root, extracted, base, sha, files)
-          edit.foreach(e => log.info(describeCatalog(e)))
-          Affected.affectedModules(graph, files, edit).map(ModuleId.unsafeMake)
+          val readings = buildFileReadings(root, extracted, graph, base, sha, files, log)
+          Affected.affectedModules(graph, files, readings).map(ModuleId.unsafeMake)
         },
     )
     IO.write(root / DeployWorkflow.ShaFile, s"${plan.sha}\n")
@@ -1997,8 +1996,8 @@ object ZipxPlugin extends AutoPlugin:
     IO.write(root / DeployWorkflow.ImageMissingFile, s"${missing.nonEmpty}\n")
   }
 
-  /** [[Affected.outputModules]] for HEAD since its merge-base with `baseRef`, reading a catalog diff as
-    * [[CatalogChange]]s. The catalog is compared at that merge-base, the commit the three-dot diff compares against.
+  /** [[Affected.outputModules]] for HEAD since its merge-base with `baseRef`, reading the build files it can (see
+    * [[buildFileReadings]]) at that merge-base, the commit the three-dot diff compares against.
     */
   private def affectedSinceMergeBase(
       root: File,
@@ -2007,15 +2006,14 @@ object ZipxPlugin extends AutoPlugin:
       baseRef: String,
       log: Logger,
   ): List[String] =
-    val changed = gitDiffNames(root, baseRef)
-    val edit    =
+    val changed  = gitDiffNames(root, baseRef)
+    val readings =
       for
-        files <- changed
-        from  <- git(root, "merge-base", baseRef, "HEAD")
-        e     <- catalogEdit(root, extracted, from, "HEAD", files)
-      yield e
-    edit.foreach(e => log.info(describeCatalog(e)))
-    Affected.outputModules(graph, changed, edit)
+        files <- changed.toList
+        from  <- git(root, "merge-base", baseRef, "HEAD").toList
+        r     <- buildFileReadings(root, extracted, graph, from, "HEAD", files, log)
+      yield r
+    Affected.outputModules(graph, changed, readings)
   end affectedSinceMergeBase
 
   /** How the catalog file reads between two commits, when it is among `changed`. Unreadable at either commit is
@@ -2046,6 +2044,35 @@ object ZipxPlugin extends AutoPlugin:
       case CatalogChange.BuildWide(reason) => s"build-wide ($reason)"
     }
     s"zipx: ${edit.path}: ${readings.mkString(", ")}"
+
+  /** A reading of every changed build file zipx can read between two commits: the catalog and the root `build.sbt`.
+    * Other build files have none, so they still affect every module.
+    */
+  private def buildFileReadings(
+      root: File,
+      extracted: Extracted,
+      graph: ModuleGraph,
+      from: String,
+      to: String,
+      changed: List[String],
+      log: Logger,
+  ): List[BuildFileReading] =
+    val catalog = catalogEdit(root, extracted, from, to, changed).map { edit =>
+      log.info(describeCatalog(edit))
+      edit.reading(graph)
+    }
+    val buildSbt = Option.when(changed.contains(zipx.syntax.BuildSbtDiff.Path)) {
+      val rel     = zipx.syntax.BuildSbtDiff.Path
+      val reading = (ModverRelease.gitShow(root, from, rel), ModverRelease.gitShow(root, to, rel)) match
+        case (Right(Some(base)), Right(Some(head))) => zipx.syntax.BuildSbtDiff.reading(base, head, graph)
+        case _                                      => BuildFileReading(rel, None)
+      log.info(
+        s"zipx: $rel: ${reading.seeds.fold("build-wide")(s => s"affects ${s.toList.sorted.mkString(", ")}")}"
+      )
+      reading
+    }
+    catalog.toList ++ buildSbt.toList
+  end buildFileReadings
 
   /** Files changed on HEAD since its merge-base with `baseRef`, repo-root-relative with forward slashes.
     *
