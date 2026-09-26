@@ -1,0 +1,43 @@
+# The builtin test job runs the affected-scoped command under AffectedOnPR.
+> zipxWorkflowGenerate
+> assertTestCommand
+# Real git history, so each diff genuinely succeeds and fail-open never masks a wrong answer.
+$ exec git init -q .
+$ exec git config user.email scripted@example.com
+$ exec git config user.name scripted
+$ exec git config commit.gpgsign false
+$ exec git add .
+$ exec git commit -q -m fixture
+# A core change tests core and app, which depends on it.
+$ touch core/src/main/scala/More.scala
+$ exec git add .
+$ exec git commit -q -m core-change
+> zipxTestAffected HEAD^
+$ exists target/tested/core
+$ exists target/tested/app
+$ absent target/tested/side
+$ absent target/tested/root
+$ delete target/tested
+# An app change tests app alone.
+$ touch app/src/main/scala/More.scala
+$ exec git add .
+$ exec git commit -q -m app-change
+> zipxTestAffected HEAD^
+$ exists target/tested/app
+$ absent target/tested/core
+$ delete target/tested
+# A change only to a module outside the root aggregate tests nothing.
+$ touch side/src/main/scala/More.scala
+$ exec git add .
+$ exec git commit -q -m side-change
+> zipxTestAffected HEAD^
+$ absent target/tested
+# No base, or an all-zero one, runs the full command: root's test task, aggregated.
+> zipxTestAffected
+$ exists target/tested/root
+$ exists target/tested/core
+$ exists target/tested/app
+$ absent target/tested/side
+$ delete target/tested
+> zipxTestAffected 0000000000000000000000000000000000000000
+$ exists target/tested/root

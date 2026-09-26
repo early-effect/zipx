@@ -566,6 +566,8 @@ object ZipxPlugin extends AutoPlugin:
   override def buildSettings: Seq[Setting[?]] = Seq(
     zipxGraph        := graphTask.value,
     zipxPublishOrder := publishOrderTask.value,
+    zipxModuleGraph  := Def.uncached(buildGraph.value),
+    commands += testAffectedCommand,
     // `Def.uncached` because a file write is not a valid cached-task output.
     zipxCatalogGenerate := Def.uncached {
       Def
@@ -806,11 +808,16 @@ object ZipxPlugin extends AutoPlugin:
       graph: ModuleGraph,
       verifyTask: SbtCommand,
       verify: ZipxVerify,
+      affectedOnPR: Boolean,
+      affectedOnPush: Boolean,
   ): List[Capability] =
-    val test =
-      Capability
+    val prBase   = Expr.github("event.pull_request.base.sha")
+    val testBase = if affectedOnPush then prBase || Expr.github("event.before") else prBase
+    val test     =
+      val full = Capability
         .once(name = Capability.TestName, command = verifyTask, phase = Phase.Verify, gate = Gate.Always)
         .withLocalCache(LocalCacheMode.Save)
+      if !affectedOnPR then full else full.running(TestAffected.command(testBase))
     val fmt = verifyGate(
       verify.fmt,
       Capability.FmtName,
@@ -922,8 +929,14 @@ object ZipxPlugin extends AutoPlugin:
     val verifyTask = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
     val verify     = orFail(ZipxVerify.validate(readBuildSetting(extracted, zipxVerify, ZipxVerify.Strict)))
     val ships      = readBuildSetting(extracted, zipxShips, Seq.empty)
-    val builtins   = builtinCapabilities(graph, verifyTask, verify)
-    val modver     =
+    val builtins   = builtinCapabilities(
+      graph,
+      verifyTask,
+      verify,
+      affectedOnPR = readBuildSetting(extracted, zipxAffectedOnPR, true),
+      affectedOnPush = readBuildSetting(extracted, zipxAffectedOnPush, false),
+    )
+    val modver =
       if ships.isEmpty then Nil
       else
         List(
@@ -1821,6 +1834,44 @@ object ZipxPlugin extends AutoPlugin:
       IO.write(root / "target" / "zipx-affected.json", json + "\n")
       println(json)
     }
+
+  /** The loaded build as a graph, for commands: a command cannot read [[buildGraph]] directly. */
+  private val zipxModuleGraph = taskKey[ModuleGraph]("zipx internal: the module graph, for zipxTestAffected")
+
+  /** `zipxTestAffected [base]`, the builtin `test` under `AffectedOnPR`: this session runs what [[TestAffected.plan]]
+    * picks.
+    *
+    * The diff runs here, not in the `affected` job, so `test` neither waits on that job nor pays a second sbt load. Its
+    * base is the one `affected` uses: the PR base, or the pushed-over commit under `zipxAffectedOnPush`. No base, or an
+    * all-zero one (a dispatch, a force-push), tests everything.
+    */
+  private val testAffectedCommand: Command = Command.args(TestAffected.CommandName, "[base]") { (st, args) =>
+    val extracted     = Project.extract(st)
+    val (next, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
+    val root          = extracted.get(LocalRootProject / baseDirectory)
+    val full          = readBuildSetting(extracted, zipxTestTask, CapabilityTasks.of(testFull))
+    val base          = args.headOption.map(_.trim).filter(b => b.nonEmpty && b.exists(_ != '0'))
+    val affected      = base.fold(Affected.AllSentinel)(b => Affected.outputModules(graph, gitDiffNames(root, b)))
+    val byId          = extracted.structure.allProjects.map(p => p.id -> p).toMap
+    val rootId        = extracted.rootProject(extracted.structure.root)
+    def reach(ids: List[String], seen: Set[String]): Set[String] = ids match
+      case Nil                             => seen
+      case id :: rest if seen.contains(id) => reach(rest, seen)
+      case id :: rest => reach(byId.get(id).toList.flatMap(_.aggregate.map(_.project)) ++ rest, seen + id)
+    val aggregated = reach(List(rootId), Set.empty).flatMap(id => ModuleId.make(id).toOption)
+    val log        = next.log
+    TestAffected.plan(full, graph, aggregated, affected) match
+      case TestAffected.Run.Everything(command) =>
+        log.info(s"zipx: testing everything (${base.fold("no base")(b => s"base $b could not narrow it")})")
+        (command.text: String) :: next
+      case TestAffected.Run.Modules(command, modules) =>
+        log.info(s"zipx: testing affected ${modules.mkString(", ")} since ${base.getOrElse("")}")
+        (command.text: String) :: next
+      case TestAffected.Run.Nothing =>
+        log.info(s"zipx: nothing the root aggregate tests is affected since ${base.getOrElse("")}")
+        next
+    end match
+  }
 
   /** `zipx-deploy.yml`'s resolve step. Inputs arrive as env and the plan leaves as files under
     * [[DeployWorkflow.ShaFile]] and its siblings, for the reason [[affectedModulesTask]] writes a file.

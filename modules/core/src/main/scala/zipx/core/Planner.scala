@@ -166,7 +166,21 @@ object Planner:
     validateModverPublish(capabilities, config)
     capabilities.filter(Coverage.instruments).foreach(validateCoverage)
     validateLocalCacheOwner(capabilities, graph)
+    capabilities.foreach(c => c.affectedBy.foreach(validateAffectedBy(c, _, graph)))
   end validateCapabilities
+
+  private def validateAffectedBy(capability: Capability, modules: ModuleNode => Boolean, graph: ModuleGraph): Unit =
+    if capability.scope != CapabilityScope.Once then
+      sys.error(
+        s"zipx: capability '${capability.name}' is ${capability.scope}-scoped with withAffectedBy; only a Once job " +
+          "needs it, since Graph jobs are already gated per module"
+      )
+    if !graph.nodes.exists(modules) then
+      sys.error(
+        s"zipx: capability '${capability.name}' withAffectedBy matches no module, so it would run only when the diff " +
+          "cannot narrow anything; name the modules whose changes it tests"
+      )
+  end validateAffectedBy
 
   /** An instrumented capability may not be the builtin test, which is every PR's required check, nor save the build
     * snapshot that uninstrumented jobs restore.
@@ -431,7 +445,9 @@ object Planner:
     // session over every module, and there is nothing there to skip.
     val usesAffected =
       config.affected == AffectedMode.AffectedOnPR &&
-        capabilities.exists(c => affectedGated(c, config) && c.scope == CapabilityScope.Graph)
+        capabilities.exists(c =>
+          (affectedGated(c, config) && c.scope == CapabilityScope.Graph) || c.affectedBy.isDefined
+        )
 
     // Publish and Deploy jobs run on a release tag and on a merged-PR push, where Verify does not, so the `affected`
     // job they depend on has to run there too. It emits the `all` sentinel for a non-PR event already (see
@@ -876,9 +892,19 @@ object Planner:
     val releaseCond   = gateCondition(capability, config)
     val crossNeeds    = crossCapabilityNeeds(capability, graph, byName, config)
     val gatedOnModver = config.modverPublish && capability.name == Capability.PublishName
+    val affectedBy    = affectedByModules(capability, graph, config)
     val rawNeeds      =
-      (crossNeeds ++ (if gatedOnModver then List(modverJobId) else Nil)).distinct.sorted
-    val tolerance  = tolerateSkips(capability, rawNeeds.filterNot(_ == modverJobId), affectedGatedNames)
+      (crossNeeds ++
+        (if gatedOnModver then List(modverJobId) else Nil) ++
+        (if affectedBy.nonEmpty then List(affectedJobId) else Nil)).distinct.sorted
+    // Same clause order as a Graph job: `!cancelled()`, the affected gate, then each other need's guard.
+    val tolerance =
+      if affectedBy.isEmpty then tolerateSkips(capability, rawNeeds.filterNot(_ == modverJobId), affectedGatedNames)
+      else
+        val clauses = skipTolerantClauses(rawNeeds.filterNot(id => id == modverJobId || id == affectedJobId))
+        val gate    =
+          Expr.group((affectedBy.map(Expr.contains(affectedModulesJson, _)) :+ affectedContainsAll).reduceLeft(_ || _))
+        Some((clauses.head :: gate.unwrapped :: clauses.tail).mkString(" && "))
     val withModver =
       andConditions(andConditions(tolerance, releaseCond), Option.when(gatedOnModver)(modverModulesNonEmpty.unwrapped))
     val (needs, base) =
@@ -922,6 +948,16 @@ object Planner:
   end onceJob
 
   private val syntheticNode = ModuleNode(id = ModuleId("_build"))
+
+  /** The modules a [[Capability.withAffectedBy]] gate lists. Empty when the capability has none, or when affected
+    * gating is off, in which case the job runs ungated as it always did.
+    */
+  private def affectedByModules(capability: Capability, graph: ModuleGraph, config: PlanConfig): List[Expr] =
+    if config.affected != AffectedMode.AffectedOnPR then Nil
+    else
+      capability.affectedBy.toList.flatMap(p =>
+        graph.topologicalSort.flatMap(graph.get).filter(p).map(n => Expr.Quoted(n.id.asExprLiteral))
+      )
 
   private def aggregateJobs(
       capability: Capability,
