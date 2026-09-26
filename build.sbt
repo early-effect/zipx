@@ -72,13 +72,13 @@ lazy val root = (project in file("."))
         ZipxCentral.release.withCondition(upstream),
         // andCondition keeps ZipxDocs tag|dispatch filter and layers the fork gate
         ZipxDocs.pages().andCondition(upstream),
-        // Override Aggregate `test` so consumer proofs share the verify job: unit/IT tests, then plugin scripted,
-        // then publishLocal + examples/monorepo zipxWorkflowCheck (former consumer-verify job).
+        // Override Aggregate `test`: unit/IT tests, then publishLocal + examples/monorepo zipxWorkflowCheck (former
+        // consumer-verify job).
         // extraSteps: saferis-style pre-pull so Testcontainers does not hit Hub mid-suite (Ryuk stays on).
         Capability
           .once(
             name = Capability.TestName,
-            command = zipxTasks.session(test, LocalProject("plugin") / scripted),
+            command = zipxTasks.of(test),
             phase = Phase.Verify,
             gate = Gate.Always,
             extraSteps = RemoteCacheItSteps.prePull,
@@ -86,6 +86,8 @@ lazy val root = (project in file("."))
           )
           // Replaces the builtin test by name, so it has to claim the LocalDir snapshot itself.
           .withLocalCache(LocalCacheMode.Save),
+        // Its own job, in parallel with `test`: in series, the two suites were the whole critical path.
+        zipxTasks.once(CapabilityName("scripted"), LocalProject("plugin") / scripted),
       )
     },
     zipxJavaVersion                := JdkVersion("25"),
@@ -198,11 +200,17 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     // JVM args for the sbt subprocess that runs scripted tests: suppress Unsafe/JNA warnings.
     scriptedLaunchOpts ++= Seq(
       "-Xmx1024m",
+      // Every test boots a cold sbt, four at a time on a four-core runner, so JIT compilation competes with the tests
+      // for CPU. C1 alone warms up fastest, and no scripted launch lives long enough to repay C2.
+      "-XX:TieredStopAtLevel=1",
       "-XX:+IgnoreUnrecognizedVMOptions",
       "--add-opens=java.base/sun.misc=ALL-UNNAMED",
       "--sun-misc-unsafe-memory-access=allow",
       "--enable-native-access=ALL-UNNAMED",
       s"-Dplugin.version=${version.value}",
+      // Scripted gives each launch its own sbt.global.base, and the launcher's boot directory defaults under it, so
+      // every launch fetched sbt and Scala into an empty directory. Share the running sbt's instead.
+      s"-Dsbt.boot.directory=${appConfiguration.value.provider.scalaProvider.launcher.bootDirectory}",
     ),
     // sbt 2's default turns batch mode off: it checks for a `1.x`-style binary version, and sbt 2's is `2`. Without
     // batch mode every test gets a fresh JVM and scriptedParallelInstances is ignored. 4 matches a standard runner.

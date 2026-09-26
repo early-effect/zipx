@@ -108,8 +108,8 @@ deploys have their own workflows, and the cache saves once per run (Specular **C
 ## Verification (how we prove changes)
 
 Always `testFull`, never plain `test` (sbt 2's `test` is `testQuick`). Prefer Metals for format and focused suite runs
-while iterating; CI Aggregate `test` runs unit/IT (including live remote-cache via Testcontainers; Docker required),
-`plugin/scripted`, and the examples/monorepo workflow check.
+while iterating; CI Aggregate `test` runs unit/IT (including live remote-cache via Testcontainers; Docker required) and
+the examples/monorepo workflow check, and a parallel `scripted` job runs `plugin/scripted`.
 
 Behavior that only shows on a real repository (cache eviction, approvals, deployment records, what a PR runs) is
 proven in [zipx-ci-lab](https://github.com/early-effect/zipx-ci-lab) against a snapshot of the branch, with the
