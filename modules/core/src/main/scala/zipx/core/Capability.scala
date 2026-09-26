@@ -4,6 +4,7 @@ import neotype.Subtype
 import neotype.unwrap
 import zipx.workflow.EnvName
 import zipx.workflow.Expr
+import zipx.workflow.ExprLiteral
 import zipx.workflow.JobId
 import zipx.workflow.JobService
 import zipx.workflow.Names
@@ -60,7 +61,24 @@ object TargetName extends Subtype[String]:
     else
       s"invalid target name '$input': it becomes part of a GitHub job id, so it must start with an ASCII letter or _ " +
         "and contain only ASCII letters, digits, - or _"
+
+  extension (name: TargetName)
+    /** Total for the reason [[ModuleId.asExprLiteral]] is: an Actions id is a subset of an expression literal. */
+    def asExprLiteral: ExprLiteral = ExprLiteral.unsafeMake(name)
 end TargetName
+
+/** Targets deployed together from one `zipx-deploy.yml` dispatch, as in every `stg` target at once. Offered beside the
+  * target names in the `target` input, so it follows the same naming rule.
+  */
+type TargetGroup = TargetGroup.Type
+object TargetGroup extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a target group must be non-empty"
+    else if input.matches(Names.ActionsId) then true
+    else
+      s"invalid target group '$input': it is a dispatch choice beside target names, so it must start with an ASCII " +
+        "letter or _ and contain only ASCII letters, digits, - or _"
+end TargetGroup
 
 /** What a capability's `extraSteps` / `postSteps` see. `target` is populated only when the capability fans out
   * job-per-target.
@@ -163,12 +181,15 @@ enum TargetFanOut:
   * @param env
   *   merged *after* [[Capability.env]], so a target wins on a key clash. Under [[TargetFanOut.SharedJob]] every key is
   *   prefixed (see [[envKey]]) instead, since several destinations' values coexist in one job.
+  * @param group
+  *   under [[DeployTrigger.Manual]], a dispatch choice that deploys every target in the group at once.
   */
 final case class Target(
     name: TargetName,
     environment: Option[String] = None,
     env: Map[String, EnvValue] = Map.empty,
     condition: Option[JobCondition] = None,
+    group: Option[TargetGroup] = None,
 ):
 
   /** This target's `env:`-key prefix under [[TargetFanOut.SharedJob]]: `ZIPX_` then the name upper-cased with `-`

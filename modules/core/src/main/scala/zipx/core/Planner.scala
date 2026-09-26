@@ -470,7 +470,6 @@ object Planner:
     val modverGatedNames: Set[CapabilityName] =
       if usesModver then Set(Capability.PublishName) else Set.empty
 
-    val topoOrder      = graph.topologicalSort
     val orderedCaps    = capabilities.zipWithIndex.sortBy((c, i) => (c.phase.ordinal, i)).map(_._1)
     val capabilityJobs =
       orderedCaps.flatMap { c =>
@@ -483,23 +482,7 @@ object Planner:
           case CapabilityScope.Layer =>
             layerJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames ++ modverGatedNames, mode)
           case CapabilityScope.Graph =>
-            mode match
-              case MatrixCollapse.Off =>
-                for
-                  moduleId <- topoOrder
-                  node     <- graph.get(moduleId).toList
-                  if c.participates(node)
-                  job <- graphJobsFor(c, node, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames)
-                yield job
-              case MatrixCollapse.Auto if !MatrixCollapse.graphCollapseFeasible(c, graph) =>
-                for
-                  moduleId <- topoOrder
-                  node     <- graph.get(moduleId).toList
-                  if c.participates(node)
-                  job <- graphJobsFor(c, node, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames)
-                yield job
-              case collapse =>
-                graphMatrixJobs(c, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames, collapse)
+            graphCapabilityJobs(c, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames, Pipeline.Ci)
         end match
       }
 
@@ -1247,6 +1230,53 @@ object Planner:
   end layerJobs
 
   /** One Graph job with `strategy.matrix` over modules (and optionally targets under Coarse). */
+  /** One Graph capability's jobs: one per participating module, or one matrix job when [[MatrixCollapse]] folds them.
+    */
+  private[core] def graphCapabilityJobs(
+      capability: Capability,
+      graph: ModuleGraph,
+      config: PlanConfig,
+      usesAffected: Boolean,
+      byName: Map[CapabilityName, Capability],
+      usesVerifyGate: Boolean,
+      affectedGatedNames: Set[CapabilityName],
+      pipeline: Pipeline,
+  ): List[(JobId, Job)] =
+    def perModule =
+      for
+        moduleId <- graph.topologicalSort
+        node     <- graph.get(moduleId).toList
+        if capability.participates(node)
+        job <- graphJobsFor(
+          capability,
+          node,
+          graph,
+          config,
+          usesAffected,
+          byName,
+          usesVerifyGate,
+          affectedGatedNames,
+          pipeline,
+        )
+      yield job
+    MatrixCollapse.effective(capability, config) match
+      case MatrixCollapse.Off                                                              => perModule
+      case MatrixCollapse.Auto if !MatrixCollapse.graphCollapseFeasible(capability, graph) => perModule
+      case collapse                                                                        =>
+        graphMatrixJobs(
+          capability,
+          graph,
+          config,
+          usesAffected,
+          byName,
+          usesVerifyGate,
+          affectedGatedNames,
+          collapse,
+          pipeline,
+        )
+    end match
+  end graphCapabilityJobs
+
   private def graphMatrixJobs(
       capability: Capability,
       graph: ModuleGraph,
@@ -1256,6 +1286,7 @@ object Planner:
       usesVerifyGate: Boolean,
       affectedGatedNames: Set[CapabilityName],
       mode: MatrixCollapse,
+      pipeline: Pipeline,
   ): List[(JobId, Job)] =
     val nodes = participants(capability, graph)
     if nodes.isEmpty then Nil
@@ -1327,24 +1358,24 @@ object Planner:
           id      <- allJobIds(dep, graph, config)
         yield id
 
+      val selector        = selectionJobId(pipeline)
       val gatedOnAffected = usesAffected && affectedGated(capability, config)
       val gatedOnModver   = config.modverPublish && capability.name == Capability.PublishName
       val rawNeeds        =
         (crossNeeds ++
-          (if gatedOnAffected then List(affectedJobId) else Nil) ++
+          (if gatedOnAffected then List(selector) else Nil) ++
           (if gatedOnModver then List(modverJobId) else Nil)).distinct.sorted
       val cache        = cacheForCommand(config, commandOverride.isDefined)
-      val guardedNeeds = rawNeeds.filterNot(id => id == affectedJobId || id == verifyGateJobId || id == modverJobId)
+      val guardedNeeds = rawNeeds.filterNot(id => id == selector || id == verifyGateJobId || id == modverJobId)
       val skipTolerant = gatedOnAffected || gatedOnModver || dependsOnSkippable(capability, affectedGatedNames)
-      val releaseGate  = gateCondition(capability, config)
+      val releaseGate  = gateFor(capability, config, pipeline)
+      val legTarget    = Option.when(targets.nonEmpty)(Expr.matrix("target"))
       // Job-level `if` cannot use `matrix.*` (GitHub rejects the workflow). Skip the whole job when
-      // affected found nothing; per-leg membership is enforced on each step below.
+      // nothing is selected; per-leg membership is enforced on each step below.
       val affectedGate =
-        Option.when(gatedOnAffected)(affectedModulesNonEmpty.unwrapped)
+        Option.when(gatedOnAffected)(selectsAny(pipeline, targeted = legTarget.isDefined).unwrapped)
       val stepAffectedGate =
-        Option.when(gatedOnAffected)(
-          Expr.group(affectedContainsMatrixModule || affectedContainsAll).unwrapped
-        )
+        Option.when(gatedOnAffected)(selects(pipeline, Expr.matrix("module"), legTarget).unwrapped)
       val modverGate =
         Option.when(gatedOnModver)(modverModulesNonEmpty.unwrapped)
       val stepModverGate =
@@ -1386,6 +1417,8 @@ object Planner:
         jobSuffix = capability.name.asJobId,
         destinations = shared,
         matrixAxes = axes,
+        pipeline = pipeline,
+        module = Expr.matrix("module"),
       ).map(andStepIf(_, stepAffectedGate)).map(andStepIf(_, stepModverGate))
 
       List(
@@ -1394,12 +1427,12 @@ object Planner:
           runsOn = runner,
           needs = needs,
           `if` = cond,
-          environment = envBinding.map(JobEnvironment(_)),
+          environment = jobEnvironment(pipeline, capability, envBinding, Expr.matrix("module")),
           permissions = ListMap.from(capability.permissions),
           strategy = Some(Strategy(matrix = matrixMap, include = includeRows)),
           container = capability.container,
           services = mergeServices(capability, cache),
-          env = mergeEnv(config.env, cache.env, capability.env, targetEnv),
+          env = mergeEnv(config.env, cache.env, capability.env, targetEnv ++ pipelineEnv(pipeline)),
           steps = steps,
         )
       )
@@ -1415,6 +1448,7 @@ object Planner:
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
       affectedGatedNames: Set[CapabilityName],
+      pipeline: Pipeline,
   ): List[(JobId, Job)] =
     val upstreamNeeds = capability.ordering match
       case Ordering.ParallelWithUpstream =>
@@ -1442,11 +1476,12 @@ object Planner:
             case _ => allJobIds(dep, graph, config)
       yield id
 
+    val selector        = selectionJobId(pipeline)
     val gatedOnAffected = usesAffected && affectedGated(capability, config)
     val gatedOnModver   = config.modverPublish && capability.name == Capability.PublishName
     val rawNeeds        =
       (upstreamNeeds ++ crossNeeds ++
-        (if gatedOnAffected then List(affectedJobId) else Nil) ++
+        (if gatedOnAffected then List(selector) else Nil) ++
         (if gatedOnModver then List(modverJobId) else Nil)).distinct.sorted
 
     val matrix =
@@ -1455,27 +1490,41 @@ object Planner:
       else None
 
     val cache = cacheForCommand(config, capability.command.runsSbt)
-    // Every need except the two jobs with a clause of their own: `affected` is read through its *output*, and
+    // Every need except the jobs with a clause of their own: the module selector is read through its *output*, and
     // `verify-gate` through `applyVerifyGate`. That includes `crossNeeds`, so a failed `fmt` still blocks the tests
     // whose `!cancelled()` would otherwise let them through.
-    val guardedNeeds = rawNeeds.filterNot(id => id == affectedJobId || id == verifyGateJobId || id == modverJobId)
+    val guardedNeeds = rawNeeds.filterNot(id => id == selector || id == verifyGateJobId || id == modverJobId)
     val skipTolerant =
       gatedOnAffected || gatedOnModver || dependsOnSkippable(capability, affectedGatedNames)
-    val baseCond =
-      jobCondition(capability, node, guardedNeeds, gatedOnAffected, skipTolerant, config, gatedOnModver)
-    // Verify jobs carry their own gate. They must not inherit a merged-PR skip by hoping `affected` is skipped: when
-    // Publish or Deploy reads `affected`, that job stays running so later `fromJson` sees real JSON.
-    val (needs, gated) =
-      applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
-    val cond   = andConditions(gated, JobCondition.renderOpt(capability.condition))
+    val needs = applyVerifyGate(rawNeeds, None, capability.phase, usesVerifyGate)._1
+
+    // Per target, because the deploy plan selects modules per target. `affected` ignores the target, so ci.yml's
+    // conditions are the same for every target of a module.
+    def condFor(target: Option[Target]): Option[String] =
+      val base = jobCondition(
+        capability,
+        node,
+        guardedNeeds,
+        gatedOnAffected,
+        skipTolerant,
+        config,
+        gatedOnModver,
+        pipeline,
+        target.map(t => Expr.Quoted(t.name.asExprLiteral)),
+      )
+      // Verify jobs carry their own gate. They must not inherit a merged-PR skip by hoping `affected` is skipped: when
+      // Publish or Deploy reads `affected`, that job stays running so later `fromJson` sees real JSON.
+      val gated = applyVerifyGate(rawNeeds, base, capability.phase, usesVerifyGate)._2
+      andConditions(gated, JobCondition.renderOpt(capability.condition))
+    end condFor
     val runner = capability.runsOn.getOrElse(List(config.runnerOs))
+    val module = lit(node.id)
 
     def baseJob(
         id: JobId,
         displayName: String,
         target: Option[Target],
         cond: Option[String],
-        environment: Option[String],
         targetEnv: Map[String, EnvValue],
         destinations: List[Target] = Nil,
     ): (JobId, Job) =
@@ -1484,12 +1533,12 @@ object Planner:
         runsOn = runner,
         needs = needs,
         `if` = cond,
-        environment = environment.map(JobEnvironment(_)),
+        environment = jobEnvironment(pipeline, capability, target.flatMap(_.environment), module),
         permissions = ListMap.from(capability.permissions),
         strategy = matrix,
         container = capability.container,
         services = mergeServices(capability, cache),
-        env = mergeEnv(config.env, cache.env, capability.env, targetEnv),
+        env = mergeEnv(config.env, cache.env, capability.env, targetEnv ++ pipelineEnv(pipeline)),
         steps = stepsFor(
           capability,
           node,
@@ -1500,6 +1549,8 @@ object Planner:
           commandOverride = None,
           jobSuffix = id,
           destinations = destinations,
+          pipeline = pipeline,
+          module = module,
         ),
       )
 
@@ -1513,8 +1564,7 @@ object Planner:
             jobId(capability, node.id),
             s"${capability.name} ${node.id}",
             None,
-            cond,
-            None,
+            condFor(None),
             sharedEnv(shared),
             destinations = shared,
           )
@@ -1525,8 +1575,7 @@ object Planner:
             jobId(capability, node.id, target),
             s"${capability.name} ${node.id} (${target.name})",
             Some(target),
-            andConditions(cond, JobCondition.renderOpt(target.condition)),
-            target.environment,
+            andConditions(condFor(Some(target)), JobCondition.renderOpt(target.condition)),
             target.env,
           )
         }
@@ -1610,6 +1659,12 @@ object Planner:
       skipTolerantClauses(crossNeeds).mkString(" && ")
     )
 
+  /** A dispatched deploy is its own gate: a release-tag or default-push gate there could never be true. */
+  private def gateFor(capability: Capability, config: PlanConfig, pipeline: Pipeline): Option[String] =
+    pipeline match
+      case Pipeline.Ci        => gateCondition(capability, config)
+      case Pipeline.Deploy(_) => None
+
   private def gateCondition(capability: Capability, config: PlanConfig): Option[String] =
     capability.gate match
       case Gate.OnReleaseTag  => Some(JobCondition.onReleaseTag.render)
@@ -1625,12 +1680,12 @@ object Planner:
       skipTolerant: Boolean,
       config: PlanConfig,
       gatedOnModver: Boolean,
+      pipeline: Pipeline,
+      target: Option[Expr],
   ): Option[String] =
-    val releaseGate  = gateCondition(capability, config)
+    val releaseGate  = gateFor(capability, config, pipeline)
     val affectedGate =
-      Option.when(gatedOnAffected)(
-        Expr.group(affectedContains(node.id.asExprLiteral) || affectedContainsAll).unwrapped
-      )
+      Option.when(gatedOnAffected)(selects(pipeline, Expr.Quoted(node.id.asExprLiteral), target).unwrapped)
     val modverGate =
       Option.when(gatedOnModver)(modverContains(node.id.asExprLiteral).unwrapped)
     val tolerance =
@@ -1683,14 +1738,55 @@ object Planner:
       Expr.matrix("module"),
     )
 
-  /** Per-leg affected membership for a Graph matrix-collapsed job. Must live on **step** `if`, not job `if`: GitHub
-    * forbids `matrix` in `jobs.<job_id>.if` (workflow fails validation with 0 jobs).
+  /** What differs between `ci.yml` and `zipx-deploy.yml` for the Graph jobs they share. */
+  private[core] enum Pipeline:
+
+    /** `affected` selects the modules, and jobs run on the event's own commit. */
+    case Ci
+
+    /** `resolve` selects the images and each target's modules, and jobs check out and record its `sha`. */
+    case Deploy(imagesEnvironment: String)
+
+  private def selectionJobId(pipeline: Pipeline): JobId = pipeline match
+    case Pipeline.Ci        => affectedJobId
+    case Pipeline.Deploy(_) => DeployWorkflow.ResolveJobId
+
+  /** Whether `module` is selected: in `affected`'s modules, or in the deploy plan's images, or in `target`'s modules.
     */
-  private val affectedContainsMatrixModule: Expr =
-    Expr.contains(
-      Expr.fromJson(Expr.JobOutput(affectedJobId, OutputName("modules"))),
-      Expr.matrix("module"),
-    )
+  private def selects(pipeline: Pipeline, module: Expr, target: Option[Expr]): Expr = pipeline match
+    case Pipeline.Ci        => Expr.group(Expr.contains(affectedModulesJson, module) || affectedContainsAll)
+    case Pipeline.Deploy(_) =>
+      target match
+        case None    => Expr.contains(Expr.fromJson(DeployWorkflow.imagesOutput), module)
+        case Some(t) => Expr.contains(Expr.fromJson(DeployWorkflow.targetsOutput).at(t), module)
+
+  /** The job-level form of [[selects]] for a matrix job, which cannot read `matrix` there: is anything selected. */
+  private def selectsAny(pipeline: Pipeline, targeted: Boolean): Expr = pipeline match
+    case Pipeline.Ci        => affectedModulesNonEmpty
+    case Pipeline.Deploy(_) =>
+      if targeted then DeployWorkflow.targetsOutput !== Expr.lit("'{}'")
+      else DeployWorkflow.imagesOutput !== Expr.lit("'[]'")
+
+  private val affectedModulesJson: Expr = Expr.fromJson(Expr.JobOutput(affectedJobId, OutputName("modules")))
+
+  /** Under [[Pipeline.Deploy]] the url is how the next `changed` deploy learns which module this job shipped at which
+    * commit; see [[GitHubDeployments]]. Image jobs bind the images Environment so each push is recorded too.
+    */
+  private def jobEnvironment(
+      pipeline: Pipeline,
+      capability: Capability,
+      environment: Option[String],
+      module: Expr,
+  ): Option[JobEnvironment] = pipeline match
+    case Pipeline.Ci                        => environment.map(JobEnvironment(_))
+    case Pipeline.Deploy(imagesEnvironment) =>
+      val name =
+        environment.orElse(Option.when(DeployWorkflow.isImage(capability))(imagesEnvironment))
+      name.map(JobEnvironment(_, Some(DeployWorkflow.deployedUrl(module).render)))
+
+  private def pipelineEnv(pipeline: Pipeline): Map[String, EnvValue] = pipeline match
+    case Pipeline.Ci        => Map.empty
+    case Pipeline.Deploy(_) => Map(DeployWorkflow.ShaEnv -> EnvValue.typed(DeployWorkflow.shaOutput))
 
   /** AND a condition onto a step's existing `if`, or set it when absent. */
   private def andStepIf(step: Step, cond: Option[String]): Step =
@@ -1737,6 +1833,8 @@ object Planner:
       jobSuffix: JobId,
       destinations: List[Target] = Nil,
       matrixAxes: Set[String] = Set.empty,
+      pipeline: Pipeline = Pipeline.Ci,
+      module: Expr = Expr.matrix("module"),
   ): List[Step] =
     val base =
       commandOverride.orElse(
@@ -1744,10 +1842,10 @@ object Planner:
       )
     val command  = capability.sessionCommand(base)
     val ctx      = StepContext(node, target, hasMatrix, config.actions, destinations)
-    val checkout = List(checkoutStep(config))
+    val checkout = checkoutStep(config, pipeline)
     command match
       case None =>
-        checkout ++ capability.extraSteps(ctx) ++ capability.postSteps(ctx)
+        checkout :: capability.extraSteps(ctx) ++ capability.postSteps(ctx)
       case Some(cmd) =>
         val onMatrixLeg =
           if matrixAxes.contains("scala") || (hasMatrix && matrixAxes.isEmpty && capability.matrixed) then
@@ -1759,9 +1857,15 @@ object Planner:
         val cacheMode =
           if config.cache == CacheBackend.LocalDir && cache.steps.isEmpty then capability.localCache
           else LocalCacheMode.Off
+        // An image is pushed at most once per commit: a rebuild is not byte-identical, and an immutable-tag registry
+        // rejects the second push.
+        val publish = pipeline match
+          case Pipeline.Deploy(_) if DeployWorkflow.isImage(capability) =>
+            List(DeployWorkflow.imageTagCheck(module), andStepIf(commandStep, Some(DeployWorkflow.imageMissing)))
+          case _ => List(commandStep)
         // Local composites need the workspace on disk before `uses: ./.github/actions/…` can resolve.
-        checkoutThenSbtSetup(config, jobSuffix, capability.nodeVersion, cacheMode) ++ cache.steps ++
-          capability.extraSteps(ctx) ++ List(commandStep) ++ capability.postSteps(ctx)
+        checkout :: ZipxComposites.sbtSetupStep(config, jobSuffix, capability.nodeVersion, cacheMode) ::
+          cache.steps ++ capability.extraSteps(ctx) ++ publish ++ capability.postSteps(ctx)
     end match
   end stepsFor
 
@@ -1777,8 +1881,11 @@ object Planner:
       ZipxComposites.sbtSetupStep(config, jobSuffix, nodeVersion, cacheMode),
     )
 
-  private def checkoutStep(config: PlanConfig): Step =
-    Step(uses = Some(config.actions.checkout), `with` = checkoutWith)
+  private def checkoutStep(config: PlanConfig, pipeline: Pipeline = Pipeline.Ci): Step =
+    val ref = pipeline match
+      case Pipeline.Ci        => ListMap.empty
+      case Pipeline.Deploy(_) => ListMap("ref" -> DeployWorkflow.shaOutput.render)
+    Step(uses = Some(config.actions.checkout), `with` = ref ++ checkoutWith)
 
   /** A static [[VerifyClean]] prefix when one is set, otherwise a runtime `cleanFull` decided by
     * [[PlanConfig.verifyCleanLabel]].

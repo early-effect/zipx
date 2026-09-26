@@ -583,6 +583,26 @@ object ZipxSettings:
       Project,
     )
 
+  val imageRefs: SettingDef[Seq[String]] =
+    SettingDef.setting(
+      SettingName("zipxImageRefs"),
+      Seq.empty,
+      SettingPurpose(
+        "This module's image references, as (Docker / dockerAliases).value.map(_.toString). zipx-deploy.yml checks each with docker manifest inspect and pushes only when one is missing. Required on image modules under DeployTrigger.Manual."
+      ),
+      Project,
+    )
+
+  val deployTrigger: SettingDef[DeployTrigger] =
+    SettingDef.setting(
+      SettingName("zipxDeployTrigger"),
+      DeployTrigger.OnMerge,
+      SettingPurpose(
+        "OnMerge (default) keeps image pushes and deploys in ci.yml. Manual(images = \"zipx-images\") moves them to a dispatched .github/workflows/zipx-deploy.yml with modules (changed / all / one), target (target or Target.group), and sha inputs."
+      ),
+      Build,
+    )
+
   // ---- Tasks / inputs ----
 
   val depCleanup: SettingDef[Unit] =
@@ -650,6 +670,22 @@ object ZipxSettings:
     SettingDef.input(
       SettingName("zipxAffectedModules"),
       SettingPurpose("Print, as a JSON array, the modules affected by changes since the given git base ref."),
+    )
+
+  val deployPlan: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxDeployPlan"),
+      SettingPurpose(
+        "zipx-deploy.yml's resolve step: reads the dispatch inputs and each Environment's last deploys, and writes the plan to target/zipx-deploy/."
+      ),
+    )
+
+  val imageMissing: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxImageMissing"),
+      SettingPurpose(
+        "Per module: writes true to target/zipx-image-missing when some zipxImageRefs tag is not in its registry."
+      ),
     )
 
   val pinCheck: SettingDef[Unit] =
@@ -752,6 +788,7 @@ object ZipxSettings:
     checkCommandNames,
     verifyClean,
     verifyCleanLabel,
+    deployTrigger,
   )
 
   val projectLevel: List[SettingDef[?]] = List(
@@ -761,6 +798,7 @@ object ZipxSettings:
     testTask,
     publishTask,
     matrixRoot,
+    imageRefs,
   )
 
   val tasks: List[SettingDef[?]] = List(
@@ -772,6 +810,8 @@ object ZipxSettings:
     depCleanup,
     publishOrder,
     affectedModules,
+    deployPlan,
+    imageMissing,
     pinCheck,
     pinCheckPr,
     pinSubmit,

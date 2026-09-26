@@ -128,6 +128,10 @@ object ZipxPlugin extends AutoPlugin:
     val CapabilityName = zipx.core.CapabilityName
     type TargetName = zipx.core.TargetName
     val TargetName = zipx.core.TargetName
+    type TargetGroup = zipx.core.TargetGroup
+    val TargetGroup = zipx.core.TargetGroup
+    type DeployTrigger = zipx.core.DeployTrigger
+    val DeployTrigger = zipx.core.DeployTrigger
 
     /** The validated settings types: see [[zipxWorkflowName]], [[zipxJavaVersion]] and [[zipxRunnerOs]]. A build names
       * one when it overrides the setting, `zipxJavaVersion := JdkVersion("17")`, and gets the check at the point of
@@ -398,6 +402,10 @@ object ZipxPlugin extends AutoPlugin:
     val zipxTestTask                 = settingKey[SbtCommand](ZipxSettings.testTask.description)
     val zipxPublishTask              = settingKey[SbtCommand](ZipxSettings.publishTask.description)
     val zipxDocker                   = settingKey[Boolean](ZipxSettings.docker.description)
+    val zipxImageRefs                = settingKey[Seq[String]](ZipxSettings.imageRefs.description)
+    val zipxImageMissing             = taskKey[Unit](ZipxSettings.imageMissing.description)
+    val zipxDeployTrigger            = settingKey[DeployTrigger](ZipxSettings.deployTrigger.description)
+    val zipxDeployPlan               = taskKey[Unit](ZipxSettings.deployPlan.description)
     val zipxVerifyClean              = settingKey[VerifyClean](ZipxSettings.verifyClean.description)
     val zipxVerifyCleanLabel         = settingKey[Option[String]](ZipxSettings.verifyCleanLabel.description)
     val zipxAffectedOnPR             = settingKey[Boolean](ZipxSettings.affectedOnPR.description)
@@ -502,6 +510,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxVersionUpdatesPreSteps   := Seq.empty,
     zipxVersionUpdatesExtraSteps := Seq.empty,
     zipxCoverageWorkflow         := None,
+    zipxDeployTrigger            := DeployTrigger.OnMerge,
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
     zipxPreRelease               := PreRelease.Skip,
@@ -577,6 +586,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxWorkflowCheck                    := checkTask.value,
     zipxAdvisoryCheck                    := Def.uncached { advisoryCheckTask.value },
     zipxAffectedModules                  := affectedModulesTask.evaluated,
+    zipxDeployPlan                       := Def.uncached { deployPlanTask.value },
     zipxPinCheck                         := Def.uncached { pinCheckTask.value },
     zipxPinCheckPr                       := Def.uncached { pinCheckPrTask.value },
     zipxPinSubmit                        := Def.uncached { pinSubmitTask.value },
@@ -608,6 +618,8 @@ object ZipxPlugin extends AutoPlugin:
     zipxPublishTask                     := CapabilityTasks.of(publish),
     zipxDocker                          := thisProject.value.autoPlugins.exists(_.label == DockerPluginLabel),
     zipxMatrixRoot                      := None,
+    zipxImageRefs                       := Seq.empty,
+    zipxImageMissing                    := Def.uncached { imageMissingTask.value },
     zipxModverPublishSigned             := Def.uncached { modverPublishSignedTask.value },
     zipxModverPublishSigned / aggregate := false,
     zipxDepCleanup                      := Def.uncached { depCleanupTask.value },
@@ -921,12 +933,27 @@ object ZipxPlugin extends AutoPlugin:
     combineCapabilities(builtins ++ modver, userCaps.toList)
   end capabilitiesOf
 
+  /** Under [[DeployTrigger.Manual]], the images-and-deploys half of the build's capabilities, refused when
+    * `zipx-deploy.yml` could not run it as declared. `None` under [[DeployTrigger.OnMerge]].
+    */
+  private def deploySplit(extracted: Extracted, graph: ModuleGraph): Option[(DeployWorkflow.Split, String)] =
+    readBuildSetting(extracted, zipxDeployTrigger, DeployTrigger.OnMerge) match
+      case DeployTrigger.OnMerge        => None
+      case DeployTrigger.Manual(images) =>
+        val split = DeployWorkflow.split(capabilitiesOf(extracted, graph))
+        DeployWorkflow.problems(split, graph).headOption.foreach(sys.error)
+        Some(split -> images)
+
+  /** What `ci.yml` plans: every capability, less what [[deploySplit]] moved to `zipx-deploy.yml`. */
+  private def ciCapabilitiesOf(extracted: Extracted, graph: ModuleGraph): List[Capability] =
+    deploySplit(extracted, graph).fold(capabilitiesOf(extracted, graph))((split, _) => split.ci)
+
   /** Same graph and capabilities as [[renderWorkflow]], so catalog generate and workflow generate agree on composites.
     */
   private def plannedWorkflow: Def.Initialize[Task[Workflow]] = Def.task {
     val graph     = buildGraph.value
     val extracted = Project.extract(state.value)
-    Planner.plan(graph, capabilitiesOf(extracted, graph), planConfig.value)
+    Planner.plan(graph, ciCapabilitiesOf(extracted, graph), planConfig.value)
   }
 
   private def renderWorkflow: Def.Initialize[Task[String]] = Def.task {
@@ -934,7 +961,7 @@ object ZipxPlugin extends AutoPlugin:
     val cfg          = planConfig.value
     val st           = state.value
     val extracted    = Project.extract(st)
-    val capabilities = capabilitiesOf(extracted, graph)
+    val capabilities = ciCapabilitiesOf(extracted, graph)
     val verify       = orFail(ZipxVerify.validate(readBuildSetting(extracted, zipxVerify, ZipxVerify.Strict)))
     checkFmtPlugin(verify, extracted)
     checkCommandNames(capabilities.flatMap(_.declaredNames), st, extracted)
@@ -960,6 +987,7 @@ object ZipxPlugin extends AutoPlugin:
     writePinWorkflowsIfEnabled.value
     writeVersionUpdatesIfEnabled.value
     writeCoverageWorkflow.value
+    writeDeployWorkflow.value
   }
 
   private def writeCiParams: Def.Initialize[Task[Unit]] = Def.task {
@@ -1114,6 +1142,35 @@ object ZipxPlugin extends AutoPlugin:
       case Some(expected)              => checkCompanion(root, rel, expected, log)
       case None if (root / rel).exists =>
         sys.error(s"zipx: $rel is leftover. Set zipxCoverageWorkflow or delete $rel, then sbt zipxWorkflowGenerate.")
+      case None => ()
+
+  private def deployYaml(st: State, graph: ModuleGraph, cfg: PlanConfig): Option[String] =
+    val extracted = Project.extract(st)
+    deploySplit(extracted, graph).map { (split, images) =>
+      checkCommandNames(split.deploy.flatMap(_.declaredNames), st, extracted)
+      orFail(DeployWorkflow.render(graph, split.deploy, cfg, images))
+    }
+
+  private def writeDeployWorkflow: Def.Initialize[Task[Unit]] = Def.task {
+    val root = (LocalRootProject / baseDirectory).value
+    val log  = streams.value.log
+    val file = root / DeployWorkflow.DefaultPath
+    deployYaml(state.value, buildGraph.value, planConfig.value) match
+      case Some(body)          => writeCompanion(root, DeployWorkflow.DefaultPath, body, log)
+      case None if file.exists =>
+        IO.delete(file)
+        log.info(s"zipx deleted ${file.getPath}")
+      case None => ()
+  }
+
+  private def checkDeployWorkflow(root: File, graph: ModuleGraph, cfg: PlanConfig, st: State, log: Logger): Unit =
+    val rel = DeployWorkflow.DefaultPath
+    deployYaml(st, graph, cfg) match
+      case Some(expected)              => checkCompanion(root, rel, expected, log)
+      case None if (root / rel).exists =>
+        sys.error(
+          s"zipx: $rel is leftover. Set zipxDeployTrigger := DeployTrigger.Manual() or delete $rel, then sbt zipxWorkflowGenerate."
+        )
       case None => ()
 
   private def writeCompanion(root: File, rel: String, body: String, log: Logger): Unit =
@@ -1375,6 +1432,7 @@ object ZipxPlugin extends AutoPlugin:
     checkPinWorkflows(root, cfg, extracted, streams.value.log)
     checkVersionUpdates(root, cfg, extracted, streams.value.log)
     checkCoverageWorkflow(root, cfg, state.value, streams.value.log)
+    checkDeployWorkflow(root, buildGraph.value, cfg, state.value, streams.value.log)
     validateCatalog(extracted, buildGraph.value, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
     checkCiParams(root, cfg, extracted, streams.value.log)
@@ -1763,6 +1821,120 @@ object ZipxPlugin extends AutoPlugin:
       IO.write(root / "target" / "zipx-affected.json", json + "\n")
       println(json)
     }
+
+  /** `zipx-deploy.yml`'s resolve step. Inputs arrive as env and the plan leaves as files under
+    * [[DeployWorkflow.ShaFile]] and its siblings, for the reason [[affectedModulesTask]] writes a file.
+    */
+  private def deployPlanTask: Def.Initialize[Task[Unit]] = Def.task {
+    val st              = state.value
+    val extracted       = Project.extract(st)
+    val graph           = buildGraph.value
+    val root            = (LocalRootProject / baseDirectory).value
+    val log             = streams.value.log
+    val (split, images) = deploySplit(extracted, graph).getOrElse(
+      sys.error("zipx: zipxDeployPlan runs under zipxDeployTrigger := DeployTrigger.Manual()")
+    )
+    def env(name: String): Option[String] = sys.env.get(name).map(_.trim).filter(_.nonEmpty)
+    val sha                               = orFail(deploySha(root, env(DeployWorkflow.RequestedShaEnv)))
+    val scope                             = DeployWorkflow.scope(graph, split.deploy, images)
+    val known                             = (scope.images ++ scope.targets.flatMap(_.modules)).toSet
+    val modules                           =
+      orFail(DeployModules.parse(env(DeployWorkflow.ModulesEnv).getOrElse(DeployModules.ChangedWire), known))
+    val selected = orFail(env(DeployWorkflow.TargetEnv) match
+      case Some(choice)                  => DeployWorkflow.selectedTargets(graph, split.deploy, choice)
+      case None if scope.targets.isEmpty => Right(Set.empty[TargetName])
+      case None => Left(s"zipx: ${DeployWorkflow.TargetEnv} is unset; zipx-deploy.yml passes the target input"))
+    val last = modules match
+      case DeployModules.Changed =>
+        val environments =
+          scope.imagesEnvironment :: scope.targets.filter(t => selected.contains(t.target)).map(_.environment)
+        orFail(
+          for
+            token <- env(DeployWorkflow.TokenEnv).toRight(s"zipx: ${DeployWorkflow.TokenEnv} is unset")
+            repo  <- env("GITHUB_REPOSITORY").toRight("zipx: GITHUB_REPOSITORY is unset")
+            found <- GitHubDeployments.lookup(
+              repo,
+              token,
+              environments,
+              env("GITHUB_GRAPHQL_URL").getOrElse("https://api.github.com/graphql"),
+            )
+          yield found
+        )
+      case _ => Nil
+    val plan = DeployPlan.resolve(
+      scope,
+      selected,
+      modules,
+      sha,
+      last,
+      base => gitDiffBetween(root, base, sha).map(Affected.affectedModules(graph, _).map(ModuleId.unsafeMake)),
+    )
+    IO.write(root / DeployWorkflow.ShaFile, s"${plan.sha}\n")
+    IO.write(root / DeployWorkflow.ImagesFile, plan.imagesJson + "\n")
+    IO.write(root / DeployWorkflow.TargetsFile, plan.targetsJson + "\n")
+    log.info(s"zipx deploy ${modules.wire} at ${plan.sha}: images ${plan.imagesJson}, targets ${plan.targetsJson}")
+    last.foreach(d => log.info(s"zipx: last deploy of ${d.module} to ${d.environment} was ${d.sha}"))
+  }
+
+  /** The `sha` input, checked to be a commit in this checkout, or the checked-out head when it is empty. */
+  private def deploySha(root: File, requested: Option[String]): Either[String, GitSha] =
+    requested match
+      case Some(raw) =>
+        GitSha
+          .make(raw.toLowerCase)
+          .left
+          .map(e => s"zipx: sha input: $e")
+          .filterOrElse(
+            sha => git(root, "cat-file", "-e", s"$sha^{commit}").isDefined,
+            s"zipx: sha input $raw is not a commit in this checkout",
+          )
+      case None =>
+        git(root, "rev-parse", "HEAD").flatMap(GitSha.make(_).toOption).toRight("zipx: git rev-parse HEAD failed")
+
+  /** One git command's trimmed stdout, or `None` when it fails. */
+  private def git(root: File, args: String*): Option[String] =
+    try
+      val out  = new StringBuilder
+      val code = scala.sys.process.Process("git" +: args, root).!(scala.sys.process.ProcessLogger(out ++= _, _ => ()))
+      Option.when(code == 0)(out.toString.trim)
+    catch case scala.util.control.NonFatal(_) => None
+
+  /** Files whose content differs between two commits, in either direction, so a rollback counts what it undoes. */
+  private def gitDiffBetween(root: File, base: GitSha, head: GitSha): Option[List[String]] =
+    try
+      val lines = scala.collection.mutable.ListBuffer.empty[String]
+      val code  =
+        scala.sys.process
+          .Process(Seq("git", "diff", "--name-only", base, head), root)
+          .!(scala.sys.process.ProcessLogger(lines += _, _ => ()))
+      if code == 0 then Some(lines.map(_.trim).filter(_.nonEmpty).toList) else None
+    catch case scala.util.control.NonFatal(_) => None
+
+  /** `true` in [[DeployWorkflow.ImageMissingFile]] when some registry lacks one of this module's image tags. */
+  private def imageMissingTask: Def.Initialize[Task[Unit]] = Def.task {
+    val refs = zipxImageRefs.value
+    val id   = thisProject.value.id
+    val root = (LocalRootProject / baseDirectory).value
+    val log  = streams.value.log
+    if refs.isEmpty then
+      sys.error(
+        s"zipx: $id/zipxImageRefs is empty, so zipx cannot tell whether this commit's image is already pushed. " +
+          "Set zipxImageRefs := (Docker / dockerAliases).value.map(_.toString)"
+      )
+    // A lookup that cannot run counts as missing, so the push that follows fails loudly instead of being skipped.
+    val missing = refs.filterNot { ref =>
+      scala.util
+        .Try(
+          scala.sys.process
+            .Process(Seq("docker", "manifest", "inspect", ref))
+            .!(scala.sys.process.ProcessLogger(_ => (), _ => ()))
+        )
+        .toOption
+        .contains(0)
+    }
+    refs.foreach(ref => log.info(s"zipx: $ref ${if missing.contains(ref) then "is missing" else "exists"}"))
+    IO.write(root / DeployWorkflow.ImageMissingFile, s"${missing.nonEmpty}\n")
+  }
 
   /** Files changed on HEAD since its merge-base with `baseRef`, repo-root-relative with forward slashes.
     *
