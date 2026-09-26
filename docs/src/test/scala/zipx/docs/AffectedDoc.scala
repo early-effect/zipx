@@ -153,10 +153,12 @@ that run.
       md"""
 | Capability shape | Path-affected? | Why |
 |---|---|---|
+| The builtin `test` | Yes, by default | `zipxTestAffected` tests the affected modules the root aggregate reaches, in one session |
 | `Capability.testGraph` (and other Graph + Verify) | Yes, by default | Per-module jobs can skip |
+| A Once job with `withAffectedBy` | Yes, when one of its modules is affected | For inputs the classpath graph cannot see |
 | Graph Publish (`publishGraph`, `dockerGraph`) | Only under `zipxAffectedPublish` | See the next section: the two risks are not symmetric |
 | Graph Deploy (`deployGraph`) | Only under `zipxAffectedDeploy` | So a deploy skips exactly when the publish it consumes did |
-| Aggregate / Layer, any phase | Never | One sbt session over every module: there is nothing in it to skip |
+| Other Aggregate / Layer, any phase | Never | One sbt session over every module: there is nothing in it to skip |
 
 `Gate.AffectedOnly` is a **design seam**, not a shipped gate. Affected-gating is derived from phase + scope +
 `zipxAffectedOnPR` / `zipxAffectedPublish` / `zipxAffectedDeploy`, not from `Gate`. The planner **rejects**

@@ -58,13 +58,15 @@ flowchart TD
 
 | Layer | Question | Who decides |
 |---|---|---|
-| **sbt 2 (inside Aggregate)** | Which sources need work, given cached task digests? | Incremental compiler + cross-run task cache (Verify default is `testFull`, so suites still run) |
-| **zipx Graph** | Which GitHub jobs should run at all for *this* PR diff? | `git diff` → owning module → reverse-dep closure |
+| **sbt 2 (inside Aggregate)** | Which sources need work, given cached task digests? | Incremental compiler + cross-run task cache |
+| **zipx, inside the `test` job** | Which modules' suites should run for *this* PR diff? | `zipxTestAffected`: `git diff` → owning module → reverse-dep closure, in the same sbt session |
+| **zipx Graph** | Which GitHub jobs should run at all for *this* PR diff? | The `affected` job, by the same closure |
 
-Aggregate always starts the stage command (one root test job). After zipx restores the epoch cache (or a remote cache
-hits), sbt may compile almost nothing. The plugin default is `zipxTestTask := zipxTasks.of(testFull)`, so CI still runs
-every suite; Zinc is what skips compile. Graph can skip entire module jobs when their reverse-dep closure is
-untouched, and it can show a green check per module. See **Caching** and **Affected** (fail-open handoff, who is gated).
+The builtin `test` is still one job. On a PR it runs `zipxTestAffected`, which tests each affected module the root
+aggregate reaches with its own `zipxTestTask`, so an unaffected module's suites do not run. After zipx restores the
+epoch cache (or a remote cache hits), sbt may also compile almost nothing. Graph goes further: it skips entire module
+jobs when their reverse-dep closure is untouched, and shows a green check per module. See **Caching** and **Affected**
+(fail-open handoff, who is gated).
 """
     ),
     section("When to use which")(
