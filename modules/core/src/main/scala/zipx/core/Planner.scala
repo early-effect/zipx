@@ -138,8 +138,8 @@ object Planner:
   /** Rejects a `needsCapabilities` cycle, [[Gate.AffectedOnly]] (an unimplemented seam: honoring it silently as
     * [[Gate.Always]] would emit a green pipeline that runs nothing it was asked to run), a per-destination field a
     * [[TargetFanOut.SharedJob]] job cannot honor, a gate/condition conjunction that can never be true, a non-Graph
-    * consumer of an affected-gated publish, which would run against an artifact nobody built, and more than one
-    * LocalDir snapshot owner.
+    * consumer of an affected-gated publish, which would run against an artifact nobody built, more than one LocalDir
+    * snapshot owner, and coverage that replaces `test` or saves the snapshot.
     */
   private def validateCapabilities(capabilities: List[Capability], graph: ModuleGraph, config: PlanConfig): Unit =
     capabilities.filter(_.gate == Gate.AffectedOnly) match
@@ -164,8 +164,28 @@ object Planner:
     capabilities.foreach(validateSessionTail)
     validateSkipConsumers(capabilities, config)
     validateModverPublish(capabilities, config)
+    capabilities.filter(Coverage.instruments).foreach(validateCoverage)
     validateLocalCacheOwner(capabilities, graph)
   end validateCapabilities
+
+  /** An instrumented capability may not be the builtin test, which is every PR's required check, nor save the build
+    * snapshot that uninstrumented jobs restore.
+    */
+  private def validateCoverage(capability: Capability): Unit =
+    if capability.name == Capability.TestName then
+      sys.error(
+        s"zipx: capability '${capability.name}' runs scoverage, so every PR would wait on an instrumented build. " +
+          "Keep the builtin test and measure coverage in its own workflow: zipxCoverageWorkflow := " +
+          "Some(Coverage.workflow(CoverageTrigger.Dispatch, CoverageTrigger.prLabel(\"coverage\"))). " +
+          "Coverage.once() under its default name also still runs in ci.yml."
+      )
+    if capability.localCache == LocalCacheMode.Save then
+      sys.error(
+        s"zipx: capability '${capability.name}' runs scoverage and has LocalCacheMode.Save, so the build snapshot " +
+          "that test and image jobs restore would hold instrumented classes. Coverage restores the snapshot and " +
+          "never saves it: drop .withLocalCache(LocalCacheMode.Save)."
+      )
+  end validateCoverage
 
   /** One capability owns the LocalDir build snapshot. Two owners race each other's entries, and an owner that spans
     * several jobs writes one entry per job, which is the eviction [[LocalCacheMode]] exists to stop.
@@ -513,16 +533,15 @@ object Planner:
     */
   private def concurrencyFor(config: PlanConfig): Concurrency =
     val cancel =
-      if !config.modverPublish then (!onAnyTagPush).render
+      if !config.modverPublish then !onAnyTagPush
       else
         val notDefault = config.pushBranches.flatMap { b =>
           Expr.quotedMake(s"refs/heads/$b").toOption.map(q => Expr.github("ref") !== q)
         }
-        notDefault.foldLeft[Expr](!onAnyTagPush)(_ && _).render
+        notDefault.foldLeft[Expr](!onAnyTagPush)(_ && _)
     Concurrency(
       group = (lit(config.workflowName + "-") ++ Expr.github("ref")).render,
-      // `render`, not `unwrapped`: `cancel-in-progress` is a plain field, so the expression needs its `${{ }}`.
-      cancelInProgress = cancel,
+      cancelInProgress = CancelInProgress.When(cancel),
     )
   end concurrencyFor
 
@@ -838,7 +857,7 @@ object Planner:
           tags = if releases then List(config.releaseTagPattern) else Nil,
         )
       ),
-      pullRequest = Some(BranchFilter()),
+      pullRequest = Some(PullRequestTrigger()),
       workflowDispatch = config.workflowDispatch || config.modverPublish,
     )
   end triggersFor

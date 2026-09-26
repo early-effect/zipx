@@ -117,5 +117,26 @@ object CoverageSpec extends ZIOSpecDefault:
         assertTrue(wf.jobs.contains("test-serviceA"), wf.jobs.contains("cov-serviceA"))
       },
     ),
+    suite("instrumented classes stay out of test and out of the build snapshot")(
+      test("coverage named test is refused in favour of the companion workflow") {
+        val refusals = List(Coverage.once(name = Capability.TestName), Coverage.graph(name = Capability.TestName))
+          .map(c => scala.util.Try(plan(c)).failed.toOption.map(_.getMessage))
+        assertTrue(refusals.forall(_.exists(_.contains("zipxCoverageWorkflow := Some(Coverage.workflow("))))
+      },
+      test("coverage that saves the snapshot is refused beside the builtin test, naming scoverage") {
+        val saving = Coverage.once().withLocalCache(LocalCacheMode.Save)
+        val error  = scala.util.Try(plan(Capability.test, saving)).failed.toOption.map(_.getMessage)
+        assertTrue(error.exists(_.contains("runs scoverage and has LocalCacheMode.Save")))
+      },
+      test("a hand-built capability that enables coverage counts as coverage") {
+        val handBuilt = Capability.test.running(Coverage.aggregateSession(SbtCommand.unsafeTask("testFull")))
+        assertTrue(
+          Coverage.instruments(handBuilt),
+          Coverage.instruments(Coverage.graph()),
+          !Coverage.instruments(Capability.test),
+          scala.util.Try(plan(handBuilt)).isFailure,
+        )
+      },
+    ),
   )
 end CoverageSpec

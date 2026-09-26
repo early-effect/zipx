@@ -12,9 +12,13 @@ import scala.collection.immutable.ListMap
   * [[ModuleNode.testTask]] is what closes that off.
   *
   * {{{
-  * zipxCapabilities += Coverage.once()   // one root session: coverage; testFull; coverageAggregate
-  * zipxCapabilities += Coverage.graph()  // one job per module, each measuring that module's own zipxTestTask
+  * zipxCoverageWorkflow := Some(Coverage.workflow(CoverageTrigger.Dispatch, CoverageTrigger.prLabel("coverage")))
+  * zipxCapabilities += Coverage.once()   // in ci.yml: coverage; testFull; coverageAggregate
+  * zipxCapabilities += Coverage.graph()  // in ci.yml: one job per module, each measuring its own zipxTestTask
   * }}}
+  *
+  * Every shape restores the build snapshot and none may save it, so instrumented classes never become the entry the
+  * builtin `test` and image jobs restore.
   */
 object Coverage:
 
@@ -28,7 +32,19 @@ object Coverage:
   private val Report: SbtCommand    = SbtCommand.unsafeTask("coverageReport")
 
   /** Wire form: sbt 2's full suite (not `testQuick`). */
-  private val FullTest: SbtCommand = SbtCommand.unsafeTask("testFull")
+  private[core] val FullTest: SbtCommand = SbtCommand.unsafeTask("testFull")
+
+  /** Whether `capability`'s session turns scoverage on. */
+  private[core] def instruments(capability: Capability): Boolean =
+    capability.declaredNames.exists(Enable.declaredNames.contains)
+
+  /** `coverage; <task>; coverageAggregate`. */
+  private[core] def aggregateSession(task: SbtCommand): SbtCommand =
+    SbtCommand.session(Enable, task, Aggregate)
+
+  /** Coverage in its own workflow, off `ci.yml`'s required checks. See [[CoverageWorkflow]]. */
+  def workflow(first: CoverageTrigger, rest: CoverageTrigger*): CoverageWorkflow =
+    CoverageWorkflow(::(first, rest.toList))
 
   /** The task to measure for `node`: its own [[ModuleNode.testTask]], substituting [[FullTest]] when that is still the
     * default `test`.
@@ -52,19 +68,19 @@ object Coverage:
 
   /** Uploads the reports under one fixed artifact name, for a capability with one job. */
   def uploadReportSteps(artifact: String = DefaultArtifact, path: String = ReportPaths): Steps =
-    Steps.one("coverage-report")(ctx => uploadStep(ctx, artifact, path))
+    Steps.one("coverage-report")(ctx => uploadStep(ctx.actions, artifact, path))
 
   /** The same, named per module, so [[CapabilityScope.Graph]]'s jobs do not collide on one artifact name. */
   def uploadModuleReportSteps(path: String = ReportPaths): Steps =
-    Steps.one("coverage-report-per-module")(ctx => uploadStep(ctx, moduleArtifactName(ctx.node.id), path))
+    Steps.one("coverage-report-per-module")(ctx => uploadStep(ctx.actions, moduleArtifactName(ctx.node.id), path))
 
   /** `if-no-files-found: error` on purpose: a run that measured nothing produces no report, and this pack exists to
     * make that loud rather than upload an empty directory.
     */
-  private def uploadStep(ctx: StepContext, artifact: String, path: String): Step =
+  private[core] def uploadStep(actions: ActionPins, artifact: String, path: String = ReportPaths): Step =
     Step(
       name = Some("Upload coverage report"),
-      uses = Some(ctx.actions.uploadArtifact),
+      uses = Some(actions.uploadArtifact),
       `with` = ListMap(
         "name"              -> artifact,
         "path"              -> path,
@@ -82,6 +98,8 @@ object Coverage:
     *
     * `task` is a literal rather than the build's `zipxTestTask` because there is no module here to read one from, and a
     * root `test` is `testQuick` too. Pass it explicitly if the root task is not [[FullTest]].
+    *
+    * Generate refuses `name = Capability.TestName`: that makes coverage every PR's required check. Use [[workflow]].
     */
   def once(
       task: SbtCommand = FullTest,
@@ -93,7 +111,7 @@ object Coverage:
   ): Capability =
     Capability.once(
       name = name,
-      command = SbtCommand.session(Enable, task, Aggregate),
+      command = aggregateSession(task),
       phase = Phase.Verify,
       gate = gate,
       postSteps = if uploadReport then uploadReportSteps(artifact) else Steps.empty,

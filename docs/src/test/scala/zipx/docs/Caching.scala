@@ -161,9 +161,10 @@ Capability.testGraph                         // Restore: its jobs compile disjoi
 myCheck.withLocalCache(LocalCacheMode.Save)  // take ownership in place of the builtin test
 ```
 
-A capability that replaces the builtin `test` by name decides for itself. `Coverage.once(name = Capability.TestName)`
-restores and never saves, because an instrumented snapshot is not the build. Generate refuses two owners, and an owner
-that would save once per job (Graph-scoped, matrixed, or fanned out per target).
+A capability that replaces the builtin `test` by name decides for itself. Coverage never saves, because an
+instrumented snapshot is not the build: generate refuses a coverage capability with `LocalCacheMode.Save` or one named
+`test` (see **Verify**, "Coverage"). It also refuses two owners, and an owner that would save once per job
+(Graph-scoped, matrixed, or fanned out per target).
 
 **Budget.** GitHub gives a repository 10 GB of `actions/cache` and evicts the least recently used entries past that.
 One save per run means the quota holds about `10 GB / snapshot size` runs, and the default branch's snapshot stays

@@ -1,0 +1,24 @@
+# Off by default: generate writes no coverage companion.
+> zipxWorkflowGenerate
+$ absent .github/workflows/zipx-coverage.yml
+# The companion's `coverage` alias goes through the same command-name check as ci.yml, and this build has no scoverage.
+> set zipxCoverageWorkflow := Some(Coverage.workflow(CoverageTrigger.Dispatch, CoverageTrigger.prLabel("coverage")))
+-> zipxWorkflowGenerate
+$ absent .github/workflows/zipx-coverage.yml
+> set zipxCheckCommandNames := false
+> zipxWorkflowGenerate
+$ exists .github/workflows/zipx-coverage.yml
+> assertCoverageWorkflow
+> zipxWorkflowCheck
+# A companion that no longer matches the build fails check.
+> set zipxCoverageWorkflow := Some(Coverage.workflow(CoverageTrigger.Dispatch))
+-> zipxWorkflowCheck
+# Turning it off: check refuses the leftover file, and generate deletes it.
+> set zipxCoverageWorkflow := None
+-> zipxWorkflowCheck
+> zipxWorkflowGenerate
+$ absent .github/workflows/zipx-coverage.yml
+> zipxWorkflowCheck
+# Coverage as the builtin test is refused, pointing at the companion.
+> set zipxCapabilities += Coverage.once(name = Capability.TestName)
+-> zipxWorkflowGenerate

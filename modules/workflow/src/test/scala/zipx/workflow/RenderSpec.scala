@@ -13,7 +13,7 @@ object RenderSpec extends ZIOSpecDefault:
     name = "CI",
     on = Triggers(
       push = Some(BranchFilter(branches = List("main"), tags = List("v*"))),
-      pullRequest = Some(BranchFilter()),
+      pullRequest = Some(PullRequestTrigger()),
       workflowDispatch = true,
     ),
     jobs = ListMap(
@@ -77,16 +77,27 @@ object RenderSpec extends ZIOSpecDefault:
       assertTrue(Render.render(sample).yaml == Render.render(sample).yaml)
     },
     test("renders the concurrency block, keeping an expression in cancel-in-progress unquoted-safe") {
-      val wf = sample.copy(concurrency =
-        Some(Concurrency("CI-${{ github.ref }}", "${{ !startsWith(github.ref, 'refs/tags/') }}"))
-      )
+      val notOnTag = !Expr.startsWith(Expr.github("ref"), Expr.quoted("refs/tags/"))
+      val wf  = sample.copy(concurrency = Some(Concurrency("CI-${{ github.ref }}", CancelInProgress.When(notOnTag))))
       val out = Render.render(wf).yaml
       assertTrue(
         out.contains("concurrency:"),
         out.contains("group: CI-${{ github.ref }}"),
-        out.contains("cancel-in-progress:"),
-        out.contains("!startsWith(github.ref, 'refs/tags/')"),
+        out.contains("cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}"),
         !Render.render(sample).yaml.contains("concurrency"),
+      )
+    },
+    test("constant cancel-in-progress renders as a YAML boolean, since GitHub rejects the string") {
+      def cancelLine(cancel: CancelInProgress): Option[String] =
+        Render
+          .render(sample.copy(concurrency = Some(Concurrency("g", cancel))))
+          .yaml
+          .linesIterator
+          .find(_.contains("cancel-in-progress"))
+          .map(_.trim)
+      assertTrue(
+        cancelLine(CancelInProgress.Always).contains("cancel-in-progress: true"),
+        cancelLine(CancelInProgress.Never).contains("cancel-in-progress: false"),
       )
     },
     test("prunes empty collections (no `{}` or `[]` in output)") {
@@ -333,7 +344,7 @@ object RenderSpec extends ZIOSpecDefault:
         name = "CI",
         on = Triggers(
           push = Some(BranchFilter(paths = List(".github/**", "modules/**"))),
-          pullRequest = Some(BranchFilter(paths = List("modules/**"))),
+          pullRequest = Some(PullRequestTrigger(BranchFilter(paths = List("modules/**")))),
         ),
         jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
       )
@@ -342,6 +353,32 @@ object RenderSpec extends ZIOSpecDefault:
         out.contains("paths:"),
         out.contains(".github/**"),
         out.contains("modules/**"),
+      )
+    },
+    test("pull_request types render ahead of its filters, in declaration order") {
+      val wf = Workflow(
+        name = "CI",
+        on = Triggers(
+          pullRequest = Some(
+            PullRequestTrigger(
+              BranchFilter(branches = List("main")),
+              List(PullRequestActivity.Opened, PullRequestActivity.Labeled),
+            )
+          )
+        ),
+        jobs = ListMap("j" -> Job(steps = List(Step(run = Some("echo hi"))))),
+      )
+      val out = Render.render(wf).yaml
+      assertTrue(
+        out.contains(
+          """|  pull_request:
+             |    types:
+             |      - opened
+             |      - labeled
+             |    branches:
+             |      - main
+             |""".stripMargin
+        )
       )
     },
 

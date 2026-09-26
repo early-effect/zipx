@@ -25,11 +25,26 @@ final case class Workflow(
 /** See [[Render.triggersYaml]] for why this one block is rendered by hand. */
 final case class Triggers(
     push: Option[BranchFilter] = None,
-    pullRequest: Option[BranchFilter] = None,
+    pullRequest: Option[PullRequestTrigger] = None,
     workflowDispatch: Boolean = false,
     workflowCall: Boolean = false,
     schedule: List[Cron] = Nil,
 )
+
+/** @param types
+  *   empty keeps GitHub's default: opened, synchronize, reopened.
+  */
+final case class PullRequestTrigger(
+    filter: BranchFilter = BranchFilter(),
+    types: List[PullRequestActivity] = Nil,
+)
+
+/** `wire` is GitHub's spelling. */
+enum PullRequestActivity(val wire: String):
+  case Opened      extends PullRequestActivity("opened")
+  case Synchronize extends PullRequestActivity("synchronize")
+  case Reopened    extends PullRequestActivity("reopened")
+  case Labeled     extends PullRequestActivity("labeled")
 
 /** GitHub Actions numbers cron days `0` = Sunday through `6` = Saturday, which is this enum's declaration order. */
 enum DayOfWeek:
@@ -203,11 +218,17 @@ object Step:
 
 end Step
 
-/** `cancelInProgress` is a String, not a Boolean, because GitHub accepts an expression there and the useful policies
-  * need one: "cancel superseded runs, but never a release publish" is `${{ !startsWith(github.ref, 'refs/tags/') }}`.
-  * Pass `"true"` / `"false"` for the constant cases.
-  */
 final case class Concurrency(
     group: String,
-    cancelInProgress: String = "false",
-) derives Schema
+    cancelInProgress: CancelInProgress = CancelInProgress.Never,
+)
+
+/** `concurrency.cancel-in-progress`. GitHub rejects the constants as strings, so they render as YAML booleans. */
+enum CancelInProgress:
+  case Never
+  case Always
+
+  /** The useful policies need an expression: "cancel superseded runs, but never a release publish" is
+    * `!startsWith(github.ref, 'refs/tags/')`.
+    */
+  case When(condition: Expr)

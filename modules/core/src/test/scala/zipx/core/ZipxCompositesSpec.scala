@@ -28,6 +28,14 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
         yaml.contains("java-version:"),
       )
     },
+    test("input required flags are YAML booleans, which is what the action metadata schema accepts") {
+      val yaml = ZipxComposites.renderSbtSetup(pins).toOption.get
+      assertTrue(
+        yaml.contains("    required: true\n"),
+        yaml.contains("    required: false\n"),
+        !yaml.contains("required: \""),
+      )
+    },
     test("aws-login action.yml parameterizes env key inputs") {
       val yaml = ZipxComposites.renderAwsLogin(pins).toOption.get
       assertTrue(
