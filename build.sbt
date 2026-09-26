@@ -204,7 +204,12 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
       "--enable-native-access=ALL-UNNAMED",
       s"-Dplugin.version=${version.value}",
     ),
-    scriptedBufferLog := false,
+    // sbt 2's default turns batch mode off: it checks for a `1.x`-style binary version, and sbt 2's is `2`. Without
+    // batch mode every test gets a fresh JVM and scriptedParallelInstances is ignored. 4 matches a standard runner.
+    scriptedBatchExecution    := true,
+    scriptedParallelInstances := 4,
+    // Buffered, because parallel instances interleave: a failing test prints its whole log in one piece.
+    scriptedBufferLog := true,
   )
 
 // Docs-as-tests site (Specular + early-effect theme). Deployed via ZipxDocs.pages in generated CI.
