@@ -181,19 +181,30 @@ and that should be a red job rather than an empty upload. Turn it off with `uplo
         )
       ),
     ),
-    section("Affected-only PRs (Graph only)")(
+    section("Affected-only PRs")(
       md"""
-`zipxAffectedOnPR` (default `true`) emits an `affected` setup job only when a **Graph** Verify capability is present.
-Aggregate and Layer always invoke their full stage command (they do not skip GitHub jobs). That is not the same as
-"always recompile everything": Zinc and the cross-run task cache (restored by zipx at the epoch, or via remote cache)
-still skip unaffected compile work, even on a cold JVM. Verify's default is `testFull`, so suites still run unless the
-whole test task is a cache hit. See **Execution modes** ("Two kinds of affected") and the **Affected** page for the
-fail-open handoff, who is gated, and `zipxAffectedPublish`, which extends the same narrowing to Graph Publish jobs as
-a separate opt-in.
+`zipxAffectedOnPR` (default `true`) narrows Verify to what a PR can have broken, in three ways:
+
+- **The builtin `test`** runs `sbt 'zipxTestAffected <PR base>'`. The command diffs against the same base as the
+  `affected` job, then runs, in the same sbt session, each affected module's own `zipxTestTask`. It runs only modules
+  the root aggregate reaches, since a root `test` never reaches the others. No base, an all-zero one, or a diff that
+  fails runs the full command as before, and an empty affected set tests nothing. `test` takes no `needs: affected`,
+  so it neither waits on that job nor pays a second sbt load.
+- **A Graph Verify capability** gets an `affected` setup job, and each per-module job skips when its module is not
+  affected.
+- **A Once job whose inputs the classpath cannot see**, such as an integration test over images `Docker/publishLocal`
+  builds, opts in with `withAffectedBy`, which gates it on the `affected` job:
 
 ```scala
-zipxAffectedOnPR := true   // default with Graph Verify
+zipxCapabilities += zipxTasks
+  .once(name = CapabilityName("image-it"), command = imageIt / testFull, phase = Phase.Verify, gate = Gate.Always)
+  .withAffectedBy(n => imageModules.contains(n.id))
 ```
+
+Layer and other Aggregate capabilities still run their full stage command. That is not the same as "always recompile
+everything": Zinc and the cross-run task cache still skip unaffected compile work, even on a cold JVM. See **Execution
+modes** ("Two kinds of affected") and the **Affected** page for the fail-open handoff and `zipxAffectedPublish`, which
+extends the narrowing to Graph Publish jobs as a separate opt-in.
 
 ```mermaid
 flowchart TD
@@ -206,11 +217,19 @@ flowchart TD
 """,
       exampleValue {
         given PlanConfig = config.copy(affected = AffectedMode.AffectedOnPR)
-        DocsRender.body(Capability.test) + "\n---\n" + DocsRender.body(Capability.testGraph)
+        val imageIt      = Capability
+          .once(
+            name = CapabilityName("image-it"),
+            command = SbtCommand.unsafeTask("imageIt/testFull"),
+            phase = Phase.Verify,
+            gate = Gate.Always,
+          )
+          .withAffectedBy(_.id == "service")
+        DocsRender.body(Capability.testGraph) + "\n---\n" + DocsRender.body(imageIt)
       }.assert(yaml =>
         assertTrue(
-          !yaml.split("---")(0).contains("affected:"),
-          yaml.split("---")(1).contains("affected:"),
+          yaml.split("---")(0).contains("affected:"),
+          yaml.split("---")(1).contains("contains(fromJson(needs.affected.outputs.modules), 'service')"),
         )
       ),
       md"""

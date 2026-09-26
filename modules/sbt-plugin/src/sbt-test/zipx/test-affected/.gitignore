@@ -1,0 +1,3 @@
+# The fixture commits real changes, so sbt's output must stay out of the diff.
+target/
+.sbt/

@@ -300,9 +300,20 @@ final case class Capability(
     sessionTail: Option[SbtCommand] = None,
     /** What this capability's jobs do with the LocalDir build snapshot. Only the builtin test saves. */
     localCache: LocalCacheMode = LocalCacheMode.Restore,
+    /** A Once or Aggregate job runs only when one of these modules is affected. See [[withAffectedBy]]. */
+    affectedBy: Option[ModuleNode => Boolean] = None,
 ):
   def withCondition(condition: JobCondition): Capability =
     copy(condition = Some(condition))
+
+  /** Under [[AffectedMode.AffectedOnPR]], run this Once or Aggregate job only when a module matching `modules` is
+    * affected, or when the diff could not narrow anything.
+    *
+    * For a job whose inputs the classpath graph cannot see, such as an integration test over images that
+    * `Docker/publishLocal` builds. A Graph capability is already gated per module and refuses this.
+    */
+  def withAffectedBy(modules: ModuleNode => Boolean): Capability =
+    copy(affectedBy = Some(modules))
 
   /** [[LocalCacheMode.Save]] makes this capability the build snapshot's owner in place of the builtin test. At most one
     * capability may save, and not a Graph one: its jobs would each write an entry.
