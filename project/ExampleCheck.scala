@@ -92,7 +92,7 @@ object ExampleCheck:
       .build
   )
 
-  /** Runs after `test; plugin/scripted` on the Aggregate test job. */
+  /** Runs after `test` on the Aggregate test job. */
   val steps: Steps =
     Steps.built("publish-local")(publishLocal) ++ Steps.built("example-check")(checkExample)
 
