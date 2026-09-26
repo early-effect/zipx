@@ -26,10 +26,21 @@ final case class Workflow(
 final case class Triggers(
     push: Option[BranchFilter] = None,
     pullRequest: Option[PullRequestTrigger] = None,
-    workflowDispatch: Boolean = false,
+    workflowDispatch: Option[WorkflowDispatch] = None,
     workflowCall: Boolean = false,
     schedule: List[Cron] = Nil,
 )
+
+/** Actions → Run workflow. Inputs render in insertion order, which is the order GitHub shows them in. */
+final case class WorkflowDispatch(inputs: ListMap[InputName, DispatchInput] = ListMap.empty)
+
+enum DispatchInput(val description: String):
+
+  /** A required dropdown whose first option is the default. */
+  case Choice(override val description: String, options: ::[String]) extends DispatchInput(description)
+
+  /** Optional free text. */
+  case Text(override val description: String) extends DispatchInput(description)
 
 /** @param types
   *   empty keeps GitHub's default: opened, synchronize, reopened.
@@ -119,7 +130,7 @@ final case class Job(
     runsOn: List[String] = List("ubuntu-latest"),
     needs: List[String] = Nil,
     `if`: Option[String] = None,
-    environment: Option[String] = None,
+    environment: Option[JobEnvironment] = None,
     permissions: Map[String, String] = ListMap.empty,
     strategy: Option[Strategy] = None,
     container: Option[String] = None,
@@ -131,6 +142,12 @@ final case class Job(
     uses: Option[ActionRef] = None,
     `with`: Map[String, String] = ListMap.empty,
 ) derives Schema
+
+/** A job's `environment:`. GitHub records a deployment for every job that binds one, and shows `url` on it.
+  *
+  * Renders as the bare name when there is no `url`, which is how every workflow wrote it before `url` existed.
+  */
+final case class JobEnvironment(name: String, url: Option[String] = None) derives Schema
 
 final case class JobService(
     image: String,

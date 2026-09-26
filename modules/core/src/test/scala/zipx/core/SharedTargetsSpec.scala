@@ -215,7 +215,7 @@ object SharedTargetsSpec extends ZIOSpecDefault:
           CapabilityScope.Graph,
           shared = false,
         )
-        assertTrue(plan(docker).jobs("docker-serviceA-us").environment.contains("production"))
+        assertTrue(plan(docker).jobs("docker-serviceA-us").environment.map(_.name).contains("production"))
       },
     ),
     suite("nothing changes for a capability that does not ask for it")(

@@ -53,7 +53,7 @@ object PinCheckWorkflow:
       else ListMap("contents"              -> "read")
     Workflow(
       name = "zipx pin check",
-      on = Triggers(schedule = List(schedule), workflowDispatch = true),
+      on = Triggers(schedule = List(schedule), workflowDispatch = Some(WorkflowDispatch())),
       permissions = permissions,
       jobs = ListMap(
         "pin-check" -> Job(

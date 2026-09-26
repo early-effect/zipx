@@ -78,6 +78,22 @@ object OutputName extends Newtype[String]:
     else if input.matches(Names.ActionsId) then true
     else s"invalid output name '$input': must start with a letter or _ and contain only letters, digits, - or _"
 
+/** A `workflow_dispatch` input id, read back as `inputs.<name>`. Same shape as a [[JobId]]. */
+type InputName = InputName.Type
+object InputName extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "an input name must be non-empty"
+    else if input.matches(Names.ActionsId) then true
+    else s"invalid input name '$input': must start with a letter or _ and contain only letters, digits, - or _"
+
+/** A property of an object inside an expression: the `images` of `fromJson(x).images`. Same shape as a [[JobId]]. */
+type PropertyName = PropertyName.Type
+object PropertyName extends Subtype[String]:
+  override inline def validate(input: String): Boolean | String =
+    if input.isEmpty then "a property name must be non-empty"
+    else if input.matches(Names.ActionsId) then true
+    else s"invalid property name '$input': must start with a letter or _ and contain only letters, digits, - or _"
+
 /** A matrix axis name for `matrix.<axis>`. `include` and `exclude` are rejected: they are directives that add and
   * remove combinations, so `matrix.include` does not mean what it reads like.
   */

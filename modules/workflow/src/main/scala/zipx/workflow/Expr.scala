@@ -49,6 +49,15 @@ enum Expr:
   /** `${{ matrix.<axis> }}`. */
   case Matrix(axis: MatrixAxis)
 
+  /** `${{ inputs.<name> }}`: a `workflow_dispatch` input. */
+  case Input(name: InputName)
+
+  /** `of.key`: a property of an object, as in `fromJson(x).images`. */
+  case Member(of: Expr, key: PropertyName)
+
+  /** `of[key]`: a property named by another expression, as in `fromJson(x).targets[matrix.target]`. */
+  case Index(of: Expr, key: Expr)
+
   /** Literal text, emitted with no `${{ }}` wrapper. The non-expression part of a [[Concat]].
     *
     * A [[zipx.shell.ShText]] rather than a `String` because a `Concat` holding one becomes a shell word through
@@ -111,6 +120,9 @@ enum Expr:
     case JobOutput(id, name)  => s"needs.$id.outputs.${name.unwrap}"
     case JobResult(id)        => s"needs.$id.result"
     case Matrix(axis)         => s"matrix.${axis.unwrap}"
+    case Input(name)          => s"inputs.$name"
+    case Member(of, key)      => s"${of.unwrapped}.$key"
+    case Index(of, key)       => s"${of.unwrapped}[${key.unwrapped}]"
     case Lit(text)            => text.unwrap
     case Quoted(text)         => s"'${text.unwrap}'"
     case Call(fn, args)       => s"${fn.unwrap}(${args.map(_.unwrapped).mkString(", ")})"
@@ -135,6 +147,12 @@ enum Expr:
 
   /** `!this`, with no parens; write `!Expr.group(…)` for `!(…)`. */
   def unary_! : Expr = Not(this)
+
+  /** `this.key`. */
+  def member(key: PropertyName): Expr = Member(this, key)
+
+  /** `this[key]`. */
+  def at(key: Expr): Expr = Index(this, key)
 
   /** Concatenate with `other`, flattening so nested [[Expr.Concat]]s do not nest. */
   infix def ++(other: Expr): Expr = (this, other) match
@@ -227,6 +245,9 @@ object Expr:
   inline def matrix(inline axis: String): Expr = Matrix(MatrixAxis(axis))
 
   def matrixMake(axis: String): Either[String, Expr] = MatrixAxis.make(axis).map(Matrix(_))
+
+  /** `${{ inputs.<name> }}`. */
+  inline def input(inline name: String): Expr = Input(InputName(name))
 
   /** Literal text with no `${{ }}` wrapper, for the fixed parts of a [[Concat]]. */
   inline def lit(inline text: String): Expr = Lit(ShText(text))

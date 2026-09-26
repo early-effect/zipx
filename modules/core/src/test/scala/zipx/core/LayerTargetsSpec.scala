@@ -96,7 +96,7 @@ object LayerTargetsSpec extends ZIOSpecDefault:
           wf.jobs.contains("deploy-L0-staging"),
           wf.jobs.contains("deploy-L0-prod"),
           wf.jobs.contains("deploy-L1-prod"),
-          l0Prod.environment.contains("production"),
+          l0Prod.environment.map(_.name).contains("production"),
           l0Prod.env.get("TIER").contains("prod"),
           l0Prod.`if`.exists(_.contains("github.event_name == 'push'")),
           wf.jobs("deploy-L0-staging").environment.isEmpty,

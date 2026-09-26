@@ -1,0 +1,23 @@
+# OnMerge by default: images and deploys stay in ci.yml, and there is no deploy workflow.
+> zipxWorkflowGenerate
+$ absent .github/workflows/zipx-deploy.yml
+> assertOnMerge
+# Manual moves them to zipx-deploy.yml, and check agrees with what generate wrote.
+> set zipxDeployTrigger := DeployTrigger.Manual()
+> zipxWorkflowGenerate
+$ exists .github/workflows/zipx-deploy.yml
+> assertManual
+> zipxWorkflowCheck
+# A module with no image refs cannot say whether its tag is pushed.
+-> svc/zipxImageMissing
+# A push-only condition could never run from a dispatch, so generate refuses it.
+> set zipxCapabilities := zipxCapabilities.value.map(c => if c.name == Capability.DockerName then c.withCondition(JobCondition.eventIs("push")) else c)
+-> zipxWorkflowGenerate
+> set zipxCapabilities := zipxCapabilities.value.map(c => if c.name == Capability.DockerName then c.copy(condition = None) else c)
+# Back to OnMerge: check refuses the leftover deploy workflow, and generate deletes it.
+> set zipxDeployTrigger := DeployTrigger.OnMerge
+-> zipxWorkflowCheck
+> zipxWorkflowGenerate
+$ absent .github/workflows/zipx-deploy.yml
+> assertOnMerge
+> zipxWorkflowCheck

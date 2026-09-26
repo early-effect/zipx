@@ -69,7 +69,7 @@ object VersionUpdatesWorkflow:
     val openPr = Step.run(updatePrScript).named("Open update PR").build
     Workflow(
       name = "zipx version updates",
-      on = Triggers(schedule = List(schedule), workflowDispatch = true),
+      on = Triggers(schedule = List(schedule), workflowDispatch = Some(WorkflowDispatch())),
       permissions = ListMap("contents" -> "write", "pull-requests" -> "write", "issues" -> "write"),
       jobs = ListMap(
         "version-updates" -> Job(

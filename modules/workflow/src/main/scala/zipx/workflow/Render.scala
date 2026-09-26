@@ -104,10 +104,33 @@ object Render:
       t.push.map(b => "push" -> branchFilterYaml(b)).toSeq ++
         t.pullRequest.map(p => "pull_request" -> pullRequestYaml(p)) ++
         scheduleEntry ++
-        (if t.workflowDispatch then Seq("workflow_dispatch" -> Yaml.NullValue) else Nil) ++
+        t.workflowDispatch.map(d => "workflow_dispatch" -> dispatchYaml(d)) ++
         (if t.workflowCall then Seq("workflow_call" -> Yaml.NullValue) else Nil)
     Yaml.Mapping.fromStringKeys(entries*)
   end triggersYaml
+
+  private def dispatchYaml(dispatch: WorkflowDispatch): Yaml =
+    if dispatch.inputs.isEmpty then Yaml.NullValue
+    else
+      val inputs = dispatch.inputs.map { (name, input) =>
+        val fields = input match
+          case DispatchInput.Choice(description, options) =>
+            Seq(
+              "description" -> Yaml.Scalar(description),
+              "type"        -> Yaml.Scalar("choice"),
+              "required"    -> bool(true),
+              "default"     -> Yaml.Scalar(options.head),
+              "options"     -> Yaml.Sequence(Chunk.from(options.map(Yaml.Scalar(_)))),
+            )
+          case DispatchInput.Text(description) =>
+            Seq(
+              "description" -> Yaml.Scalar(description),
+              "type"        -> Yaml.Scalar("string"),
+              "required"    -> bool(false),
+            )
+        Yaml.Scalar(name: String) -> Yaml.Mapping.fromStringKeys(fields*)
+      }
+      Yaml.Mapping.fromStringKeys("inputs" -> Yaml.Mapping(Chunk.from(inputs)))
 
   private def branchFilterYaml(b: BranchFilter): Yaml =
     filterMapping(branchFilterEntries(b))
@@ -129,7 +152,19 @@ object Render:
     )
 
   private def encodeJob(job: Job): Yaml =
-    nestMatrixInclude(collapseSingletonRunsOn(prune(jobCodec.encodeValue(job))))
+    nestMatrixInclude(collapseNameOnlyEnvironment(collapseSingletonRunsOn(prune(jobCodec.encodeValue(job)))))
+
+  /** `environment: {name: x}` as `environment: x`, the form GitHub documents first. */
+  private def collapseNameOnlyEnvironment(job: Yaml): Yaml = job match
+    case Yaml.Mapping(entries) =>
+      Yaml.Mapping(entries.map {
+        case (k @ Yaml.Scalar("environment", _), Yaml.Mapping(envEntries)) if envEntries.size == 1 =>
+          envEntries.head match
+            case (Yaml.Scalar("name", _), name) => (k, name)
+            case _                              => (k, Yaml.Mapping(envEntries))
+        case other => other
+      })
+    case other => other
 
   /** The derived codec puts [[Strategy.include]] next to `matrix:`; GitHub wants it under `matrix.include`. */
   private def nestMatrixInclude(job: Yaml): Yaml = job match

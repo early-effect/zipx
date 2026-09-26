@@ -44,7 +44,7 @@ object CoverageWorkflowSpec extends ZIOSpecDefault:
           assertTrue(
             wf.on.pullRequest.isDefined == labeled,
             job(wf).`if`.isDefined == labeled,
-            wf.on.workflowDispatch == triggers.contains(CoverageTrigger.Dispatch),
+            wf.on.workflowDispatch.isDefined == triggers.contains(CoverageTrigger.Dispatch),
             wf.on.schedule == triggers.collect { case CoverageTrigger.Scheduled(cron) => cron }.distinct,
             wf.on.push.isEmpty,
           )
