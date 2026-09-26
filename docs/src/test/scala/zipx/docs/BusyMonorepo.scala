@@ -195,9 +195,8 @@ In order, one PR each, so each step's effect on required checks is visible on it
     ),
     section("Limits")(
       md"""
-- A version bump in the catalog affects every module, because the catalog is a build file. Narrowing it to the modules
-  that select the row is planned.
-- Any edit to `build.sbt` affects every module, for the same reason.
+- Any edit to `build.sbt` affects every module, because it is a build file. A catalog bump is the exception: it affects
+  the modules that declare the library (see **Affected**, *Catalog bumps*).
 - `zipxTestAffected` scopes the builtin `test` only. A user Aggregate capability with per-module commands still runs
   all of them.
 - Registry-style steps that need an image (LaunchPad, a manifest registry) run whenever their module's image is in the

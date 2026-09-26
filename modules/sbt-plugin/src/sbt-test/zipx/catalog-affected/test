@@ -1,0 +1,28 @@
+# Real git history, so each catalog is read at both commits exactly as CI reads it.
+$ exec git init -q .
+$ exec git config user.email scripted@example.com
+$ exec git config user.name scripted
+$ exec git config commit.gpgsign false
+$ exec git add .
+$ exec git commit -q -m fixture
+# L6: a row only svcB declares moves, so only svcB is affected.
+$ copy-file changes/fansi-bumped.scala project/ZipxVersions.scala
+$ exec git add .
+$ exec git commit -q -m bump-fansi
+> reload
+> zipxAffectedModules HEAD^
+> assertAffected svcB
+# A row models declares moves: models, then its reverse closure.
+$ copy-file changes/upickle-bumped.scala project/ZipxVersions.scala
+$ exec git add .
+$ exec git commit -q -m bump-upickle
+> reload
+> zipxAffectedModules HEAD^
+> assertAffected models svcA svcB
+# An edit beyond version literals could change which module gets what, so everything is affected.
+$ copy-file changes/beyond-versions.scala project/ZipxVersions.scala
+$ exec git add .
+$ exec git commit -q -m add-a-group
+> reload
+> zipxAffectedModules HEAD^
+> assertAffected models svcA svcB

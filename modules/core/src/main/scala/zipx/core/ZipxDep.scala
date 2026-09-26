@@ -178,7 +178,11 @@ final case class Lib(
   def excluding(ex: ZipxExclude*): Lib = copy(excludes = excludes ++ ex.toList)
   def fromGraph: Lib                   = copy(alignTo = Some(family.getOrElse(artifact)))
   def isAligned: Boolean               = alignTo.nonEmpty
+  def coordinate: LibCoordinate        = LibCoordinate(group, artifact)
 end Lib
+
+/** A library as `libraryDependencies` names it: group and base artifact, before any `_3` cross suffix. */
+final case class LibCoordinate(group: GroupId, artifact: ArtifactId)
 
 object Lib:
   /** String factory for catalog literals. The case-class `apply` is `(GroupId, ArtifactId, DepVersion, …defaults)`.

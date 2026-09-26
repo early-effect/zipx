@@ -4,7 +4,8 @@ package zipx.core
   *
   * Algorithm (mirrors the well-worn sbt approach):
   *   1. If any changed file touches the build itself (a `.sbt` file or anything under the `project` dir), treat the
-  *      whole build as affected: the graph or plugins may have changed, so nothing can be safely skipped.
+  *      whole build as affected: the graph or plugins may have changed, so nothing can be safely skipped. The one
+  *      exception is a catalog diff that moved only library or Action versions; see [[CatalogChange]].
   *   2. Otherwise map each changed file to its owning module(s) by **longest matching prefix** over each module's
   *      source paths and its base dir. Plural because a cross-built module's shared sources belong to every platform
   *      row.
@@ -31,12 +32,24 @@ object Affected:
     *
     * Returns all module ids when a build file changed. Files under no module are ignored (unless a build file). Seeds
     * are expanded via the reverse-dependency closure.
+    *
+    * The catalog file is a build file, except when `catalog` reads its diff: then its [[CatalogChange]]s seed modules
+    * instead, and only a [[CatalogChange.BuildWide]] one affects everything.
     */
-  def affectedModules(graph: ModuleGraph, changedFiles: List[String]): Set[String] =
-    if changedFiles.exists(isBuildFile) then graph.ids.toSet
-    else
-      val seeds = changedFiles.flatMap(owningModules(graph, _)).toSet
-      graph.affectedClosure(seeds)
+  def affectedModules(
+      graph: ModuleGraph,
+      changedFiles: List[String],
+      catalog: Option[CatalogEdit] = None,
+  ): Set[String] =
+    val (catalogFiles, others) = changedFiles.partition(f => catalog.exists(_.path == f))
+    val catalogSeeds           = catalog match
+      case Some(edit) if catalogFiles.nonEmpty => CatalogChange.seeds(edit.changes, graph)
+      case _                                   => Some(Set.empty[String])
+    catalogSeeds match
+      case Some(seeds) if !others.exists(isBuildFile) =>
+        graph.affectedClosure(seeds ++ others.flatMap(owningModules(graph, _)))
+      case _ => graph.ids.toSet
+  end affectedModules
 
   /** The module ids the `affected` job should publish, given a diff that may have failed.
     *
@@ -49,10 +62,14 @@ object Affected:
     *
     * `Some(Nil)` is different and stays empty: that is a successful diff finding no changed files.
     */
-  def outputModules(graph: ModuleGraph, changedFiles: Option[List[String]]): List[String] =
+  def outputModules(
+      graph: ModuleGraph,
+      changedFiles: Option[List[String]],
+      catalog: Option[CatalogEdit] = None,
+  ): List[String] =
     changedFiles match
       case None        => AllSentinel
-      case Some(files) => affectedModules(graph, files).toList.sorted
+      case Some(files) => affectedModules(graph, files, catalog).toList.sorted
 
   /** Every module owning a file, by longest matching prefix over [[ModuleNode.ownedPaths]].
     *
