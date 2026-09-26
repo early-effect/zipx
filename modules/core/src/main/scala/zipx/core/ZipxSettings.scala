@@ -598,7 +598,7 @@ object ZipxSettings:
       SettingName("zipxDeployTrigger"),
       DeployTrigger.OnMerge,
       SettingPurpose(
-        "OnMerge (default) keeps image pushes and deploys in ci.yml. Manual(images = \"zipx-images\") moves them to a dispatched .github/workflows/zipx-deploy.yml with modules (changed / all / one), target (target or Target.group), and sha inputs."
+        "OnMerge (default) keeps image pushes and deploys in ci.yml. Manual(images = \"zipx-images\") moves them to a dispatched .github/workflows/zipx-deploy.yml with modules (changed / all / one), target (choose, a target, or a Target.group), and sha inputs. DeployTrigger.staged(deployLabel, skipLabel) runs the same workflow on every merge and on PRs carrying deployLabel, for DeployStage.PreProduction targets only; production deploys only from a dispatch on the default branch."
       ),
       Build,
     )

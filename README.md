@@ -43,6 +43,7 @@ Three settings keep a large repo's CI fast and its merges unblocked:
 ```scala
 zipxCoverageWorkflow := Some(Coverage.workflow(CoverageTrigger.Dispatch, CoverageTrigger.prLabel("coverage")))
 zipxDeployTrigger    := DeployTrigger.Manual()          // images and deploys from zipx-deploy.yml, never on a merge
+// or DeployTrigger.staged("deploy-stg", "no-deploy"): staging on merge and on labeled PRs, production by dispatch
 zipxImageRefs        := (Docker / dockerAliases).value.map(_.toString)  // on each image module
 ```
 
@@ -100,7 +101,8 @@ What's covered:
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate Verify via Testcontainers)
 - **Action pins** (catalog `Action` vals, `zipxActionUpdate`, jar defaults)
 - **Dependency updates** (scheduled `zipx-version-updates.yml` opens the catalog PR; local `zipxDepUpdate` / `zipxActionUpdate` / `zipxPinUpdate`) and **Pin feeds**
-- Docker and multi-target deploy, on merge or dispatched (`DeployTrigger.Manual`, `zipx-deploy.yml`)
+- Docker and multi-target deploy, on merge, dispatched (`DeployTrigger.Manual`), or staged with production by dispatch
+  only (`DeployTrigger.Staged`), from `zipx-deploy.yml`
 - `ZipxCentral` / `ZipxDocs` packs
 - Settings reference and dogfood notes
 

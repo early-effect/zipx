@@ -1564,12 +1564,14 @@ object Planner:
         targetEnv: Map[String, EnvValue],
         destinations: List[Target] = Nil,
     ): (JobId, Job) =
+      val environment = jobEnvironment(pipeline, capability, target.flatMap(_.environment), module)
       id -> Job(
         name = Some(displayName),
         runsOn = runner,
         needs = needs,
         `if` = cond,
-        environment = jobEnvironment(pipeline, capability, target.flatMap(_.environment), module),
+        environment = environment,
+        concurrency = deployConcurrency(pipeline, environment, id),
         permissions = ListMap.from(capability.permissions),
         strategy = matrix,
         container = capability.container,
@@ -1589,6 +1591,7 @@ object Planner:
           module = module,
         ),
       )
+    end baseJob
 
     fannedTargets(capability, node) match
       case Nil =>
@@ -1793,15 +1796,18 @@ object Planner:
     case Pipeline.Ci        => Expr.group(Expr.contains(affectedModulesJson, module) || affectedContainsAll)
     case Pipeline.Deploy(_) =>
       target match
-        case None    => Expr.contains(Expr.fromJson(DeployWorkflow.imagesOutput), module)
-        case Some(t) => Expr.contains(Expr.fromJson(DeployWorkflow.targetsOutput).at(t), module)
+        case None    => resolved && Expr.contains(Expr.fromJson(DeployWorkflow.imagesOutput), module)
+        case Some(t) => resolved && Expr.contains(Expr.fromJson(DeployWorkflow.targetsOutput).at(t), module)
 
   /** The job-level form of [[selects]] for a matrix job, which cannot read `matrix` there: is anything selected. */
   private def selectsAny(pipeline: Pipeline, targeted: Boolean): Expr = pipeline match
     case Pipeline.Ci        => affectedModulesNonEmpty
     case Pipeline.Deploy(_) =>
-      if targeted then DeployWorkflow.targetsOutput !== Expr.lit("'{}'")
-      else DeployWorkflow.imagesOutput !== Expr.lit("'[]'")
+      if targeted then resolved && (DeployWorkflow.targetsOutput !== Expr.lit("'{}'"))
+      else resolved && (DeployWorkflow.imagesOutput !== Expr.lit("'[]'"))
+
+  /** First, so a skipped `resolve` (an unlabeled PR) short-circuits before `fromJson` reads its empty outputs. */
+  private val resolved: Expr = Expr.JobResult(DeployWorkflow.ResolveJobId) === Expr.quoted("success")
 
   private val affectedModulesJson: Expr = Expr.fromJson(Expr.JobOutput(affectedJobId, OutputName("modules")))
 
@@ -1819,6 +1825,15 @@ object Planner:
       val name =
         environment.orElse(Option.when(DeployWorkflow.isImage(capability))(imagesEnvironment))
       name.map(JobEnvironment(_, Some(DeployWorkflow.deployedUrl(module).render)))
+
+  /** Under [[Pipeline.Deploy]], each job binding an Environment is its own group across runs, keyed by its id (one
+    * capability, module and target), so a merge, a PR and a dispatch reaching one Environment queue instead of
+    * interleaving, and two image pushes of one module never race an immutable-tag registry.
+    */
+  private def deployConcurrency(pipeline: Pipeline, environment: Option[JobEnvironment], id: JobId): Option[String] =
+    pipeline match
+      case Pipeline.Ci        => None
+      case Pipeline.Deploy(_) => environment.map(_ => s"zipx-deploy-$id")
 
   private def pipelineEnv(pipeline: Pipeline): Map[String, EnvValue] = pipeline match
     case Pipeline.Ci        => Map.empty

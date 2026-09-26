@@ -31,7 +31,7 @@ one job per stage. Graph and Layer are opt-in; ignore them until one job is not 
 | **workflow-check** | Once | `zipxWorkflowCheck` | whole build | Verify | always (`zipxVerify.workflowCheck`) |
 | **advisories** | Once | `zipxAdvisoryCheck` | whole build | Verify | always (`zipxVerify.advisories`) |
 | **publish** | Aggregate | `+?<module>/<publishTask>` (joined) | modules that publish | Publish | release tag |
-| **docker** | Aggregate | `<module>/Docker/publish` (joined) | `DockerPlugin` modules | Publish | release tag, or dispatched under `DeployTrigger.Manual` |
+| **docker** | Aggregate | `<module>/Docker/publish` (joined) | `DockerPlugin` modules | Publish | release tag, or in `zipx-deploy.yml` under `DeployTrigger.Manual` or `Staged` |
 
 Verify jobs have empty `needs` versus each other (GitHub runs them in parallel). Pin-feed OSV folds into **advisories**
 when feeds are present. `Capability.pinCheck` remains if you want a dedicated job; see **Pin feeds**. Skip a gate with

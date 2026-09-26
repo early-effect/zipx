@@ -46,11 +46,11 @@ object DeployWorkflowSpec extends ZIOSpecDefault:
 
   private val all = List(Capability.test, Capability.publish, image, registry, deploy())
 
-  private def planned(capabilities: List[Capability] = all): Workflow =
-    DeployWorkflow.plan(graph, DeployWorkflow.split(capabilities).deploy, config, DeployWorkflow.ImagesEnvironment)
+  private def planned(capabilities: List[Capability] = all, trigger: DeployTrigger = DeployTrigger.Manual()): Workflow =
+    DeployWorkflow.plan(graph, DeployWorkflow.split(capabilities).deploy, config, trigger)
 
-  private def problems(capabilities: List[Capability]): List[String] =
-    DeployWorkflow.problems(DeployWorkflow.split(capabilities), graph)
+  private def problems(capabilities: List[Capability], trigger: DeployTrigger = DeployTrigger.Manual()): List[String] =
+    DeployWorkflow.problems(DeployWorkflow.split(capabilities), graph, trigger)
 
   private def step(job: Job, name: String): Option[Step] = job.steps.find(_.name.contains(name))
 
@@ -115,11 +115,14 @@ object DeployWorkflowSpec extends ZIOSpecDefault:
           )
         )
       },
-      test("target offers target names, then groups") {
+      test("target offers choose first, so the default deploys nothing, then target names, then groups") {
         val target = planned().on.workflowDispatch.flatMap(_.inputs.get(DeployWorkflow.TargetInput))
         assertTrue(
           target.contains(
-            DispatchInput.Choice("Target or group to deploy to", ::("prd", List("stg", "all-prd", "all-stg")))
+            DispatchInput.Choice(
+              "Target or group to deploy to (choose deploys nothing)",
+              ::("choose", List("prd", "stg", "all-prd", "all-stg")),
+            )
           )
         )
       },
@@ -192,9 +195,34 @@ object DeployWorkflowSpec extends ZIOSpecDefault:
       },
       test("renders") {
         assertTrue(
-          DeployWorkflow
-            .render(graph, DeployWorkflow.split(all).deploy, config, DeployWorkflow.ImagesEnvironment)
-            .isRight
+          DeployWorkflow.render(graph, DeployWorkflow.split(all).deploy, config, DeployTrigger.Manual()).isRight
+        )
+      },
+      test("every job binding an Environment is its own concurrency group across runs; others have none") {
+        val wf = planned()
+        assertTrue(
+          wf.jobs("docker-serviceA").concurrency.contains("zipx-deploy-docker-serviceA"),
+          wf.jobs("deploy-serviceB-prd").concurrency.contains("zipx-deploy-deploy-serviceB-prd"),
+          wf.jobs("registry-serviceA").concurrency.isEmpty,
+          wf.jobs("resolve").concurrency.isEmpty,
+        )
+      },
+      test("every job needs resolve to have succeeded before it reads the plan") {
+        val jobs = planned().jobs.removed("resolve").values.toList
+        assertTrue(
+          jobs.nonEmpty,
+          jobs.forall(_.`if`.exists(_.contains("needs.resolve.result == 'success' && contains(fromJson(needs.resolve"))),
+        )
+      },
+      test("Manual's resolve runs on every dispatch, reads the sha input, and knows the default branch") {
+        val resolve = planned().jobs("resolve")
+        val env     = step(resolve, "Resolve deploy plan").map(_.env).getOrElse(Map.empty)
+        assertTrue(
+          resolve.`if`.isEmpty,
+          !resolve.permissions.contains("pull-requests"),
+          env.get(DeployWorkflow.RequestedShaEnv).contains("${{ inputs.sha }}"),
+          env.get(DeployWorkflow.DefaultBranchEnv).contains("${{ github.event.repository.default_branch }}"),
+          !env.contains(DeployWorkflow.PrLabelsEnv),
         )
       },
       test("a target or group selects the targets the plan resolves") {
@@ -205,6 +233,88 @@ object DeployWorkflowSpec extends ZIOSpecDefault:
           DeployWorkflow.selectedTargets(graph, deploys, "qa").isLeft,
         )
       },
+    ),
+    suite("under Staged")(
+      test("a merge to the default branch, a PR event, and a dispatch each start it") {
+        val on = planned(stagedAll, staged).on
+        assertTrue(
+          on.push.map(_.branches).contains(List("main")),
+          on.pullRequest.exists(_.types.contains(PullRequestActivity.Labeled)),
+          on.pullRequest.exists(_.types.contains(PullRequestActivity.Synchronize)),
+          on.workflowDispatch.isDefined,
+        )
+      },
+      test("an unlabeled PR stops at resolve, before a runner boots sbt") {
+        val resolve = planned(stagedAll, staged).jobs("resolve")
+        assertTrue(
+          resolve.`if`.contains(
+            "github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'deploy-stg')"
+          )
+        )
+      },
+      test("resolve reads the merged PR's labels, and deploys a PR's head") {
+        val resolve = planned(stagedAll, staged).jobs("resolve")
+        val env     = step(resolve, "Resolve deploy plan").map(_.env).getOrElse(Map.empty)
+        assertTrue(
+          resolve.permissions.get("pull-requests").contains("read"),
+          env.get(DeployWorkflow.RequestedShaEnv).contains("${{ inputs.sha || github.event.pull_request.head.sha }}"),
+          env.get(DeployWorkflow.PrLabelsEnv).contains("${{ toJSON(github.event.pull_request.labels.*.name) }}"),
+        )
+      },
+      test("each event source is its own run group, so a PR's runs never replace a pending merge or dispatch") {
+        assertTrue(
+          planned(stagedAll, staged).concurrency.contains(
+            Concurrency(
+              "zipx-deploy-${{ github.event_name }}-${{ github.event.pull_request.number }}${{ inputs.target }}",
+              CancelInProgress.Never,
+            )
+          )
+        )
+      },
+      test("renders") {
+        assertTrue(DeployWorkflow.render(graph, DeployWorkflow.split(stagedAll).deploy, config, staged).isRight)
+      },
+      test("a well-formed staged deploy has no problems") {
+        assertTrue(problems(stagedAll, staged).isEmpty)
+      },
+      test("refuses a build with no PreProduction target, which no merge or PR could deploy to") {
+        assertTrue(problems(all, staged).exists(_.contains("no target is DeployStage.PreProduction")))
+      },
+      test("refuses one label for both deploying and skipping") {
+        val same = DeployTrigger.Staged(ExprLiteral("deploy"), ExprLiteral("deploy"))
+        assertTrue(
+          problems(stagedAll, same).exists(_.contains("the deploy and skip labels are both 'deploy'")),
+          DeployTrigger.stagedMake("deploy", "deploy").isLeft,
+        )
+      },
+    ),
+    suite("refuses a target")(
+      test("declared Production in one capability and PreProduction in another") {
+        val other = deploy(List(Target(stg, environment = Some("lab-stg"))))
+          .copy(name = CapabilityName("deploy-lambda"))
+        assertTrue(
+          problems(stagedAll :+ other, staged).exists(_.contains("target 'stg' is Production in one capability"))
+        )
+      },
+      test("named choose, the dispatch form's deploy-nothing default") {
+        val choose = deploy(List(Target(TargetName("choose"), environment = Some("lab-stg"))))
+        assertTrue(problems(List(image, choose)).exists(_.contains("a target is named 'choose'")))
+      },
+    ),
+  )
+
+  private val staged = DeployTrigger.staged(deployLabel = "deploy-stg", skipLabel = "no-deploy")
+
+  private val stagedAll = List(
+    Capability.test,
+    Capability.publish,
+    image,
+    registry,
+    deploy(
+      List(
+        Target(stg, environment = Some("lab-stg"), stage = DeployStage.PreProduction),
+        Target(prd, environment = Some("lab-prd")),
+      )
     ),
   )
 end DeployWorkflowSpec

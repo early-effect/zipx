@@ -6,6 +6,17 @@ import zipx.workflow.*
 
 import scala.collection.immutable.ListMap
 
+/** Which commits may reach a [[Target]] from `zipx-deploy.yml`. */
+enum DeployStage:
+
+  /** Only a dispatch on the default branch, of a commit on that branch. Pair its Environment with a default-branch
+    * deployment policy, which GitHub enforces even against a workflow edited on a branch.
+    */
+  case Production
+
+  /** Also every merge under [[DeployTrigger.Staged]], and every push to a PR carrying its deploy label. */
+  case PreProduction
+
 /** Where image pushes and deploys run. */
 enum DeployTrigger:
 
@@ -17,12 +28,41 @@ enum DeployTrigger:
     */
   case Manual(images: String = DeployWorkflow.ImagesEnvironment)
 
-/** `zipx-deploy.yml`: images and deploys, run by hand from a plan.
+  /** In `zipx-deploy.yml`: every merge deploys its changed modules to the [[DeployStage.PreProduction]] targets unless
+    * its PR carries `skipLabel`, a PR carrying `deployLabel` deploys its head there on each push, and a dispatch from
+    * the default branch deploys anywhere. Nothing but that dispatch reaches a [[DeployStage.Production]] target, and a
+    * branch reaches nothing without the label.
+    */
+  case Staged(deployLabel: ExprLiteral, skipLabel: ExprLiteral, images: String = DeployWorkflow.ImagesEnvironment)
+
+  /** The images Environment `zipx-deploy.yml` records pushes in, or `None` when there is no deploy workflow. */
+  def imagesEnvironment: Option[String] = this match
+    case OnMerge              => None
+    case Manual(images)       => Some(images)
+    case Staged(_, _, images) => Some(images)
+end DeployTrigger
+
+object DeployTrigger:
+
+  /** [[Staged]] with both labels checked while the build compiles. */
+  inline def staged(inline deployLabel: String, inline skipLabel: String): DeployTrigger =
+    Staged(ExprLiteral(deployLabel), ExprLiteral(skipLabel))
+
+  def stagedMake(deployLabel: String, skipLabel: String): Either[String, DeployTrigger] =
+    for
+      deploy <- ExprLiteral.make(deployLabel.trim)
+      skip   <- ExprLiteral.make(skipLabel.trim)
+      _      <- Either.cond(deploy != skip, (), s"zipx: the deploy and skip labels are both '$deploy'")
+    yield Staged(deploy, skip)
+end DeployTrigger
+
+/** `zipx-deploy.yml`: images and deploys, run from a plan.
   *
   * It takes every image capability ([[Capability.DockerName]]), everything that needs one, and every [[Phase.Deploy]]
-  * capability out of `ci.yml`. A `resolve` job turns the dispatch inputs into a [[DeployPlan]]: `changed` compares each
-  * Environment's last successful deploy of each module with the commit being deployed. Image jobs push a tag only when
-  * a registry lacks it, and every job checks out and records that commit.
+  * capability out of `ci.yml`. A `resolve` job turns the event into a [[DeployPlan]] (see [[DeployRequest.select]] for
+  * what each event may reach): `changed` compares each Environment's last successful deploy of each module with the
+  * commit being deployed. Image jobs push a tag only when a registry lacks it, and every job checks out and records
+  * that commit. Each job that binds an Environment is its own concurrency group, so two runs never interleave on it.
   */
 object DeployWorkflow:
 
@@ -89,10 +129,11 @@ object DeployWorkflow:
     val (deploy, ci) = capabilities.partition(c => moved.contains(c.name))
     Split(ci, deploy)
 
-  /** Every reason `zipx-deploy.yml` could not run `split.deploy` as declared. */
-  def problems(split: Split, graph: ModuleGraph): List[String] =
-    val deployNames = split.deploy.map(_.name).toSet
-    val targets = split.deploy.flatMap(c => graph.nodes.filter(c.participates).flatMap(c.targets)).distinctBy(_.name)
+  /** Every reason `zipx-deploy.yml` could not run `split.deploy` as declared under `trigger`. */
+  def problems(split: Split, graph: ModuleGraph, trigger: DeployTrigger): List[String] =
+    val deployNames   = split.deploy.map(_.name).toSet
+    val declared      = split.deploy.flatMap(c => graph.nodes.filter(c.participates).flatMap(c.targets))
+    val targets       = declared.distinctBy(_.name)
     val perCapability = split.deploy.flatMap { c =>
       List(
         Option.when(c.scope != CapabilityScope.Graph)(
@@ -105,8 +146,8 @@ object DeployWorkflow:
           s"'${c.name}' needs '$need', which stays in ci.yml; a job cannot need a job in another workflow"
         },
         c.condition.flatMap(pushOnly).map { event =>
-          s"'${c.name}' has a condition requiring event '$event', which is never true in zipx-deploy.yml " +
-            "(workflow_dispatch only); drop it, since the dispatch decides when this runs"
+          s"'${c.name}' has a condition requiring event '$event', which a dispatch of zipx-deploy.yml never " +
+            "satisfies; drop it, since the deploy plan decides when this runs"
         },
       ).flatten
     }
@@ -121,8 +162,35 @@ object DeployWorkflow:
     val clashes = targets.flatMap(_.group).distinct.filter(g => targets.exists(_.name == (g: String))).map { g =>
       s"target group '$g' is also a target name, so the dispatch choice '$g' would be ambiguous"
     }
-    (perCapability ++ unrecorded ++ clashes).map("zipx: DeployTrigger.Manual: " + _)
+    val reserved = Option.when(targets.exists(t => (t.name: String) == DeployRequest.ChooseWire))(
+      s"a target is named '${DeployRequest.ChooseWire}', the dispatch form's deploy-nothing default"
+    )
+    val mixedStages = declared.groupBy(_.name).toList.sortBy((t, _) => t: String).collect {
+      case (t, ts) if ts.map(_.stage).distinct.sizeIs > 1 =>
+        s"target '$t' is Production in one capability and PreProduction in another; a target has one stage"
+    }
+    val staged = trigger match
+      case DeployTrigger.Staged(deploy, skip, _) =>
+        List(
+          Option.when(!targets.exists(_.stage == DeployStage.PreProduction))(
+            "no target is DeployStage.PreProduction, so a merge or labeled PR would deploy nothing; mark the " +
+              "staging targets PreProduction, or use DeployTrigger.Manual()"
+          ),
+          Option.when(deploy == skip)(s"the deploy and skip labels are both '$deploy'"),
+        ).flatten
+      case _ => Nil
+    (perCapability ++ unrecorded ++ clashes ++ reserved ++ mixedStages ++ staged)
+      .map(s"zipx: ${triggerName(trigger)}: " + _)
   end problems
+
+  private def triggerName(trigger: DeployTrigger): String = trigger match
+    case DeployTrigger.OnMerge         => "DeployTrigger.OnMerge"
+    case DeployTrigger.Manual(_)       => "DeployTrigger.Manual"
+    case DeployTrigger.Staged(_, _, _) => "DeployTrigger.Staged"
+
+  /** Each deploy target's [[DeployStage]]. [[problems]] refuses a target declared with two. */
+  def stages(graph: ModuleGraph, deploy: List[Capability]): Map[TargetName, DeployStage] =
+    deploy.flatMap(c => graph.nodes.filter(c.participates).flatMap(c.targets)).map(t => t.name -> t.stage).toMap
 
   /** An event a condition requires at its top level, other than `workflow_dispatch`. */
   private def pushOnly(condition: JobCondition): Option[String] =
@@ -164,13 +232,14 @@ object DeployWorkflow:
   /** One job per module and target, never a collapsed matrix: a matrix binds its Environment on every leg, so a leg the
     * plan skips would still wait for that Environment's approval and record a deploy that never happened.
     */
-  def plan(graph: ModuleGraph, deploy: List[Capability], config: PlanConfig, imagesEnvironment: String): Workflow =
-    val deployConfig = config.copy(affectedPublish = true, affectedDeploy = true, modverPublish = false)
-    val perModule    = deploy.map(_.withMatrixCollapse(MatrixCollapse.Off))
-    val byName       = perModule.map(c => c.name -> c).toMap
-    val gated        = perModule.map(_.name).toSet
-    val ordered      = perModule.zipWithIndex.sortBy((c, i) => (c.phase.ordinal, i)).map(_._1)
-    val jobs         = ordered.flatMap(c =>
+  def plan(graph: ModuleGraph, deploy: List[Capability], config: PlanConfig, trigger: DeployTrigger): Workflow =
+    val imagesEnvironment = trigger.imagesEnvironment.getOrElse(ImagesEnvironment)
+    val deployConfig      = config.copy(affectedPublish = true, affectedDeploy = true, modverPublish = false)
+    val perModule         = deploy.map(_.withMatrixCollapse(MatrixCollapse.Off))
+    val byName            = perModule.map(c => c.name -> c).toMap
+    val gated             = perModule.map(_.name).toSet
+    val ordered           = perModule.zipWithIndex.sortBy((c, i) => (c.phase.ordinal, i)).map(_._1)
+    val jobs              = ordered.flatMap(c =>
       Planner.graphCapabilityJobs(
         c,
         graph,
@@ -190,18 +259,36 @@ object DeployWorkflow:
         "changed: what differs from each Environment's last deploy; all; or one module",
         ::(DeployModules.ChangedWire, DeployModules.AllWire :: modules),
       )
-    ) ++ (choices match
-      case head :: tail => ListMap(TargetInput -> DispatchInput.Choice("Target or group to deploy to", ::(head, tail)))
-      case Nil          => ListMap.empty) ++
+    ) ++ (if choices.isEmpty then ListMap.empty
+          else
+            ListMap(
+              TargetInput -> DispatchInput.Choice(
+                s"Target or group to deploy to (${DeployRequest.ChooseWire} deploys nothing)",
+                ::(DeployRequest.ChooseWire, choices),
+              )
+            )) ++
       ListMap(ShaInput -> DispatchInput.Text("Commit to deploy (40 hex). Empty deploys the dispatched branch head."))
-    val group =
-      if choices.isEmpty then Expr.lit("zipx-deploy")
-      else Expr.lit("zipx-deploy-") ++ Expr.Input(TargetInput)
+    val dispatch    = WorkflowDispatch(inputs)
+    val (on, group) = trigger match
+      case DeployTrigger.Staged(_, _, _) =>
+        // One group per event source: a PR's runs replace each other, and never a pending merge or dispatch.
+        val bySource = Expr.lit("zipx-deploy-") ++ Expr.github("event_name") ++ Expr.lit("-") ++
+          Expr.github("event.pull_request.number") ++ Expr.Input(TargetInput)
+        val staged = Triggers(
+          push = Some(BranchFilter(branches = config.pushBranches)),
+          pullRequest = Some(PullRequestTrigger(types = PrActivities)),
+          workflowDispatch = Some(dispatch),
+        )
+        (staged, bySource)
+      case _ =>
+        val byTarget =
+          if choices.isEmpty then Expr.lit("zipx-deploy") else Expr.lit("zipx-deploy-") ++ Expr.Input(TargetInput)
+        (Triggers(workflowDispatch = Some(dispatch)), byTarget)
     Workflow(
       name = "zipx deploy",
-      on = Triggers(workflowDispatch = Some(WorkflowDispatch(inputs))),
+      on = on,
       concurrency = Some(Concurrency(group.render, CancelInProgress.Never)),
-      jobs = ListMap.from[String, Job]((ResolveJobId -> resolveJob(config, choices.nonEmpty)) :: jobs),
+      jobs = ListMap.from[String, Job]((ResolveJobId -> resolveJob(config, choices.nonEmpty, trigger)) :: jobs),
     )
   end plan
 
@@ -209,29 +296,63 @@ object DeployWorkflow:
       graph: ModuleGraph,
       deploy: List[Capability],
       config: PlanConfig,
-      imagesEnvironment: String,
+      trigger: DeployTrigger,
   ): Either[String, String] =
-    Render.render(plan(graph, deploy, config, imagesEnvironment)).map(ActionPinFile.annotateUses(_, config.actions))
+    Render.render(plan(graph, deploy, config, trigger)).map(ActionPinFile.annotateUses(_, config.actions))
+
+  /** `labeled` starts a PR deploy when the label goes on; the rest keep it current while the label stays. */
+  private val PrActivities: List[PullRequestActivity] =
+    List(
+      PullRequestActivity.Opened,
+      PullRequestActivity.Synchronize,
+      PullRequestActivity.Reopened,
+      PullRequestActivity.Labeled,
+    )
 
   /** Its own token variable, because a build's `zipxEnv` may point `GITHUB_TOKEN` at a packages token that cannot read
     * deployments.
     */
   val TokenEnv: String = "ZIPX_GITHUB_TOKEN"
 
-  val ModulesEnv: String      = "ZIPX_DEPLOY_MODULES"
-  val TargetEnv: String       = "ZIPX_DEPLOY_TARGET"
-  val RequestedShaEnv: String = "ZIPX_DEPLOY_REQUESTED_SHA"
+  val ModulesEnv: String       = "ZIPX_DEPLOY_MODULES"
+  val TargetEnv: String        = "ZIPX_DEPLOY_TARGET"
+  val RequestedShaEnv: String  = "ZIPX_DEPLOY_REQUESTED_SHA"
+  val DefaultBranchEnv: String = "ZIPX_DEFAULT_BRANCH"
+
+  /** The PR's labels as a JSON array, on a `pull_request` run. */
+  val PrLabelsEnv: String = "ZIPX_DEPLOY_PR_LABELS"
 
   private val PlanStep: StepId = StepId("plan")
 
-  private def resolveJob(config: PlanConfig, hasTargets: Boolean): Job =
+  private val prLabels: Expr = Expr.github("event.pull_request.labels.*.name")
+
+  private def resolveJob(config: PlanConfig, hasTargets: Boolean, trigger: DeployTrigger): Job =
     def output(assign: Word.Lit, file: Word): Word = Word.dquote(assign, Word.subst(Exec("cat", file)))
-    val stepEnv                                    =
+    // A PR run deploys its head; a merge or an empty dispatch input deploys the checked-out commit.
+    val requested = trigger match
+      case DeployTrigger.Staged(_, _, _) => Expr.Input(ShaInput) || Expr.github("event.pull_request.head.sha")
+      case _                             => Expr.Input(ShaInput)
+    val stepEnv =
       ListMap(
-        ModulesEnv      -> Expr.Input(ModulesInput).render,
-        RequestedShaEnv -> Expr.Input(ShaInput).render,
-        TokenEnv        -> Expr.githubToken.render,
-      ) ++ (if hasTargets then ListMap(TargetEnv -> Expr.Input(TargetInput).render) else ListMap.empty)
+        ModulesEnv       -> Expr.Input(ModulesInput).render,
+        RequestedShaEnv  -> requested.render,
+        TokenEnv         -> Expr.githubToken.render,
+        DefaultBranchEnv -> Expr.github("event.repository.default_branch").render,
+      ) ++ (if hasTargets then ListMap(TargetEnv -> Expr.Input(TargetInput).render) else ListMap.empty) ++
+        (trigger match
+          case DeployTrigger.Staged(_, _, _) => ListMap(PrLabelsEnv -> Expr.call("toJSON", prLabels).render)
+          case _                             => ListMap.empty)
+    // Unlabeled PR runs stop here, before a runner boots sbt; every other job needs this one to succeed.
+    val labelGate = trigger match
+      case DeployTrigger.Staged(label, _, _) =>
+        Some(
+          ((Expr.github("event_name") !== Expr.quoted("pull_request")) || Expr
+            .contains(prLabels, Expr.Quoted(label))).unwrapped
+        )
+      case _ => None
+    val readsPrs = trigger match
+      case DeployTrigger.Staged(_, _, _) => ListMap("pull-requests" -> "read")
+      case _                             => ListMap.empty
     val resolve = Step
       .run(
         Script(
@@ -253,7 +374,8 @@ object DeployWorkflow:
     Job(
       name = Some("resolve"),
       runsOn = List(config.runnerOs),
-      permissions = ListMap("contents" -> "read", "deployments" -> "read"),
+      `if` = labelGate,
+      permissions = ListMap("contents" -> "read", "deployments" -> "read") ++ readsPrs,
       env = EnvValue.renderAll(config.env),
       outputs = ListMap(fromPlan(Sha), fromPlan(Images), fromPlan(Targets)),
       steps = Planner.checkoutThenSbtSetup(config, ResolveJobId, nodeVersion = None, cacheMode(config)) :+ resolve,
