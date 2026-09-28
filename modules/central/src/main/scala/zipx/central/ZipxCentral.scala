@@ -121,15 +121,20 @@ object ZipxCentral:
       .withExtraSteps(gpgImportSteps)
       .withPostSteps(uploadStagingSteps)
 
+  /** Nothing to release when every publish skipped (a merge that moved no `Ship` row), so it runs only when one
+    * succeeded.
+    */
   val releaseOnce: Capability =
-    Capability.once(
-      name = CapabilityName("central-release"),
-      command = SbtCommand.unsafeCommand("sonaRelease"),
-      phase = Phase.Publish,
-      gate = Gate.OnReleaseTag,
-      needsCapabilities = List(Capability.PublishName),
-      env = signingEnv,
-      extraSteps = downloadStagingSteps ++ gpgImportSteps,
-    )
+    Capability
+      .once(
+        name = CapabilityName("central-release"),
+        command = SbtCommand.unsafeCommand("sonaRelease"),
+        phase = Phase.Publish,
+        gate = Gate.OnReleaseTag,
+        needsCapabilities = List(Capability.PublishName),
+        env = signingEnv,
+        extraSteps = downloadStagingSteps ++ gpgImportSteps,
+      )
+      .whenAnyUpstreamSucceeded
 
 end ZipxCentral

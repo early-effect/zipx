@@ -79,7 +79,8 @@ zipxCapabilities += ZipxCentral.releaseOnce.copy(gate = Gate.OnDefaultPush)
 ```
 
 The monorepo example uses ZipxModver without Central secrets. Compose `releaseOnce` only when the repo actually
-publishes to Maven Central.
+publishes to Maven Central. It runs only when at least one publish job succeeded: a merge that moves no row skips
+every publish, stages nothing, and has nothing to release.
 """,
       exampleValue {
         DocsRender.jobs("modver", "publish-api", "central-release")(
@@ -94,6 +95,7 @@ publishes to Maven Central.
           yaml.contains("workflow_dispatch"),
           yaml.contains("central-release:"),
           yaml.contains("sonaRelease"),
+          yaml.contains("needs.publish-api.result == 'success'"),
         )
       ),
     ),
