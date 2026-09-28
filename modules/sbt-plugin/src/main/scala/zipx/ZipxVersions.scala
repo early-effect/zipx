@@ -5,6 +5,7 @@ import sbt.Keys.{
   baseDirectory,
   crossScalaVersions,
   libraryDependencies,
+  organization,
   pomPostProcess,
   scalaVersion,
   thisProject,
@@ -89,16 +90,43 @@ object ZipxVersions:
               sys.env,
             )
           },
-          pomPostProcess := { (node: scala.xml.Node) => stripCiPomVersions(node) },
+          pomPostProcess := {
+            val ships     = zipxShips.value
+            val org       = organization.value
+            val releasing = !version.value.endsWith(zipx.core.Modver.UnreleasedSuffix)
+            (node: scala.xml.Node) => releasedPomVersions(node, org, releasing, ships)
+          },
         )
     catalog ++ versions
   end applySettings
 
-  /** Never emit `-ci` into a POM. Sibling `dependsOn` revisions become catalog release numbers. */
-  private def stripCiPomVersions(node: scala.xml.Node): scala.xml.Node =
-    node match
-      case e: scala.xml.Elem if e.label == "version" && e.text.endsWith("-ci") =>
-        e.copy(child = Seq(scala.xml.Text(e.text.dropRight(3))))
-      case e: scala.xml.Elem => e.copy(child = e.child.map(stripCiPomVersions))
-      case other             => other
+  /** A release POM goes to a registry, which holds only releases: each in-repo sibling built at `<row>-SNAPSHOT` takes
+    * its row's catalog number. Any other POM (`publishLocal` of an unreleased build) names what was built, as its
+    * `ivy.xml` does, and another organization's revisions are theirs.
+    */
+  private def releasedPomVersions(
+      node: scala.xml.Node,
+      org: String,
+      releasing: Boolean,
+      ships: Seq[PublishedRow],
+  ): scala.xml.Node =
+    def child(e: scala.xml.Elem, label: String): Option[String] =
+      e.child.collectFirst { case c: scala.xml.Elem if c.label == label => c.text }
+    def released(e: scala.xml.Elem): scala.xml.Elem =
+      child(e, "groupId").fold(e) { groupId =>
+        e.copy(child = e.child.map {
+          case v: scala.xml.Elem if v.label == "version" =>
+            v.copy(child =
+              Seq(scala.xml.Text(zipx.core.Modver.releasedRevision(groupId, v.text, org, releasing, ships)))
+            )
+          case other => other
+        })
+      }
+    def walk(n: scala.xml.Node): scala.xml.Node =
+      n match
+        case e: scala.xml.Elem if e.label == "dependency" => released(e)
+        case e: scala.xml.Elem                            => e.copy(child = e.child.map(walk))
+        case other                                        => other
+    walk(node)
+  end releasedPomVersions
 end ZipxVersions

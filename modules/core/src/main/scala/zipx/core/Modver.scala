@@ -128,18 +128,43 @@ object Modver:
       }
     }
 
+  /** What an unreleased version ends with, in CI and on a developer's machine alike. sbt overwrites a `-SNAPSHOT` on
+    * every `publishLocal`, so a sibling build sees each republish; a release-shaped version (as `-ci` was) is written
+    * once, then skipped with "already exists, skipping (overwrite=false)". Caches need only a version that is the same
+    * from commit to commit, which `<row>-SNAPSHOT` is.
+    */
+  val UnreleasedSuffix = "-SNAPSHOT"
+
+  /** The version a row's members take on a commit that does not release it. */
+  def unreleased(row: PublishedRow): String = (row.version: String) + UnreleasedSuffix
+
+  /** What a POM names a revision. A release POM (`releasing`: the project is at its catalog number) goes to a registry,
+    * which holds only releases, so each unreleased sibling in `organization` takes its row's catalog number. Any other
+    * POM names what was built, and another organization's revisions are theirs.
+    */
+  def releasedRevision(
+      groupId: String,
+      revision: String,
+      organization: String,
+      releasing: Boolean,
+      ships: Seq[PublishedRow],
+  ): String =
+    if !releasing || groupId != organization then revision
+    else ships.find(r => unreleased(r) == revision).fold(revision)(_.version: String)
+
   def bumpVersion(from: String, kind: BumpKind): Either[String, String] =
-    if from.endsWith("-ci") then Left(s"version '$from' must be the release number, not a -ci suffix")
-    else
-      parseSemver(from) match
-        case None                  => Left(s"not a major.minor.patch version: '$from'")
-        case Some((maj, min, pat)) =>
-          kind match
-            case BumpKind.None | BumpKind.PreRelease =>
-              Left(s"$kind is not a min-bump")
-            case BumpKind.Patch => Right(s"$maj.$min.${pat + 1}")
-            case BumpKind.Minor => Right(s"$maj.${min + 1}.0")
-            case BumpKind.Major => Right(s"${maj + 1}.0.0")
+    unreleasedSuffixOf(from) match
+      case Some(s) => Left(s"version '$from' must be the release number, not a $s suffix")
+      case None    =>
+        parseSemver(from) match
+          case None                  => Left(s"not a major.minor.patch version: '$from'")
+          case Some((maj, min, pat)) =>
+            kind match
+              case BumpKind.None | BumpKind.PreRelease =>
+                Left(s"$kind is not a min-bump")
+              case BumpKind.Patch => Right(s"$maj.$min.${pat + 1}")
+              case BumpKind.Minor => Right(s"$maj.${min + 1}.0")
+              case BumpKind.Major => Right(s"${maj + 1}.0.0")
 
   private def parseSemver(raw: String): Option[(Int, Int, Int)] =
     val core  = raw.stripPrefix("v").takeWhile(_ != '-')
@@ -290,9 +315,11 @@ object Modver:
 
   private def ciVersionError(row: PublishedRow): Option[String] =
     val ver = row.version: String
-    Option.when(ver.endsWith("-ci")) {
-      s"${describe(row)} version '$ver' must be the release number, not a -ci suffix."
-    }
+    unreleasedSuffixOf(ver).map(s => s"${describe(row)} version '$ver' must be the release number, not a $s suffix.")
+
+  /** A catalog holds release numbers; either unreleased form, today's `-SNAPSHOT` or the former `-ci`, is not one. */
+  private def unreleasedSuffixOf(version: String): Option[String] =
+    List(UnreleasedSuffix, "-ci").find(version.endsWith)
 
   private def emptyGroupError(row: PublishedRow): Option[String] = row match
     case g: ShipGroup if g.members.isEmpty => Some(s"""ShipGroup("${g.name}") has no members.""")

@@ -6,7 +6,9 @@ import zipx.core.*
 import zipx.syntax.CatalogSource
 import zio.json.*
 
-/** Local vs CI version assignment for Ship-backed modules. Not autoImport. */
+/** Version assignment for Ship-backed modules: the catalog number when this commit releases the row, else
+  * `<row>-SNAPSHOT`. Not autoImport.
+  */
 object ModverRelease:
 
   final case class PushPayload(before: Option[String]) derives JsonCodec
@@ -26,8 +28,8 @@ object ModverRelease:
           val moved = movedOrFail(root, versionsFile, ships, env)
           val index = ShipIndex.from(ships)
           if Modver.thisCommitReleases(pub, moved, index) then pub.version: String
-          else s"${pub.version}-ci"
-        else s"${pub.version}-ci"
+          else Modver.unreleased(pub)
+        else Modver.unreleased(pub)
 
   def isReleasingPush(env: Map[String, String], branches: Seq[String]): Boolean =
     env.get("GITHUB_ACTIONS").contains("true") &&

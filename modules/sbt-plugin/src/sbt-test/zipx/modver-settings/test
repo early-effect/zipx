@@ -1,7 +1,22 @@
 > assertModverSettings
 > zipxDepUpdate dry-run
 > assertCatalogUntouched
-> assertClientPom
+> assertLocalPom
+
+# The push that releases client sets it to the catalog number; siblings it did not release stay -SNAPSHOT.
+> set client / version := "0.3.0"
+> assertReleasePom
+> set client / version := "0.3.0-SNAPSHOT"
+
+# A republish after a change replaces the jar; a release-shaped version would be skipped.
+> forgetFixtureRepo
+> models/publishLocal
+> recordPublishedModels
+$ copy-file changes/Models.scala models/src/main/scala/Models.scala
+> models/publishLocal
+> assertRepublished
+> forgetFixtureRepo
+
 > zipxModverBump client
 > assertBumpedClient
 > zipxWorkflowGenerate

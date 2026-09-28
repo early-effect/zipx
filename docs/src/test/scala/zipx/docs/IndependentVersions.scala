@@ -194,15 +194,22 @@ group of one is legal and pointless (it is just `Ship`). Empty members are refus
     ),
     section("Catalog rows")(
       md"""
-Drop the repo-wide `version := "…"`. Members take `<row>-ci` locally and the catalog number on publish. Aggregators and
-unpublished apps keep sbt's default version.
+Drop the repo-wide `version := "…"`. Members take the catalog number on the push that releases their row, and
+`<row>-SNAPSHOT` everywhere else, in CI and on a developer's machine alike. Aggregators and unpublished apps keep sbt's
+default version.
 
-| Where | Number |
-|---|---|
-| Catalog constructor | release number only (`1.4.2`, never `1.4.2-ci`) |
-| Local / PR checkout | `<row>-ci` (`1.4.2-ci`) |
-| Default-branch push that **releases** this row | catalog number |
-| POM / `publishLocal` sibling revision | catalog number, never `-ci` |
+| Where | Number | Why |
+|---|---|---|
+| Catalog constructor | release number only (`1.4.2`, never `1.4.2-SNAPSHOT`) | the human writes the next release |
+| Any commit that does not release this row | `<row>-SNAPSHOT` (`1.4.2-SNAPSHOT`) | the same from commit to commit, so caches hold; and `publishLocal` overwrites it |
+| Default-branch push that **releases** this row | catalog number | |
+| POM of a release | each in-organization sibling at its catalog number | a registry holds only releases |
+| POM and `ivy.xml` of anything else | what was built (`1.4.2-SNAPSHOT`) | an unreleased build is not a release |
+
+A cache needs only a version that does not change between commits; `-SNAPSHOT` is as stable as any fixed suffix. What
+breaks a cache is a per-commit version, such as dynver's hash. What `-SNAPSHOT` adds is that sbt 2 overwrites it: a
+release-shaped version is published once, then skipped with "already exists, skipping (overwrite=false)", and consumers
+keep the first jar. sbt 2's `publishLocal` writes the Ivy local repository, not Maven local.
 
 `zipxDepUpdate` / `catalog update` rewrite `Lib` / `Plugin` / `Action` only. They never touch `Ship` / `ShipGroup`.
 Bump outbound rows yourself:
@@ -574,7 +581,7 @@ in the planner when ships are present.
 | The same root is in two rows | `Each publishes=true module must be in exactly one row` |
 | `ShipGroup` with empty members | `has no members` |
 | A member that does not publish | `does not publish` |
-| Catalog version already ends in `-ci` | `must be the release number, not a -ci suffix` |
+| Catalog version already ends in `-SNAPSHOT` (or `-ci`) | `must be the release number, not a -SNAPSHOT suffix` |
 | `sbt-dynver-ci` still loaded | `cannot share version with sbt-dynver-ci` |
 
 Docker Aggregate on a tag is **not** this table. `service` in the example is unpublished, so it is not a membership
@@ -585,14 +592,14 @@ hole. See **Validation**.
           Modver.membership(graph, ships).fold(identity, _ => "ok")
         List(
           s"ok: ${show(ships)}",
-          s"ci suffix: ${show(List(Ship("client", "0.3.0-ci"), libsRow))}",
+          s"snapshot suffix: ${show(List(Ship("client", "0.3.0-SNAPSHOT"), libsRow))}",
           s"unpublished: ${show(ships :+ Ship("service", "1.0.0"))}",
           s"uncovered: ${show(List(libsRow))}",
         ).mkString("\n")
       }.assert(text =>
         assertTrue(
           text.contains("ok: ok"),
-          text.contains("must be the release number, not a -ci suffix"),
+          text.contains("must be the release number, not a -SNAPSHOT suffix"),
           text.contains("does not publish"),
           text.contains("published module 'client' is not in a Ship or ShipGroup"),
         )

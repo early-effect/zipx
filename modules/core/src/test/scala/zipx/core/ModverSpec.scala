@@ -125,6 +125,7 @@ object ModverSpec extends ZIOSpecDefault:
           Modver.bumpVersion("1.4.2", BumpKind.Minor) == Right("1.5.0"),
           Modver.bumpVersion("1.4.2", BumpKind.Major) == Right("2.0.0"),
           Modver.bumpVersion("1.4.2-ci", BumpKind.Patch).isLeft,
+          Modver.bumpVersion("1.4.2-SNAPSHOT", BumpKind.Patch).isLeft,
         )
       },
       test("rowForProject prefers the exact id then a JS suffix of a Ship root") {
@@ -134,6 +135,43 @@ object ModverSpec extends ZIOSpecDefault:
           Modver.rowForProject("coreJS", rows).exists(_.identity == "core"),
           Modver.rowForProject("cli", rows).exists(_.identity == "cli"),
           Modver.rowForProject("service", rows).isEmpty,
+        )
+      },
+    ),
+    suite("unreleased")(
+      test("an unreleased member is its row's number and -SNAPSHOT, for a Ship and a ShipGroup alike") {
+        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+        assertTrue(rows.map(Modver.unreleased) == List("0.3.0-SNAPSHOT", "1.4.2-SNAPSHOT"))
+      },
+      test("a release POM names each unreleased sibling in the organization at its row's catalog number") {
+        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+        assertTrue(
+          Modver.releasedRevision("com.example", "1.4.2-SNAPSHOT", "com.example", releasing = true, rows) == "1.4.2",
+          Modver.releasedRevision("com.example", "0.3.0-SNAPSHOT", "com.example", releasing = true, rows) == "0.3.0",
+        )
+      },
+      test("an unreleased POM names what was built, as its ivy.xml does") {
+        check(Gen.fromIterable(List("0.3.0", "1.4.2", "9.9.9"))) { v =>
+          val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+          assertTrue(
+            Modver
+              .releasedRevision("com.example", s"$v-SNAPSHOT", "com.example", releasing = false, rows) == s"$v-SNAPSHOT"
+          )
+        }
+      },
+      test("a release POM leaves another organization's revisions, and any no row owns, as written") {
+        val rows = List[PublishedRow](Ship("client", "0.8.0"))
+        assertTrue(
+          Modver
+            .releasedRevision("org.other", "0.8.0-SNAPSHOT", "com.example", releasing = true, rows) == "0.8.0-SNAPSHOT",
+          Modver.releasedRevision(
+            "com.example",
+            "0.9.0-SNAPSHOT",
+            "com.example",
+            releasing = true,
+            rows,
+          ) == "0.9.0-SNAPSHOT",
+          Modver.releasedRevision("com.example", "0.8.0", "com.example", releasing = true, rows) == "0.8.0",
         )
       },
     ),
@@ -203,6 +241,17 @@ object ModverSpec extends ZIOSpecDefault:
         assertTrue(
           err.swap.exists(
             _ == """ShipGroup("libs") version '1.4.2-ci' must be the release number, not a -ci suffix."""
+          )
+        )
+      },
+      test("a -SNAPSHOT catalog version is refused") {
+        val err = Modver.membership(
+          graph,
+          List(ShipGroup("libs", "1.4.2")("models", "coreLib"), Ship("client", "0.3.0-SNAPSHOT")),
+        )
+        assertTrue(
+          err.swap.exists(
+            _ == """Ship("client") version '0.3.0-SNAPSHOT' must be the release number, not a -SNAPSHOT suffix."""
           )
         )
       },
