@@ -52,6 +52,22 @@ enum ModverPropagate:
       case MatchBump      => Modver.propagate(bumps, graph, ships, inheritTrigger = true)
 end ModverPropagate
 
+/** What a Ship member's version carries when its commit does not release it.
+  *
+  * CI takes `Ci`: the same version on every run, so caches keyed on it hold. A developer's machine takes `Snapshot`:
+  * sbt overwrites a `-SNAPSHOT` in the local repository on every `publishLocal` and resolvers treat it as changing, so
+  * a sibling build sees each republish. A `-ci` is a release-shaped number there, and sbt 2 skips the republish with
+  * "already exists, skipping (overwrite=false)", leaving consumers on the first jar.
+  */
+enum UnreleasedSuffix(val suffix: String):
+  case Ci       extends UnreleasedSuffix("-ci")
+  case Snapshot extends UnreleasedSuffix("-SNAPSHOT")
+
+object UnreleasedSuffix:
+  /** `Ci` under GitHub Actions, `Snapshot` everywhere else. */
+  def fromEnv(env: Map[String, String]): UnreleasedSuffix =
+    if env.get("GITHUB_ACTIONS").contains("true") then Ci else Snapshot
+
 object ModverPropagate:
   def default: ModverPropagate = Never
 
@@ -128,18 +144,31 @@ object Modver:
       }
     }
 
+  /** The version a row's members take on a commit that does not release it. */
+  def unreleased(row: PublishedRow, suffix: UnreleasedSuffix): String = (row.version: String) + suffix.suffix
+
+  /** What a POM names a revision. Only CI publishes to a registry, and CI names an unreleased sibling `<row>-ci`, which
+    * no registry holds; the POM names that row's catalog number instead. The rewrite is for `organization` only, so
+    * another organization's real `-ci` stays. A `-SNAPSHOT` is never rewritten: a local build is not a release, and its
+    * POM names what it built, as its `ivy.xml` does.
+    */
+  def releasedRevision(groupId: String, revision: String, organization: String, ships: Seq[PublishedRow]): String =
+    if groupId != organization then revision
+    else ships.find(r => unreleased(r, UnreleasedSuffix.Ci) == revision).fold(revision)(_.version: String)
+
   def bumpVersion(from: String, kind: BumpKind): Either[String, String] =
-    if from.endsWith("-ci") then Left(s"version '$from' must be the release number, not a -ci suffix")
-    else
-      parseSemver(from) match
-        case None                  => Left(s"not a major.minor.patch version: '$from'")
-        case Some((maj, min, pat)) =>
-          kind match
-            case BumpKind.None | BumpKind.PreRelease =>
-              Left(s"$kind is not a min-bump")
-            case BumpKind.Patch => Right(s"$maj.$min.${pat + 1}")
-            case BumpKind.Minor => Right(s"$maj.${min + 1}.0")
-            case BumpKind.Major => Right(s"${maj + 1}.0.0")
+    UnreleasedSuffix.values.find(s => from.endsWith(s.suffix)) match
+      case Some(s) => Left(s"version '$from' must be the release number, not a ${s.suffix} suffix")
+      case None    =>
+        parseSemver(from) match
+          case None                  => Left(s"not a major.minor.patch version: '$from'")
+          case Some((maj, min, pat)) =>
+            kind match
+              case BumpKind.None | BumpKind.PreRelease =>
+                Left(s"$kind is not a min-bump")
+              case BumpKind.Patch => Right(s"$maj.$min.${pat + 1}")
+              case BumpKind.Minor => Right(s"$maj.${min + 1}.0")
+              case BumpKind.Major => Right(s"${maj + 1}.0.0")
 
   private def parseSemver(raw: String): Option[(Int, Int, Int)] =
     val core  = raw.stripPrefix("v").takeWhile(_ != '-')
@@ -290,8 +319,8 @@ object Modver:
 
   private def ciVersionError(row: PublishedRow): Option[String] =
     val ver = row.version: String
-    Option.when(ver.endsWith("-ci")) {
-      s"${describe(row)} version '$ver' must be the release number, not a -ci suffix."
+    UnreleasedSuffix.values.find(s => ver.endsWith(s.suffix)).map { s =>
+      s"${describe(row)} version '$ver' must be the release number, not a ${s.suffix} suffix."
     }
 
   private def emptyGroupError(row: PublishedRow): Option[String] = row match

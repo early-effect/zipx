@@ -194,15 +194,21 @@ group of one is legal and pointless (it is just `Ship`). Empty members are refus
     ),
     section("Catalog rows")(
       md"""
-Drop the repo-wide `version := "…"`. Members take `<row>-ci` locally and the catalog number on publish. Aggregators and
-unpublished apps keep sbt's default version.
+Drop the repo-wide `version := "…"`. Members take the catalog number on the push that releases their row, and the row's
+number with a suffix everywhere else. Aggregators and unpublished apps keep sbt's default version.
 
-| Where | Number |
-|---|---|
-| Catalog constructor | release number only (`1.4.2`, never `1.4.2-ci`) |
-| Local / PR checkout | `<row>-ci` (`1.4.2-ci`) |
-| Default-branch push that **releases** this row | catalog number |
-| POM / `publishLocal` sibling revision | catalog number, never `-ci` |
+| Where | Number | Why |
+|---|---|---|
+| Catalog constructor | release number only (`1.4.2`, never `1.4.2-ci` or `1.4.2-SNAPSHOT`) | the human writes the next release |
+| CI (`GITHUB_ACTIONS=true`) | `<row>-ci` (`1.4.2-ci`) | the same version every run, so caches keyed on it hold |
+| A developer's machine | `<row>-SNAPSHOT` (`1.4.2-SNAPSHOT`) | `publishLocal` overwrites it, so a sibling build sees each republish |
+| Default-branch push that **releases** this row | catalog number | |
+| POM, from CI | catalog number for each in-organization sibling; another organization's `-ci` stays | a registry holds release numbers |
+| POM and `ivy.xml`, from `publishLocal` | what was built (`1.4.2-SNAPSHOT`) | a local build is not a release |
+
+A local `-ci` would be release-shaped: sbt 2 publishes it once, then skips every later `publishLocal` with "already
+exists, skipping (overwrite=false)", and consumers keep the first jar. `zipxModverUnreleased` picks the suffix; its
+default follows `GITHUB_ACTIONS`. sbt 2's `publishLocal` writes the Ivy local repository, not Maven local.
 
 `zipxDepUpdate` / `catalog update` rewrite `Lib` / `Plugin` / `Action` only. They never touch `Ship` / `ShipGroup`.
 Bump outbound rows yourself:
@@ -607,8 +613,8 @@ hole. See **Validation**.
 4. Set `zipxCacheEpoch := CacheEpoch.ShipCatalog` (LocalDir). Lockstep OSS keeps `GitTags()`.
 5. `sbt zipxWorkflowGenerate`, commit `ci.yml` and composites, open a PR.
 
-Human still writes the next number. Settings: **Settings** (`zipxShips`, `zipxModverPropagate`, `zipxModverBump`,
-`zipxModverCheck`, `zipxModverSuggest`, `zipxModverPublishSigned`).
+Human still writes the next number. Settings: **Settings** (`zipxShips`, `zipxModverPropagate`, `zipxModverUnreleased`,
+`zipxModverBump`, `zipxModverCheck`, `zipxModverSuggest`, `zipxModverPublishSigned`).
 """
     ),
   )

@@ -87,6 +87,8 @@ object ZipxPlugin extends AutoPlugin:
     val ShipGroup = zipx.core.ShipGroup
     type ModverPropagate = zipx.core.ModverPropagate
     val ModverPropagate = zipx.core.ModverPropagate
+    type UnreleasedSuffix = zipx.core.UnreleasedSuffix
+    val UnreleasedSuffix = zipx.core.UnreleasedSuffix
     type ModverRegistry = zipx.core.ModverRegistry
     val ModverRegistry = zipx.core.ModverRegistry
     type ModuleId = zipx.core.ModuleId
@@ -430,6 +432,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxPins                 = settingKey[Seq[Pin]](ZipxSettings.pins.description)
     val zipxShips                = settingKey[Seq[PublishedRow]](ZipxSettings.ships.description)
     val zipxModverPropagate      = settingKey[ModverPropagate](ZipxSettings.modverPropagate.description)
+    val zipxModverUnreleased     = settingKey[UnreleasedSuffix](ZipxSettings.modverUnreleased.description)
     val zipxMatrixRoot           = settingKey[Option[ModuleId]](ZipxSettings.matrixRoot.description)
     val zipxSbt                  = settingKey[Option[SbtVersion]](ZipxSettings.sbtVersionCoord.description)
     val zipxScala                = settingKey[Option[ScalaVersion]](ZipxSettings.scalaVersionCoord.description)
@@ -520,6 +523,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxPins                     := Seq.empty,
     zipxShips                    := Seq.empty,
     zipxModverPropagate          := ModverPropagate.Never,
+    zipxModverUnreleased         := UnreleasedSuffix.fromEnv(sys.env),
     zipxSbt                      := None,
     zipxScala                    := None,
     zipxCheckDeps                := false,

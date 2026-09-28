@@ -125,6 +125,7 @@ object ModverSpec extends ZIOSpecDefault:
           Modver.bumpVersion("1.4.2", BumpKind.Minor) == Right("1.5.0"),
           Modver.bumpVersion("1.4.2", BumpKind.Major) == Right("2.0.0"),
           Modver.bumpVersion("1.4.2-ci", BumpKind.Patch).isLeft,
+          Modver.bumpVersion("1.4.2-SNAPSHOT", BumpKind.Patch).isLeft,
         )
       },
       test("rowForProject prefers the exact id then a JS suffix of a Ship root") {
@@ -134,6 +135,47 @@ object ModverSpec extends ZIOSpecDefault:
           Modver.rowForProject("coreJS", rows).exists(_.identity == "core"),
           Modver.rowForProject("cli", rows).exists(_.identity == "cli"),
           Modver.rowForProject("service", rows).isEmpty,
+        )
+      },
+    ),
+    suite("unreleased")(
+      test("CI keeps -ci for cache-stable versions; anywhere else is -SNAPSHOT, which a republish overwrites") {
+        check(Gen.mapOf(Gen.alphaNumericStringBounded(1, 12), Gen.alphaNumericStringBounded(0, 8))) { env =>
+          val suffix = UnreleasedSuffix.fromEnv(env)
+          assertTrue(
+            UnreleasedSuffix.fromEnv(env.updated("GITHUB_ACTIONS", "true")) == UnreleasedSuffix.Ci,
+            UnreleasedSuffix.fromEnv(env - "GITHUB_ACTIONS") == UnreleasedSuffix.Snapshot,
+            suffix == (if env.get("GITHUB_ACTIONS").contains("true") then UnreleasedSuffix.Ci
+                       else UnreleasedSuffix.Snapshot),
+          )
+        }
+      },
+      test("an unreleased member is its row's number and the suffix, for a Ship and a ShipGroup alike") {
+        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+        assertTrue(
+          rows.map(Modver.unreleased(_, UnreleasedSuffix.Ci)) == List("0.3.0-ci", "1.4.2-ci"),
+          rows.map(Modver.unreleased(_, UnreleasedSuffix.Snapshot)) == List("0.3.0-SNAPSHOT", "1.4.2-SNAPSHOT"),
+        )
+      },
+      test("a POM names a sibling CI built (-ci) at its row's release number, for a Ship and a ShipGroup alike") {
+        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+        assertTrue(
+          Modver.releasedRevision("com.example", "1.4.2-ci", "com.example", rows) == "1.4.2",
+          Modver.releasedRevision("com.example", "0.3.0-ci", "com.example", rows) == "0.3.0",
+        )
+      },
+      test("a POM leaves a -SNAPSHOT as written: a local build is not a release") {
+        check(Gen.fromIterable(List("0.3.0", "1.4.2", "9.9.9"))) { v =>
+          val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+          assertTrue(Modver.releasedRevision("com.example", s"$v-SNAPSHOT", "com.example", rows) == s"$v-SNAPSHOT")
+        }
+      },
+      test("a POM leaves another organization's -ci, and any revision no row owns, as written") {
+        val rows = List[PublishedRow](Ship("client", "0.8.0"))
+        assertTrue(
+          Modver.releasedRevision("org.other", "0.8.0-ci", "com.example", rows) == "0.8.0-ci",
+          Modver.releasedRevision("com.example", "0.9.0-ci", "com.example", rows) == "0.9.0-ci",
+          Modver.releasedRevision("com.example", "0.8.0", "com.example", rows) == "0.8.0",
         )
       },
     ),
@@ -203,6 +245,17 @@ object ModverSpec extends ZIOSpecDefault:
         assertTrue(
           err.swap.exists(
             _ == """ShipGroup("libs") version '1.4.2-ci' must be the release number, not a -ci suffix."""
+          )
+        )
+      },
+      test("a -SNAPSHOT catalog version is refused") {
+        val err = Modver.membership(
+          graph,
+          List(ShipGroup("libs", "1.4.2")("models", "coreLib"), Ship("client", "0.3.0-SNAPSHOT")),
+        )
+        assertTrue(
+          err.swap.exists(
+            _ == """Ship("client") version '0.3.0-SNAPSHOT' must be the release number, not a -SNAPSHOT suffix."""
           )
         )
       },

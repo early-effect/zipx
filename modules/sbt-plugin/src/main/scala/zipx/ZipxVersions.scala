@@ -5,6 +5,7 @@ import sbt.Keys.{
   baseDirectory,
   crossScalaVersions,
   libraryDependencies,
+  organization,
   pomPostProcess,
   scalaVersion,
   thisProject,
@@ -14,6 +15,7 @@ import zipx.plugin.ZipxDeps
 import zipx.plugin.ZipxPlugin.autoImport.{
   zipxActionRows,
   zipxCheckDeps,
+  zipxModverUnreleased,
   zipxPins,
   zipxPushBranches,
   zipxSbt,
@@ -87,18 +89,42 @@ object ZipxVersions:
               zipxVersionsFile.value,
               (LocalRootProject / baseDirectory).value,
               sys.env,
+              zipxModverUnreleased.value,
             )
           },
-          pomPostProcess := { (node: scala.xml.Node) => stripCiPomVersions(node) },
+          pomPostProcess := {
+            val ships = zipxShips.value
+            val org   = organization.value
+            (node: scala.xml.Node) => releasedPomVersions(node, org, ships)
+          },
         )
     catalog ++ versions
   end applySettings
 
-  /** Never emit `-ci` into a POM. Sibling `dependsOn` revisions become catalog release numbers. */
-  private def stripCiPomVersions(node: scala.xml.Node): scala.xml.Node =
+  /** A POM goes to a registry, and only CI publishes there, naming an unreleased sibling `<row>-ci`. Each such revision
+    * in this build's organization (the POM's own `<version>` and each in-repo dependency) takes its row's catalog
+    * number. Everything else stays as written: another organization's `-ci`, and any `-SNAPSHOT`, since a local build's
+    * POM names what it built.
+    */
+  private def releasedPomVersions(node: scala.xml.Node, org: String, ships: Seq[PublishedRow]): scala.xml.Node =
+    def child(e: scala.xml.Elem, label: String): Option[String] =
+      e.child.collectFirst { case c: scala.xml.Elem if c.label == label => c.text }
+    def released(e: scala.xml.Elem): scala.xml.Elem =
+      child(e, "groupId").fold(e) { groupId =>
+        e.copy(child = e.child.map {
+          case v: scala.xml.Elem if v.label == "version" =>
+            v.copy(child = Seq(scala.xml.Text(zipx.core.Modver.releasedRevision(groupId, v.text, org, ships))))
+          case other => other
+        })
+      }
+    def walk(n: scala.xml.Node): scala.xml.Node =
+      n match
+        case e: scala.xml.Elem if e.label == "dependency" => released(e)
+        case e: scala.xml.Elem                            => e.copy(child = e.child.map(walk))
+        case other                                        => other
     node match
-      case e: scala.xml.Elem if e.label == "version" && e.text.endsWith("-ci") =>
-        e.copy(child = Seq(scala.xml.Text(e.text.dropRight(3))))
-      case e: scala.xml.Elem => e.copy(child = e.child.map(stripCiPomVersions))
-      case other             => other
+      // The project's own coordinates sit on the root element, beside its dependencies.
+      case e: scala.xml.Elem if e.label == "project" => walk(released(e))
+      case other                                     => walk(other)
+  end releasedPomVersions
 end ZipxVersions

@@ -271,6 +271,16 @@ object ZipxSettings:
       Build,
     )
 
+  val modverUnreleased: SettingDef[UnreleasedSuffix] =
+    SettingDef.setting(
+      SettingName("zipxModverUnreleased"),
+      UnreleasedSuffix.Snapshot,
+      SettingPurpose(
+        "Suffix a Ship member's version takes on a commit that does not release it. Default from the environment: Ci under GitHub Actions (cache-stable), Snapshot elsewhere (publishLocal overwrites it, so a sibling build sees each republish)."
+      ),
+      Build,
+    )
+
   val matrixRoot: SettingDef[Option[ModuleId]] =
     SettingDef.setting(
       SettingName("zipxMatrixRoot"),
@@ -761,6 +771,7 @@ object ZipxSettings:
     pins,
     ships,
     modverPropagate,
+    modverUnreleased,
     sbtVersionCoord,
     scalaVersionCoord,
     checkDeps,
