@@ -6,8 +6,8 @@ import zipx.core.*
 import zipx.syntax.CatalogSource
 import zio.json.*
 
-/** Version assignment for Ship-backed modules: the catalog number when this commit releases the row, else the row's
-  * number with `zipxModverUnreleased` (`-ci` in CI, `-SNAPSHOT` locally). Not autoImport.
+/** Version assignment for Ship-backed modules: the catalog number when this commit releases the row, else
+  * `<row>-SNAPSHOT`. Not autoImport.
   */
 object ModverRelease:
 
@@ -20,7 +20,6 @@ object ModverRelease:
       versionsFile: String,
       root: File,
       env: Map[String, String],
-      unreleased: UnreleasedSuffix,
   ): String =
     Modver.rowForProject(projectId, ships) match
       case None      => "0.1.0-SNAPSHOT"
@@ -29,8 +28,8 @@ object ModverRelease:
           val moved = movedOrFail(root, versionsFile, ships, env)
           val index = ShipIndex.from(ships)
           if Modver.thisCommitReleases(pub, moved, index) then pub.version: String
-          else Modver.unreleased(pub, unreleased)
-        else Modver.unreleased(pub, unreleased)
+          else Modver.unreleased(pub)
+        else Modver.unreleased(pub)
 
   def isReleasingPush(env: Map[String, String], branches: Seq[String]): Boolean =
     env.get("GITHUB_ACTIONS").contains("true") &&

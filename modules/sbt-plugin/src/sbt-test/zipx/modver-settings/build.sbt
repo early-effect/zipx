@@ -22,44 +22,35 @@ lazy val root = (project in file("."))
   .aggregate(models, coreLib, client, service)
   .settings(publish / skip := true)
 
-// zipx's own CI runs scripted under GitHub Actions, where the default suffix is Ci, so each stage sets it.
-val assertModverSettings = taskKey[Unit]("CI suffix: Ship-backed version is row-ci; aggregators keep sbt default")
+val assertModverSettings = taskKey[Unit]("Ship-backed version is row-SNAPSHOT; aggregators keep sbt default")
 assertModverSettings := {
   val modelsV  = (models / version).value
   val coreV    = (coreLib / version).value
   val clientV  = (client / version).value
   val serviceV = (service / version).value
   val rootV    = (root / version).value
-  assert(modelsV == "1.4.2-ci", s"models version, got $modelsV")
-  assert(coreV == "1.4.2-ci", s"coreLib version, got $coreV")
-  assert(clientV == "0.3.0-ci", s"client version, got $clientV")
+  assert(modelsV == "1.4.2-SNAPSHOT", s"models version, got $modelsV")
+  assert(coreV == "1.4.2-SNAPSHOT", s"coreLib version, got $coreV")
+  assert(clientV == "0.3.0-SNAPSHOT", s"client version, got $clientV")
   assert(serviceV == "0.1.0-SNAPSHOT", s"unpublished service must not take a Ship version, got $serviceV")
   assert(rootV == "0.1.0-SNAPSHOT", s"root aggregator must not take a Ship version, got $rootV")
 }
 
-val assertClientPom = taskKey[Unit]("CI suffix: POM sibling revisions are catalog numbers, not -ci")
-assertClientPom := {
-  val pom = (client / makePom).value
-  val xml = IO.read(fileConverter.value.toPath(pom).toFile)
-  assert(!xml.contains("-ci"), s"POM must not emit -ci, got $xml")
-  assert(xml.contains("<version>1.4.2</version>"), s"client POM should depend on coreLib 1.4.2, got $xml")
-  assert(xml.contains("<version>0.3.0</version>"), s"client POM should name itself 0.3.0, got $xml")
-}
-
-val assertSnapshotSettings = taskKey[Unit]("Snapshot suffix: Ship-backed version is row-SNAPSHOT")
-assertSnapshotSettings := {
-  val modelsV = (models / version).value
-  val clientV = (client / version).value
-  assert(modelsV == "1.4.2-SNAPSHOT", s"models version, got $modelsV")
-  assert(clientV == "0.3.0-SNAPSHOT", s"client version, got $clientV")
-}
-
-val assertSnapshotPom = taskKey[Unit]("Snapshot suffix: a local POM names what it built, as its ivy.xml does")
-assertSnapshotPom := {
+val assertLocalPom = taskKey[Unit]("An unreleased POM names what it built, as its ivy.xml does")
+assertLocalPom := {
   val pom = (client / makePom).value
   val xml = IO.read(fileConverter.value.toPath(pom).toFile)
   assert(xml.contains("<version>1.4.2-SNAPSHOT</version>"), s"client POM should name coreLib as built, got $xml")
   assert(xml.contains("<version>0.3.0-SNAPSHOT</version>"), s"client POM should name itself as built, got $xml")
+}
+
+val assertReleasePom = taskKey[Unit]("A release POM names each unreleased sibling at its catalog number")
+assertReleasePom := {
+  val pom = (client / makePom).value
+  val xml = IO.read(fileConverter.value.toPath(pom).toFile)
+  assert(!xml.contains("-SNAPSHOT"), s"a release POM must not name a -SNAPSHOT, got $xml")
+  assert(xml.contains("<version>1.4.2</version>"), s"client POM should depend on coreLib 1.4.2, got $xml")
+  assert(xml.contains("<version>0.3.0</version>"), s"client POM should name itself 0.3.0, got $xml")
 }
 
 /** Where sbt 2's publishLocal writes this fixture's organization. It ignores `ivyPaths`, so this is the machine's. */

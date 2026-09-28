@@ -15,7 +15,6 @@ import zipx.plugin.ZipxDeps
 import zipx.plugin.ZipxPlugin.autoImport.{
   zipxActionRows,
   zipxCheckDeps,
-  zipxModverUnreleased,
   zipxPins,
   zipxPushBranches,
   zipxSbt,
@@ -89,31 +88,37 @@ object ZipxVersions:
               zipxVersionsFile.value,
               (LocalRootProject / baseDirectory).value,
               sys.env,
-              zipxModverUnreleased.value,
             )
           },
           pomPostProcess := {
-            val ships = zipxShips.value
-            val org   = organization.value
-            (node: scala.xml.Node) => releasedPomVersions(node, org, ships)
+            val ships     = zipxShips.value
+            val org       = organization.value
+            val releasing = !version.value.endsWith(zipx.core.Modver.UnreleasedSuffix)
+            (node: scala.xml.Node) => releasedPomVersions(node, org, releasing, ships)
           },
         )
     catalog ++ versions
   end applySettings
 
-  /** A POM goes to a registry, and only CI publishes there, naming an unreleased sibling `<row>-ci`. Each such revision
-    * in this build's organization (the POM's own `<version>` and each in-repo dependency) takes its row's catalog
-    * number. Everything else stays as written: another organization's `-ci`, and any `-SNAPSHOT`, since a local build's
-    * POM names what it built.
+  /** A release POM goes to a registry, which holds only releases: each in-repo sibling built at `<row>-SNAPSHOT` takes
+    * its row's catalog number. Any other POM (`publishLocal` of an unreleased build) names what was built, as its
+    * `ivy.xml` does, and another organization's revisions are theirs.
     */
-  private def releasedPomVersions(node: scala.xml.Node, org: String, ships: Seq[PublishedRow]): scala.xml.Node =
+  private def releasedPomVersions(
+      node: scala.xml.Node,
+      org: String,
+      releasing: Boolean,
+      ships: Seq[PublishedRow],
+  ): scala.xml.Node =
     def child(e: scala.xml.Elem, label: String): Option[String] =
       e.child.collectFirst { case c: scala.xml.Elem if c.label == label => c.text }
     def released(e: scala.xml.Elem): scala.xml.Elem =
       child(e, "groupId").fold(e) { groupId =>
         e.copy(child = e.child.map {
           case v: scala.xml.Elem if v.label == "version" =>
-            v.copy(child = Seq(scala.xml.Text(zipx.core.Modver.releasedRevision(groupId, v.text, org, ships))))
+            v.copy(child =
+              Seq(scala.xml.Text(zipx.core.Modver.releasedRevision(groupId, v.text, org, releasing, ships)))
+            )
           case other => other
         })
       }
@@ -122,9 +127,6 @@ object ZipxVersions:
         case e: scala.xml.Elem if e.label == "dependency" => released(e)
         case e: scala.xml.Elem                            => e.copy(child = e.child.map(walk))
         case other                                        => other
-    node match
-      // The project's own coordinates sit on the root element, beside its dependencies.
-      case e: scala.xml.Elem if e.label == "project" => walk(released(e))
-      case other                                     => walk(other)
+    walk(node)
   end releasedPomVersions
 end ZipxVersions

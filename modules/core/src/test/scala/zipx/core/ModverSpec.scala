@@ -139,43 +139,39 @@ object ModverSpec extends ZIOSpecDefault:
       },
     ),
     suite("unreleased")(
-      test("CI keeps -ci for cache-stable versions; anywhere else is -SNAPSHOT, which a republish overwrites") {
-        check(Gen.mapOf(Gen.alphaNumericStringBounded(1, 12), Gen.alphaNumericStringBounded(0, 8))) { env =>
-          val suffix = UnreleasedSuffix.fromEnv(env)
+      test("an unreleased member is its row's number and -SNAPSHOT, for a Ship and a ShipGroup alike") {
+        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+        assertTrue(rows.map(Modver.unreleased) == List("0.3.0-SNAPSHOT", "1.4.2-SNAPSHOT"))
+      },
+      test("a release POM names each unreleased sibling in the organization at its row's catalog number") {
+        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+        assertTrue(
+          Modver.releasedRevision("com.example", "1.4.2-SNAPSHOT", "com.example", releasing = true, rows) == "1.4.2",
+          Modver.releasedRevision("com.example", "0.3.0-SNAPSHOT", "com.example", releasing = true, rows) == "0.3.0",
+        )
+      },
+      test("an unreleased POM names what was built, as its ivy.xml does") {
+        check(Gen.fromIterable(List("0.3.0", "1.4.2", "9.9.9"))) { v =>
+          val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
           assertTrue(
-            UnreleasedSuffix.fromEnv(env.updated("GITHUB_ACTIONS", "true")) == UnreleasedSuffix.Ci,
-            UnreleasedSuffix.fromEnv(env - "GITHUB_ACTIONS") == UnreleasedSuffix.Snapshot,
-            suffix == (if env.get("GITHUB_ACTIONS").contains("true") then UnreleasedSuffix.Ci
-                       else UnreleasedSuffix.Snapshot),
+            Modver
+              .releasedRevision("com.example", s"$v-SNAPSHOT", "com.example", releasing = false, rows) == s"$v-SNAPSHOT"
           )
         }
       },
-      test("an unreleased member is its row's number and the suffix, for a Ship and a ShipGroup alike") {
-        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
-        assertTrue(
-          rows.map(Modver.unreleased(_, UnreleasedSuffix.Ci)) == List("0.3.0-ci", "1.4.2-ci"),
-          rows.map(Modver.unreleased(_, UnreleasedSuffix.Snapshot)) == List("0.3.0-SNAPSHOT", "1.4.2-SNAPSHOT"),
-        )
-      },
-      test("a POM names a sibling CI built (-ci) at its row's release number, for a Ship and a ShipGroup alike") {
-        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
-        assertTrue(
-          Modver.releasedRevision("com.example", "1.4.2-ci", "com.example", rows) == "1.4.2",
-          Modver.releasedRevision("com.example", "0.3.0-ci", "com.example", rows) == "0.3.0",
-        )
-      },
-      test("a POM leaves a -SNAPSHOT as written: a local build is not a release") {
-        check(Gen.fromIterable(List("0.3.0", "1.4.2", "9.9.9"))) { v =>
-          val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
-          assertTrue(Modver.releasedRevision("com.example", s"$v-SNAPSHOT", "com.example", rows) == s"$v-SNAPSHOT")
-        }
-      },
-      test("a POM leaves another organization's -ci, and any revision no row owns, as written") {
+      test("a release POM leaves another organization's revisions, and any no row owns, as written") {
         val rows = List[PublishedRow](Ship("client", "0.8.0"))
         assertTrue(
-          Modver.releasedRevision("org.other", "0.8.0-ci", "com.example", rows) == "0.8.0-ci",
-          Modver.releasedRevision("com.example", "0.9.0-ci", "com.example", rows) == "0.9.0-ci",
-          Modver.releasedRevision("com.example", "0.8.0", "com.example", rows) == "0.8.0",
+          Modver
+            .releasedRevision("org.other", "0.8.0-SNAPSHOT", "com.example", releasing = true, rows) == "0.8.0-SNAPSHOT",
+          Modver.releasedRevision(
+            "com.example",
+            "0.9.0-SNAPSHOT",
+            "com.example",
+            releasing = true,
+            rows,
+          ) == "0.9.0-SNAPSHOT",
+          Modver.releasedRevision("com.example", "0.8.0", "com.example", releasing = true, rows) == "0.8.0",
         )
       },
     ),

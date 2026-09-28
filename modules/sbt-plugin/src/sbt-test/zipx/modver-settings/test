@@ -1,16 +1,14 @@
-# Stage 1, CI: cache-stable -ci versions, and POMs that name release numbers.
-> set ThisBuild / zipxModverUnreleased := UnreleasedSuffix.Ci
 > assertModverSettings
 > zipxDepUpdate dry-run
 > assertCatalogUntouched
-> assertClientPom
+> assertLocalPom
 
-# Stage 2, a developer's machine: -SNAPSHOT versions, and a local POM that names what it built.
-> set ThisBuild / zipxModverUnreleased := UnreleasedSuffix.Snapshot
-> assertSnapshotSettings
-> assertSnapshotPom
+# The push that releases client sets it to the catalog number; siblings it did not release stay -SNAPSHOT.
+> set client / version := "0.3.0"
+> assertReleasePom
+> set client / version := "0.3.0-SNAPSHOT"
 
-# Stage 3: a republish after a change replaces the jar, where a -ci one was skipped.
+# A republish after a change replaces the jar; a release-shaped version would be skipped.
 > forgetFixtureRepo
 > models/publishLocal
 > recordPublishedModels
@@ -19,8 +17,6 @@ $ copy-file changes/Models.scala models/src/main/scala/Models.scala
 > assertRepublished
 > forgetFixtureRepo
 
-# Bump and generate are unchanged by the suffix.
-> set ThisBuild / zipxModverUnreleased := UnreleasedSuffix.Ci
 > zipxModverBump client
 > assertBumpedClient
 > zipxWorkflowGenerate

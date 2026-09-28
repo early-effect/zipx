@@ -52,22 +52,6 @@ enum ModverPropagate:
       case MatchBump      => Modver.propagate(bumps, graph, ships, inheritTrigger = true)
 end ModverPropagate
 
-/** What a Ship member's version carries when its commit does not release it.
-  *
-  * CI takes `Ci`: the same version on every run, so caches keyed on it hold. A developer's machine takes `Snapshot`:
-  * sbt overwrites a `-SNAPSHOT` in the local repository on every `publishLocal` and resolvers treat it as changing, so
-  * a sibling build sees each republish. A `-ci` is a release-shaped number there, and sbt 2 skips the republish with
-  * "already exists, skipping (overwrite=false)", leaving consumers on the first jar.
-  */
-enum UnreleasedSuffix(val suffix: String):
-  case Ci       extends UnreleasedSuffix("-ci")
-  case Snapshot extends UnreleasedSuffix("-SNAPSHOT")
-
-object UnreleasedSuffix:
-  /** `Ci` under GitHub Actions, `Snapshot` everywhere else. */
-  def fromEnv(env: Map[String, String]): UnreleasedSuffix =
-    if env.get("GITHUB_ACTIONS").contains("true") then Ci else Snapshot
-
 object ModverPropagate:
   def default: ModverPropagate = Never
 
@@ -144,21 +128,33 @@ object Modver:
       }
     }
 
-  /** The version a row's members take on a commit that does not release it. */
-  def unreleased(row: PublishedRow, suffix: UnreleasedSuffix): String = (row.version: String) + suffix.suffix
-
-  /** What a POM names a revision. Only CI publishes to a registry, and CI names an unreleased sibling `<row>-ci`, which
-    * no registry holds; the POM names that row's catalog number instead. The rewrite is for `organization` only, so
-    * another organization's real `-ci` stays. A `-SNAPSHOT` is never rewritten: a local build is not a release, and its
-    * POM names what it built, as its `ivy.xml` does.
+  /** What an unreleased version ends with, in CI and on a developer's machine alike. sbt overwrites a `-SNAPSHOT` on
+    * every `publishLocal`, so a sibling build sees each republish; a release-shaped version (as `-ci` was) is written
+    * once, then skipped with "already exists, skipping (overwrite=false)". Caches need only a version that is the same
+    * from commit to commit, which `<row>-SNAPSHOT` is.
     */
-  def releasedRevision(groupId: String, revision: String, organization: String, ships: Seq[PublishedRow]): String =
-    if groupId != organization then revision
-    else ships.find(r => unreleased(r, UnreleasedSuffix.Ci) == revision).fold(revision)(_.version: String)
+  val UnreleasedSuffix = "-SNAPSHOT"
+
+  /** The version a row's members take on a commit that does not release it. */
+  def unreleased(row: PublishedRow): String = (row.version: String) + UnreleasedSuffix
+
+  /** What a POM names a revision. A release POM (`releasing`: the project is at its catalog number) goes to a registry,
+    * which holds only releases, so each unreleased sibling in `organization` takes its row's catalog number. Any other
+    * POM names what was built, and another organization's revisions are theirs.
+    */
+  def releasedRevision(
+      groupId: String,
+      revision: String,
+      organization: String,
+      releasing: Boolean,
+      ships: Seq[PublishedRow],
+  ): String =
+    if !releasing || groupId != organization then revision
+    else ships.find(r => unreleased(r) == revision).fold(revision)(_.version: String)
 
   def bumpVersion(from: String, kind: BumpKind): Either[String, String] =
-    UnreleasedSuffix.values.find(s => from.endsWith(s.suffix)) match
-      case Some(s) => Left(s"version '$from' must be the release number, not a ${s.suffix} suffix")
+    unreleasedSuffixOf(from) match
+      case Some(s) => Left(s"version '$from' must be the release number, not a $s suffix")
       case None    =>
         parseSemver(from) match
           case None                  => Left(s"not a major.minor.patch version: '$from'")
@@ -319,9 +315,11 @@ object Modver:
 
   private def ciVersionError(row: PublishedRow): Option[String] =
     val ver = row.version: String
-    UnreleasedSuffix.values.find(s => ver.endsWith(s.suffix)).map { s =>
-      s"${describe(row)} version '$ver' must be the release number, not a ${s.suffix} suffix."
-    }
+    unreleasedSuffixOf(ver).map(s => s"${describe(row)} version '$ver' must be the release number, not a $s suffix.")
+
+  /** A catalog holds release numbers; either unreleased form, today's `-SNAPSHOT` or the former `-ci`, is not one. */
+  private def unreleasedSuffixOf(version: String): Option[String] =
+    List(UnreleasedSuffix, "-ci").find(version.endsWith)
 
   private def emptyGroupError(row: PublishedRow): Option[String] = row match
     case g: ShipGroup if g.members.isEmpty => Some(s"""ShipGroup("${g.name}") has no members.""")
