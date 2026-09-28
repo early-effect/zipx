@@ -183,6 +183,36 @@ object ZipxCentralSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("after a modver-gated publish, the release runs only when at least one publish job succeeded") {
+      val pub     = zipx.core.ZipxModver.publish(SbtCommand.unsafeTask("zipxModverPublishSigned"))
+      val release = ZipxCentral.releaseOnce.copy(gate = Gate.OnDefaultPush)
+      val cfg     = config.copy(modverPublish = true)
+      val pubIds  = Planner.allJobIds(pub, sampleGraph, cfg).map(id => id: String)
+      val gated   = Planner.plan(sampleGraph, List(pub, release), cfg).jobs("central-release").`if`.getOrElse("")
+      val plain   = Planner
+        .plan(sampleGraph, List(pub, release.copy(upstream = UpstreamResult.NoneFailed)), cfg)
+        .jobs("central-release")
+        .`if`
+        .getOrElse("")
+      val anySucceeded = pubIds.sorted.map(id => s"needs.$id.result == 'success'").mkString("(", " || ", ")")
+      assertTrue(
+        pubIds.size > 1,
+        pubIds.forall(id => plain.contains(s"needs.$id.result != 'failure'")),
+        !plain.contains("== 'success'"),
+        gated.contains(anySucceeded),
+        gated.replace(s" && $anySucceeded", "") == plain,
+      )
+    },
+    test("where no publish can skip, requiring one to succeed changes nothing") {
+      check(gExpandingMode) { mode =>
+        val pub     = publishSigned(mode)
+        val optedIn = Planner.plan(sampleGraph, List(pub, ZipxCentral.releaseOnce), config).jobs("central-release")
+        val plain   = Planner
+          .plan(sampleGraph, List(pub, ZipxCentral.releaseOnce.copy(upstream = UpstreamResult.NoneFailed)), config)
+          .jobs("central-release")
+        assertTrue(optedIn.`if` == plain.`if`, !optedIn.`if`.exists(_.contains("== 'success'")))
+      }
+    },
     test("Once needsCapabilities fans out over allJobIds of the dependency under every collapse mode") {
       check(gMode) { mode =>
         val graph = sampleGraph.mapNodes {

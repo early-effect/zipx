@@ -219,16 +219,19 @@ object ZipxPlugin extends AutoPlugin:
             .withPostSteps(zipx.central.ZipxCentral.uploadStagingSteps)
         )
 
+      /** Nothing to release when every publish skipped, so it runs only when one succeeded. */
       def releaseOnce: Capability =
-        Capability.once(
-          name = CapabilityName("central-release"),
-          command = CapabilityTasks.of(Publishing.sonaRelease),
-          phase = Phase.Publish,
-          gate = Gate.OnReleaseTag,
-          needsCapabilities = List(Capability.PublishName),
-          env = zipx.central.ZipxCentral.signingEnv,
-          extraSteps = zipx.central.ZipxCentral.downloadStagingSteps ++ zipx.central.ZipxCentral.gpgImportSteps,
-        )
+        Capability
+          .once(
+            name = CapabilityName("central-release"),
+            command = CapabilityTasks.of(Publishing.sonaRelease),
+            phase = Phase.Publish,
+            gate = Gate.OnReleaseTag,
+            needsCapabilities = List(Capability.PublishName),
+            env = zipx.central.ZipxCentral.signingEnv,
+            extraSteps = zipx.central.ZipxCentral.downloadStagingSteps ++ zipx.central.ZipxCentral.gpgImportSteps,
+          )
+          .whenAnyUpstreamSucceeded
 
       def signingEnv     = zipx.central.ZipxCentral.signingEnv
       def OrgSecretNames = zipx.central.ZipxCentral.OrgSecretNames

@@ -901,8 +901,9 @@ object Planner:
     val tolerance =
       if affectedBy.isEmpty then tolerateSkips(capability, rawNeeds.filterNot(_ == modverJobId), affectedGatedNames)
       else
-        val clauses = skipTolerantClauses(rawNeeds.filterNot(id => id == modverJobId || id == affectedJobId))
-        val gate    =
+        val clauses =
+          skipTolerantClauses(rawNeeds.filterNot(id => id == modverJobId || id == affectedJobId), capability.upstream)
+        val gate =
           Expr.group((affectedBy.map(Expr.contains(affectedModulesJson, _)) :+ affectedContainsAll).reduceLeft(_ || _))
         Some((clauses.head :: gate.unwrapped :: clauses.tail).mkString(" && "))
     val withModver =
@@ -1417,7 +1418,8 @@ object Planner:
       val stepModverGate =
         Option.when(gatedOnModver)(modverContainsMatrixModule.unwrapped)
       val tolerance =
-        if gatedOnAffected || gatedOnModver || skipTolerant then skipTolerantClauses(guardedNeeds) else Nil
+        if gatedOnAffected || gatedOnModver || skipTolerant then skipTolerantClauses(guardedNeeds, capability.upstream)
+        else Nil
       val clauses =
         tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ modverGate.toList ++
           tolerance.drop(1)
@@ -1670,10 +1672,20 @@ object Planner:
     * Without this, affected-gating a Publish capability would break every dependent: `Capability.deploy` needs `docker`
     * by default, so one skipped `docker-<module>` would silently skip the deploy that wanted the other modules'.
     */
-  private def skipTolerantClauses(needs: List[JobId]): List[String] =
-    (!Expr.cancelled).unwrapped +: needs.distinct.sorted.map(n =>
-      (Expr.JobResult(n) !== Expr.quoted("failure")).unwrapped
-    )
+  private def skipTolerantClauses(needs: List[JobId], upstream: UpstreamResult): List[String] =
+    val guards     = needs.distinct.sorted
+    val noneFailed = guards.map(n => (Expr.JobResult(n) !== Expr.quoted("failure")).unwrapped)
+    // Last, so callers that splice the head (`!cancelled()`) elsewhere keep it.
+    val anySucceeded = upstream match
+      case UpstreamResult.NoneFailed   => Nil
+      case UpstreamResult.AnySucceeded =>
+        guards
+          .map(n => Expr.JobResult(n) === Expr.quoted("success"))
+          .reduceLeftOption(_ || _)
+          .map(Expr.group(_).unwrapped)
+          .toList
+    ((!Expr.cancelled).unwrapped +: noneFailed) ++ anySucceeded
+  end skipTolerantClauses
 
   /** Whether a job depending on these capability names has a need that affected-gating can skip. One hop is enough: a
     * direct dependent becomes skip-tolerant and therefore never skips itself, so its own dependents keep seeing
@@ -1695,7 +1707,7 @@ object Planner:
       affectedGatedNames: Set[CapabilityName],
   ): Option[String] =
     Option.when(dependsOnSkippable(capability, affectedGatedNames) && crossNeeds.nonEmpty)(
-      skipTolerantClauses(crossNeeds).mkString(" && ")
+      skipTolerantClauses(crossNeeds, capability.upstream).mkString(" && ")
     )
 
   /** A dispatched deploy is its own gate: a release-tag or default-push gate there could never be true. */
@@ -1728,7 +1740,8 @@ object Planner:
     val modverGate =
       Option.when(gatedOnModver)(modverContains(node.id.asExprLiteral).unwrapped)
     val tolerance =
-      if gatedOnAffected || gatedOnModver || skipTolerant then skipTolerantClauses(guardedNeeds) else Nil
+      if gatedOnAffected || gatedOnModver || skipTolerant then skipTolerantClauses(guardedNeeds, capability.upstream)
+      else Nil
 
     val clauses =
       tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ modverGate.toList ++
