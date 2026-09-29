@@ -101,9 +101,12 @@ object Modver:
     val md    = java.security.MessageDigest.getInstance("SHA-256")
     md.digest(lines.getBytes(java.nio.charset.StandardCharsets.UTF_8)).take(8).map("%02x".format(_)).mkString
 
+  /** Whether a registry response means the GAV is already published. 304 counts: `HttpLookup` revalidates a POM it
+    * already fetched, and the registry answers Not Modified. That POM is there.
+    */
   def registryStatus(httpStatus: Int): Either[String, RegistryStatus] =
     httpStatus match
-      case 200       => Right(RegistryStatus.Published)
+      case 200 | 304 => Right(RegistryStatus.Published)
       case 404 | 410 => Right(RegistryStatus.Missing)
       case n         => Left(s"HTTP $n")
 
