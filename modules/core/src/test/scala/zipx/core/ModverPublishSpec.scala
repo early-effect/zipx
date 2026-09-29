@@ -234,6 +234,7 @@ object ModverPublishSpec extends ZIOSpecDefault:
         ModverRegistry.MavenCentral.pomUrl(gav).contains("repo1.maven.org"),
         ModverRegistry.GitHubPackages("acme", "libs").pomUrl(gav).contains("maven.pkg.github.com/acme/libs"),
         Modver.registryStatus(200) == Right(RegistryStatus.Published),
+        Modver.registryStatus(304) == Right(RegistryStatus.Published),
         Modver.registryStatus(404) == Right(RegistryStatus.Missing),
         Modver.registryStatus(410) == Right(RegistryStatus.Missing),
         Modver.registryStatus(500).isLeft,
