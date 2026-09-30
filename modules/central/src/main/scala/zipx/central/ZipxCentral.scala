@@ -85,4 +85,7 @@ object ZipxCentral:
 
   val snapshots: Capability = Capability.snapshots().withEnv(snapshotEnv)
 
+  inline def pullRequestSnapshots(inline label: String): Capability =
+    Capability.pullRequestSnapshots(zipx.workflow.ExprLiteral(label.trim)).withEnv(snapshotEnv)
+
 end ZipxCentral

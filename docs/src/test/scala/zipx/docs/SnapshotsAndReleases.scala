@@ -51,6 +51,7 @@ zipxReleaseWorkflow := Some(ZipxCentral.releases)
 |---|---|---|---|
 | any build, `publishLocal` included | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | `~/.ivy2/local` |
 | a merge to the default branch | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | Central snapshots |
+| a push to PR #42 labeled `snapshots` | `1.4.2-pr42-SNAPSHOT` | `0.3.0-pr42-SNAPSHOT` | Central snapshots |
 | a `zipxRelease` session | `1.4.2` | `0.3.0` | Central |
 
 `-SNAPSHOT` is what sbt overwrites on republish, so `publishLocal` after every edit reaches a sibling build. It is also
@@ -78,6 +79,31 @@ enabled for the namespace in the Central Portal (Namespaces). Central deletes sn
           yml.contains("cache-mode: restore"),
           yml.contains("SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}"),
           !yml.contains("PGP_"),
+        )
+      ),
+    ),
+    section("PR snapshots")(
+      md"""
+`ZipxCentral.pullRequestSnapshots("snapshots")` publishes the same rows from a pull request, on each push once the PR
+carries the label, at `<row>-pr<N>-SNAPSHOT`. A downstream PR can pin `0.3.0-pr42-SNAPSHOT` and prove the pair works
+before either merges. A fork's PR never runs it: its run has no publishing secrets.
+
+Only the published coordinate moves. sbt still compiles and packages at `<row>-SNAPSHOT`, exactly what the PR's `test`
+built, so the job restores the PR's cache and recompiles nothing; each POM names in-repo dependencies at their
+`-pr<N>-SNAPSHOT` coordinate. Labeling a PR starts no run by itself; push to publish.
+
+```scala
+zipxCapabilities ++= Seq(ZipxCentral.snapshots, ZipxCentral.pullRequestSnapshots("snapshots"))
+```
+""",
+      exampleValue {
+        DocsRender.job("snapshots-pr")(Capability.test, ZipxCentral.pullRequestSnapshots("snapshots"))(using graph)
+      }.assert(yml =>
+        assertTrue(
+          yml.contains("zipxSnapshotPublish pr"),
+          yml.contains("contains(github.event.pull_request.labels.*.name, 'snapshots')"),
+          yml.contains("github.event.pull_request.head.repo.full_name == github.repository"),
+          yml.contains("cache-mode: restore"),
         )
       ),
     ),

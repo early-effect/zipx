@@ -78,6 +78,12 @@ object ModverSpec extends ZIOSpecDefault:
       patch <- Gen.int(0, 9)
     yield ReleaseVersion.make(s"$major.$minor.$patch")).collect { case Right(v) => v }
 
+  private val gSession: Gen[Any, BuildSession] =
+    Gen.oneOf(
+      Gen.elements(BuildSession.Development, BuildSession.SnapshotPublish, BuildSession.Release),
+      Gen.int(1, 9999).map(PullRequestNumber.make(_)).collect { case Right(pr) => BuildSession.PullRequestSnapshot(pr) },
+    )
+
   private def gChunks(ids: List[String]): Gen[Any, List[List[String]]] =
     Gen.suspend {
       if ids.isEmpty then Gen.const(Nil)
@@ -175,19 +181,21 @@ object ModverSpec extends ZIOSpecDefault:
       },
     ),
     suite("BuildSession")(
-      test("a row member builds at <row>-SNAPSHOT, and at its catalog number only in a release session") {
-        check(gVersion, Gen.boolean) { (v, grouped) =>
+      test("every session but a release builds <row>-SNAPSHOT; a PR snapshot publishes <row>-pr<N>-SNAPSHOT") {
+        check(gVersion, Gen.boolean, gSession) { (v, grouped, session) =>
           val row: PublishedRow =
             if grouped then ShipGroup(gname("libs"), v, List(mid("models"))) else Ship(mid("client"), v)
+          val published = session match
+            case BuildSession.PullRequestSnapshot(pr) => s"$v-pr$pr-SNAPSHOT"
+            case _                                    => session.versionOf(row)
           assertTrue(
-            BuildSession.Development.versionOf(row) == s"$v-SNAPSHOT",
-            BuildSession.SnapshotPublish.versionOf(row) == s"$v-SNAPSHOT",
-            BuildSession.Release.versionOf(row) == (v: String),
+            session.versionOf(row) == (if session == BuildSession.Release then (v: String) else s"$v-SNAPSHOT"),
+            session.publishedRevisionOf(row) == published,
           )
         }
       },
       test("the zipx.session JVM property names the session") {
-        checkAll(Gen.fromIterable(BuildSession.values)) { session =>
+        check(gSession) { session =>
           assertTrue(BuildSession.of(Map(BuildSession.Property -> session.id)) == Right(session))
         }
       },
@@ -195,11 +203,17 @@ object ModverSpec extends ZIOSpecDefault:
         assertTrue(
           BuildSession.of(Map("zipx.other" -> "x")) == Right(BuildSession.Development),
           BuildSession.of(Map(BuildSession.Property -> "nightly")) == Left(UnknownBuildSession("nightly")),
-          UnknownBuildSession("nightly").message.contains("development, snapshot, release"),
+          BuildSession.of(Map(BuildSession.Property -> "pr-0")) == Left(UnknownBuildSession("pr-0")),
+          UnknownBuildSession("nightly").message.contains("development, snapshot, pr-<number>, release"),
         )
       },
-      test("only a snapshot publish drops scaladoc") {
-        assertTrue(BuildSession.values.filterNot(_.publishesDocs).toList == List(BuildSession.SnapshotPublish))
+      test("only a snapshot publish, mainline or PR, drops scaladoc") {
+        check(gSession) { session =>
+          val snapshot = session match
+            case BuildSession.SnapshotPublish | BuildSession.PullRequestSnapshot(_) => true
+            case BuildSession.Development | BuildSession.Release                    => false
+          assertTrue(session.publishesDocs == !snapshot)
+        }
       },
     ),
     suite("membership")(
