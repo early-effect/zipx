@@ -288,7 +288,33 @@ that already exists. Two consequences:
   eviction check reads `0.10.0-SNAPSHOT` against `0.10.0` literally; early-semver compares `0.y.0` and `x.0.0`
   exactly, tag included. zipx exempts the build's own artifacts from that check and checks them itself after `update`:
   the row's next number against the release the library needs, under the module's own `versionScheme`. `0.10.0-SNAPSHOT`
-  over `0.10.0` resolves; `0.11.0-SNAPSHOT` over `0.10.0` fails, naming both.
+  over `0.10.0` resolves; `0.11.0-SNAPSHOT` over `0.10.0` is a conflict, naming both.
+"""
+    ),
+    section("A conflict's severity follows what ships")(
+      md"""
+When zipx finds that conflict, what it does depends on whether the project publishes:
+
+| Project | Conflict | Why |
+|---|---|---|
+| publishes (a `Ship` / `ShipGroup` member) | fails `update` | its POM would ship the mix to every consumer |
+| does not publish (`publish / skip := true`: docs, examples) | loud warning; `update` resolves | nothing downstream sees it; its own compile, link, and tests are the proof |
+
+That is what lets a repo release its libraries on their own schedule, even when its docs depend on something built
+against those libraries. Say the docs site uses a docs framework, and the framework's released version was built
+against `client` 0.3.0. When this repo moves `client` to 0.4.0, the docs project meets the in-repo `0.4.0-SNAPSHOT`
+against a library that needs 0.3.0:
+
+```text
+[warn] zipx: the build's own artifacts conflict with a release:
+  * com.example:client_3:0.4.0-SNAPSHOT (early-semver) is selected over 0.3.0: 0.4.0 is not early-semver-compatible with it
+  (a warning: this project does not publish)
+```
+
+The docs project publishes nothing, so `client` 0.4.0 releases anyway. If the framework really cannot run on the new
+`client`, the docs fail to compile, link, or test, which is the real signal; if they pass, the old framework is fine
+until it catches up. A published row in the same position fails instead, and should: its POM would carry the mix to
+every consumer.
 """
     ),
   )

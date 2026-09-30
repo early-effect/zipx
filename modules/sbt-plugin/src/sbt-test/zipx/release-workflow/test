@@ -43,8 +43,11 @@ $ touch ext
 > reload
 > writeExternalLib
 > consumer/update
+> downstream/update
 
-# Once client moves to 0.4.0, a library built against 0.3.0 is incompatible under client's early-semver.
+# Once client moves to 0.4.0, a library built against 0.3.0 is incompatible under client's early-semver:
+# a warning where the project does not publish, a failure where it does.
 $ touch client-next
 > reload
--> consumer/update
+> consumer/update
+-> downstream/update

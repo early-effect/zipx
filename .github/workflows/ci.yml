@@ -73,7 +73,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: cache-rehydrate
         run: sbt 'Test/compile'
   test:
@@ -96,7 +96,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: Pre-pull remote-cache IT images
         run: |
           set -euo pipefail
@@ -166,7 +166,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: fmt
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -196,7 +196,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: workflow-check
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -226,7 +226,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: advisories
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -261,7 +261,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
       - name: modver-suggest
@@ -297,7 +297,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
       - name: modver-check
@@ -329,7 +329,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: scripted
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -363,7 +363,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: snapshots
         run: sbt 'zipxSnapshotPublish'
   snapshots-pr:
@@ -390,7 +390,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: cbb259409de4c6db
+          cache-epoch: "9639f84455397a0f"
       - name: snapshots-pr
         run: sbt 'zipxSnapshotPublish pr'
   docs:
