@@ -460,7 +460,7 @@ object Planner:
         val mode = MatrixCollapse.effective(c, config)
         c.scope match
           case CapabilityScope.Once =>
-            List(onceJob(c, graph, config, byName, usesVerifyGate, affectedGatedNames))
+            List(onceJob(c, graph, config, byName, usesVerifyGate, usesCacheRehydrate, affectedGatedNames))
           case CapabilityScope.Aggregate =>
             aggregateJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames, mode)
           case CapabilityScope.Layer =>
@@ -787,16 +787,20 @@ object Planner:
       config: PlanConfig,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      usesCacheRehydrate: Boolean,
       affectedGatedNames: Set[CapabilityName],
   ): (JobId, Job) =
     val releaseCond = gateCondition(capability, config)
     val crossNeeds  = crossCapabilityNeeds(capability, graph, byName, config)
     val affectedBy  = affectedByModules(capability, graph, config)
+    val afterVerify = waitsOnVerify(capability)
+    val cacheOwner  = Option.when(afterVerify && usesCacheRehydrate)(cacheRehydrateJobId).toList
     val rawNeeds    =
-      (crossNeeds ++ (if affectedBy.nonEmpty then List(affectedJobId) else Nil)).distinct.sorted
+      (crossNeeds ++ cacheOwner ++ (if affectedBy.nonEmpty then List(affectedJobId) else Nil)).distinct.sorted
     // Same clause order as a Graph job: `!cancelled()`, the affected gate, then each other need's guard.
     val tolerance =
-      if affectedBy.isEmpty then tolerateSkips(capability, rawNeeds, affectedGatedNames)
+      if affectedBy.isEmpty && afterVerify then Some(skipTolerantClauses(rawNeeds).mkString(" && "))
+      else if affectedBy.isEmpty then tolerateSkips(capability, rawNeeds, affectedGatedNames)
       else
         val gate = Expr
           .group((affectedBy.map(Expr.contains(affectedModulesJson, _)) :+ affectedContainsAll).reduceLeft(_ || _))
@@ -846,6 +850,12 @@ object Planner:
   end onceJob
 
   private val syntheticNode = ModuleNode(id = ModuleId("_build"))
+
+  /** A later-phase job that waits on `test` must tolerate it skipping, since Verify skips on a merged-PR push and a
+    * dispatch, and must then wait on `cache-rehydrate`, which owns that push's build snapshot in its place.
+    */
+  private def waitsOnVerify(capability: Capability): Boolean =
+    capability.phase != Phase.Verify && capability.needsCapabilities.contains(Capability.TestName)
 
   /** The modules a [[Capability.withAffectedBy]] gate lists. Empty when the capability has none, or when affected
     * gating is off, in which case the job runs ungated as it always did.

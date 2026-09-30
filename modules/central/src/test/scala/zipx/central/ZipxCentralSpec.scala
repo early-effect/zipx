@@ -55,6 +55,15 @@ object ZipxCentralSpec extends ZIOSpecDefault:
           Set("PGP_KEY_HEX", "PGP_SECRET", "PGP_PASSPHRASE", "SONATYPE_USERNAME", "SONATYPE_PASSWORD")
       )
     },
+    test("snapshots publish with the Sonatype token alone: Central snapshots take no signature") {
+      val job = Planner.plan(sampleGraph, List(Capability.test, ZipxCentral.snapshots), config).jobs.get("snapshots")
+      assertTrue(
+        job.flatMap(_.env.get("SONATYPE_USERNAME")).contains("${{ secrets.SONATYPE_USERNAME }}"),
+        job.flatMap(_.env.get("SONATYPE_PASSWORD")).contains("${{ secrets.SONATYPE_PASSWORD }}"),
+        job.exists(j => !j.env.keys.exists(_.startsWith("PGP_"))),
+        job.exists(!_.steps.exists(_.name.contains("Import signing key"))),
+      )
+    },
     test("Once needsCapabilities fans out over allJobIds of the dependency under every collapse mode") {
       check(gMode) { mode =>
         val graph = sampleGraph.mapNodes {

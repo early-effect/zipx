@@ -28,3 +28,10 @@ $ exec git add .
 $ exec git commit -q -m fixture
 > zipxAffectedModules HEAD
 > assertAffectedEmptyStaysEmpty
+
+# Snapshots publish Ship rows; a catalog without any is refused.
+$ copy-file changes/snapshots.sbt snapshots.sbt
+> reload
+-> zipxWorkflowGenerate
+$ delete snapshots.sbt
+> reload

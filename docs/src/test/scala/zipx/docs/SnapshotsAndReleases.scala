@@ -43,17 +43,44 @@ val libs   = ShipGroup("libs", "1.4.2")("models", "coreLib")
 val client = Ship("client", "0.3.0")
 
 // build.sbt
+zipxCapabilities += ZipxCentral.snapshots
 zipxReleaseWorkflow := Some(ZipxCentral.releases)
 ```
 
-| Build | `models` | `client` |
-|---|---|---|
-| any build, `publishLocal` included | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` |
-| a `zipxRelease` session | `1.4.2` | `0.3.0` |
+| Build | `models` | `client` | Published to |
+|---|---|---|---|
+| any build, `publishLocal` included | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | `~/.ivy2/local` |
+| a merge to the default branch | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | Central snapshots |
+| a `zipxRelease` session | `1.4.2` | `0.3.0` | Central |
 
 `-SNAPSHOT` is what sbt overwrites on republish, so `publishLocal` after every edit reaches a sibling build. It is also
 the same string on every commit, so cache digests hold (see **Caching**).
 """,
+    section("Mainline snapshots")(
+      md"""
+With `ZipxCentral.snapshots`, every push to the default branch publishes each row whose catalog number is not
+released yet, at `<row>-SNAPSHOT`. A downstream repo can pin that coordinate in CI before the release exists. A row
+that is already released is skipped: its snapshot would sort before the release.
+
+The `snapshots` job waits on this run's cache owner (`test`, or `cache-rehydrate` on a merge push that skipped
+Verify), restores that save, and never saves one, so it packages and uploads without recompiling. It skips scaladoc,
+which Central checks only on a release, and signs nothing. It needs `SONATYPE_USERNAME` / `SONATYPE_PASSWORD` and a
+`publishTo` that routes `-SNAPSHOT` to `https://central.sonatype.com/repository/maven-snapshots/`, and SNAPSHOTs
+enabled for the namespace in the Central Portal (Namespaces). Central deletes snapshots after 90 days.
+""",
+      exampleValue {
+        DocsRender.job("snapshots")(Capability.test, ZipxCentral.snapshots)(using graph)
+      }.assert(yml =>
+        assertTrue(
+          yml.contains("sbt zipxSnapshotPublish") || yml.contains("sbt 'zipxSnapshotPublish'"),
+          yml.contains("github.ref == 'refs/heads/main'"),
+          yml.contains("needs.test.result != 'failure'"),
+          yml.contains("cache-mode: restore"),
+          yml.contains("SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}"),
+          !yml.contains("PGP_"),
+        )
+      ),
+    ),
     section("Release")(
       md"""
 `zipx-release.yml` has one job, started two ways:

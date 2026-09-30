@@ -69,6 +69,7 @@ run however many rows it carries. Full guide: **Snapshots and releases**.
 
 ```scala
 zipxReleaseWorkflow := Some(ZipxCentral.releases)
+zipxCapabilities += ZipxCentral.snapshots   // each merge: unreleased rows at <row>-SNAPSHOT, unsigned
 ```
 """,
       exampleValue {

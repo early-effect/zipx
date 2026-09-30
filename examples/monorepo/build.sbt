@@ -5,8 +5,9 @@
 //   models ──▶ core-lib ──▶ client   (publish; ShipGroup libs 1.4.2 + Ship client 0.3.0)
 //     └───────────────────▶ service  (non-publishing app; depends on core-lib)
 //
-// Every build is `<row>-SNAPSHOT`. Libraries release from zipx-release.yml, on a GitHub
-// Release tag or a dispatch. Image and deploy wait on a human v* tag in ci.yml.
+// Every build is `<row>-SNAPSHOT`, and each merge publishes unreleased rows to Central
+// snapshots. Libraries release from zipx-release.yml, on a GitHub Release tag or a
+// dispatch. Image and deploy wait on a human v* tag in ci.yml.
 //
 // zipx derives everything (module set, needs edges, publish order, matrix) from this.
 
@@ -90,7 +91,7 @@ lazy val root = (project in file("."))
   )
 
 // Layer-mode test: dependency-ordered waves, few sbt sessions.
-zipxCapabilities += Capability.testLayers
+zipxCapabilities ++= Seq(Capability.testLayers, ZipxCentral.snapshots)
 
 // Multi-registry image publish (Gap 1). Overrides the built-in single-target `docker` capability (same name ⇒
 // replace) to push the service image to N registries, each with its own credentials.

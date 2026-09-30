@@ -154,7 +154,9 @@ LocalDir passes `save` or `restore`, so the composite runs epoch-keyed `actions/
 Every sbt job restores the LocalDir build snapshot. Only its **owner** saves one. The builtin `test` owns it on PRs
 and direct pushes, and `cache-rehydrate` owns it on a merge push, where Verify is skipped. `testLayers` saves once per
 wave, so each wave warms the next through the same-run key. Graph test jobs, coverage, publish, docker, and deploy
-jobs restore through `actions/cache/restore` and never save.
+jobs restore through `actions/cache/restore` and never save. The `snapshots` job waits on the owner (`test` or
+`cache-rehydrate`), so it restores this run's save and only packages and uploads. A `zipx-release.yml` job restores
+and never saves: its jars carry release numbers, which no PR build would hit.
 
 ```scala
 Capability.test                              // LocalCacheMode.Save: the default owner

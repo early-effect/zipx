@@ -222,6 +222,9 @@ object ZipxPlugin extends AutoPlugin:
       def gpgImportSteps = zipx.central.ZipxCentral.gpgImportSteps
 
       def releases: ReleaseWorkflow = zipx.central.ZipxCentral.releases
+
+      def snapshots: Capability =
+        Capability.snapshots(CapabilityTasks.of(snapshotPublishCommand)).withEnv(zipx.central.ZipxCentral.snapshotEnv)
     end ZipxCentral
 
     /** The AWS pack. The newtypes are re-exported as `type` + `val` pairs rather than hidden behind factories, because
@@ -549,6 +552,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxModuleGraph  := Def.uncached(buildGraph.value),
     commands += testAffectedCommand,
     commands += releaseCommand,
+    commands += snapshotPublishCommand,
     // `Def.uncached` because a file write is not a valid cached-task output.
     zipxCatalogGenerate := Def.uncached {
       Def
@@ -928,6 +932,8 @@ object ZipxPlugin extends AutoPlugin:
       sys.error(
         "zipx: Ship rows release from zipx-release.yml (zipxReleaseWorkflow), so ci.yml has no publish job. Drop the 'publish' capability from zipxCapabilities."
       )
+    if ships.isEmpty && userCaps.exists(_.name == Capability.SnapshotsName) then
+      sys.error("zipx: the 'snapshots' capability publishes Ship / ShipGroup rows, and the catalog has none")
     val published = if ships.nonEmpty then builtins.filterNot(_.name == Capability.PublishName) else builtins
     combineCapabilities(published ++ modver, userCaps.toList)
   end capabilitiesOf
@@ -1223,7 +1229,7 @@ object ZipxPlugin extends AutoPlugin:
     IO.writeLines(extracted.get(LocalRootProject / baseDirectory) / ReleaseWorkflow.TagsFile, plan.entries.map(_.tag))
     plan.entries.foreach(e => next.log.info(s"zipx: releasing ${Modver.describe(e.row)} ${e.row.version} as ${e.tag}"))
     next.log.info("zipx: this sbt session now builds every row at its catalog number")
-    sys.props(BuildSession.ReleaseProperty) = plan.entries.map(_.tag).mkString(",")
+    sys.props(BuildSession.Property) = BuildSession.Release.id
     val (publishTask, finish) = release.registry match
       case ArtifactRegistry.MavenCentral =>
         import com.jsuereth.sbtpgp.PgpKeys.publishSigned
@@ -1235,6 +1241,34 @@ object ZipxPlugin extends AutoPlugin:
     val commands =
       plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, publishTask)) ++ finish
     "reload" :: commands.map(c => c.text: String) ::: next
+  }
+
+  private val snapshotPublishCommand: Command = Command.command("zipxSnapshotPublish") { st =>
+    val extracted     = Project.extract(st)
+    val (next, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
+    val release       = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
+    val catalog       = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
+    val binaries      = liveBinaries(extracted, graph, catalog)
+    ReleasePlan.plan(
+      ReleaseRequest.AllUnreleased,
+      catalog,
+      graph,
+      rowStatus(_, graph, catalog, binaries, release.registry),
+    ) match
+      case Left(ReleaseError.NothingToRelease) =>
+        next.log.info("zipx: every row's catalog number is released; no snapshot to publish")
+        next
+      case Left(err)   => sys.error(s"zipx: ${err.message}")
+      case Right(plan) =>
+        plan.entries.foreach(e =>
+          next.log.info(s"zipx: publishing ${Modver.describe(e.row)} ${e.row.version}-SNAPSHOT")
+        )
+        next.log.info("zipx: this sbt session now publishes snapshots without scaladoc")
+        sys.props(BuildSession.Property) = BuildSession.SnapshotPublish.id
+        val commands =
+          plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, CapabilityTasks.of(publish)))
+        "reload" :: commands.map(c => c.text: String) ::: next
+    end match
   }
 
   private def rowStatus(

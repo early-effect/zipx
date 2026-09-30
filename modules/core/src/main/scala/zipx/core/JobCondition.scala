@@ -110,7 +110,7 @@ object JobCondition:
     }
     val onPush = refs match
       case Nil          => eventIs("push")
-      case head :: tail => eventIs("push") && JobCondition.anyOf(head :: tail).get
+      case head :: tail => eventIs("push") && Any(head, tail)
     onPush || onWorkflowDispatch
 
   /** `contains(github.event.pull_request.labels.*.name, 'label')`. */
