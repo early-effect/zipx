@@ -96,9 +96,11 @@ flowchart TD
    number must move; a moved row must clear the MiMa floor measured against that release's jar. Over-bump is fine. An
    unreadable registry or jar fails the check; it never reads as a first release.
 4. You write the number (`zipxModverBump client`, or by hand) and push.
-5. Merge. The default branch now builds `0.3.1-SNAPSHOT`. Later PRs in the same cycle pass without another bump
+5. Before merging, prove the change downstream without a release: `sbt zipxSnapshotPublish local` here, pin
+   `0.3.1-SNAPSHOT` there (or `sbt zipxSnapshotPublish` for another machine's CI). See **Snapshots and releases**.
+6. Merge. The default branch now builds `0.3.1-SNAPSHOT`. Later PRs in the same cycle pass without another bump
    unless MiMa says their change is bigger than the row already declares.
-6. Release when ready: a GitHub Release tagged `client/v0.3.1`, or Run workflow on **zipx release**. See **Snapshots
+7. Release when ready: a GitHub Release tagged `client/v0.3.1`, or Run workflow on **zipx release**. See **Snapshots
    and releases**.
 
 `modver-check` / `modver-suggest` self-compile (`needsCapabilities = Nil`). They do not wait on test topology.
@@ -198,7 +200,7 @@ unpublished apps keep sbt's default version.
 | Where | Number | Why |
 |---|---|---|
 | Catalog constructor | release number only (`1.4.2`, never `1.4.2-SNAPSHOT`) | the human writes the next release |
-| Any build: PR, merge, `publishLocal` | `<row>-SNAPSHOT` (`1.4.2-SNAPSHOT`) | the same from commit to commit, so caches hold; and `publishLocal` overwrites it |
+| Any build: PR, merge, `zipxSnapshotPublish local` | `<row>-SNAPSHOT` (`1.4.2-SNAPSHOT`) | the same from commit to commit, so caches hold; and `publishLocal` overwrites it |
 | A `zipxRelease` session | catalog number, for every row member | its POMs name in-repo dependencies at release numbers |
 
 A cache needs only a version that does not change between commits; `-SNAPSHOT` is as stable as any fixed suffix. What

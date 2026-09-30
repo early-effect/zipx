@@ -49,14 +49,65 @@ zipxReleaseWorkflow := Some(ZipxCentral.releases)
 
 | Build | `models` | `client` | Published to |
 |---|---|---|---|
-| any build, `publishLocal` included | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | `~/.ivy2/local` |
+| any build | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | nowhere until you publish |
+| `sbt zipxSnapshotPublish local`, on a laptop | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | `~/.ivy2/local` |
+| `sbt zipxSnapshotPublish`, on a laptop | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | Central snapshots |
 | a merge to the default branch | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | Central snapshots |
 | a push to PR #42 labeled `snapshots` | `1.4.2-pr42-SNAPSHOT` | `0.3.0-pr42-SNAPSHOT` | Central snapshots |
 | a `zipxRelease` session | `1.4.2` | `0.3.0` | Central |
 
-`-SNAPSHOT` is what sbt overwrites on republish, so `publishLocal` after every edit reaches a sibling build. It is also
-the same string on every commit, so cache digests hold (see **Caching**).
+`-SNAPSHOT` is what sbt overwrites on republish, so a republish after every edit reaches a sibling build. It is also
+the same string on every commit, so cache digests hold (see **Caching**). None of it spends a release.
 """,
+    section("Iterate from your machine")(
+      md"""
+Proving a change across two libraries needs no PR, no CI, and no release. In the upstream repo:
+
+```text
+sbt zipxSnapshotPublish local     # every unreleased row to ~/.ivy2/local, which sbt and cs resolve
+```
+
+In the downstream repo, pin the coordinate like any other row, then `reload` a running shell:
+
+```scala
+val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
+```
+
+Edit upstream, publish again, compile downstream: a `-SNAPSHOT` overwrites, and a project that depends on one
+re-resolves every session. When the upstream change adds or changes a dependency, `reload` the downstream shell;
+zipx forgets sbt's in-memory resolutions on `reload` and `clean` while a snapshot is pinned.
+
+To share the same bits with a teammate, or with a downstream PR's CI, publish them to the registry instead:
+
+```text
+sbt zipxSnapshotPublish           # the same rows to the registry's snapshot repository
+```
+
+Both forms publish exactly the rows a merge would (every row whose number is not released yet), skip scaladoc, and
+return the shell to a development session when they finish. The registry form checks credentials before anything
+uploads: for Central, `SONATYPE_USERNAME` / `SONATYPE_PASSWORD`, or a credentials file for `central.sonatype.com`. A
+missing token never leaves some modules published and the rest not.
+
+A build writes no `publishTo` for any of this. While zipx publishes a row, it routes the upload from
+`zipxReleaseWorkflow`'s registry; a development session keeps whatever `publishTo` the build sets. A `file:` registry
+rehearses snapshots and releases entirely on one machine.
+""",
+      exampleValue {
+        List(
+          ArtifactRegistry.MavenCentral,
+          ArtifactRegistry.GitHubPackages("early-effect", "zipx"),
+          ArtifactRegistry.Url("file:///tmp/zipx-repo"),
+        ).map(r =>
+          s"$r: snapshots -> ${r.snapshotRepository}; releases -> ${r.releaseRepository.getOrElse("localStaging, then sonaRelease")}"
+        ).mkString("\n")
+      }.assert(routes =>
+        assertTrue(
+          routes.contains("MavenCentral: snapshots -> https://central.sonatype.com/repository/maven-snapshots/"),
+          routes.contains("releases -> localStaging, then sonaRelease"),
+          routes.contains("snapshots -> file:///tmp/zipx-repo/; releases -> file:///tmp/zipx-repo/"),
+        )
+      ),
+    ),
     section("Mainline snapshots")(
       md"""
 With `ZipxCentral.snapshots`, every push to the default branch publishes each row whose catalog number is not
@@ -66,12 +117,8 @@ that is already released is skipped: its snapshot would sort before the release.
 The `snapshots` job waits on this run's cache owner (`test`, or `cache-rehydrate` on a merge push that skipped
 Verify), restores that save, and never saves one, so it packages and uploads without recompiling. It skips scaladoc,
 which Central checks only on a release, and signs nothing. It needs `SONATYPE_USERNAME` / `SONATYPE_PASSWORD` and
-SNAPSHOTs enabled for the namespace in the Central Portal (Namespaces). Central deletes snapshots after 90 days.
-
-A build does not write its own `publishTo` for any of this. While zipx publishes a row, it routes the upload from
-`zipxReleaseWorkflow`'s registry: a snapshot to the registry's snapshot repository (Central's is
-`https://central.sonatype.com/repository/maven-snapshots/`), a release to `localStaging` for Central's `sonaRelease`,
-or to the registry's own URL. A development session keeps whatever `publishTo` the build sets.
+SNAPSHOTs enabled for the namespace in the Central Portal (Namespaces). Central deletes snapshots after 90 days. It is
+the same `zipxSnapshotPublish` you run from a laptop.
 """,
       exampleValue {
         DocsRender.job("snapshots")(Capability.test, ZipxCentral.snapshots)(using graph)
@@ -182,22 +229,6 @@ Nothing uploads until the plan is sound. Each refusal says what to do next.
           text.contains("""cannot tell whether ShipGroup("libs") 1.4.2 is released: connect timed out"""),
         )
       ),
-    ),
-    section("From your machine")(
-      md"""
-The same command publishes from a laptop, with no CI and no PR:
-
-```text
-sbt zipxSnapshotPublish local     # unreleased rows to ~/.ivy2/local, which sbt and cs resolve
-sbt zipxSnapshotPublish           # the same rows to the registry's snapshot repository
-```
-
-Both publish exactly the rows CI would, skip scaladoc, and put the shell back in a development session when they
-finish. The registry form checks credentials before anything uploads (for Central, `SONATYPE_USERNAME` /
-`SONATYPE_PASSWORD` or a credentials file for `central.sonatype.com`), so a missing token never leaves some modules
-published and the rest not. A `file:` registry, `ArtifactRegistry.Url("file:///tmp/repo/")`, rehearses snapshots and
-releases entirely on one machine.
-"""
     ),
     section("Pin a snapshot downstream")(
       md"""

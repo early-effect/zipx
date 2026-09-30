@@ -85,6 +85,7 @@ Release tag v0.15.2, catalog 0.15.1    zipx-release: [error] tag v0.15.2 does no
 | 6 | `snapshots/consume` | pin a snapshot: resolvers, freshness, guard, promotion | [x] |
 | 7 | `snapshots/pr-channel` | a label publishes `<row>-pr<N>-SNAPSHOT` from the PR's cache | [x] |
 | 8 | `snapshots/dogfood` | zipx on its own rows and `zipx-release.yml` | [x] |
+| 9 | `snapshots/local-publish` | `zipxSnapshotPublish [local]` from a laptop; zipx routes the upload | [x] |
 
 Cache invariants every layer keeps, each with a check in the layer that could break it:
 

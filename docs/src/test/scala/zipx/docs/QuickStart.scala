@@ -108,6 +108,7 @@ a catalog row; you do not list them again. Each module picks a group. Full guide
 A multi-artifact repo that publishes libraries on different cadences adds outbound `Ship` / `ShipGroup` rows. Every
 build is `<row>-SNAPSHOT`; a GitHub Release or a dispatch of `zipx-release.yml` releases rows; image and deploy still
 wait on a human `v*` tag. That loop, the graphs, and the fail-closed gate are **Independent versions**.
+`sbt zipxSnapshotPublish local` proves a change in a sibling repo before any of that; see **Snapshots and releases**.
 
 ```scala
 // project/ZipxVersions.scala
