@@ -483,6 +483,7 @@ object Capability:
   val AdvisoriesName: CapabilityName    = CapabilityName("advisories")
   val ModverCheckName: CapabilityName   = CapabilityName("modver-check")
   val ModverSuggestName: CapabilityName = CapabilityName("modver-suggest")
+  val SnapshotsName: CapabilityName     = CapabilityName("snapshots")
 
   private def testBody(scope: CapabilityScope, matrixed: Boolean): Capability = Capability(
     name = TestName,
@@ -556,6 +557,16 @@ object Capability:
       extraSteps = ModverCheck.fetchBaseSha,
       condition = Some(JobCondition.eventIs("pull_request")),
       env = Map(ModverCheck.BaseShaEnv -> EnvValue.typed(Expr.github("event.pull_request.base.sha"))),
+    )
+
+  /** Publishes every unreleased row at `<row>-SNAPSHOT` on a default-branch push, once this run's cache owner saved. */
+  def snapshots(command: SbtCommand = SbtCommand.unsafeCommand("zipxSnapshotPublish")): Capability =
+    Capability.once(
+      name = SnapshotsName,
+      command = command,
+      phase = Phase.Publish,
+      gate = Gate.OnDefaultPush,
+      needsCapabilities = List(TestName),
     )
 
   /** A Verify Once job that prints `zipx: skipping <gate>: <reason>` and exits 0. The check name stays on the PR. */

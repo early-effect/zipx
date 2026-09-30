@@ -1,7 +1,15 @@
 package zipx
 
-import sbt.{Def, ModuleID, Setting}
-import sbt.Keys.{crossScalaVersions, libraryDependencies, scalaVersion, thisProject, version}
+import sbt.{/, Compile, Def, ModuleID, Setting, Test}
+import sbt.Keys.{
+  crossScalaVersions,
+  libraryDependencies,
+  packageDoc,
+  publishArtifact,
+  scalaVersion,
+  thisProject,
+  version,
+}
 import zipx.plugin.ZipxDeps
 import zipx.plugin.ZipxPlugin.autoImport.{
   zipxActionRows,
@@ -68,12 +76,16 @@ object ZipxVersions:
     val versions =
       if shipRows.isEmpty then Nil
       else
-        Seq(version := {
-          val session = zipx.core.BuildSession.of(sys.props)
-          zipx.core.Modver
+        def session =
+          zipx.core.BuildSession.of(sys.props).fold(err => sys.error(s"zipx: ${err.message}"), identity)
+        Seq(
+          version := zipx.core.Modver
             .rowForProject(thisProject.value.id, zipxShips.value)
-            .fold("0.1.0-SNAPSHOT")(session.versionOf)
-        })
+            .fold("0.1.0-SNAPSHOT")(session.versionOf),
+          // Test resolves packageDoc-scoped keys through Compile before its own publishArtifact, so it is pinned too.
+          Compile / packageDoc / publishArtifact := session.publishesDocs && (Compile / publishArtifact).value,
+          Test / packageDoc / publishArtifact    := session.publishesDocs && (Test / publishArtifact).value,
+        )
     catalog ++ versions
   end applySettings
 end ZipxVersions

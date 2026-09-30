@@ -12,20 +12,31 @@ object RowStatus:
       case Nil          => if binaries.isEmpty then Unreleased else Released
       case head :: tail => if missing.sizeIs == binaries.size then Unreleased else Partial(::(head, tail))
 
-enum BuildSession:
-  case Snapshot
-  case Release
+enum BuildSession(val id: String):
+  case Development     extends BuildSession("development")
+  case SnapshotPublish extends BuildSession("snapshot")
+  case Release         extends BuildSession("release")
 
   def versionOf(row: PublishedRow): String = this match
-    case Snapshot => s"${row.version}${Modver.UnreleasedSuffix}"
-    case Release  => row.version
+    case Release                       => row.version
+    case Development | SnapshotPublish => s"${row.version}${Modver.UnreleasedSuffix}"
+
+  /** Central validates docs on a release only; scaladoc is the slow part of a snapshot publish. */
+  def publishesDocs: Boolean = this != SnapshotPublish
+end BuildSession
 
 object BuildSession:
   /** A JVM property, because sbt drops session settings when `++` / `+` switch Scala versions. */
-  val ReleaseProperty: String = "zipx.release"
+  val Property: String = "zipx.session"
 
-  def of(props: collection.Map[String, String]): BuildSession =
-    if props.contains(ReleaseProperty) then Release else Snapshot
+  def of(props: collection.Map[String, String]): Either[UnknownBuildSession, BuildSession] =
+    props.get(Property) match
+      case None     => Right(Development)
+      case Some(id) => values.find(_.id == id).toRight(UnknownBuildSession(id))
+
+final case class UnknownBuildSession(id: String):
+  def message: String =
+    s"-D${BuildSession.Property}=$id is not one of ${BuildSession.values.map(_.id).mkString(", ")}"
 
 /** A multi-row catalog tags `<identity>/v<n>` because a bare `v*` tag there is the image tag `ci.yml` builds on. */
 enum TagScheme:

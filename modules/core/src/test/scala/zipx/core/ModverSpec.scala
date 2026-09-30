@@ -180,16 +180,26 @@ object ModverSpec extends ZIOSpecDefault:
           val row: PublishedRow =
             if grouped then ShipGroup(gname("libs"), v, List(mid("models"))) else Ship(mid("client"), v)
           assertTrue(
-            BuildSession.Snapshot.versionOf(row) == s"$v-SNAPSHOT",
+            BuildSession.Development.versionOf(row) == s"$v-SNAPSHOT",
+            BuildSession.SnapshotPublish.versionOf(row) == s"$v-SNAPSHOT",
             BuildSession.Release.versionOf(row) == (v: String),
           )
         }
       },
-      test("the zipx.release JVM property is what makes a session a release") {
+      test("the zipx.session JVM property names the session") {
+        checkAll(Gen.fromIterable(BuildSession.values)) { session =>
+          assertTrue(BuildSession.of(Map(BuildSession.Property -> session.id)) == Right(session))
+        }
+      },
+      test("without the property a build is a development session, and an unknown session is refused") {
         assertTrue(
-          BuildSession.of(Map(BuildSession.ReleaseProperty -> "v1.4.2")) == BuildSession.Release,
-          BuildSession.of(Map("zipx.other" -> "x")) == BuildSession.Snapshot,
+          BuildSession.of(Map("zipx.other" -> "x")) == Right(BuildSession.Development),
+          BuildSession.of(Map(BuildSession.Property -> "nightly")) == Left(UnknownBuildSession("nightly")),
+          UnknownBuildSession("nightly").message.contains("development, snapshot, release"),
         )
+      },
+      test("only a snapshot publish drops scaladoc") {
+        assertTrue(BuildSession.values.filterNot(_.publishesDocs).toList == List(BuildSession.SnapshotPublish))
       },
     ),
     suite("membership")(

@@ -77,4 +77,12 @@ object ZipxCentral:
 
   val releases: ReleaseWorkflow = ReleaseWorkflow(ArtifactRegistry.MavenCentral, signingEnv, gpgImportSteps)
 
+  /** Central snapshots take no signature. */
+  val snapshotEnv: Map[String, EnvValue] = Map(
+    "SONATYPE_USERNAME" -> secret"SONATYPE_USERNAME",
+    "SONATYPE_PASSWORD" -> secret"SONATYPE_PASSWORD",
+  )
+
+  val snapshots: Capability = Capability.snapshots().withEnv(snapshotEnv)
+
 end ZipxCentral

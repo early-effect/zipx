@@ -2,7 +2,12 @@
 > zipxWorkflowGenerate
 $ exists .github/workflows/zipx-release.yml
 > assertReleaseWorkflow
+> assertSnapshotsJob
 > zipxWorkflowCheck
+
+# A merge publishes every unreleased row at <row>-SNAPSHOT.
+> zipxSnapshotPublish
+> assertSnapshotsPublished
 
 # A tag must name a row at its catalog number.
 -> zipxRelease refs/tags/client/v0.3.1
