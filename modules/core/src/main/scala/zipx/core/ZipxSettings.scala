@@ -191,6 +191,16 @@ object ZipxSettings:
       Build,
     )
 
+  val releaseWorkflow: SettingDef[Option[ReleaseWorkflow]] =
+    SettingDef.setting(
+      SettingName("zipxReleaseWorkflow"),
+      None,
+      SettingPurpose(
+        "Emit .github/workflows/zipx-release.yml: a GitHub Release's tag (v1.4.2, or row/v1.4.2 with several rows) or a default-branch dispatch runs zipxRelease, publishing unreleased Ship rows at their catalog numbers in one session. ZipxCentral.releases is the Central preset. Default None. None deletes the companion."
+      ),
+      Build,
+    )
+
   val coverageWorkflow: SettingDef[Option[CoverageWorkflow]] =
     SettingDef.setting(
       SettingName("zipxCoverageWorkflow"),
@@ -763,6 +773,7 @@ object ZipxSettings:
     versionUpdatesSchedule,
     versionUpdatesPreSteps,
     versionUpdatesExtraSteps,
+    releaseWorkflow,
     coverageWorkflow,
     pinFeeds,
     pinPrGate,

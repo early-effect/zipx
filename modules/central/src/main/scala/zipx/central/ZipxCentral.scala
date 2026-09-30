@@ -137,4 +137,6 @@ object ZipxCentral:
       )
       .whenAnyUpstreamSucceeded
 
+  val releases: ReleaseWorkflow = ReleaseWorkflow(ArtifactRegistry.MavenCentral, signingEnv, gpgImportSteps)
+
 end ZipxCentral

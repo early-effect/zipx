@@ -88,6 +88,7 @@ object ZipxVersions:
               zipxVersionsFile.value,
               (LocalRootProject / baseDirectory).value,
               sys.env,
+              zipx.core.ReleaseSession.active(sys.props),
             )
           },
           pomPostProcess := {

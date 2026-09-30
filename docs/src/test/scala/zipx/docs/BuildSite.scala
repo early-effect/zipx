@@ -15,6 +15,7 @@ object BuildSite extends DocsSite:
     QuickStart.doc,
     Versions.doc,
     IndependentVersions.doc,
+    SnapshotsAndReleases.doc,
     ExtendingVersions.doc,
     ExecutionModes.doc,
     BusyMonorepo.doc,
@@ -58,7 +59,7 @@ Later pages cover extra jobs (Graph, docker, deploy), packs (Central, Pages, AWS
 until you need them. **CI for a busy monorepo** is the one to read when a large repo's CI turns slow or blocks merges. **Extending Versions** is for sbt plugins that sit on zipx (splice, a company catalog). If you
 already maintain painful CI YAML, **Why zipx** is the recovery story.
 
-Guide: Why zipx → Quick start → Versions → Independent versions → Extending Versions → Execution modes → CI for a busy
+Guide: Why zipx → Quick start → Versions → Independent versions → Snapshots and releases → Extending Versions → Execution modes → CI for a busy
 monorepo → Matrix collapse
 → Capabilities → Custom capabilities → Composing sbt commands → Shell and steps → Verify → Affected → Caching → Remote
 cache for teams → From Bazel → Action pins → Dependency updates → Pin feeds → Docker and deploy → Job conditions →

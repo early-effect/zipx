@@ -1,7 +1,7 @@
 package zipx.core
 
-/** Where zipx looks up outbound POMs for version-moved skip. Topology is [[ZipxModver]], not this type. */
-enum ModverRegistry:
+/** Where a build's releases live. zipx reads POMs there to learn which catalog numbers are already released. */
+enum ArtifactRegistry:
   case MavenCentral
   case GitHubPackages(owner: String, repo: String)
   case Url(base: String)
@@ -22,25 +22,25 @@ enum ModverRegistry:
   def usesGithubToken: Boolean = this match
     case GitHubPackages(_, _) => true
     case _                    => false
-end ModverRegistry
+end ArtifactRegistry
 
-object ModverRegistry:
+object ArtifactRegistry:
   val EnvKey: String = "ZIPX_MODVER_REGISTRY"
 
-  def decode(raw: String): Either[String, ModverRegistry] =
+  def decode(raw: String): Either[String, ArtifactRegistry] =
     raw match
       case "central"                     => Right(MavenCentral)
       case s"ghpkg:$owner/$repo"         => Right(GitHubPackages(owner, repo))
       case s"url:$base" if base.nonEmpty => Right(Url(base))
-      case other                         => Left(s"unknown ModverRegistry encoding '$other'")
-end ModverRegistry
+      case other                         => Left(s"unknown ArtifactRegistry encoding '$other'")
+end ArtifactRegistry
 
 /** Independent-versioning topology: Graph library publish on default-branch push. Not a registry pack. */
 object ZipxModver:
 
   def publish(
       command: SbtCommand,
-      registry: ModverRegistry = ModverRegistry.MavenCentral,
+      registry: ArtifactRegistry = ArtifactRegistry.MavenCentral,
   ): Capability =
     val _ = registry
     Capability.publishGraph

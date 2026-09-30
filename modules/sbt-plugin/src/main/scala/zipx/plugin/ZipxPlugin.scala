@@ -85,14 +85,16 @@ object ZipxPlugin extends AutoPlugin:
     val ReleaseVersion = zipx.core.ReleaseVersion
     type ReleaseBump = zipx.core.ReleaseBump
     val ReleaseBump = zipx.core.ReleaseBump
+    type ReleaseWorkflow = zipx.core.ReleaseWorkflow
+    val ReleaseWorkflow = zipx.core.ReleaseWorkflow
     type Ship = zipx.core.Ship
     val Ship = zipx.core.Ship
     type ShipGroup = zipx.core.ShipGroup
     val ShipGroup = zipx.core.ShipGroup
     type ModverPropagate = zipx.core.ModverPropagate
     val ModverPropagate = zipx.core.ModverPropagate
-    type ModverRegistry = zipx.core.ModverRegistry
-    val ModverRegistry = zipx.core.ModverRegistry
+    type ArtifactRegistry = zipx.core.ArtifactRegistry
+    val ArtifactRegistry = zipx.core.ArtifactRegistry
     type ModuleId = zipx.core.ModuleId
     val ModuleId = zipx.core.ModuleId
     type Action = zipx.core.Action
@@ -240,6 +242,8 @@ object ZipxPlugin extends AutoPlugin:
       def signingEnv     = zipx.central.ZipxCentral.signingEnv
       def OrgSecretNames = zipx.central.ZipxCentral.OrgSecretNames
       def gpgImportSteps = zipx.central.ZipxCentral.gpgImportSteps
+
+      def releases: ReleaseWorkflow = zipx.central.ZipxCentral.releases
     end ZipxCentral
 
     /** The AWS pack. The newtypes are re-exported as `type` + `val` pairs rather than hidden behind factories, because
@@ -405,6 +409,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxVersionUpdatesPreSteps   = settingKey[Seq[Step]](ZipxSettings.versionUpdatesPreSteps.description)
     val zipxVersionUpdatesExtraSteps = settingKey[Seq[Step]](ZipxSettings.versionUpdatesExtraSteps.description)
     val zipxCoverageWorkflow         = settingKey[Option[CoverageWorkflow]](ZipxSettings.coverageWorkflow.description)
+    val zipxReleaseWorkflow          = settingKey[Option[ReleaseWorkflow]](ZipxSettings.releaseWorkflow.description)
     val zipxWorkflowDispatch         = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
     val zipxPublishSnapshots         = settingKey[Boolean](ZipxSettings.publishSnapshots.description)
     val zipxCiRelevant               = settingKey[Boolean](ZipxSettings.ciRelevant.description)
@@ -474,11 +479,11 @@ object ZipxPlugin extends AutoPlugin:
     object ZipxModver:
       def publish(
           command: SbtCommand = CapabilityTasks.of(zipxModverPublishSigned),
-          registry: ModverRegistry = zipx.core.ModverRegistry.MavenCentral,
+          registry: ArtifactRegistry = zipx.core.ArtifactRegistry.MavenCentral,
       ): Capability =
         zipx.core.ZipxModver
           .publish(command, registry)
-          .withEnv(Map(zipx.core.ModverRegistry.EnvKey -> EnvValue.plain(registry.encode)))
+          .withEnv(Map(zipx.core.ArtifactRegistry.EnvKey -> EnvValue.plain(registry.encode)))
     end ZipxModver
   end autoImport
 
@@ -520,6 +525,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxVersionUpdatesPreSteps   := Seq.empty,
     zipxVersionUpdatesExtraSteps := Seq.empty,
     zipxCoverageWorkflow         := None,
+    zipxReleaseWorkflow          := None,
     zipxDeployTrigger            := DeployTrigger.OnMerge,
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
@@ -579,6 +585,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxPublishOrder := publishOrderTask.value,
     zipxModuleGraph  := Def.uncached(buildGraph.value),
     commands += testAffectedCommand,
+    commands += releaseCommand,
     // `Def.uncached` because a file write is not a valid cached-task output.
     zipxCatalogGenerate := Def.uncached {
       Def
@@ -960,7 +967,13 @@ object ZipxPlugin extends AutoPlugin:
           Capability.modverSuggest(CapabilityTasks.of(zipxModverSuggest)),
           Capability.modverCheck(CapabilityTasks.of(zipxModverCheck)),
         )
-    combineCapabilities(builtins ++ modver, userCaps.toList)
+    val releasing = readBuildSetting(extracted, zipxReleaseWorkflow, None).isDefined
+    if releasing && userCaps.exists(_.name == Capability.PublishName) then
+      sys.error(
+        "zipx: zipx-release.yml publishes the Ship rows, so ci.yml must not. Drop the 'publish' capability from zipxCapabilities."
+      )
+    val published = if releasing then builtins.filterNot(_.name == Capability.PublishName) else builtins
+    combineCapabilities(published ++ modver, userCaps.toList)
   end capabilitiesOf
 
   /** Under [[DeployTrigger.Manual]] or [[DeployTrigger.Staged]], the images-and-deploys half of the build's
@@ -1018,6 +1031,7 @@ object ZipxPlugin extends AutoPlugin:
     writeVersionUpdatesIfEnabled.value
     writeCoverageWorkflow.value
     writeDeployWorkflow.value
+    writeReleaseWorkflow.value
   }
 
   private def writeCiParams: Def.Initialize[Task[Unit]] = Def.task {
@@ -1202,6 +1216,88 @@ object ZipxPlugin extends AutoPlugin:
           s"zipx: $rel is leftover. Set zipxDeployTrigger := DeployTrigger.Manual() or delete $rel, then sbt zipxWorkflowGenerate."
         )
       case None => ()
+
+  private def releaseYaml(st: State, graph: ModuleGraph, cfg: PlanConfig): Option[String] =
+    val extracted = Project.extract(st)
+    readBuildSetting(extracted, zipxReleaseWorkflow, None).map { release =>
+      val ships = readBuildSetting(extracted, zipxShips, Seq.empty)
+      if ships.isEmpty then sys.error(s"zipx: ${ReleaseError.NoRows.message}")
+      val docs = capabilitiesOf(extracted, graph).find { cap =>
+        cap.name == zipx.specular.ZipxDocs.DocsName && cap.workflowCall.isDefined
+      }
+      orFail(ReleaseWorkflow.render(release, cfg, TagScheme.of(ShipIndex.from(ships)), docs))
+    }
+  end releaseYaml
+
+  private def writeReleaseWorkflow: Def.Initialize[Task[Unit]] = Def.task {
+    val root = (LocalRootProject / baseDirectory).value
+    val log  = streams.value.log
+    val file = root / ReleaseWorkflow.DefaultPath
+    releaseYaml(state.value, buildGraph.value, planConfig.value) match
+      case Some(body)          => writeCompanion(root, ReleaseWorkflow.DefaultPath, body, log)
+      case None if file.exists =>
+        IO.delete(file)
+        log.info(s"zipx deleted ${file.getPath}")
+      case None => ()
+  }
+
+  private def checkReleaseWorkflow(root: File, graph: ModuleGraph, cfg: PlanConfig, st: State, log: Logger): Unit =
+    val rel = ReleaseWorkflow.DefaultPath
+    releaseYaml(st, graph, cfg) match
+      case Some(expected)              => checkCompanion(root, rel, expected, log)
+      case None if (root / rel).exists =>
+        sys.error(s"zipx: $rel is leftover. Set zipxReleaseWorkflow or delete $rel, then sbt zipxWorkflowGenerate.")
+      case None => ()
+
+  private val releaseCommand: Command = Command.args("zipxRelease", "<ref>") { (st, args) =>
+    val extracted     = Project.extract(st)
+    val (next, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
+    val release       = readBuildSetting(extracted, zipxReleaseWorkflow, None)
+      .getOrElse(sys.error("zipx: zipxRelease needs zipxReleaseWorkflow := Some(...)"))
+    val catalog  = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
+    val binaries = liveBinaries(extracted, graph, catalog)
+    val plan     = orFail(
+      ReleaseRequest
+        .fromRef(args.mkString(" ").trim)
+        .flatMap(ReleasePlan.plan(_, catalog, graph, rowStatus(_, graph, catalog, binaries, release.registry)))
+        .left
+        .map(_.message)
+    )
+    IO.writeLines(extracted.get(LocalRootProject / baseDirectory) / ReleaseWorkflow.TagsFile, plan.entries.map(_.tag))
+    plan.entries.foreach(e => next.log.info(s"zipx: releasing ${Modver.describe(e.row)} ${e.row.version} as ${e.tag}"))
+    next.log.info("zipx: this sbt session now builds every row at its catalog number")
+    sys.props(ReleaseSession.Property) = plan.entries.map(_.tag).mkString(",")
+    val (publishTask, finish) = release.registry match
+      case ArtifactRegistry.MavenCentral =>
+        import com.jsuereth.sbtpgp.PgpKeys.publishSigned
+        (
+          CapabilityTasks.of(publishSigned),
+          List(CapabilityTasks.of(sbt.internal.librarymanagement.Publishing.sonaRelease)),
+        )
+      case ArtifactRegistry.GitHubPackages(_, _) | ArtifactRegistry.Url(_) => (CapabilityTasks.of(publish), Nil)
+    val commands =
+      plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, publishTask)) ++ finish
+    "reload" :: commands.map(c => c.text: String) ::: next
+  }
+
+  private def rowStatus(
+      row: PublishedRow,
+      graph: ModuleGraph,
+      catalog: ShipIndex,
+      binaries: Map[ModuleId, List[(String, Gav)]],
+      registry: ArtifactRegistry,
+  ): Either[ReleaseError, RowStatus] =
+    val gavs = graph.nodes.filter(n => catalog.rowFor(n.matrixRoot).contains(row)).flatMap { node =>
+      binaries.getOrElse(node.id, Nil).map(_._2)
+    }
+    gavs
+      .foldLeft[Either[ReleaseError, List[(Gav, RegistryStatus)]]](Right(Nil)) { (acc, gav) =>
+        acc.flatMap { seen =>
+          lookupGav(registry, gav).map(s => seen :+ (gav -> s)).left.map(ReleaseError.RegistryUnreachable(row, _))
+        }
+      }
+      .map(RowStatus.of)
+  end rowStatus
 
   private def writeCompanion(root: File, rel: String, body: String, log: Logger): Unit =
     val file = root / rel
@@ -1463,6 +1559,7 @@ object ZipxPlugin extends AutoPlugin:
     checkVersionUpdates(root, cfg, extracted, streams.value.log)
     checkCoverageWorkflow(root, cfg, state.value, streams.value.log)
     checkDeployWorkflow(root, buildGraph.value, cfg, state.value, streams.value.log)
+    checkReleaseWorkflow(root, buildGraph.value, cfg, state.value, streams.value.log)
     validateCatalog(extracted, buildGraph.value, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
     checkCiParams(root, cfg, extracted, streams.value.log)
@@ -2307,17 +2404,17 @@ object ZipxPlugin extends AutoPlugin:
     end match
   }
 
-  private def resolveRegistry(extracted: Extracted, graph: ModuleGraph): ModverRegistry =
+  private def resolveRegistry(extracted: Extracted, graph: ModuleGraph): ArtifactRegistry =
     capabilitiesOf(extracted, graph)
       .find(_.name == Capability.PublishName)
-      .flatMap(_.env.get(ModverRegistry.EnvKey))
+      .flatMap(_.env.get(ArtifactRegistry.EnvKey))
       .flatMap {
-        case EnvValue.Plain(value) => ModverRegistry.decode(value).toOption
+        case EnvValue.Plain(value) => ArtifactRegistry.decode(value).toOption
         case _                     => None
       }
-      .getOrElse(ModverRegistry.MavenCentral)
+      .getOrElse(ArtifactRegistry.MavenCentral)
 
-  private def lookupGav(registry: ModverRegistry, gav: Gav): Either[String, RegistryStatus] =
+  private def lookupGav(registry: ArtifactRegistry, gav: Gav): Either[String, RegistryStatus] =
     val headers =
       if registry.usesGithubToken then
         sys.env
