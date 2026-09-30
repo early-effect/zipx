@@ -5,8 +5,6 @@ ThisBuild / organization         := "rocks.earlyeffect"
 ThisBuild / organizationName     := "Early Effect"
 ThisBuild / organizationHomepage := Some(uri("https://www.earlyeffect.rocks"))
 ThisBuild / versionScheme        := Some("early-semver")
-// sbt-dynver-ci owns version until zipx ships from its own Ship rows; between tags it is `<last-tag>-SNAPSHOT`.
-ThisBuild / dynverCiSuffix := "-SNAPSHOT"
 
 ThisBuild / homepage := Some(uri("https://github.com/early-effect/zipx"))
 ThisBuild / licenses := Seq("Apache-2.0" -> uri("http://www.apache.org/licenses/LICENSE-2.0.txt"))
@@ -61,16 +59,17 @@ lazy val root = (project in file("."))
     // `Def.uncached` because a file write is not a valid cached-task output.
     zipxWriteVersion := Def.uncached {
       val out = (LocalRootProject / baseDirectory).value / zipx.ExampleCheck.VersionFile
-      IO.write(out, (ThisBuild / version).value)
-      streams.value.log.info(s"zipx version ${(ThisBuild / version).value} -> ${out.getPath}")
+      IO.write(out, (plugin / version).value)
+      streams.value.log.info(s"zipx version ${(plugin / version).value} -> ${out.getPath}")
       out
     },
-    // Dogfood: Aggregate Central + Pages, fork-gated so tag pushes on forks skip publish/docs.
-    // (No ZipxGitHubPackages here yet: that needs dual publishTo when PUBLISH_GITHUB_PACKAGES=true.)
+    // Dogfood: snapshots on merge and on labeled PRs, Pages, fork-gated. Releases run from zipx-release.yml.
+    zipxReleaseWorkflow := Some(ZipxCentral.releases),
     zipxCapabilities ++= {
       val upstream = JobCondition.repositoryIs("early-effect/zipx")
       Seq(
-        ZipxCentral.release.withCondition(upstream),
+        ZipxCentral.snapshots.andCondition(upstream),
+        ZipxCentral.pullRequestSnapshots("snapshots"),
         // andCondition keeps ZipxDocs tag|dispatch filter and layers the fork gate
         ZipxDocs.pages().andCondition(upstream),
         // Override Aggregate `test`: unit/IT tests, then publishLocal + examples/monorepo zipxWorkflowCheck (former
@@ -304,4 +303,3 @@ lazy val docs = project
 
 addCommandAlias("docsPreview", "~docs/specularPreview")
 addCommandAlias("docsDev", "docsPreview")
-addCommandAlias("release", "; publishSigned; sonaRelease")

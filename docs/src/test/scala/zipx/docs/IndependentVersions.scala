@@ -44,8 +44,9 @@ object IndependentVersions extends DocSpecSuite:
 
   def doc = page("Independent versions")(
     md"""
-Skip this page if every artifact in the repo ships together on a `v*` tag. That lockstep path still works:
-`sbt-dynver-ci`, Aggregate `ZipxCentral.release`, `Gate.OnReleaseTag`. zipx itself stays there for now.
+A repo whose artifacts always ship together is one `ShipGroup` over every published module, as zipx itself is. A tag-driven
+lockstep build (`sbt-dynver-ci`, Aggregate `ZipxCentral.release`, `Gate.OnReleaseTag`) still generates, but the rows
+below are the model the org is moving to.
 
 Use `Ship` / `ShipGroup` rows when a monorepo publishes several libraries on different cadences. Presence of any such
 val is the feature flag. A row holds the **next** release number, every build is `<row>-SNAPSHOT`, and a release is a

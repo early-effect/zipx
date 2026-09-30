@@ -61,8 +61,8 @@ parameterizes instead of rewriting YAML:
 
 `zipxVersionUpdatesPreSteps` (default empty) runs after setup and before `zipx-cli` apply. zipx dogfoods this to
 `publishLocal` the **whole** in-dev graph (not `cli/publishLocal` alone: `cs launch` still needs `zipx-core` and
-`zipx-syntax` at the same dynver) and export `ZIPX_CLI_VERSION` on `GITHUB_ENV`, so Sunday `cs launch` can resolve that
-version without baking dynver into committed `zipx-ci.env`.
+`zipx-syntax` at the same version) and export `ZIPX_CLI_VERSION` on `GITHUB_ENV`, so Sunday `cs launch` can resolve
+that version without baking an in-dev version into committed `zipx-ci.env`.
 
 `zipxVersionUpdatesExtraSteps` (default empty) runs after `zipxCatalogGenerate` and before the PR opens. Any zipx repo
 can set it. The usual case is an **sbt plugin** whose nested example (or scripted fixture) must see the in-dev plugin:

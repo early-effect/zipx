@@ -53,7 +53,7 @@ Day one is Aggregate: parallel Verify (`test`, `fmt`, `workflow-check`, `advisor
 tag. Add the plugin, run `zipxWorkflowGenerate`, commit, open a PR. `zipxWorkflowCheck` fails the PR if you forgot to
 regenerate. Versions live in a `ZipxVersions` catalog you extend (`Lib` / `Plugin` / `Pin` / `Action` inbound vals, no
 second list); drop `MyVersions.settings` in `build.sbt`. Multi-artifact repos add outbound `Ship` / `ShipGroup` rows
-(**Independent versions**); zipx-the-product stays lockstep on dynver-ci.
+(**Independent versions**); zipx itself is one `ShipGroup` released from `zipx-release.yml`.
 
 Later pages cover extra jobs (Graph, docker, deploy), packs (Central, Pages, AWS), and the local bump loop. Skip them
 until you need them. **CI for a busy monorepo** is the one to read when a large repo's CI turns slow or blocks merges. **Extending Versions** is for sbt plugins that sit on zipx (splice, a company catalog). If you

@@ -73,7 +73,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
-          cache-epoch: ""
+          cache-epoch: cbb259409de4c6db
       - name: cache-rehydrate
         run: sbt 'Test/compile'
   test:
@@ -96,7 +96,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
-          cache-epoch: ""
+          cache-epoch: cbb259409de4c6db
       - name: Pre-pull remote-cache IT images
         run: |
           set -euo pipefail
@@ -166,7 +166,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: ""
+          cache-epoch: cbb259409de4c6db
       - name: fmt
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -196,7 +196,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: ""
+          cache-epoch: cbb259409de4c6db
       - name: workflow-check
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -226,13 +226,86 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: ""
+          cache-epoch: cbb259409de4c6db
       - name: advisories
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
             sbt 'cleanFull; zipxAdvisoryCheck'
           else
             sbt 'zipxAdvisoryCheck'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
+  modver-suggest:
+    name: modver-suggest
+    runs-on: ubuntu-latest
+    needs:
+      - verify-gate
+    if: (!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))) && (github.event_name == 'pull_request')
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      ZIPX_MODVER_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
+      - name: zipx sbt setup
+        uses: ./.github/actions/zipx-sbt-setup
+        with:
+          java-version: "25"
+          runner-os: ubuntu-latest
+          cache-key-suffix: modver-suggest
+          node-version: ""
+          sbt-disk-cache: "false"
+          cache-mode: restore
+          cache-epoch: cbb259409de4c6db
+      - name: Fetch PR base SHA
+        run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
+      - name: modver-suggest
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; zipxModverSuggest'
+          else
+            sbt 'zipxModverSuggest'
+          fi
+        env:
+          ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
+  modver-check:
+    name: modver-check
+    runs-on: ubuntu-latest
+    needs:
+      - verify-gate
+    if: (!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))) && (github.event_name == 'pull_request')
+    permissions:
+      contents: read
+    env:
+      ZIPX_MODVER_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
+      - name: zipx sbt setup
+        uses: ./.github/actions/zipx-sbt-setup
+        with:
+          java-version: "25"
+          runner-os: ubuntu-latest
+          cache-key-suffix: modver-check
+          node-version: ""
+          sbt-disk-cache: "false"
+          cache-mode: restore
+          cache-epoch: cbb259409de4c6db
+      - name: Fetch PR base SHA
+        run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
+      - name: modver-check
+        run: |
+          if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
+            sbt 'cleanFull; zipxModverCheck'
+          else
+            sbt 'zipxModverCheck'
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
@@ -256,7 +329,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: ""
+          cache-epoch: cbb259409de4c6db
       - name: scripted
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -266,13 +339,14 @@ jobs:
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
-  publish:
-    name: publish
+  snapshots:
+    name: snapshots
     runs-on: ubuntu-latest
-    if: (startsWith(github.ref, 'refs/tags/v')) && (github.repository == 'early-effect/zipx')
+    needs:
+      - cache-rehydrate
+      - test
+    if: ((!cancelled() && needs.cache-rehydrate.result != 'failure' && needs.test.result != 'failure') && ((((github.event_name == 'push') && ((github.ref == 'refs/heads/main'))) || (github.event_name == 'workflow_dispatch')))) && (github.repository == 'early-effect/zipx')
     env:
-      PGP_KEY_HEX: ${{ secrets.PGP_KEY_HEX }}
-      PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
       SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
     steps:
@@ -285,22 +359,40 @@ jobs:
         with:
           java-version: "25"
           runner-os: ubuntu-latest
-          cache-key-suffix: publish
+          cache-key-suffix: snapshots
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
-          cache-epoch: ""
-      - name: Import signing key
-        run: |
-          mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
-          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
-          echo "pinentry-mode loopback"   >> ~/.gnupg/gpg.conf
-          gpgconf --kill gpg-agent || true
-          echo "$PGP_SECRET" | base64 --decode | gpg --batch --import
-        env:
-          PGP_SECRET: ${{ secrets.PGP_SECRET }}
-      - name: publish
-        run: sbt 'shell/publishSigned; workflow/publishSigned; core/publishSigned; aws/publishSigned; central/publishSigned; syntax/publishSigned; cli/publishSigned; plugin/publishSigned; sonaRelease'
+          cache-epoch: cbb259409de4c6db
+      - name: snapshots
+        run: sbt 'zipxSnapshotPublish'
+  snapshots-pr:
+    name: snapshots-pr
+    runs-on: ubuntu-latest
+    needs:
+      - cache-rehydrate
+      - test
+    if: (!cancelled() && needs.cache-rehydrate.result != 'failure' && needs.test.result != 'failure') && (((github.event_name == 'pull_request') && (contains(github.event.pull_request.labels.*.name, 'snapshots'))) && (github.event.pull_request.head.repo.full_name == github.repository))
+    env:
+      SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+      SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: "0"
+          fetch-tags: "true"
+      - name: zipx sbt setup
+        uses: ./.github/actions/zipx-sbt-setup
+        with:
+          java-version: "25"
+          runner-os: ubuntu-latest
+          cache-key-suffix: snapshots-pr
+          node-version: ""
+          sbt-disk-cache: "false"
+          cache-mode: restore
+          cache-epoch: cbb259409de4c6db
+      - name: snapshots-pr
+        run: sbt 'zipxSnapshotPublish pr'
   docs:
     name: docs
     if: ((startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch')) && (github.repository == 'early-effect/zipx')

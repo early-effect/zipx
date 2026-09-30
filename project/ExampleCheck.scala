@@ -70,10 +70,10 @@ object ExampleCheck:
   val companionSteps: Seq[Step] = Seq(publishLocal.build, generateExample.build)
 
   /** Publish the whole in-dev graph and export `ZIPX_CLI_VERSION` so Sunday `cs launch` can resolve zipx-cli plus
-    * zipx-core / zipx-syntax at the same dynver. `cli/publishLocal` alone is not enough.
+    * zipx-core / zipx-syntax at the same version. `cli/publishLocal` alone is not enough.
     *
-    * Do not bake dynver into committed `zipx-ci.env`: that file is a `zipxWorkflowCheck` input, and the next SHA would
-    * fail. `GITHUB_ENV` lasts for later steps in this job only.
+    * Do not bake the in-dev version into committed `zipx-ci.env`: that file is a `zipxWorkflowCheck` input, and the next
+    * row bump would fail it. `GITHUB_ENV` lasts for later steps in this job only.
     */
   val companionPreSteps: Seq[Step] = Seq(
     Step
