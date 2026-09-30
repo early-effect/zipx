@@ -11,6 +11,23 @@ $ copy-file changes/Api.scala upstream/src/main/scala/Api.scala
 $ copy-file changes/Use.scala consumer/src/main/scala/Use.scala
 > consumer/compile
 
+# A republish that adds a dependency reaches this same sbt shell after reload, which forgets sbt's in-memory
+# resolutions while a snapshot is pinned.
+> helper/publishLocal
+$ touch v2
+> reload
+> upstream/publishLocal
+$ copy-file changes/UseHelper.scala consumer/src/main/scala/Use.scala
+> consumer/compile
+
+# clean forgets them too: a republish from outside this shell's settings stays stale until clean.
+$ touch v3
+> upstream/publishLocal
+$ copy-file changes/UseKernel.scala consumer/src/main/scala/Use.scala
+-> consumer/compile
+> consumer/clean
+> consumer/compile
+
 > zipxWorkflowGenerate
 > assertCiPins
 > forgetFixtureRepo

@@ -457,6 +457,9 @@ object ZipxPlugin extends AutoPlugin:
   import autoImport.*
 
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
+    onUnload := onUnload.value.andThen(
+      ResolutionCache.forgetOnUnload(s => readBuildSetting(Project.extract(s), zipxVersions, Seq.empty))
+    ),
     zipxCapabilities             := Seq.empty,
     zipxCache                    := CacheBackend.LocalDir,
     zipxCacheEpoch               := CacheEpoch.GitTags(),
@@ -608,6 +611,10 @@ object ZipxPlugin extends AutoPlugin:
     resolvers ++= Option
       .when(SnapshotPins.of(zipxVersions.value).nonEmpty)(SnapshotPins.ResolverName at SnapshotPins.CentralSnapshots)
       .toList,
+    clean := Def.uncached {
+      clean.value
+      ResolutionCache.forgetIfPinned(zipxVersions.value)
+    },
     forceUpdatePeriod := {
       if libraryDependencies.value.exists(m => SnapshotPins.isSnapshot(m.revision)) then
         Some(scala.concurrent.duration.Duration.Zero)
