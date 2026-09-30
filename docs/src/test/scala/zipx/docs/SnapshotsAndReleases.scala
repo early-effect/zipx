@@ -65,9 +65,13 @@ that is already released is skipped: its snapshot would sort before the release.
 
 The `snapshots` job waits on this run's cache owner (`test`, or `cache-rehydrate` on a merge push that skipped
 Verify), restores that save, and never saves one, so it packages and uploads without recompiling. It skips scaladoc,
-which Central checks only on a release, and signs nothing. It needs `SONATYPE_USERNAME` / `SONATYPE_PASSWORD` and a
-`publishTo` that routes `-SNAPSHOT` to `https://central.sonatype.com/repository/maven-snapshots/`, and SNAPSHOTs
-enabled for the namespace in the Central Portal (Namespaces). Central deletes snapshots after 90 days.
+which Central checks only on a release, and signs nothing. It needs `SONATYPE_USERNAME` / `SONATYPE_PASSWORD` and
+SNAPSHOTs enabled for the namespace in the Central Portal (Namespaces). Central deletes snapshots after 90 days.
+
+A build does not write its own `publishTo` for any of this. While zipx publishes a row, it routes the upload from
+`zipxReleaseWorkflow`'s registry: a snapshot to the registry's snapshot repository (Central's is
+`https://central.sonatype.com/repository/maven-snapshots/`), a release to `localStaging` for Central's `sonaRelease`,
+or to the registry's own URL. A development session keeps whatever `publishTo` the build sets.
 """,
       exampleValue {
         DocsRender.job("snapshots")(Capability.test, ZipxCentral.snapshots)(using graph)
@@ -178,6 +182,22 @@ Nothing uploads until the plan is sound. Each refusal says what to do next.
           text.contains("""cannot tell whether ShipGroup("libs") 1.4.2 is released: connect timed out"""),
         )
       ),
+    ),
+    section("From your machine")(
+      md"""
+The same command publishes from a laptop, with no CI and no PR:
+
+```text
+sbt zipxSnapshotPublish local     # unreleased rows to ~/.ivy2/local, which sbt and cs resolve
+sbt zipxSnapshotPublish           # the same rows to the registry's snapshot repository
+```
+
+Both publish exactly the rows CI would, skip scaladoc, and put the shell back in a development session when they
+finish. The registry form checks credentials before anything uploads (for Central, `SONATYPE_USERNAME` /
+`SONATYPE_PASSWORD` or a credentials file for `central.sonatype.com`), so a missing token never leaves some modules
+published and the rest not. A `file:` registry, `ArtifactRegistry.Url("file:///tmp/repo/")`, rehearses snapshots and
+releases entirely on one machine.
+"""
     ),
     section("Pin a snapshot downstream")(
       md"""

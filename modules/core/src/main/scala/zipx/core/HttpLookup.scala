@@ -53,7 +53,15 @@ object HttpLookup:
       firstJitter: Duration = FirstAttemptJitter,
       etags: ConcurrentHashMap[String, String] = sharedEtags,
   ): Either[String, HttpLookupResult] =
-    runEither(getZio(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, etags))
+    if url.startsWith("file:") then Right(readFile(url))
+    else runEither(getZio(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, etags))
+
+  /** A `file:` registry, for a release or snapshot rehearsed entirely on one machine. */
+  private def readFile(url: String): HttpLookupResult =
+    val path = java.nio.file.Path.of(URI.create(url))
+    if java.nio.file.Files.isRegularFile(path) then
+      HttpLookupResult(200, java.nio.file.Files.readString(path), Map.empty)
+    else HttpLookupResult(404, "", Map.empty)
 
   def post(
       url: String,

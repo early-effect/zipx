@@ -15,6 +15,19 @@ enum ArtifactRegistry:
   def metadataUrl(organization: String, artifact: String): String =
     s"$root/${ArtifactRegistry.groupPath(organization)}/$artifact/maven-metadata.xml"
 
+  def snapshotRepository: String = this match
+    case MavenCentral => "https://central.sonatype.com/repository/maven-snapshots/"
+    case _            => s"$root/"
+
+  /** `None` for Central, whose releases stage locally for `sonaRelease`. */
+  def releaseRepository: Option[String] = this match
+    case MavenCentral => None
+    case _            => Some(s"$root/")
+
+  /** The host a publish authenticates to; a `file:` registry needs none. */
+  def credentialHost: Option[String] =
+    Option(java.net.URI.create(snapshotRepository)).filter(_.getScheme.startsWith("http")).map(_.getHost)
+
   def usesGithubToken: Boolean = this match
     case GitHubPackages(_, _) => true
     case _                    => false

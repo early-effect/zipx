@@ -2,12 +2,12 @@ MyVersions.settings
 organization        := "com.example.zipx.release"
 zipxCacheEpoch      := CacheEpoch.ShipCatalog
 zipxVerify          := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
-zipxReleaseWorkflow := Some(ReleaseWorkflow(ArtifactRegistry.Url("https://repo1.maven.org/maven2")))
+LocalRootProject / zipxReleaseWorkflow := Some(ReleaseWorkflow(ArtifactRegistry.Url(file("released").getAbsoluteFile.toURI.toString)))
 zipxCapabilities ++= Seq(Capability.snapshots(), ZipxCentral.pullRequestSnapshots("snapshots"))
 
 val released = file("released").getAbsoluteFile
 
-val toFixtureRepo = Seq(publishTo := Some(Resolver.file("fixture", released)))
+val toFixtureRepo = Seq.empty[Setting[?]]
 
 lazy val models = project.settings(toFixtureRepo)
 
@@ -55,6 +55,20 @@ assertPrSnapshotsPublished := Def.uncached {
   assert((client / version).value == "0.3.0-SNAPSHOT", (client / version).value)
   val yml = IO.read((LocalRootProject / baseDirectory).value / ".github/workflows/ci.yml")
   assert(yml.contains("  snapshots-pr:") && yml.contains("zipxSnapshotPublish pr"), yml)
+}
+
+def ivyLocalRepo: File = file(sys.props("user.home")) / ".ivy2" / "local" / "com.example.zipx.release"
+
+val forgetIvyLocal = taskKey[Unit]("Remove this fixture's organization from the machine's ivy repository")
+forgetIvyLocal := Def.uncached(IO.delete(ivyLocalRepo))
+
+val assertLocalSnapshots = taskKey[Unit]("zipxSnapshotPublish local publishes unreleased rows to ivy-local, and the shell is a development session again")
+assertLocalSnapshots := Def.uncached {
+  val models = ivyLocalRepo / "models_3" / "1.4.2-SNAPSHOT"
+  assert((models / "jars" / "models_3.jar").exists, s"no local models jar under $models")
+  assert(!(models / "docs").exists, "a local snapshot publish carries no scaladoc")
+  assert(!sys.props.contains("zipx.session"), s"session left at ${sys.props.get("zipx.session")}")
+  assert((client / Compile / packageDoc / publishArtifact).value, "a development session publishes docs again")
 }
 
 val assertSnapshotVersions = taskKey[Unit]("outside a release every row member is <row>-SNAPSHOT")

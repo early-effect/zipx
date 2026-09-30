@@ -1,12 +1,15 @@
 package zipx
 
-import sbt.{/, Compile, Def, ModuleID, Setting, Test}
+import sbt.{/, Compile, Def, LocalRootProject, ModuleID, Setting, Test}
+import sbt.librarymanagement.syntax.*
 import sbt.Keys.{
   crossScalaVersions,
   libraryDependencies,
+  localStaging,
   packageDoc,
   projectID,
   publishArtifact,
+  publishTo,
   scalaVersion,
   thisProject,
   version,
@@ -16,6 +19,7 @@ import zipx.plugin.ZipxPlugin.autoImport.{
   zipxActionRows,
   zipxCheckDeps,
   zipxPins,
+  zipxReleaseWorkflow,
   zipxSbt,
   zipxScala,
   zipxShips,
@@ -89,6 +93,16 @@ object ZipxVersions:
           // Test resolves packageDoc-scoped keys through Compile before its own publishArtifact, so it is pinned too.
           Compile / packageDoc / publishArtifact := session.publishesDocs && (Compile / publishArtifact).value,
           Test / packageDoc / publishArtifact    := session.publishesDocs && (Test / publishArtifact).value,
+          publishTo                              := zipx.core.Modver
+            .rowForProject(thisProject.value.id, zipxShips.value)
+            .flatMap(_ => (LocalRootProject / zipxReleaseWorkflow).value.map(_.registry))
+            .fold(publishTo.value)(registry =>
+              session match
+                case zipx.core.BuildSession.Development => publishTo.value
+                case zipx.core.BuildSession.Release     =>
+                  registry.releaseRepository.fold(localStaging.value)(url => Some("zipx-release" at url))
+                case _ => Some("zipx-snapshots" at registry.snapshotRepository)
+            ),
         )
     catalog ++ versions
   end applySettings

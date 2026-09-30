@@ -7,7 +7,7 @@ import zipx.workflow.Step
   * snapshots and re-resolves them on every session.
   */
 object SnapshotPins:
-  val CentralSnapshots: String = "https://central.sonatype.com/repository/maven-snapshots/"
+  val CentralSnapshots: String = ArtifactRegistry.MavenCentral.snapshotRepository
 
   val ResolverName: String = "central-snapshots"
 

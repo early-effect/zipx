@@ -6,6 +6,12 @@ $ exists .github/workflows/zipx-release.yml
 > zipxWorkflowCheck
 
 # A merge publishes every unreleased row at <row>-SNAPSHOT.
+# A laptop publishes the same rows to the local ivy repository, then the shell is back to a development session.
+> forgetIvyLocal
+> zipxSnapshotPublish local
+> assertLocalSnapshots
+> forgetIvyLocal
+
 > zipxSnapshotPublish
 > assertSnapshotsPublished
 

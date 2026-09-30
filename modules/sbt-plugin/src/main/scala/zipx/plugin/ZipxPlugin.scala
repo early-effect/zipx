@@ -560,6 +560,7 @@ object ZipxPlugin extends AutoPlugin:
     commands += testAffectedCommand,
     commands += releaseCommand,
     commands += snapshotPublishCommand,
+    commands += sessionCommand,
     // `Def.uncached` because a file write is not a valid cached-task output.
     zipxCatalogGenerate := Def.uncached {
       Def
@@ -1278,50 +1279,84 @@ object ZipxPlugin extends AutoPlugin:
     "reload" :: commands.map(c => c.text: String) ::: next
   }
 
-  private val snapshotPublishCommand: Command = Command.args("zipxSnapshotPublish", "[pr [<number>]]") { (st, args) =>
-    val session = args.toList match
-      case Nil         => BuildSession.SnapshotPublish
-      case "pr" :: Nil =>
-        pullRequestNumber()
-          .flatMap(PullRequestNumber.make(_).toOption)
-          .fold(
-            sys
-              .error("zipx: 'zipxSnapshotPublish pr' runs on a pull_request event; pass the number to run it elsewhere")
-          )(
-            BuildSession.PullRequestSnapshot(_)
+  private enum SnapshotTarget:
+    case Registry
+    case Local
+
+  private val snapshotPublishCommand: Command =
+    Command.args("zipxSnapshotPublish", "[local | pr [<number>]]") { (st, args) =>
+      val (session, target) = args.toList match
+        case Nil            => (BuildSession.SnapshotPublish, SnapshotTarget.Registry)
+        case "local" :: Nil => (BuildSession.SnapshotPublish, SnapshotTarget.Local)
+        case "pr" :: Nil    =>
+          pullRequestNumber()
+            .flatMap(PullRequestNumber.make(_).toOption)
+            .fold(sys.error("zipx: 'zipxSnapshotPublish pr' runs on a pull_request event; pass the number elsewhere"))(
+              pr => (BuildSession.PullRequestSnapshot(pr), SnapshotTarget.Registry)
+            )
+        case "pr" :: n :: Nil =>
+          n.toIntOption
+            .flatMap(PullRequestNumber.make(_).toOption)
+            .fold(sys.error(s"zipx: '$n' is not a pull request number"))(pr =>
+              (BuildSession.PullRequestSnapshot(pr), SnapshotTarget.Registry)
+            )
+        case other =>
+          sys.error(
+            s"zipx: zipxSnapshotPublish takes nothing, 'local', or 'pr [<number>]'; got '${other.mkString(" ")}'"
           )
-      case "pr" :: n :: Nil =>
-        n.toIntOption
-          .flatMap(PullRequestNumber.make(_).toOption)
-          .fold(sys.error(s"zipx: '$n' is not a pull request number"))(BuildSession.PullRequestSnapshot(_))
-      case other =>
-        sys.error(s"zipx: zipxSnapshotPublish takes nothing, 'pr', or 'pr <number>'; got '${other.mkString(" ")}'")
-    val extracted     = Project.extract(st)
-    val (next, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
-    val release       = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
-    val catalog       = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
-    val binaries      = liveBinaries(extracted, graph, catalog)
-    ReleasePlan.plan(
-      ReleaseRequest.AllUnreleased,
-      catalog,
-      graph,
-      rowStatus(_, graph, catalog, binaries, release.registry),
-    ) match
-      case Left(ReleaseError.NothingToRelease) =>
-        next.log.info("zipx: every row's catalog number is released; no snapshot to publish")
-        next
-      case Left(err)   => sys.error(s"zipx: ${err.message}")
-      case Right(plan) =>
-        plan.entries.foreach(e =>
-          next.log.info(s"zipx: publishing ${Modver.describe(e.row)} ${session.publishedRevisionOf(e.row)}")
-        )
-        next.log.info("zipx: this sbt session now publishes snapshots without scaladoc")
-        sys.props(BuildSession.Property) = session.id
-        val commands =
-          plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, CapabilityTasks.of(publish)))
-        "reload" :: commands.map(c => c.text: String) ::: next
-    end match
+      val extracted     = Project.extract(st)
+      val (next, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
+      val release       = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
+      val catalog       = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
+      val binaries      = liveBinaries(extracted, graph, catalog)
+      ReleasePlan.plan(
+        ReleaseRequest.AllUnreleased,
+        catalog,
+        graph,
+        rowStatus(_, graph, catalog, binaries, release.registry),
+      ) match
+        case Left(ReleaseError.NothingToRelease) =>
+          next.log.info("zipx: every row's catalog number is released; no snapshot to publish")
+          next
+        case Left(err)   => sys.error(s"zipx: ${err.message}")
+        case Right(plan) =>
+          val (task, destination) = target match
+            case SnapshotTarget.Local    => (publishLocal, "the local ivy repository")
+            case SnapshotTarget.Registry =>
+              requireCredentials(extracted, next, release.registry)
+              (publish, release.registry.snapshotRepository)
+          plan.entries.foreach(e =>
+            next.log.info(
+              s"zipx: publishing ${Modver.describe(e.row)} ${session.publishedRevisionOf(e.row)} to $destination"
+            )
+          )
+          val restore = BuildSession.of(sys.props).getOrElse(BuildSession.Development)
+          sys.props(BuildSession.Property) = session.id
+          val commands =
+            plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, CapabilityTasks.of(task)))
+          "reload" :: commands.map(c => c.text: String) ::: s"$SessionCommand ${restore.id}" :: "reload" :: next
+      end match
+    }
+
+  private val SessionCommand = "zipxSession"
+
+  private val sessionCommand: Command = Command.single(SessionCommand) { (st, id) =>
+    BuildSession.of(Map(BuildSession.Property -> id)) match
+      case Right(BuildSession.Development) => sys.props -= BuildSession.Property
+      case Right(session)                  => sys.props(BuildSession.Property) = session.id
+      case Left(err)                       => sys.error(s"zipx: ${err.message}")
+    st
   }
+
+  /** Fails before any upload, so a missing token never leaves some modules published and the rest not. */
+  private def requireCredentials(extracted: Extracted, st: State, registry: ArtifactRegistry): Unit =
+    registry.credentialHost.foreach { host =>
+      val (_, declared) = extracted.runTask(LocalRootProject / credentials, st)
+      if sbt.librarymanagement.CredentialUtils.forHost(declared, host).isEmpty then
+        sys.error(
+          s"zipx: no credentials for $host. Set SONATYPE_USERNAME and SONATYPE_PASSWORD, or add a credentials file for $host."
+        )
+    }
 
   private def rowStatus(
       row: PublishedRow,
