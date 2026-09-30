@@ -457,6 +457,9 @@ object ZipxPlugin extends AutoPlugin:
   import autoImport.*
 
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
+    onUnload := onUnload.value.andThen(
+      ResolutionCache.forgetOnUnload(s => readBuildSetting(Project.extract(s), zipxVersions, Seq.empty))
+    ),
     zipxCapabilities             := Seq.empty,
     zipxCache                    := CacheBackend.LocalDir,
     zipxCacheEpoch               := CacheEpoch.GitTags(),
@@ -605,6 +608,18 @@ object ZipxPlugin extends AutoPlugin:
     zipxImageRefs    := Seq.empty,
     zipxImageMissing := Def.uncached { imageMissingTask.value },
     zipxDepCleanup   := Def.uncached { depCleanupTask.value },
+    resolvers ++= Option
+      .when(SnapshotPins.of(zipxVersions.value).nonEmpty)(SnapshotPins.ResolverName at SnapshotPins.CentralSnapshots)
+      .toList,
+    clean := Def.uncached {
+      clean.value
+      ResolutionCache.forgetIfPinned(zipxVersions.value)
+    },
+    forceUpdatePeriod := {
+      if libraryDependencies.value.exists(m => SnapshotPins.isSnapshot(m.revision)) then
+        Some(scala.concurrent.duration.Duration.Zero)
+      else forceUpdatePeriod.value
+    },
   )
 
   /** A module opts into the docker capability by enabling sbt-native-packager's `DockerPlugin`, detected by label so
@@ -769,7 +784,8 @@ object ZipxPlugin extends AutoPlugin:
       cacheRehydrateTask = read(zipxCacheRehydrateTask, CapabilityTasks.of(Test / compile)),
       cacheRehydrateExtraSteps = read(zipxCacheRehydrateExtraSteps, (_ => Nil)),
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
-      env = read(zipxEnv, Map.empty),
+      env = read(zipxEnv, Map.empty) ++
+        Option.when(SnapshotPins.of(read(zipxVersions, Seq.empty)).nonEmpty)(SnapshotPins.CoursierTtl),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
       verifyCleanLabel = orFail(typedVerifyCleanLabel(read(zipxVerifyCleanLabel, Some("clean")))),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
@@ -935,7 +951,12 @@ object ZipxPlugin extends AutoPlugin:
     if ships.isEmpty && userCaps.exists(_.name == Capability.SnapshotsName) then
       sys.error("zipx: the 'snapshots' capability publishes Ship / ShipGroup rows, and the catalog has none")
     val published = if ships.nonEmpty then builtins.filterNot(_.name == Capability.PublishName) else builtins
-    combineCapabilities(published ++ modver, userCaps.toList)
+    val combined  = combineCapabilities(published ++ modver, userCaps.toList)
+    SnapshotPins.of(readBuildSetting(extracted, zipxVersions, Seq.empty)) match
+      case Nil          => combined
+      case head :: tail =>
+        val note = orFail(SnapshotPins.annotation(::(head, tail)))
+        combined.map(c => if c.name == Capability.TestName then c.plusExtraSteps(note) else c)
   end capabilitiesOf
 
   /** Under [[DeployTrigger.Manual]] or [[DeployTrigger.Staged]], the images-and-deploys half of the build's
@@ -1225,6 +1246,14 @@ object ZipxPlugin extends AutoPlugin:
         .flatMap(ReleasePlan.plan(_, catalog, graph, rowStatus(_, graph, catalog, binaries, release.registry)))
         .left
         .map(_.message)
+    )
+    val declared = plan.projects(graph, catalog).flatMap { id =>
+      extracted.structure.allProjectRefs.find(_.project == (id: String)).toList.flatMap { ref =>
+        extracted.get(ref / libraryDependencies)
+      }
+    }
+    orFail(
+      ReleasePlan.refuseSnapshots(declared.map(m => s"${m.organization}:${m.name}:${m.revision}")).left.map(_.message)
     )
     IO.writeLines(extracted.get(LocalRootProject / baseDirectory) / ReleaseWorkflow.TagsFile, plan.entries.map(_.tag))
     plan.entries.foreach(e => next.log.info(s"zipx: releasing ${Modver.describe(e.row)} ${e.row.version} as ${e.tag}"))
@@ -1644,6 +1673,10 @@ object ZipxPlugin extends AutoPlugin:
           .checkPlugins(file.getPath, zipx.syntax.PluginsSbt.parse(actual), inventory)
           .left
           .foreach(sys.error)
+        if SnapshotPins.of(inventory).nonEmpty && !actual.linesIterator.contains(SnapshotPins.resolverLine) then
+          sys.error(
+            s"zipx: ${file.getPath} pins a snapshot plugin but lacks the snapshot resolver. Run 'sbt zipxWorkflowGenerate'."
+          )
         log.info(s"zipx: ${file.getPath} plugin list is up to date.")
       end if
     end if

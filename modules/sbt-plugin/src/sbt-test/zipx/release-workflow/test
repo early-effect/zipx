@@ -14,6 +14,11 @@ $ exists .github/workflows/zipx-release.yml
 -> zipxRelease refs/tags/v0.3.0
 -> zipxRelease refs/pull/7/merge
 
+# A release cannot depend on a snapshot.
+> set client / libraryDependencies += "com.example.pinned" %% "upstream" % "1.0.0-SNAPSHOT"
+-> zipxRelease refs/tags/client/v0.3.0
+> session clear-all
+
 # client's tag releases client and the unreleased libs row it depends on, at catalog numbers.
 > zipxRelease refs/tags/client/v0.3.0
 > assertReleased
