@@ -76,7 +76,7 @@ object MovedRows:
   val empty: MovedRows = MovedRows(Set.empty, Set.empty, Set.empty)
 
 /** Identity is a Ship project id or a ShipGroup name. */
-final case class ShipBump(identity: String, from: String, to: String)
+final case class ShipBump(identity: String, from: ReleaseVersion, to: ReleaseVersion)
 
 /** Fail-closed bump and publish sets. Verify's [[Affected]] stays a sibling; do not call it from here. */
 object Modver:
@@ -183,32 +183,6 @@ object Modver:
   ): String =
     if !releasing || groupId != organization then revision
     else ships.find(r => unreleased(r) == revision).fold(revision)(_.version: String)
-
-  def bumpVersion(from: String, kind: BumpKind): Either[String, String] =
-    unreleasedSuffixOf(from) match
-      case Some(s) => Left(s"version '$from' must be the release number, not a $s suffix")
-      case None    =>
-        parseSemver(from) match
-          case None                  => Left(s"not a major.minor.patch version: '$from'")
-          case Some((maj, min, pat)) =>
-            kind match
-              case BumpKind.None | BumpKind.PreRelease =>
-                Left(s"$kind is not a min-bump")
-              case BumpKind.Patch => Right(s"$maj.$min.${pat + 1}")
-              case BumpKind.Minor => Right(s"$maj.${min + 1}.0")
-              case BumpKind.Major => Right(s"${maj + 1}.0.0")
-
-  private def parseSemver(raw: String): Option[(Int, Int, Int)] =
-    val core  = raw.stripPrefix("v").takeWhile(_ != '-')
-    val parts = core.split("\\.", -1)
-    if parts.length != 3 then None
-    else
-      for
-        major <- parts(0).toIntOption
-        minor <- parts(1).toIntOption
-        patch <- parts(2).toIntOption
-      yield (major, minor, patch)
-  end parseSemver
 
   /** Walk published reverse-deps after MiMa kinds exist. Never is identity so MatchBump cannot see Patch placeholders.
     */
@@ -334,7 +308,6 @@ object Modver:
 
   def membership(graph: ModuleGraph, ships: Seq[PublishedRow]): Either[String, ShipIndex] =
     for
-      _ <- firstError(ships.flatMap(unreleasedVersionError))
       _ <- firstError(ships.flatMap(emptyGroupError))
       _ <- firstError(duplicateIdentityErrors(ships))
       _ <- firstError(ships.flatMap(memberErrors(graph, _)))
@@ -344,13 +317,6 @@ object Modver:
 
   private def firstError(errs: Seq[String]): Either[String, Unit] =
     errs.headOption.toLeft(())
-
-  private def unreleasedVersionError(row: PublishedRow): Option[String] =
-    val ver = row.version: String
-    unreleasedSuffixOf(ver).map(s => s"${describe(row)} version '$ver' must be the release number, not a $s suffix.")
-
-  private def unreleasedSuffixOf(version: String): Option[String] =
-    Option.when(version.endsWith(UnreleasedSuffix))(UnreleasedSuffix)
 
   private def emptyGroupError(row: PublishedRow): Option[String] = row match
     case g: ShipGroup if g.members.isEmpty => Some(s"""ShipGroup("${g.name}") has no members.""")
@@ -449,14 +415,13 @@ object Modver:
     val rows = graph.nodes.filter(n => n.matrixRoot == root && n.publishes)
     rows.nonEmpty && rows.forall(n => (n.id: String).endsWith("JS"))
 
-  def minBumpKind(version: String, scheme: String, probe: MemberProbe): BumpKind =
+  def minBumpKind(version: ReleaseVersion, scheme: String, probe: MemberProbe): BumpKind =
     probe match
       case MemberProbe.FirstPublish => BumpKind.None
       case MemberProbe.JsOnly       => BumpKind.Patch
       case MemberProbe.Clean        => BumpKind.Patch
       case MemberProbe.BinaryBreak  =>
-        val earlyZero = parseSemver(version).exists(_._1 == 0) && isEarlySemver(scheme)
-        if earlyZero then BumpKind.Minor else BumpKind.Major
+        if version.isInitialDevelopment && isEarlySemver(scheme) then BumpKind.Minor else BumpKind.Major
 
   def isEarlySemver(scheme: String): Boolean =
     scheme.trim.toLowerCase match
@@ -467,10 +432,8 @@ object Modver:
     val counted = kinds.filter(k => k != BumpKind.None && k != BumpKind.PreRelease)
     counted.maxOption(using minBumpOrd).getOrElse(BumpKind.None)
 
-  def suggestedVersion(from: String, kind: BumpKind): Either[String, String] =
-    kind match
-      case BumpKind.None | BumpKind.PreRelease => Right(from)
-      case other                               => bumpVersion(from, other)
+  def suggestedVersion(from: ReleaseVersion, kind: BumpKind): ReleaseVersion =
+    ReleaseBump.of(kind).fold(from)(from.bump)
 
   def writtenStatus(base: String, written: String, floor: BumpKind): BumpStatus =
     if floor == BumpKind.None || floor == BumpKind.PreRelease then BumpStatus.Ok
@@ -540,13 +503,14 @@ object Modver:
           current.byIdentity.get(ref) match
             case None      => Left(s"no catalog row for $ref")
             case Some(row) =>
-              val written = row.version: String
-              val from    = previous.byIdentity.get(ref).map(r => r.version: String).getOrElse(written)
-              val floor   = kinds.getOrElse(ref, BumpKind.None)
-              suggestedVersion(from, floor).map { suggested =>
-                val status0 = writtenStatus(from, written, floor)
-                val status  =
-                  if dirty.contains(ref) && written == from then BumpStatus.NewMemberDirty else status0
+              val written   = row.version
+              val from      = previous.byIdentity.get(ref).fold(written)(_.version)
+              val floor     = kinds.getOrElse(ref, BumpKind.None)
+              val suggested = suggestedVersion(from, floor)
+              val status0   = writtenStatus(from, written, floor)
+              val status    =
+                if dirty.contains(ref) && written == from then BumpStatus.NewMemberDirty else status0
+              Right(
                 rows :+ ModverReportRow(
                   identity = row.identity,
                   label = row.label,
@@ -558,7 +522,7 @@ object Modver:
                   mimaRan = mimaRan.contains(ref),
                   status = status,
                 )
-              }
+              )
         }
       }
       .map(ModverReport(_))

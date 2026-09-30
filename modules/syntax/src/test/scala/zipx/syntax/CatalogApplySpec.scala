@@ -27,8 +27,8 @@ object CatalogApplySpec extends ZIOSpecDefault:
     },
     test("applyShipBumps rewrites Ship and ShipGroup version literals and leaves Lib") {
       val bumps = List(
-        ShipBump("core", "1.4.2", "1.4.3"),
-        ShipBump("foo", "1.4.2", "1.5.0"),
+        ShipBump("core", ReleaseVersion("1.4.2"), ReleaseVersion("1.4.3")),
+        ShipBump("foo", ReleaseVersion("1.4.2"), ReleaseVersion("1.5.0")),
       )
       CatalogApply.applyShipBumps(mixed, bumps) match
         case Left(err)  => assertTrue(err.isEmpty)
@@ -42,15 +42,16 @@ object CatalogApplySpec extends ZIOSpecDefault:
     test("applyShipBumps is Left when the constructor is missing") {
       CatalogApply.applyShipBumps(
         "val zio = Lib(\"dev.zio\", \"zio\", \"2.1.26\")\n",
-        List(ShipBump("core", "1.4.2", "1.4.3")),
+        List(ShipBump("core", ReleaseVersion("1.4.2"), ReleaseVersion("1.4.3"))),
       ) match
         case Left(err) => assertTrue(err.contains("no Ship / ShipGroup constructor"), err.contains("core"))
         case Right(_)  => assertTrue(false)
     },
-    test("applyShipBumps refuses to write a snapshot") {
-      CatalogApply.applyShipBumps(mixed, List(ShipBump("core", "1.4.2", "1.4.3-SNAPSHOT"))) match
-        case Left(err) => assertTrue(err.contains("1.4.3-SNAPSHOT"))
-        case Right(_)  => assertTrue(false)
+    test("a ShipBump cannot name a snapshot") {
+      typeCheck(
+        """zipx.core.ShipBump("core", zipx.core.ReleaseVersion("1.4.2"), zipx.core.ReleaseVersion("1.4.3-SNAPSHOT"))"""
+      )
+        .map(result => assertTrue(result.isLeft))
     },
   )
 end CatalogApplySpec

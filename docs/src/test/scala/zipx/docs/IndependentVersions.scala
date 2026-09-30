@@ -238,8 +238,7 @@ val client = Ship("client", "0.3.0")
         assertTrue(
           text.contains("""Lib("dev.zio", "zio", "2.1.27")"""),
           text.contains("""Ship("client", "0.3.0")"""),
-          Modver.bumpVersion("0.3.0", BumpKind.Patch) == Right("0.3.1"),
-          Modver.bumpVersion("0.3.1-SNAPSHOT", BumpKind.Patch).isLeft,
+          ReleaseVersion("0.3.0").bump(ReleaseBump.Patch) == ReleaseVersion("0.3.1"),
         )
       ),
     ),
@@ -588,8 +587,10 @@ in the planner when ships are present.
 | The same root is in two rows | `Each publishes=true module must be in exactly one row` |
 | `ShipGroup` with empty members | `has no members` |
 | A member that does not publish | `does not publish` |
-| Catalog version already ends in `-SNAPSHOT` | `must be the release number, not a -SNAPSHOT suffix` |
 | `sbt-dynver-ci` still loaded | `cannot share version with sbt-dynver-ci` |
+
+A row version that is not `major.minor.patch`, such as `Ship("client", "0.3.0-SNAPSHOT")`, never reaches generate:
+the catalog does not compile (`a release number is major.minor.patch`).
 
 Docker Aggregate on a tag is **not** this table. `service` in the example is unpublished, so it is not a membership
 hole. See **Validation**.
@@ -599,14 +600,15 @@ hole. See **Validation**.
           Modver.membership(graph, ships).fold(identity, _ => "ok")
         List(
           s"ok: ${show(ships)}",
-          s"snapshot suffix: ${show(List(Ship("client", "0.3.0-SNAPSHOT"), libsRow))}",
           s"unpublished: ${show(ships :+ Ship("service", "1.0.0"))}",
           s"uncovered: ${show(List(libsRow))}",
         ).mkString("\n")
       }.assert(text =>
         assertTrue(
           text.contains("ok: ok"),
-          text.contains("must be the release number, not a -SNAPSHOT suffix"),
+          scala.compiletime.testing
+            .typeCheckErrors("""Ship("client", "0.3.0-SNAPSHOT")""")
+            .exists(_.message.contains("a release number is major.minor.patch")),
           text.contains("does not publish"),
           text.contains("published module 'client' is not in a Ship or ShipGroup"),
         )

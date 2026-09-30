@@ -135,13 +135,13 @@ object CatalogSource:
   private def mkShip(id: String, v: String): Option[Ship] =
     for
       mid <- ModuleId.make(id).toOption
-      ver <- DepVersion.make(v).toOption
+      ver <- ReleaseVersion.make(v).toOption
     yield Ship(mid, ver)
 
   private def mkGroup(n: String, v: String, members: List[String]): Option[ShipGroup] =
     for
       name <- ShipGroupName.make(n).toOption
-      ver  <- DepVersion.make(v).toOption
+      ver  <- ReleaseVersion.make(v).toOption
       ids  <- memberIds(members)
     yield ShipGroup(name, ver, ids)
 

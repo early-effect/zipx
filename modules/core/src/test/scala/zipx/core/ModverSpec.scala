@@ -5,7 +5,6 @@ import zio.test.*
 object ModverSpec extends ZIOSpecDefault:
 
   private def mid(s: String): ModuleId        = ModuleId.unsafeMake(s)
-  private def depVer(s: String): DepVersion   = DepVersion.unsafeMake(s)
   private def gname(s: String): ShipGroupName = ShipGroupName.unsafeMake(s)
 
   private def node(
@@ -61,12 +60,12 @@ object ModverSpec extends ZIOSpecDefault:
     )
   )
 
-  private val gVersion: Gen[Any, String] =
-    for
+  private val gVersion: Gen[Any, ReleaseVersion] =
+    (for
       major <- Gen.int(0, 9)
       minor <- Gen.int(0, 9)
       patch <- Gen.int(0, 9)
-    yield s"$major.$minor.$patch"
+    yield ReleaseVersion.make(s"$major.$minor.$patch")).collect { case Right(v) => v }
 
   private def gChunks(ids: List[String]): Gen[Any, List[List[String]]] =
     Gen.suspend {
@@ -90,9 +89,9 @@ object ModverSpec extends ZIOSpecDefault:
         ids.map(id => node(id)) ++
           Option.when(unpublished)(node("skip", publishes = false)).toList
       val rows = chunks.zipWithIndex.map {
-        case (List(one), _) => Ship(mid(one), depVer(ver))
+        case (List(one), _) => Ship(mid(one), ver)
         case (members, i)   =>
-          ShipGroup(gname(s"g$i"), depVer(ver), members.map(mid))
+          ShipGroup(gname(s"g$i"), ver, members.map(mid))
       }
       (GraphFixture(nodes), rows)
 
@@ -112,19 +111,46 @@ object ModverSpec extends ZIOSpecDefault:
       },
       test("a Ship literal is rejected while the catalog compiles, not when it runs") {
         for
-          good    <- typeCheck("""zipx.core.Ship("core", "1.4.2")""")
-          badId   <- typeCheck("""zipx.core.Ship("café", "1.4.2")""")
-          badName <- typeCheck("""zipx.core.ShipGroup("", "1.4.2")("core")""")
-        yield assertTrue(good.isRight, badId.isLeft, badName.isLeft)
+          good     <- typeCheck("""zipx.core.Ship("core", "1.4.2")""")
+          badId    <- typeCheck("""zipx.core.Ship("café", "1.4.2")""")
+          badName  <- typeCheck("""zipx.core.ShipGroup("", "1.4.2")("core")""")
+          snapshot <- typeCheck("""zipx.core.Ship("core", "1.4.2-SNAPSHOT")""")
+          grouped  <- typeCheck("""zipx.core.ShipGroup("libs", "1.4.2-SNAPSHOT")("core")""")
+        yield assertTrue(
+          good.isRight,
+          badId.isLeft,
+          badName.isLeft,
+          snapshot.left.exists(_.contains("a release number is major.minor.patch")),
+          grouped.isLeft,
+        )
       },
     ),
-    suite("bumpVersion")(
-      test("patch, minor, and major increment a release number and refuse a snapshot") {
+    suite("ReleaseVersion")(
+      test("patch, minor, and major bumps reset the lower parts") {
+        val v = ReleaseVersion("1.4.2")
         assertTrue(
-          Modver.bumpVersion("1.4.2", BumpKind.Patch) == Right("1.4.3"),
-          Modver.bumpVersion("1.4.2", BumpKind.Minor) == Right("1.5.0"),
-          Modver.bumpVersion("1.4.2", BumpKind.Major) == Right("2.0.0"),
-          Modver.bumpVersion("1.4.2-SNAPSHOT", BumpKind.Patch).isLeft,
+          v.bump(ReleaseBump.Patch) == ReleaseVersion("1.4.3"),
+          v.bump(ReleaseBump.Minor) == ReleaseVersion("1.5.0"),
+          v.bump(ReleaseBump.Major) == ReleaseVersion("2.0.0"),
+        )
+      },
+      test("every bump of any release number is a release number that npm semver orders after it") {
+        check(gVersion, Gen.fromIterable(ReleaseBump.values)) { (v, by) =>
+          val next = v.bump(by)
+          assertTrue(
+            ReleaseVersion.make(next).isRight,
+            ReleaseBump.of(VersionStrategy.npm.classify(v, next)).contains(by),
+          )
+        }
+      },
+      test("only major 0 is initial development") {
+        assertTrue(ReleaseVersion("0.9.9").isInitialDevelopment, !ReleaseVersion("1.0.0").isInitialDevelopment)
+      },
+      test("the runtime constructor refuses a snapshot and a qualifier") {
+        assertTrue(
+          ReleaseVersion.make("1.4.2-SNAPSHOT").isLeft,
+          ReleaseVersion.make("1.4.2-M1").isLeft,
+          ReleaseVersion.make("1.4").isLeft,
         )
       },
       test("rowForProject prefers the exact id then a JS suffix of a Ship root") {
@@ -249,17 +275,6 @@ object ModverSpec extends ZIOSpecDefault:
         assertTrue(
           err.swap.exists(
             _ == """ShipGroup("apps") member 'service' does not publish. Drop it or set publish / skip := false."""
-          )
-        )
-      },
-      test("a -SNAPSHOT catalog version is refused") {
-        val err = Modver.membership(
-          graph,
-          List(ShipGroup("libs", "1.4.2")("models", "coreLib"), Ship("client", "0.3.0-SNAPSHOT")),
-        )
-        assertTrue(
-          err.swap.exists(
-            _ == """Ship("client") version '0.3.0-SNAPSHOT' must be the release number, not a -SNAPSHOT suffix."""
           )
         )
       },
@@ -599,13 +614,13 @@ object ModverSpec extends ZIOSpecDefault:
     suite("min-bump")(
       test("early-semver 0.y binary break is minor; 1.y is major") {
         assertTrue(
-          Modver.minBumpKind("0.4.2", "early-semver", MemberProbe.BinaryBreak) == BumpKind.Minor,
-          Modver.minBumpKind("1.4.2", "early-semver", MemberProbe.BinaryBreak) == BumpKind.Major,
-          Modver.minBumpKind("1.4.2", "pvp", MemberProbe.BinaryBreak) == BumpKind.Major,
-          Modver.minBumpKind("1.4.2", "semver-spec", MemberProbe.BinaryBreak) == BumpKind.Major,
-          Modver.minBumpKind("1.4.2", "early-semver", MemberProbe.Clean) == BumpKind.Patch,
-          Modver.minBumpKind("1.4.2", "early-semver", MemberProbe.JsOnly) == BumpKind.Patch,
-          Modver.minBumpKind("1.4.2", "early-semver", MemberProbe.FirstPublish) == BumpKind.None,
+          Modver.minBumpKind(ReleaseVersion("0.4.2"), "early-semver", MemberProbe.BinaryBreak) == BumpKind.Minor,
+          Modver.minBumpKind(ReleaseVersion("1.4.2"), "early-semver", MemberProbe.BinaryBreak) == BumpKind.Major,
+          Modver.minBumpKind(ReleaseVersion("1.4.2"), "pvp", MemberProbe.BinaryBreak) == BumpKind.Major,
+          Modver.minBumpKind(ReleaseVersion("1.4.2"), "semver-spec", MemberProbe.BinaryBreak) == BumpKind.Major,
+          Modver.minBumpKind(ReleaseVersion("1.4.2"), "early-semver", MemberProbe.Clean) == BumpKind.Patch,
+          Modver.minBumpKind(ReleaseVersion("1.4.2"), "early-semver", MemberProbe.JsOnly) == BumpKind.Patch,
+          Modver.minBumpKind(ReleaseVersion("1.4.2"), "early-semver", MemberProbe.FirstPublish) == BumpKind.None,
         )
       },
       test("group max ignores None and uses minBumpOrd") {

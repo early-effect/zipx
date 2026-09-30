@@ -51,18 +51,16 @@ object CatalogApply:
     }
 
   private def applyOneShipBump(src: String, bump: ShipBump): Either[String, String] =
-    if bump.to.endsWith(Modver.UnreleasedSuffix) then
-      Left(s"zipx: zipxModverBump writes release numbers, not '${bump.to}'")
-    else
-      given Context = ScalaParse.freshContext()
-      ScalaParse.untyped(src, "ZipxVersions.scala").flatMap { tree =>
-        findShipVersionLit(tree, bump.identity)
-          .map { lit =>
-            val (start, end) = spanOf(lit)
-            applyEdits(src, List((start, end) -> quote(bump.to)))
-          }
-          .toRight(s"zipx: catalog has no Ship / ShipGroup constructor for '${bump.identity}' ${bump.from}")
-      }
+    given Context = ScalaParse.freshContext()
+    ScalaParse.untyped(src, "ZipxVersions.scala").flatMap { tree =>
+      findShipVersionLit(tree, bump.identity)
+        .map { lit =>
+          val (start, end) = spanOf(lit)
+          applyEdits(src, List((start, end) -> quote(bump.to)))
+        }
+        .toRight(s"zipx: catalog has no Ship / ShipGroup constructor for '${bump.identity}' ${bump.from}")
+    }
+  end applyOneShipBump
 
   private def findShipVersionLit(tree: Tree, identity: String)(using Context): Option[Tree] =
     var found: Option[Tree] = None

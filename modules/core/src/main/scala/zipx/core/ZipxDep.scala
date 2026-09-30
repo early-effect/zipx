@@ -103,9 +103,46 @@ object ShipGroupName extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
     if input.nonEmpty then true else "a ship group name must be non-empty"
 
+/** The number a [[Ship]] / [[ShipGroup]] row releases next: `major.minor.patch`. */
+type ReleaseVersion = ReleaseVersion.Type
+object ReleaseVersion extends Subtype[String]:
+  inline val Shape = """\d+\.\d+\.\d+"""
+
+  override inline def validate(input: String): Boolean | String =
+    if input.matches(Shape) then true
+    else s"a release number is major.minor.patch, got '$input'"
+
+  private final case class Parts(major: BigInt, minor: BigInt, patch: BigInt)
+
+  private def parts(version: ReleaseVersion): Parts =
+    val (major, afterMajor) = version.span(_ != '.')
+    val (minor, afterMinor) = afterMajor.drop(1).span(_ != '.')
+    Parts(BigInt(major), BigInt(minor), BigInt(afterMinor.drop(1)))
+
+  extension (version: ReleaseVersion)
+    def bump(by: ReleaseBump): ReleaseVersion =
+      val p = parts(version)
+      unsafeMake(by match
+        case ReleaseBump.Patch => s"${p.major}.${p.minor}.${p.patch + 1}"
+        case ReleaseBump.Minor => s"${p.major}.${p.minor + 1}.0"
+        case ReleaseBump.Major => s"${p.major + 1}.0.0")
+
+    def isInitialDevelopment: Boolean = parts(version).major == 0
+end ReleaseVersion
+
+enum ReleaseBump:
+  case Patch, Minor, Major
+
+object ReleaseBump:
+  def of(kind: BumpKind): Option[ReleaseBump] = kind match
+    case BumpKind.Patch                      => Some(Patch)
+    case BumpKind.Minor                      => Some(Minor)
+    case BumpKind.Major                      => Some(Major)
+    case BumpKind.None | BumpKind.PreRelease => None
+
 /** One outbound version row: a lone [[Ship]] or a [[ShipGroup]] whose members share a number. */
 sealed trait PublishedRow:
-  def version: DepVersion
+  def version: ReleaseVersion
 
   /** `"Ship"` or `"ShipGroup"`, for comments and apply. */
   def label: String
@@ -117,23 +154,23 @@ sealed trait PublishedRow:
   def memberRoots: List[ModuleId]
 end PublishedRow
 
-final case class Ship(id: ModuleId, version: DepVersion) extends PublishedRow:
+final case class Ship(id: ModuleId, version: ReleaseVersion) extends PublishedRow:
   def label: String               = "Ship"
   def identity: String            = id
   def memberRoots: List[ModuleId] = List(id)
 
 object Ship:
-  /** Catalog literal. `@targetName` plus `new` because [[ModuleId]] / [[DepVersion]] erase to `String` and would clash
-    * with the case-class apply. Same pattern as [[Action.apply]] (`Lib` / `Plugin` dodge it with extra defaults; Ship
-    * has none).
+  /** Catalog literal. `@targetName` plus `new` because [[ModuleId]] / [[ReleaseVersion]] erase to `String` and would
+    * clash with the case-class apply. Same pattern as [[Action.apply]] (`Lib` / `Plugin` dodge it with extra defaults;
+    * Ship has none).
     */
   @targetName("fromLiterals")
   inline def apply(inline id: String, inline version: String): Ship =
-    new Ship(ModuleId(id), DepVersion(version))
+    new Ship(ModuleId(id), ReleaseVersion(version))
 
 final case class ShipGroup(
     name: ShipGroupName,
-    version: DepVersion,
+    version: ReleaseVersion,
     members: List[ModuleId],
 ) extends PublishedRow:
   def label: String               = "ShipGroup"
@@ -145,7 +182,7 @@ object ShipGroup:
   inline def apply(inline name: String, inline version: String)(members: String*): ShipGroup =
     new ShipGroup(
       ShipGroupName(name),
-      DepVersion(version),
+      ReleaseVersion(version),
       members.iterator.map(ModuleId.unsafeMake).toList,
     )
 
