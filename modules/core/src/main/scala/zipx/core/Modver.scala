@@ -75,7 +75,7 @@ final case class MovedRows(
 object MovedRows:
   val empty: MovedRows = MovedRows(Set.empty, Set.empty, Set.empty)
 
-/** One catalog rewrite: identity is a Ship project id or a ShipGroup name. `to` is the release number, never `-ci`. */
+/** Identity is a Ship project id or a ShipGroup name. */
 final case class ShipBump(identity: String, from: String, to: String)
 
 /** Fail-closed bump and publish sets. Verify's [[Affected]] stays a sibling; do not call it from here. */
@@ -131,11 +131,7 @@ object Modver:
       }
     }
 
-  /** What an unreleased version ends with, in CI and on a developer's machine alike. sbt overwrites a `-SNAPSHOT` on
-    * every `publishLocal`, so a sibling build sees each republish; a release-shaped version (as `-ci` was) is written
-    * once, then skipped with "already exists, skipping (overwrite=false)". Caches need only a version that is the same
-    * from commit to commit, which `<row>-SNAPSHOT` is.
-    */
+  /** sbt overwrites only a `-SNAPSHOT` on republish; any other version is written once and then skipped. */
   val UnreleasedSuffix = "-SNAPSHOT"
 
   /** The version a row's members take on a commit that does not release it. */
@@ -338,7 +334,7 @@ object Modver:
 
   def membership(graph: ModuleGraph, ships: Seq[PublishedRow]): Either[String, ShipIndex] =
     for
-      _ <- firstError(ships.flatMap(ciVersionError))
+      _ <- firstError(ships.flatMap(unreleasedVersionError))
       _ <- firstError(ships.flatMap(emptyGroupError))
       _ <- firstError(duplicateIdentityErrors(ships))
       _ <- firstError(ships.flatMap(memberErrors(graph, _)))
@@ -349,13 +345,12 @@ object Modver:
   private def firstError(errs: Seq[String]): Either[String, Unit] =
     errs.headOption.toLeft(())
 
-  private def ciVersionError(row: PublishedRow): Option[String] =
+  private def unreleasedVersionError(row: PublishedRow): Option[String] =
     val ver = row.version: String
     unreleasedSuffixOf(ver).map(s => s"${describe(row)} version '$ver' must be the release number, not a $s suffix.")
 
-  /** A catalog holds release numbers; either unreleased form, today's `-SNAPSHOT` or the former `-ci`, is not one. */
   private def unreleasedSuffixOf(version: String): Option[String] =
-    List(UnreleasedSuffix, "-ci").find(version.endsWith)
+    Option.when(version.endsWith(UnreleasedSuffix))(UnreleasedSuffix)
 
   private def emptyGroupError(row: PublishedRow): Option[String] = row match
     case g: ShipGroup if g.members.isEmpty => Some(s"""ShipGroup("${g.name}") has no members.""")

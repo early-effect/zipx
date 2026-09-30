@@ -1,6 +1,6 @@
 scalaVersion   := "3.8.4"
-version        := "1.0.0-ci"
-zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+version        := "1.0.0-SNAPSHOT"
+zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 
 lazy val core = project

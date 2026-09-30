@@ -119,12 +119,11 @@ object ModverSpec extends ZIOSpecDefault:
       },
     ),
     suite("bumpVersion")(
-      test("patch, minor, and major increment and never write -ci") {
+      test("patch, minor, and major increment a release number and refuse a snapshot") {
         assertTrue(
           Modver.bumpVersion("1.4.2", BumpKind.Patch) == Right("1.4.3"),
           Modver.bumpVersion("1.4.2", BumpKind.Minor) == Right("1.5.0"),
           Modver.bumpVersion("1.4.2", BumpKind.Major) == Right("2.0.0"),
-          Modver.bumpVersion("1.4.2-ci", BumpKind.Patch).isLeft,
           Modver.bumpVersion("1.4.2-SNAPSHOT", BumpKind.Patch).isLeft,
         )
       },
@@ -250,14 +249,6 @@ object ModverSpec extends ZIOSpecDefault:
         assertTrue(
           err.swap.exists(
             _ == """ShipGroup("apps") member 'service' does not publish. Drop it or set publish / skip := false."""
-          )
-        )
-      },
-      test("a -ci catalog version is refused") {
-        val err = Modver.membership(graph, List(ShipGroup("libs", "1.4.2-ci")("models", "coreLib"), client))
-        assertTrue(
-          err.swap.exists(
-            _ == """ShipGroup("libs") version '1.4.2-ci' must be the release number, not a -ci suffix."""
           )
         )
       },

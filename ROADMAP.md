@@ -75,7 +75,7 @@ Release tag v0.15.2, catalog 0.15.1    zipx-release: [error] tag v0.15.2 does no
 | # | Branch | Intent | Done |
 |---|---|---|---|
 | 0 | `snapshots/roadmap` | this file | [x] |
-| 1 | `snapshots/retire-ci` | `-SNAPSHOT` is the only unreleased form | [ ] |
+| 1 | `snapshots/retire-ci` | `-SNAPSHOT` is the only unreleased form | [x] |
 | 2 | `snapshots/typed-versions` | `Ship(id, ReleaseVersion)`; `Revision.{Release, Snapshot}` | [ ] |
 | 3 | `snapshots/release-workflow` | `zipx-release.yml`: tag == catalog, or dispatch; one bundle | [ ] |
 | 4 | `snapshots/version-model` | `version == s"$row-SNAPSHOT"`; merges never release | [ ] |

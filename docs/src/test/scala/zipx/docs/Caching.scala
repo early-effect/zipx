@@ -18,7 +18,7 @@ sbt 2 caches task results **across JVM runs**. zipx restores that cache before t
 **commit-stable epoch** (`zipxCacheEpoch`, default `CacheEpoch.GitTags()`). Every push within a PR reuses prior hits;
 cutting a release tag rolls the epoch **without regenerating** `ci.yml`. Remote backends share the same hits across
 machines, including developer laptops when CI hydrates a shared store (see **Remote cache for teams**).
-This pairs with [`sbt-dynver-ci`](https://github.com/early-effect/sbt-dynver-ci).
+Hits need a `version` that is the same from commit to commit, such as `<row>-SNAPSHOT` (see **Independent versions**).
 
 ```mermaid
 flowchart TD
@@ -54,7 +54,7 @@ zipxCacheEpoch := CacheEpoch.Script(myEpochShell)      // custom shell; must wri
 
 **GitTags (default):** a `Resolve cache epoch` step runs after checkout (`fetch-depth: 0`, `fetch-tags: true`). On a
 `v*` tag ref, epoch = release = tag without `v`. Otherwise the latest matching tag becomes release and epoch is
-`$${release}-ci`. If local tags lag `origin` (or none match), the step emits an Actions `::warning` titled
+`$${release}-SNAPSHOT`. If local tags lag `origin` (or none match), the step emits an Actions `::warning` titled
 `zipx cache epoch` so shallow/missing tags are obvious in the run summary.
 
 **Fixed:** embeds a literal into the workflow at `zipxWorkflowGenerate` (useful for scripted tests or unusual versioning).

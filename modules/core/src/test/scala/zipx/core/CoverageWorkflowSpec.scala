@@ -6,7 +6,7 @@ import zio.test.*
 
 object CoverageWorkflowSpec extends ZIOSpecDefault:
 
-  private val config = PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"))
+  private val config = PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT"))
 
   private val coverageLabel = CoverageTrigger.prLabel("coverage")
   private val fullCiLabel   = CoverageTrigger.prLabel("full-ci")

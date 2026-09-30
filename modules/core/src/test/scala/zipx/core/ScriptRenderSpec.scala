@@ -24,7 +24,7 @@ object ScriptRenderSpec extends ZIOSpecDefault:
             |  epoch="$release"
             |elif tag=$(git describe --tags --abbrev=0 --match "$tag_match" 2>/dev/null); then
             |  release="${tag#v}"
-            |  epoch="${release}-ci"
+            |  epoch="${release}-SNAPSHOT"
             |else
             |  echo "::warning title=zipx cache epoch::No tags matching '$tag_match' found; using epoch 0.0.0."
             |  release="0.0.0"
@@ -171,7 +171,7 @@ object ScriptRenderSpec extends ZIOSpecDefault:
     },
     test("LocalDir jobs checkout then call the zipx-sbt-setup composite") {
       val steps = Planner
-        .plan(Fixtures.sampleGraph, List(Capability.test), PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci")))
+        .plan(Fixtures.sampleGraph, List(Capability.test), PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT")))
         .jobs("test")
         .steps
       val checkoutIdx = steps.indexWhere(_.uses.exists(_.unwrap.contains("actions/checkout@")))
@@ -179,7 +179,7 @@ object ScriptRenderSpec extends ZIOSpecDefault:
       assertTrue(
         checkoutIdx >= 0,
         setupIdx == checkoutIdx + 1,
-        steps(setupIdx).`with`.get("cache-epoch").contains("1.2.3-ci"),
+        steps(setupIdx).`with`.get("cache-epoch").contains("1.2.3-SNAPSHOT"),
       )
     },
   )

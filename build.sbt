@@ -5,7 +5,8 @@ ThisBuild / organization         := "rocks.earlyeffect"
 ThisBuild / organizationName     := "Early Effect"
 ThisBuild / organizationHomepage := Some(uri("https://www.earlyeffect.rocks"))
 ThisBuild / versionScheme        := Some("early-semver")
-// Version comes from sbt-dynver-ci (do not set ThisBuild / version).
+// sbt-dynver-ci owns version until zipx ships from its own Ship rows; between tags it is `<last-tag>-SNAPSHOT`.
+ThisBuild / dynverCiSuffix := "-SNAPSHOT"
 
 ThisBuild / homepage := Some(uri("https://github.com/early-effect/zipx"))
 ThisBuild / licenses := Seq("Apache-2.0" -> uri("http://www.apache.org/licenses/LICENSE-2.0.txt"))
@@ -293,8 +294,7 @@ lazy val docs = project
       val marker = (ThisBuild / baseDirectory).value / "target" / "specular-client-js.path"
       IO.write(marker, mainJs.getAbsolutePath)
     },
-    // CI docs builds are dynver `-ci`; stripCi drops the suffix so install snippets show the last published tag.
-    specularDisplayVersion := stripCi,
+    specularDisplayVersion := (_.stripSuffix("-SNAPSHOT")),
     // Rebuild site then (re)start DocsServe; use alias docsPreview for continuous watch.
     specularPreview := Def.uncached {
       specularSite.value

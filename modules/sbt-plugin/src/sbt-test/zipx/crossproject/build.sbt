@@ -5,8 +5,8 @@
 // module is `unmanagedSourceDirectories`, which is what `ModuleNode.sourcePaths` records. Asserted through
 // `target/zipx-affected.json`, the handoff CI actually reads, never by capturing sbt stdout.
 scalaVersion   := "3.8.4"
-version        := "1.0.0-ci"
-zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+version        := "1.0.0-SNAPSHOT"
+zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 // Empty catalog: generate must still succeed. The JS row injects scalajs-library_2.13 /
 // scala3-library_sjs1_3 / scalajs-test-bridge_2.13, which are not Lib rows.

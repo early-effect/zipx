@@ -22,7 +22,7 @@ object AffectedDeploySpec extends ZIOSpecDefault:
   import Fixtures.*
 
   private val base = PlanConfig(
-    cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"),
+    cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT"),
     affected = AffectedMode.AffectedOnPR,
     skipMergedPrPush = false,
     verifyCleanLabel = None,

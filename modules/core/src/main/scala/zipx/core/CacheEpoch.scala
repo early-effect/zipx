@@ -10,8 +10,8 @@ enum CacheEpoch:
   case Fixed(value: String)
 
   /** On `refs/tags/v*` the epoch and release are both the tag without its `v`; otherwise the release is the latest
-    * matching tag without its `v` and the epoch is `${release}-ci`. Annotates a warning when local tags lag `origin`,
-    * or when no tag matches and it falls back to `0.0.0`.
+    * matching tag without its `v` and the epoch is `${release}-SNAPSHOT`. Annotates a warning when local tags lag
+    * `origin`, or when no tag matches and it falls back to `0.0.0`.
     *
     * @param tagMatch
     *   a [[zipx.shell.SquoteText]] rather than a `String` because the generated script single-quotes it so `v*` reaches
@@ -120,8 +120,7 @@ object CacheEpoch:
         ) ->
           Block(
             Assign("release", Word.dquote(Word.vStrip("tag", "v"))),
-            // `${release}` braced: a bare `$release-ci` would be read as the variable `release-ci`.
-            Assign("epoch", Word.dquote(Word.vBraced("release"), Word.lit("-ci"))),
+            Assign("epoch", Word.dquote(Word.vBraced("release"), Word.lit("-SNAPSHOT"))),
           )
       ),
       elseDo = Some(

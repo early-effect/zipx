@@ -82,8 +82,8 @@ sbt docsDev              # watch: ~docs/specularPreview (rebuild + restart DocsS
 Open http://127.0.0.1:8765/ while `docsDev` is running. Pages deploy on `v*` tags **or** manual
 `workflow_dispatch` (`zipxWorkflowDispatch := true`) via `ZipxDocs.pages` in the generated workflow. Verify is skipped
 on dispatch so a docs-only refresh does not re-run the full test suite. Install / chrome versions use
-`specularDisplayVersion` (last stable tag when dynver is `*-ci`) so docs-only deploys do not advertise `-ci`
-coordinates.
+`specularDisplayVersion` (the last tag when the build is a `-SNAPSHOT`) so docs-only deploys do not advertise
+snapshot coordinates.
 """
     ),
     section("Status")(

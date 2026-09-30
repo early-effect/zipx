@@ -37,7 +37,6 @@ object CatalogApplySpec extends ZIOSpecDefault:
             out.contains("""Lib("dev.zio", "zio", "2.1.26")"""),
             out.contains("""Ship("core", "1.4.3")"""),
             out.contains("""ShipGroup("foo", "1.5.0")("foo-api", "foo-cli")"""),
-            !out.contains("-ci"),
           )
     },
     test("applyShipBumps is Left when the constructor is missing") {
@@ -48,9 +47,9 @@ object CatalogApplySpec extends ZIOSpecDefault:
         case Left(err) => assertTrue(err.contains("no Ship / ShipGroup constructor"), err.contains("core"))
         case Right(_)  => assertTrue(false)
     },
-    test("applyShipBumps refuses to write a -ci suffix") {
-      CatalogApply.applyShipBumps(mixed, List(ShipBump("core", "1.4.2", "1.4.3-ci"))) match
-        case Left(err) => assertTrue(err.contains("-ci"))
+    test("applyShipBumps refuses to write a snapshot") {
+      CatalogApply.applyShipBumps(mixed, List(ShipBump("core", "1.4.2", "1.4.3-SNAPSHOT"))) match
+        case Left(err) => assertTrue(err.contains("1.4.3-SNAPSHOT"))
         case Right(_)  => assertTrue(false)
     },
   )

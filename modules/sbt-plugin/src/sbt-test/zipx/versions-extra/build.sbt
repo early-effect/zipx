@@ -1,6 +1,6 @@
 scalaVersion   := "3.8.4"
-version        := "1.0.0-ci"
-zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+version        := "1.0.0-SNAPSHOT"
+zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 
 zipxVersions  := Seq(Lib("dev.zio", "zio", "2.1.26"))
 zipxCheckDeps := true

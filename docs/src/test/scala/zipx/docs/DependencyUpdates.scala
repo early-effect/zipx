@@ -42,7 +42,7 @@ Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-upda
 `workflow_dispatch`). The default schedule is Sunday 00:00 UTC; set `zipxVersionUpdatesSchedule` to change it
 (`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job installs `cs` via `zipx-sbt-setup` (`coursier: true`), runs
 `cs launch --ttl Inf --repository m2Local --repository ivy2Local --repository central rocks.earlyeffect:zipx-cli_3:${'$'}ZIPX_CLI_VERSION -- catalog update --yes --verify-load`
-(a release writes `ZIPX_CLI_VERSION` to `project/zipx-ci.env`; in-dev dogfood exports it from `zipxVersionUpdatesPreSteps`). `--repository ivy2Local` is how zipx dogfood resolves a just-`publishLocal`'d `0.0.0-ci` CLI (sbt 2's `publishLocal` writes the Ivy local repository, which default `cs` does not search). Empty local repositories on a consumer runner are a no-op. Then
+(a release writes `ZIPX_CLI_VERSION` to `project/zipx-ci.env`; in-dev dogfood exports it from `zipxVersionUpdatesPreSteps`). `--repository ivy2Local` is how zipx dogfood resolves a just-`publishLocal`'d `-SNAPSHOT` CLI (sbt 2's `publishLocal` writes the Ivy local repository, which default `cs` does not search). Empty local repositories on a consumer runner are a no-op. Then
 `zipxPinUpdate yes` and `zipxCatalogGenerate`, and opens a PR as `github-actions[bot]` unless App secrets are set (below). The branch is
 `zipx/version-updates-${'$'}GITHUB_RUN_ID` so a second dispatch cannot overwrite an open PR. The PR is labeled **`clean`**,
 so Verify runs `cleanFull` (same label as a one-off human PR). That PR is every ZipxVersions row kind: Lib / Plugin /

@@ -7,7 +7,7 @@ object DocsFixtures:
 
   val config: PlanConfig =
     PlanConfig(
-      cacheEpoch = CacheEpoch.Fixed("0.1.0-ci"),
+      cacheEpoch = CacheEpoch.Fixed("0.1.0-SNAPSHOT"),
       skipMergedPrPush = false,
       verifyCleanLabel = None,
       // Doc fragments teach job ids and YAML shape; Auto collapse is covered on the Matrix collapse page.

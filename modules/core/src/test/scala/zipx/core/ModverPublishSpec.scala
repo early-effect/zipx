@@ -15,7 +15,7 @@ object ModverPublishSpec extends ZIOSpecDefault:
   )
 
   private val lockstep = PlanConfig(
-    cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"),
+    cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
     verifyCleanLabel = None,

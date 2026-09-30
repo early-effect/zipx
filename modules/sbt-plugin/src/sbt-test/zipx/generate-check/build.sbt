@@ -1,8 +1,8 @@
 // Bare settings (sbt 2.0 common settings): apply to every module, overridable per module. No `ThisBuild /` needed.
 scalaVersion := "3.8.4"
-version      := "1.0.0-ci"
+version      := "1.0.0-SNAPSHOT"
 // Keep Fixed so scripted asserts stay on a literal epoch (default is now GitTags at runtime).
-zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 // Scripted asserts name per-module jobs and literal module paths; keep Graph expanded here.
 // (Product default is MatrixCollapse.Auto; Auto is covered in core MatrixCollapseSpec.)
@@ -127,7 +127,7 @@ assertGraph := {
   // LocalDir: epoch+run_id+job primary key lives in zipx-sbt-setup; the workflow only passes inputs.
   assert(content.contains("uses: ./.github/actions/zipx-sbt-setup"), "expected zipx-sbt-setup composite")
   assert(content.contains("cache-key-suffix: test-schema"), "cache-key-suffix should be the job id")
-  assert(content.contains("cache-epoch: \"1.0.0-ci\""), "Fixed epoch should be passed into the composite")
+  assert(content.contains("cache-epoch: \"1.0.0-SNAPSHOT\""), "Fixed epoch should be passed into the composite")
   assert(content.contains("cache-mode: restore"), "Graph test jobs must restore the LocalDir snapshot, never save it")
   assert(
     content.split("cache-mode: save", -1).length - 1 == 1,

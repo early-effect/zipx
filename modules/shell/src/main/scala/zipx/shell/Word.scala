@@ -89,8 +89,8 @@ object Word:
   final case class Squote(text: SquoteText) extends Word:
     def lines(quoting: Quoting): ShLines = ShLines.composed(s"'${text.unwrap}'")
 
-  /** A double-quoted string, `"…"`. The parts list is the concatenation, so `"${release}-ci"` is a `Dquote` of two
-    * parts. Nested inside another `Dquote` this emits `\"…\"`, the form a `--jq` argument needs.
+  /** A double-quoted string, `"…"`. The parts list is the concatenation, so `"${release}-SNAPSHOT"` is a `Dquote` of
+    * two parts. Nested inside another `Dquote` this emits `\"…\"`, the form a `--jq` argument needs.
     */
   final case class Dquote(parts: List[Quotable]) extends Quotable:
     def lines(quoting: Quoting): ShLines =

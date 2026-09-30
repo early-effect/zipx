@@ -1,6 +1,6 @@
 MyVersions.settings
 organization := "com.example.zipx.modver"
-zipxCacheEpoch := CacheEpoch.Fixed("1.4.2-ci")
+zipxCacheEpoch := CacheEpoch.Fixed("1.4.2-SNAPSHOT")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 zipxCapabilities += ZipxModver.publish()
 
@@ -82,11 +82,11 @@ assertCatalogUntouched := {
   assert(src.contains("""Ship("client", "0.3.0")"""), src)
 }
 
-val assertBumpedClient = taskKey[Unit]("zipxModverBump rewrote the client Ship, not -ci")
+val assertBumpedClient = taskKey[Unit]("zipxModverBump rewrote the client Ship to a release number")
 assertBumpedClient := {
   val src = IO.read((LocalRootProject / baseDirectory).value / "project" / "ZipxVersions.scala")
   assert(src.contains("""Ship("client", "0.3.1")"""), src)
-  assert(!src.contains("0.3.1-ci"), src)
+  assert(!src.contains("0.3.1-SNAPSHOT"), src)
   assert(src.contains("""ShipGroup("libs", "1.4.2")("models", "coreLib")"""), src)
 }
 

@@ -62,7 +62,7 @@ object ScriptSpec extends ZIOSpecDefault:
       },
       test("a variable inside double quotes still expands") {
         assertTrue(
-          Word.dquote(Word.v("release"), Word.lit("-ci")).render == "\"$release-ci\"",
+          Word.dquote(Word.v("release"), Word.lit("-SNAPSHOT")).render == "\"$release-SNAPSHOT\"",
           Word.dquote(Word.vBraced("release"), Word.lit("x")).render == "\"${release}x\"",
         )
       },
