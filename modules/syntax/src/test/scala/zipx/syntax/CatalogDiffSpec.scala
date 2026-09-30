@@ -10,7 +10,7 @@ object CatalogDiffSpec extends ZIOSpecDefault:
 
   /** A catalog as `zipxDepUpdate` and the version-updates companion leave it: constructors in canonical form. */
   private def catalog(
-      sbt: String = "2.1.0-M2",
+      sbt: String = "2.1.0-M3",
       fansi: String = "0.5.1",
       upickle: String = "4.4.2",
       checkout: String = sha1,
