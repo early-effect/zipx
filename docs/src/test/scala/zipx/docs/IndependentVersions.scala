@@ -6,7 +6,7 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.config
 import zio.test.*
 
-/** Outbound Ship / ShipGroup rows: independent library versions, merge-to-main publish. */
+/** Outbound Ship / ShipGroup rows: the next release number, snapshots until a deliberate release. */
 object IndependentVersions extends DocSpecSuite:
 
   private val graph = GraphFixture(
@@ -37,10 +37,6 @@ object IndependentVersions extends DocSpecSuite:
     )
   )
 
-  private val independent = config.copy(modverPublish = true)
-
-  private val publishCmd = SbtCommand.unsafeTask("zipxModverPublishSigned")
-
   private val libsRow   = ShipGroup("libs", "1.4.2")("models", "coreLib")
   private val clientRow = Ship("client", "0.3.0")
   private val ships     = List[PublishedRow](libsRow, clientRow)
@@ -48,13 +44,14 @@ object IndependentVersions extends DocSpecSuite:
 
   def doc = page("Independent versions")(
     md"""
-Skip this page if every artifact in the repo ships together on a `v*` tag. That lockstep path is still the default:
-`sbt-dynver-ci`, Aggregate `ZipxCentral.release`, `Gate.OnReleaseTag`. zipx itself stays there.
+Skip this page if every artifact in the repo ships together on a `v*` tag. That lockstep path still works:
+`sbt-dynver-ci`, Aggregate `ZipxCentral.release`, `Gate.OnReleaseTag`. zipx itself stays there for now.
 
 Use `Ship` / `ShipGroup` rows when a monorepo publishes several libraries on different cadences. Presence of any such
-val is the feature flag. The human writes the number in the PR. CI suggests a MiMa-informed edit as a sticky comment
-and **fails closed** on a missing or undersized bump. Merge to the default branch is the release signal. Graph publish
-uploads only modules whose row moved, and skips a GAV already on the registry.
+val is the feature flag. A row holds the **next** release number, every build is `<row>-SNAPSHOT`, and a release is a
+deliberate run of `zipx-release.yml`. The human writes the number in a PR; CI suggests a MiMa-informed edit as a sticky
+comment and **fails closed** when a changed row is still at a released number, or below the MiMa floor. Merges release
+nothing.
 
 ```mermaid
 flowchart TD
@@ -63,12 +60,12 @@ flowchart TD
   Ships -->|no| Dynver[dynver-ci]
   Dynver --> Tag[v* tag]
   Tag --> Agg[ZipxCentral.release]
-  Ships -->|yes| Row[version from the row]
+  Ships -->|yes| Row[row-SNAPSHOT everywhere]
   Row --> Check[suggest + check on PR]
   Check --> Merge[merge to main]
-  Merge --> Graph[ZipxModver publish]
+  Merge --> Release[zipx-release.yml]
   class Catalog,Ships warn
-  class Dynver,Tag,Agg,Row,Check,Merge,Graph happy
+  class Dynver,Tag,Agg,Row,Check,Merge,Release happy
 ```
 
 Inbound catalog rows (`Lib` / `Plugin` / `Pin` / `Action`) stay on **Versions**. This page is outbound versions only.
@@ -83,26 +80,25 @@ A source change and a version change are different commits' jobs. CI never write
 flowchart TD
   Push([1 · push PR]) --> Suggest[2 · sticky comment]
   Suggest --> Gate[3 · modver-check]
-  Gate -->|undersized| Red([fail closed])
+  Gate -->|row still released, or undersized| Red([fail closed])
   Gate -->|ok| Human[4 · you write the number]
   Human --> Merge([5 · merge to main])
-  Merge --> Modver[6 · modver id array]
-  Modver --> Pub[7 · publish those ids]
-  class Push,Suggest,Gate,Human,Merge,Modver warn
+  Merge --> Release([6 · GitHub Release or dispatch])
+  class Push,Suggest,Gate,Human,Merge warn
   class Red sad
-  class Pub happy
+  class Release happy
 ```
 
 1. Push a PR that changes sources. You may not have edited a `Ship` yet.
 2. `modver-suggest` posts a sticky comment with the MiMa-informed constructors (best-effort on forks).
-3. `modver-check` fails the PR until the catalog number is at least that floor. Over-bump is fine. Skipping is not.
-   Bumping less is not.
+3. `modver-check` reads each changed row's last release from the registry's `maven-metadata.xml`. A row still at that
+   number must move; a moved row must clear the MiMa floor measured against that release's jar. Over-bump is fine. An
+   unreadable registry or jar fails the check; it never reads as a first release.
 4. You write the number (`zipxModverBump client`, or by hand) and push.
-5. Merge to the default branch. That is the release signal. Nothing here creates a `v*` tag.
-6. The synthetic `modver` job diffs catalog rows against `github.event.before` (or registry-only on
-   `workflow_dispatch`) and writes a compact module-id array. No `'all'` sentinel.
-7. Graph `publish-*` jobs run only for ids in that array, skip-tolerant of a skipped ancestor, and skip a GAV already
-   on the registry.
+5. Merge. The default branch now builds `0.3.1-SNAPSHOT`. Later PRs in the same cycle pass without another bump
+   unless MiMa says their change is bigger than the row already declares.
+6. Release when ready: a GitHub Release tagged `client/v0.3.1`, or Run workflow on **zipx release**. See **Snapshots
+   and releases**.
 
 `modver-check` / `modver-suggest` self-compile (`needsCapabilities = Nil`). They do not wait on test topology.
 """,
@@ -194,21 +190,15 @@ group of one is legal and pointless (it is just `Ship`). Empty members are refus
     ),
     section("Catalog rows")(
       md"""
-Drop the repo-wide `version := "…"`. Members take the catalog number on the push that releases their row, and on a
-`workflow_dispatch` from a release branch. Every other commit is `<row>-SNAPSHOT`, in CI and on a developer's machine
-alike. Aggregators and unpublished apps keep sbt's default version.
+Drop the repo-wide `version := "…"`. A member's `version` is a pure function of its row: `<row>-SNAPSHOT` in every
+build, on a laptop and in CI alike, and the catalog number only inside a `zipxRelease` session. Aggregators and
+unpublished apps keep sbt's default version.
 
 | Where | Number | Why |
 |---|---|---|
 | Catalog constructor | release number only (`1.4.2`, never `1.4.2-SNAPSHOT`) | the human writes the next release |
-| A commit that does not release this row | `<row>-SNAPSHOT` (`1.4.2-SNAPSHOT`) | the same from commit to commit, so caches hold; and `publishLocal` overwrites it |
-| Default-branch push that **releases** this row | catalog number | |
-| `workflow_dispatch` on a release branch | catalog number | modver looked that number up; the publish uploads that number |
-| POM of a release | each in-organization sibling at its catalog number | a registry holds only releases |
-| POM and `ivy.xml` of anything else | what was built (`1.4.2-SNAPSHOT`) | an unreleased build is not a release |
-
-`zipxPublishSnapshots` (default `false`) refuses a remote publish of a `-SNAPSHOT`. `publishLocal` of that snapshot
-still runs. Set it `true` only for a build that really does publish to a snapshot repository.
+| Any build: PR, merge, `publishLocal` | `<row>-SNAPSHOT` (`1.4.2-SNAPSHOT`) | the same from commit to commit, so caches hold; and `publishLocal` overwrites it |
+| A `zipxRelease` session | catalog number, for every row member | its POMs name in-repo dependencies at release numbers |
 
 A cache needs only a version that does not change between commits; `-SNAPSHOT` is as stable as any fixed suffix. What
 breaks a cache is a per-commit version, such as dynver's hash. What `-SNAPSHOT` adds is that sbt 2 overwrites it: a
@@ -242,10 +232,10 @@ val client = Ship("client", "0.3.0")
         )
       ),
     ),
-    section("Three sets: affected, bump, publish")(
+    section("Affected is not the bump set")(
       md"""
-**Affected** answers "which Verify jobs can we skip." A version manager answers "which coordinates move, to what, and
-when is upload legal." Reusing `affectedModules` for that second question is how you fail-open a publish.
+**Affected** answers "which Verify jobs can we skip." Modver answers "which rows must move, and how far." Reusing
+`affectedModules` for the second question is how a check fails open.
 
 ```mermaid
 flowchart TD
@@ -253,22 +243,20 @@ flowchart TD
   Own --> Aff[Affected reverse-dep]
   Aff --> Verify([Verify · fail open])
   Own --> Lift[group lift]
-  Lift --> MiMa[MiMa min-bump]
+  Lift --> MiMa[MiMa vs last release]
   MiMa --> Prop[propagate]
   Prop --> Bump([bump set · fail closed])
-  Diff([Ship row diff]) --> Moved[moved rows]
-  Moved --> Members[every member]
-  Members --> Gav[skip GAV already published]
-  Gav --> Publish([publish set · fail closed])
-  class Files,Own,Aff,Verify,Diff warn
-  class Lift,MiMa,Prop,Bump,Moved,Members,Gav,Publish happy
+  class Files,Own,Aff,Verify warn
+  class Lift,MiMa,Prop,Bump happy
 ```
 
 | Set | Inputs | Rule | Failure |
 |---|---|---|---|
 | Verify (Affected) | graph, files | reverse-dep of owners; `.sbt` / `project/` => all; diff fail => `["all"]` | fail **open** |
-| Bump | graph, ships, files | owners ∩ publishes, **no** reverse-dep, **no** build-file explosion, group lift, then MiMa, then propagate | fail **closed** |
-| Publish | ships, before SHA, registry | every member of a row whose version **or membership** changed; job skipped only when every binary is 200 | fail **closed** |
+| Bump | graph, ships, files, registry | owners ∩ publishes, **no** reverse-dep, **no** build-file explosion, group lift, then MiMa against the last release, then propagate | fail **closed** |
+
+What a release carries is a third question with its own rule (the requested rows plus their unreleased in-repo
+upstream rows); see **Snapshots and releases**.
 
 A dirty `models` source file reverse-deps into `coreLib`, `client`, and `service` for **test**. For **bump** it lifts
 only the `libs` group. `client` does not have to move. See **Affected**.
@@ -302,149 +290,39 @@ only the `libs` group. `client` does not have to move. See **Affected**.
     ),
     section("Library vs image")(
       md"""
-Library publish moves off tags. Docker and deploy do not.
+Libraries release from `zipx-release.yml`. Docker and deploy stay in `ci.yml` on a human `v*` tag.
 
 ```mermaid
 flowchart TD
-  Merge([merge to main]) --> Lib[library coordinates]
+  Release([GitHub Release or dispatch]) --> Lib[zipx-release.yml]
   Lib --> Registry[(registry)]
-  Tag([human v* tag]) --> Img[docker image]
+  Tag([human v* tag]) --> Img[ci.yml docker image]
   Img --> Dep[deploy]
-  class Merge,Lib,Registry happy
+  class Release,Lib,Registry happy
   class Tag,Img,Dep warn
 ```
 
-| What | Signal | Pack |
+| What | Signal | Where |
 |---|---|---|
-| Library coordinates | merge to `main` when a `Ship` / `ShipGroup` row moved | `ZipxModver.publish` |
-| Docker image / deploy | a **human** `v*` tag (docs/docker only, not the library version) | `ZipxAws.dockerPublishAll`, deploy |
+| Library coordinates | a GitHub Release tagged `<row>/v<n>`, or a dispatch | `zipx-release.yml` (`zipxReleaseWorkflow`) |
+| Docker image / deploy | a **human** `v*` tag | `ci.yml` (`ZipxAws.dockerPublishAll`, deploy) |
 
-Nothing in independent mode creates `v*` tags. A library-only release does not push an image. Do not retarget docker to
-`Gate.OnDefaultPush`. Keep docker and deploy in the build so they still teach AWS wiring; the comment is the contract.
+With rows, `ci.yml` has no library publish job, and generate refuses one. A library-only release does not push an
+image.
 
 ```scala
-zipxCapabilities ++= Seq(
-  Capability.testLayers,
-  ZipxModver.publish(),
-)
+zipxReleaseWorkflow := Some(ZipxCentral.releases)
+zipxCapabilities += Capability.testLayers
 zipxCapabilities += ZipxAws.dockerPublishAll(Registry.destinations) // still OnReleaseTag
 ```
 """,
       exampleValue {
-        DocsRender.jobs("publish-client", "docker")(
-          ZipxModver.publish(publishCmd),
-          Capability.docker,
-        )(using graph, independent)
+        DocsRender.job("docker")(Capability.docker)(using graph)
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("publish-client:"),
-          yaml.contains("workflow_dispatch"),
-          yaml.contains("needs.modver.outputs.modules"),
-          yaml.contains("docker:"),
           yaml.contains("refs/tags/v"),
           yaml.contains("service/Docker/publish"),
-        )
-      ),
-    ),
-    section("ZipxModver.publish")(
-      md"""
-`zipxReleaseWorkflow := Some(ZipxCentral.releases)` replaces this whole section: merges publish nothing, and a GitHub
-Release's tag or a dispatch releases rows from `zipx-release.yml` (see **Snapshots and releases**). The merge-release
-path below remains until every repo has moved.
-
-Replace builtin Aggregate `publish` (or `Capability.publishLayers`) with `ZipxModver.publish`. Graph,
-`Gate.OnDefaultPush` (push to `zipxPushBranches` **or** `workflow_dispatch`), `MatrixCollapse.Off`. Default command is
-`zipxModverPublishSigned`. That task publishes a binary named in `target/zipx-modver-publish.json`. If the file is
-absent on the publish runner, it publishes anyway: the modver job's `target/` is not this job's, and a `cleanFull`
-extra step deletes a restored one. An existing file that omits the binary logs `already on the registry` and skips.
-No Central secrets unless you compose them.
-
-```mermaid
-flowchart TD
-  Modver[modver id array] --> Models[publish-models]
-  Modver --> Core[publish-coreLib]
-  Modver --> Client[publish-client]
-  Models -.->|skip-tolerant| Core
-  Core -.->|skip-tolerant| Client
-  class Modver,Models,Core,Client happy
-```
-
-```scala
-zipxCapabilities += ZipxModver.publish()
-
-// Optional: Central sonaRelease once after Graph publish
-zipxCapabilities += ZipxCentral.releaseOnce.copy(gate = Gate.OnDefaultPush)
-```
-
-Generate refuses Aggregate / Layer / `OnReleaseTag` **library** publish when ships are present. Docker is not that
-refusal. Graph `if:` is `contains(fromJson(needs.modver.outputs.modules), '<id>')` with **no** `'all'` sentinel. A
-skipped `publish-coreLib` does not skip `publish-client`. `workflow_dispatch` runs `modver` in registry-only mode
-(every catalog GAV not on the registry). `gh run rerun` of the merge SHA is the other recovery path. See **Packs** and
-**Job conditions**.
-
-Default Graph waits on upstream publish jobs (`Ordering.DependencyOrdered`). That is the right default when a dependent
-must resolve the upstream POM from the registry (Central staging). GH Packages `publish` compiles `dependsOn` from the
-checkout, so the wait only serializes uploads. Combinators, not `.copy`:
-
-| Combinator | Jobs | When |
-|---|---|---|
-| `ZipxModver.publish()` | N Graph, `needs` upstream | Central / registry completeness |
-| `.withoutUpstreamJobs` | N Graph, `needs: [modver]` only | parallel GH Packages uploads, per-Ship checks |
-| `.withoutUpstreamJobs.withMatrixCollapse(Auto)` | 1 matrix job, step `if` on `matrix.module` | same, one check. Job `if` never uses `matrix.*` (GitHub rejects it). No `'all'`. |
-| `.inOneSession` | 1 Once job, `zipxModverPublishMoved` | one sbt JVM over the moved set |
-
-Do not bake Auto into `withoutUpstreamJobs`. Collapse is `withMatrixCollapse`. Job-level `if:` cannot mention `matrix`.
-""",
-      exampleValue {
-        DocsRender.jobs("modver", "publish-client", "modver-check")(
-          ZipxModver.publish(publishCmd),
-          Capability.modverCheck(),
-        )(using graph, independent)
-      }.assert(yaml =>
-        assertTrue(
-          yaml.contains("modver:"),
-          yaml.contains("zipxModverPublishModules"),
-          yaml.contains("publish-client:"),
-          yaml.contains("contains(fromJson(needs.modver.outputs.modules), 'client')"),
-          yaml.contains("needs.publish-coreLib.result != 'failure'"),
-          !yaml.contains("'all'"),
-          yaml.contains("modver-check:"),
-          yaml.contains("zipxModverCheck"),
-          yaml.contains("pull_request"),
-          yaml.contains("workflow_dispatch"),
-        )
-      ),
-      exampleValue {
-        val yaml = DocsRender.jobs("publish")(
-          ZipxModver.publish(publishCmd).withoutUpstreamJobs.withMatrixCollapse(MatrixCollapse.Auto)
-        )(using graph, independent)
-        s"$yaml"
-      }.assert(yaml =>
-        assertTrue(
-          yaml.contains("publish:"),
-          !yaml.contains("publish-client:"),
-          yaml.contains("matrix.module"),
-          yaml.contains("zipxModverPublishSigned"),
-          !yaml.contains("'all'"),
-        )
-      ),
-      exampleValue {
-        DocsRender.job("publish")(ZipxModver.publish(publishCmd).inOneSession)(using graph, independent)
-      }.assert(yaml =>
-        assertTrue(
-          yaml.contains("zipxModverPublishMoved"),
-          yaml.contains("needs.modver.outputs.modules"),
-          !yaml.contains("'all'"),
-        )
-      ),
-      exampleValue {
-        scala.util
-          .Try(DocsRender.plan(Capability.publish)(using graph, independent))
-          .fold(_.getMessage, _ => "planned (no error)")
-      }.assert(err =>
-        assertTrue(
-          err.contains("Ship rows require Graph publish"),
-          err.contains("ZipxModver.publish"),
+          !yaml.contains("workflow_dispatch"),
         )
       ),
     ),
@@ -498,7 +376,7 @@ zipxModverPropagate := ModverPropagate.custom { (kinds, graph, ships) => kinds }
       }.assert(text =>
         assertTrue(
           text.contains("Never group:libs=Minor"),
-          !text.split("\n").head.contains("ship:client"),
+          !text.linesIterator.nextOption().exists(_.contains("ship:client")),
           text.contains("PatchPublished") && text.contains("ship:client=Patch"),
           text.contains("MatchBump") && text.contains("ship:client=Minor"),
         )
@@ -506,8 +384,8 @@ zipxModverPropagate := ModverPropagate.custom { (kinds, graph, ships) => kinds }
     ),
     section("Cache epoch")(
       md"""
-Independent mode does not force `GitTags()`. Set `zipxCacheEpoch := CacheEpoch.ShipCatalog` so LocalDir keys off sorted
-Ship identity and version (baked at generate, same path as `Fixed`).
+With rows, `zipxCacheEpoch` defaults to `CacheEpoch.ShipCatalog`: LocalDir keys off sorted row identity and number
+(baked at generate, same path as `Fixed`).
 
 ```mermaid
 flowchart TD
@@ -517,19 +395,15 @@ flowchart TD
   class Local,Remote happy
 ```
 
-One row bump rolls the **repo-wide** LocalDir namespace, the same way a `v*` tag does under `GitTags()`. Remote
-`cacheVersion` stays JDK/OS only; a bump already changes that module's `version`, so only that module's remote entries
-miss. Lockstep OSS keeps `GitTags()`. Full guide: **Caching**.
-
-```scala
-zipxCacheEpoch := CacheEpoch.ShipCatalog
-```
+One row bump rolls the **repo-wide** LocalDir namespace in the same PR that moves the `<row>-SNAPSHOT` strings. A
+release rolls nothing: the release run restores the cache and never saves. Remote `cacheVersion` stays JDK/OS only; a
+bump already changes that module's `version`, so only that module's remote entries miss. Full guide: **Caching**.
 """,
       exampleValue {
         val hash = Modver.epochHash(ships)
         val yaml = DocsRender.job("test")(Capability.test)(using
           graph,
-          independent.copy(cacheEpoch = CacheEpoch.ShipCatalog, shipEpochHash = Some(hash)),
+          config.copy(cacheEpoch = CacheEpoch.ShipCatalog, shipEpochHash = Some(hash)),
         )
         s"hash: $hash\n$yaml"
       }.assert(text =>
@@ -580,13 +454,12 @@ flowchart LR
     ),
     section("What generate refuses")(
       md"""
-Membership and dynver checks run at `zipxWorkflowGenerate` / `zipxWorkflowCheck`, not at sbt load. Topology checks run
-in the planner when ships are present.
+These run at `zipxWorkflowGenerate` / `zipxWorkflowCheck`, not at sbt load.
 
 | When | Error |
 |---|---|
-| Library `publish` is Aggregate or Layer | `Ship rows require Graph publish` |
-| Library `publish` is `OnReleaseTag` | `cannot use Gate.OnReleaseTag as the publish gate` |
+| `zipxCapabilities` has a `publish` | `Ship rows release from zipx-release.yml (zipxReleaseWorkflow), so ci.yml has no publish job` |
+| `zipxReleaseWorkflow` is `None` | `Ship rows release from zipx-release.yml: set zipxReleaseWorkflow := Some(ZipxCentral.releases)` |
 | A publishing module has no row | `published module '…' is not in a Ship or ShipGroup` |
 | The same root is in two rows | `Each publishes=true module must be in exactly one row` |
 | `ShipGroup` with empty members | `has no members` |
@@ -620,15 +493,16 @@ hole. See **Validation**.
     ),
     section("Adopt")(
       md"""
-1. Add `Ship` / `ShipGroup` vals. Every `publishes = true` matrix root belongs in exactly one row.
+1. Add `Ship` / `ShipGroup` vals holding each row's **next** release. Every `publishes = true` matrix root belongs in
+   exactly one row.
 2. Remove repo-wide `version :=`. Remove `sbt-dynver-ci` if it was a catalog plugin.
-3. Replace `Capability.publish` / `publishLayers` / `ZipxCentral.release` with `ZipxModver.publish()`. Compose
-   `ZipxCentral.releaseOnce.copy(gate = Gate.OnDefaultPush)` only if you actually publish to Maven Central.
-4. Set `zipxCacheEpoch := CacheEpoch.ShipCatalog` (LocalDir). Lockstep OSS keeps `GitTags()`.
-5. `sbt zipxWorkflowGenerate`, commit `ci.yml` and composites, open a PR.
+3. Remove `Capability.publish` / `publishLayers` / `ZipxCentral.release` from `zipxCapabilities`, and set
+   `zipxReleaseWorkflow := Some(ZipxCentral.releases)` (or a `ReleaseWorkflow` for your registry).
+4. `sbt zipxWorkflowGenerate`, commit `ci.yml`, `zipx-release.yml`, and composites, open a PR.
+5. Create the `zipx-release` GitHub Environment. Release with a GitHub Release or Run workflow.
 
-Human still writes the next number. Settings: **Settings** (`zipxShips`, `zipxModverPropagate`, `zipxModverBump`,
-`zipxModverCheck`, `zipxModverSuggest`, `zipxModverPublishSigned`).
+Human still writes the next number. Settings: **Settings** (`zipxShips`, `zipxReleaseWorkflow`, `zipxModverPropagate`,
+`zipxModverBump`, `zipxModverCheck`, `zipxModverSuggest`).
 """
     ),
   )

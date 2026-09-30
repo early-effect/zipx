@@ -50,7 +50,7 @@ with `.when(...)`. `withExtraSteps` replaces; `plusExtraSteps` / `dropExtraSteps
 filled the field. See **Shell and steps**.
 
 Constructors: `Capability.test` / `.testJoined` / `.publish` / `.docker`, `.*Layers`, `.*Graph`, `.deploy` /
-`.deployGraph`, `.custom`, `.once`. Packs: `ZipxCentral.*`, `ZipxModver.publish`, `ZipxGitHubPackages.*`,
+`.deployGraph`, `.custom`, `.once`. Packs: `ZipxCentral.*`, `ZipxGitHubPackages.*`,
 `ZipxDocs.pages`. A `Target` is
 `(name, environment, env, condition)` with typed `EnvValue`s and `JobCondition`.
 

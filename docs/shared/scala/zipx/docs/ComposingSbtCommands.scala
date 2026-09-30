@@ -10,7 +10,7 @@ import zio.test.*
 object ComposingSbtCommands extends DocSpec:
 
   private enum ReleaseShape:
-    case Aggregate, GraphStaging, RootOnce
+    case Aggregate, ShipRows, RootOnce
 
   private object Styles:
     val ink     = Color.hex("#1f2328")
@@ -92,7 +92,7 @@ object ComposingSbtCommands extends DocSpec:
       E.div(
         Styles.Row,
         shapeButton(shape, "Aggregate · ZipxCentral.release", ReleaseShape.Aggregate),
-        shapeButton(shape, "Graph · publishSigned + releaseOnce", ReleaseShape.GraphStaging),
+        shapeButton(shape, "Ship rows · ZipxCentral.releases", ReleaseShape.ShipRows),
         shapeButton(shape, "Root Once · releaseRoot", ReleaseShape.RootOnce),
       ),
       shape.map {
@@ -107,16 +107,20 @@ object ComposingSbtCommands extends DocSpec:
             E.span(Styles.Mono, ".aggregate"),
             " (projectMatrix rows, skipped docs).",
           )
-        case ReleaseShape.GraphStaging =>
+        case ReleaseShape.ShipRows =>
           E.div(
             Styles.Detail,
-            "Per-module publish jobs upload ",
-            E.span(Styles.Mono, "target/sona-staging"),
-            "; ",
-            E.span(Styles.Mono, "releaseOnce"),
-            " merges them and runs ",
+            "With ",
+            E.span(Styles.Mono, "Ship"),
+            " / ",
+            E.span(Styles.Mono, "ShipGroup"),
+            " rows, ",
+            E.span(Styles.Mono, "zipx-release.yml"),
+            " publishes each released row at its catalog number in one session, then ",
             E.span(Styles.Mono, "sonaRelease"),
-            ". Use when you need Graph isolation or staging across jobs.",
+            " once. ",
+            E.span(Styles.Mono, "ci.yml"),
+            " has no publish job.",
           )
         case ReleaseShape.RootOnce =>
           E.div(
@@ -179,7 +183,7 @@ suites prove the key path; core unit tests prove the wire form.
       md"""
 `SbtCommand.session` / `andThen` join steps. Capability setters: `running` / `runningEach` / `runningEachCross` /
 `thenOnce` / `runningNothing`. A session tail is **Aggregate or Once only**: Layer and Graph would release a partial
-bundle per wave (generate fails naming Aggregate / `releaseOnce`).
+bundle per wave (generate fails naming Aggregate).
 
 ```mermaid
 flowchart TD

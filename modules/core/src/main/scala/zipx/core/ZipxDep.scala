@@ -119,6 +119,11 @@ object ReleaseVersion extends Subtype[String]:
     val (minor, afterMinor) = afterMajor.drop(1).span(_ != '.')
     Parts(BigInt(major), BigInt(minor), BigInt(afterMinor.drop(1)))
 
+  given ordering: scala.math.Ordering[ReleaseVersion] = scala.math.Ordering.by { version =>
+    val p = parts(version)
+    (p.major, p.minor, p.patch)
+  }
+
   extension (version: ReleaseVersion)
     def bump(by: ReleaseBump): ReleaseVersion =
       val p = parts(version)
@@ -152,12 +157,15 @@ sealed trait PublishedRow:
 
   /** Matrix roots this row owns. */
   def memberRoots: List[ModuleId]
+
+  def at(version: ReleaseVersion): PublishedRow
 end PublishedRow
 
 final case class Ship(id: ModuleId, version: ReleaseVersion) extends PublishedRow:
-  def label: String               = "Ship"
-  def identity: String            = id
-  def memberRoots: List[ModuleId] = List(id)
+  def label: String                             = "Ship"
+  def identity: String                          = id
+  def memberRoots: List[ModuleId]               = List(id)
+  def at(version: ReleaseVersion): PublishedRow = copy(version = version)
 
 object Ship:
   /** Catalog literal. `@targetName` plus `new` because [[ModuleId]] / [[ReleaseVersion]] erase to `String` and would
@@ -173,9 +181,10 @@ final case class ShipGroup(
     version: ReleaseVersion,
     members: List[ModuleId],
 ) extends PublishedRow:
-  def label: String               = "ShipGroup"
-  def identity: String            = name
-  def memberRoots: List[ModuleId] = members
+  def label: String                             = "ShipGroup"
+  def identity: String                          = name
+  def memberRoots: List[ModuleId]               = members
+  def at(version: ReleaseVersion): PublishedRow = copy(version = version)
 
 object ShipGroup:
   /** Catalog literal. Member ids are runtime strings (`String*`), so they cannot use inline [[ModuleId.apply]]. */

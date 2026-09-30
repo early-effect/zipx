@@ -12,11 +12,20 @@ object RowStatus:
       case Nil          => if binaries.isEmpty then Unreleased else Released
       case head :: tail => if missing.sizeIs == binaries.size then Unreleased else Partial(::(head, tail))
 
-/** A JVM property, because sbt drops session settings when `++` / `+` switch Scala versions. */
-object ReleaseSession:
-  val Property: String = "zipx.release"
+enum BuildSession:
+  case Snapshot
+  case Release
 
-  def active(props: collection.Map[String, String]): Boolean = props.contains(Property)
+  def versionOf(row: PublishedRow): String = this match
+    case Snapshot => s"${row.version}${Modver.UnreleasedSuffix}"
+    case Release  => row.version
+
+object BuildSession:
+  /** A JVM property, because sbt drops session settings when `++` / `+` switch Scala versions. */
+  val ReleaseProperty: String = "zipx.release"
+
+  def of(props: collection.Map[String, String]): BuildSession =
+    if props.contains(ReleaseProperty) then Release else Snapshot
 
 /** A multi-row catalog tags `<identity>/v<n>` because a bare `v*` tag there is the image tag `ci.yml` builds on. */
 enum TagScheme:

@@ -80,7 +80,7 @@ object ZipxSettings:
       SettingName("zipxCacheEpoch"),
       CacheEpoch.GitTags(),
       SettingPurpose(
-        "LocalDir cache epoch strategy (default CacheEpoch.GitTags). Use CacheEpoch.Fixed(version.value) to bake at generate time."
+        "LocalDir cache epoch strategy: CacheEpoch.ShipCatalog when the catalog has Ship rows, else CacheEpoch.GitTags."
       ),
       Build,
     )
@@ -320,40 +320,6 @@ object ZipxSettings:
       SettingName("zipxModverSuggest"),
       SettingPurpose(
         "Sticky PR comment with suggested Ship / ShipGroup constructors. Best-effort on forks."
-      ),
-    )
-
-  val modverPublishModules: SettingDef[Unit] =
-    SettingDef.input(
-      SettingName("zipxModverPublishModules"),
-      SettingPurpose(
-        "Write target/zipx-modver-publish.json (missing binaries) and target/zipx-modver-modules.json (id array). Fail closed. Empty arg is registry-only."
-      ),
-    )
-
-  val modverPublishSigned: SettingDef[Unit] =
-    SettingDef.task(
-      SettingName("zipxModverPublishSigned"),
-      SettingPurpose(
-        "Publish this scalaBinaryVersion when the missing list names it, or when target/zipx-modver-publish.json is absent. An existing file that omits the binary skips. A -SNAPSHOT remote publish also skips unless zipxPublishSnapshots."
-      ),
-    )
-
-  val publishSnapshots: SettingDef[Boolean] =
-    SettingDef.setting(
-      SettingName("zipxPublishSnapshots"),
-      false,
-      SettingPurpose(
-        "Publish -SNAPSHOT versions to the remote repository. Default false. publishLocal is unaffected."
-      ),
-      Build,
-    )
-
-  val modverPublishMoved: SettingDef[Unit] =
-    SettingDef.task(
-      SettingName("zipxModverPublishMoved"),
-      SettingPurpose(
-        "Publish every id in target/zipx-modver-modules.json, in zipxPublishOrder, in this sbt session. Missing JSON fails closed."
       ),
     )
 
@@ -791,7 +757,6 @@ object ZipxSettings:
     selfPlugins,
     versionsFile,
     workflowDispatch,
-    publishSnapshots,
     cache,
     cacheEpoch,
     pushBranches,
@@ -845,9 +810,6 @@ object ZipxSettings:
     modverCompat,
     modverCheck,
     modverSuggest,
-    modverPublishModules,
-    modverPublishSigned,
-    modverPublishMoved,
   )
 
   /** Every public catalog entry, in docs-friendly order. */

@@ -5,17 +5,14 @@
 //   models ──▶ core-lib ──▶ client   (publish; ShipGroup libs 1.4.2 + Ship client 0.3.0)
 //     └───────────────────▶ service  (non-publishing app; depends on core-lib)
 //
-// Library coordinates ship on merge to main when a Ship / ShipGroup row moved.
-// Image and deploy still wait on a human v* tag (docs/docker only, not the library
-// version). A library-only release does not push an image.
+// Every build is `<row>-SNAPSHOT`. Libraries release from zipx-release.yml, on a GitHub
+// Release tag or a dispatch. Image and deploy wait on a human v* tag in ci.yml.
 //
 // zipx derives everything (module set, needs edges, publish order, matrix) from this.
 
 MyVersions.settings
 organization := "com.example"
-// No repo-wide version. Ship / ShipGroup rows own library versions (`<row>-SNAPSHOT` until the
-// row is released). Root and `service` keep sbt's default (never published).
-zipxCacheEpoch := CacheEpoch.ShipCatalog
+zipxReleaseWorkflow := Some(ZipxCentral.releases)
 
 // Build-level zipx config: plain bare settings (sbt 2.0 common settings). zipx reads these from the root project's
 // scope, so no `ThisBuild /` prefix is needed.
@@ -92,15 +89,8 @@ lazy val root = (project in file("."))
     ),
   )
 
-// Format is a builtin Verify job (parallel with test). Layer-mode test
-// (dependency-ordered waves, few sbt sessions).
-// Library publish is ZipxModver (Graph, OnDefaultPush): version-moved Ships only, no Central
-// secrets. Deploy stays Aggregate-by-target (one job per staging/prod). Multi-registry docker
-// below is a single Aggregate job still gated on a human v* tag.
-zipxCapabilities ++= Seq(
-  Capability.testLayers,
-  ZipxModver.publish(),
-)
+// Layer-mode test: dependency-ordered waves, few sbt sessions.
+zipxCapabilities += Capability.testLayers
 
 // Multi-registry image publish (Gap 1). Overrides the built-in single-target `docker` capability (same name ⇒
 // replace) to push the service image to N registries, each with its own credentials.

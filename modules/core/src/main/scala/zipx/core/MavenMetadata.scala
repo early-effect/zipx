@@ -65,6 +65,12 @@ object MavenMetadata:
         Right(None)
       case Right(res) => Left(s"lookup $url: HTTP ${res.status}")
 
+  def latestRelease(xml: String): Option[ReleaseVersion] =
+    raw"<version>([^<]+)</version>".r
+      .findAllMatchIn(xml)
+      .flatMap(m => ReleaseVersion.make(m.group(1).trim).toOption)
+      .maxOption(using ReleaseVersion.ordering)
+
   private[core] def parseLatest(xml: String, preRelease: PreRelease = PreRelease.Skip): Option[String] =
     val latest  = raw"<latest>([^<]+)</latest>".r.findFirstMatchIn(xml).map(_.group(1))
     val release = raw"<release>([^<]+)</release>".r.findFirstMatchIn(xml).map(_.group(1))

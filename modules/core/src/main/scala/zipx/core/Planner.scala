@@ -163,7 +163,6 @@ object Planner:
     capabilities.foreach(c => validateSatisfiable(c, graph, config))
     capabilities.foreach(validateSessionTail)
     validateSkipConsumers(capabilities, config)
-    validateModverPublish(capabilities, config)
     capabilities.filter(Coverage.instruments).foreach(validateCoverage)
     validateLocalCacheOwner(capabilities, graph)
     capabilities.foreach(c => c.affectedBy.foreach(validateAffectedBy(c, _, graph)))
@@ -228,21 +227,6 @@ object Planner:
     }
   end validateLocalCacheOwner
 
-  /** Library `publish` must be Graph + OnDefaultPush when Ship rows are present. Docker is not this refusal. */
-  private def validateModverPublish(capabilities: List[Capability], config: PlanConfig): Unit =
-    if !config.modverPublish then ()
-    else
-      capabilities.filter(_.name == Capability.PublishName).foreach { c =>
-        if c.scope == CapabilityScope.Aggregate || c.scope == CapabilityScope.Layer then
-          sys.error(
-            s"zipx: Ship rows require Graph publish (version-moved). Capability 'publish' is ${c.scope}. Use ZipxModver.publish, ZipxModver.publish(...).inOneSession, or Capability.publishGraph.copy(gate = Gate.OnDefaultPush)."
-          )
-        if c.gate == Gate.OnReleaseTag then
-          sys.error(
-            "zipx: Ship rows cannot use Gate.OnReleaseTag as the publish gate. Merge to the default branch is the release signal. Use Gate.OnDefaultPush."
-          )
-      }
-
   /** Rejects [[Capability.sessionTail]] on scopes where a tail would run too often or with a partial module set. */
   private def validateSessionTail(capability: Capability): Unit =
     capability.sessionTail.foreach { tail =>
@@ -261,12 +245,12 @@ object Planner:
         case CapabilityScope.Layer =>
           fail(
             "Layer runs one session per wave, so the tail would release a partial bundle per wave",
-            "Use Aggregate (or ZipxCentral.release) / Once, or Graph + releaseOnce",
+            "Use Aggregate (or ZipxCentral.release) / Once",
           )
         case CapabilityScope.Graph =>
           fail(
             "Graph runs one session per module, so the tail would run once per module",
-            "Use Aggregate / Once, or Graph publishSigned + releaseOnce",
+            "Use Aggregate / Once",
           )
         case CapabilityScope.Aggregate | CapabilityScope.Once => ()
       end match
@@ -408,7 +392,6 @@ object Planner:
   val affectedJobId: JobId       = JobId("affected")
   val verifyGateJobId: JobId     = JobId("verify-gate")
   val cacheRehydrateJobId: JobId = JobId("cache-rehydrate")
-  val modverJobId: JobId         = JobId("modver")
 
   /** Whether a phase's Graph jobs may be narrowed to the affected modules.
     *
@@ -425,16 +408,9 @@ object Planner:
     * Note that only Graph scope is ever gated (see the `usesAffected` filters below), so an Aggregate deploy is
     * unaffected by this either way.
     */
-  /** Whether this capability's Graph jobs may be narrowed to the affected modules.
-    *
-    * Library `publish` under [[PlanConfig.modverPublish]] is version-moved instead; docker Graph publish may still use
-    * [[PlanConfig.affectedPublish]].
-    */
   private def affectedGated(capability: Capability, config: PlanConfig): Boolean =
     capability.phase match
-      case Phase.Verify                                                                       => true
-      case Phase.Publish if config.modverPublish && capability.name == Capability.PublishName =>
-        false
+      case Phase.Verify  => true
       case Phase.Publish => config.affectedPublish
       case Phase.Deploy  => config.affectedDeploy
 
@@ -478,25 +454,17 @@ object Planner:
           .map(_.name)
           .toSet
 
-    val usesModver =
-      config.modverPublish && capabilities.exists(c =>
-        c.name == Capability.PublishName &&
-          (c.scope == CapabilityScope.Graph || c.scope == CapabilityScope.Once)
-      )
-    val modverGatedNames: Set[CapabilityName] =
-      if usesModver then Set(Capability.PublishName) else Set.empty
-
     val orderedCaps    = capabilities.zipWithIndex.sortBy((c, i) => (c.phase.ordinal, i)).map(_._1)
     val capabilityJobs =
       orderedCaps.flatMap { c =>
         val mode = MatrixCollapse.effective(c, config)
         c.scope match
           case CapabilityScope.Once =>
-            List(onceJob(c, graph, config, byName, usesVerifyGate, affectedGatedNames ++ modverGatedNames))
+            List(onceJob(c, graph, config, byName, usesVerifyGate, affectedGatedNames))
           case CapabilityScope.Aggregate =>
-            aggregateJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames ++ modverGatedNames, mode)
+            aggregateJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames, mode)
           case CapabilityScope.Layer =>
-            layerJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames ++ modverGatedNames, mode)
+            layerJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames, mode)
           case CapabilityScope.Graph =>
             graphCapabilityJobs(c, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames, Pipeline.Ci)
         end match
@@ -510,7 +478,6 @@ object Planner:
           affectedJobId ->
             affectedSetupJob(config, usesVerifyGate && !affectedWhenVerifySkips, affectedWhenVerifySkips)
         ),
-        Option.when(usesModver)(modverJobId -> modverSetupJob(config)),
       ).flatten
 
     // Widening the key to `String` is the last responsible moment: `Workflow` is the serialization model, and a
@@ -531,18 +498,10 @@ object Planner:
     * behind, which is worse than a wasted runner.
     */
   private def concurrencyFor(config: PlanConfig): Concurrency =
-    val cancel =
-      if !config.modverPublish then !onAnyTagPush
-      else
-        val notDefault = config.pushBranches.flatMap { b =>
-          Expr.quotedMake(s"refs/heads/$b").toOption.map(q => Expr.github("ref") !== q)
-        }
-        notDefault.foldLeft[Expr](!onAnyTagPush)(_ && _)
     Concurrency(
       group = (lit(config.workflowName + "-") ++ Expr.github("ref")).render,
-      cancelInProgress = CancelInProgress.When(cancel),
+      cancelInProgress = CancelInProgress.When(!onAnyTagPush),
     )
-  end concurrencyFor
 
   /** Deliberately broader than [[JobCondition.onReleaseTag]] (`refs/tags/v`): Verify is skipped and cancellation
     * disabled for *every* tag, since a tag push is never what Verify exists to check, while only a `v` tag publishes.
@@ -745,65 +704,6 @@ object Planner:
     )
   end affectedSetupJob
 
-  private def modverSetupJob(config: PlanConfig): Job =
-    Job(
-      name = Some("modver"),
-      runsOn = List(config.runnerOs),
-      `if` = Some(JobCondition.onDefaultPush(config.pushBranches).render),
-      permissions = ListMap("contents" -> "read"),
-      env = EnvValue.renderAll(config.env),
-      outputs = ListMap("modules" -> Expr.stepOutput("compute", "modules").render),
-      steps = checkoutThenSbtSetup(config, modverJobId, nodeVersion = None, LocalCacheMode.Off) ++ List(
-        Step
-          .run(modverScript)
-          .withId("compute")
-          .named("Compute version-moved modules")
-          .build
-      ),
-    )
-
-  private def modverScript: Script =
-    val runWithBefore = Block(
-      Exec(
-        "sbt",
-        Word.lit("-batch"),
-        Word.lit("--error"),
-        Word.dquote(Word.lit("zipxModverPublishModules "), Word.v("before")),
-      ),
-      Assign("modules", Word.subst(Exec("cat", Word.lit("target/zipx-modver-modules.json")))),
-    )
-    val runRegistryOnly = Block(
-      Exec("sbt", Word.lit("-batch"), Word.lit("--error"), Word.lit("zipxModverPublishModules")),
-      Assign("modules", Word.subst(Exec("cat", Word.lit("target/zipx-modver-modules.json")))),
-    )
-    val failBefore = Block(
-      Exec(
-        "echo",
-        Word.quoted("zipx: github.event.before is missing or all-zero; refusing to guess the publish set"),
-      ),
-      Exec("exit", Word.lit("1")),
-    )
-    Script(
-      If(
-        eventIs("workflow_dispatch"),
-        runRegistryOnly,
-        elifs = List(
-          eventIs("push") -> Block(
-            Assign("before", Word.dquote(Expr.github("event.before").asWord)),
-            If(
-              ShTest.varEmpty("before") ||
-                ShTest.varEquals("before", "0000000000000000000000000000000000000000"),
-              failBefore,
-              elseDo = Some(runWithBefore),
-            ),
-          )
-        ),
-        elseDo = Some(failBefore),
-      ),
-      setOutput("modules", Word.v("modules")),
-    )
-  end modverScript
-
   private def affectedScript(affectedOnPush: Boolean): Script =
     // sbt writes the answer to a file rather than stdout, because sbt 2 prints server banners and `modules=$(sbt …)`
     // would put them in GITHUB_OUTPUT.
@@ -857,7 +757,7 @@ object Planner:
         )
       ),
       pullRequest = Some(PullRequestTrigger()),
-      workflowDispatch = Option.when(config.workflowDispatch || config.modverPublish)(WorkflowDispatch()),
+      workflowDispatch = Option.when(config.workflowDispatch)(WorkflowDispatch()),
     )
   end triggersFor
 
@@ -889,27 +789,24 @@ object Planner:
       usesVerifyGate: Boolean,
       affectedGatedNames: Set[CapabilityName],
   ): (JobId, Job) =
-    val releaseCond   = gateCondition(capability, config)
-    val crossNeeds    = crossCapabilityNeeds(capability, graph, byName, config)
-    val gatedOnModver = config.modverPublish && capability.name == Capability.PublishName
-    val affectedBy    = affectedByModules(capability, graph, config)
-    val rawNeeds      =
-      (crossNeeds ++
-        (if gatedOnModver then List(modverJobId) else Nil) ++
-        (if affectedBy.nonEmpty then List(affectedJobId) else Nil)).distinct.sorted
+    val releaseCond = gateCondition(capability, config)
+    val crossNeeds  = crossCapabilityNeeds(capability, graph, byName, config)
+    val affectedBy  = affectedByModules(capability, graph, config)
+    val rawNeeds    =
+      (crossNeeds ++ (if affectedBy.nonEmpty then List(affectedJobId) else Nil)).distinct.sorted
     // Same clause order as a Graph job: `!cancelled()`, the affected gate, then each other need's guard.
     val tolerance =
-      if affectedBy.isEmpty then tolerateSkips(capability, rawNeeds.filterNot(_ == modverJobId), affectedGatedNames)
+      if affectedBy.isEmpty then tolerateSkips(capability, rawNeeds, affectedGatedNames)
       else
-        val clauses =
-          skipTolerantClauses(rawNeeds.filterNot(id => id == modverJobId || id == affectedJobId), capability.upstream)
-        val gate =
-          Expr.group((affectedBy.map(Expr.contains(affectedModulesJson, _)) :+ affectedContainsAll).reduceLeft(_ || _))
-        Some((clauses.head :: gate.unwrapped :: clauses.tail).mkString(" && "))
-    val withModver =
-      andConditions(andConditions(tolerance, releaseCond), Option.when(gatedOnModver)(modverModulesNonEmpty.unwrapped))
+        val gate = Expr
+          .group((affectedBy.map(Expr.contains(affectedModulesJson, _)) :+ affectedContainsAll).reduceLeft(_ || _))
+          .unwrapped
+        val clauses = skipTolerantClauses(rawNeeds.filterNot(_ == affectedJobId)) match
+          case first :: rest => first :: gate :: rest
+          case Nil           => List(gate)
+        Some(clauses.mkString(" && "))
     val (needs, base) =
-      applyVerifyGate(rawNeeds, withModver, capability.phase, usesVerifyGate)
+      applyVerifyGate(rawNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
     val cond = andConditions(base, JobCondition.renderOpt(capability.condition))
     capability.workflowCall match
       case Some(call) =>
@@ -1397,32 +1294,23 @@ object Planner:
 
       val selector        = selectionJobId(pipeline)
       val gatedOnAffected = usesAffected && affectedGated(capability, config)
-      val gatedOnModver   = config.modverPublish && capability.name == Capability.PublishName
-      val rawNeeds        =
-        (crossNeeds ++
-          (if gatedOnAffected then List(selector) else Nil) ++
-          (if gatedOnModver then List(modverJobId) else Nil)).distinct.sorted
-      val cache        = cacheForCommand(config, commandOverride.isDefined)
-      val guardedNeeds = rawNeeds.filterNot(id => id == selector || id == verifyGateJobId || id == modverJobId)
-      val skipTolerant = gatedOnAffected || gatedOnModver || dependsOnSkippable(capability, affectedGatedNames)
-      val releaseGate  = gateFor(capability, config, pipeline)
-      val legTarget    = Option.when(targets.nonEmpty)(Expr.matrix("target"))
+      val rawNeeds        = (crossNeeds ++ (if gatedOnAffected then List(selector) else Nil)).distinct.sorted
+      val cache           = cacheForCommand(config, commandOverride.isDefined)
+      val guardedNeeds    = rawNeeds.filterNot(id => id == selector || id == verifyGateJobId)
+      val skipTolerant    = gatedOnAffected || dependsOnSkippable(capability, affectedGatedNames)
+      val releaseGate     = gateFor(capability, config, pipeline)
+      val legTarget       = Option.when(targets.nonEmpty)(Expr.matrix("target"))
       // Job-level `if` cannot use `matrix.*` (GitHub rejects the workflow). Skip the whole job when
       // nothing is selected; per-leg membership is enforced on each step below.
       val affectedGate =
         Option.when(gatedOnAffected)(selectsAny(pipeline, targeted = legTarget.isDefined).unwrapped)
       val stepAffectedGate =
         Option.when(gatedOnAffected)(selects(pipeline, Expr.matrix("module"), legTarget).unwrapped)
-      val modverGate =
-        Option.when(gatedOnModver)(modverModulesNonEmpty.unwrapped)
-      val stepModverGate =
-        Option.when(gatedOnModver)(modverContainsMatrixModule.unwrapped)
       val tolerance =
-        if gatedOnAffected || gatedOnModver || skipTolerant then skipTolerantClauses(guardedNeeds, capability.upstream)
+        if gatedOnAffected || skipTolerant then skipTolerantClauses(guardedNeeds)
         else Nil
       val clauses =
-        tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ modverGate.toList ++
-          tolerance.drop(1)
+        tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ tolerance.drop(1)
       val baseCond       = if clauses.isEmpty then None else Some(clauses.mkString(" && "))
       val (needs, gated) =
         applyVerifyGate(rawNeeds, baseCond, capability.phase, usesVerifyGate)
@@ -1457,7 +1345,7 @@ object Planner:
         matrixAxes = axes,
         pipeline = pipeline,
         module = Expr.matrix("module"),
-      ).map(andStepIf(_, stepAffectedGate)).map(andStepIf(_, stepModverGate))
+      ).map(andStepIf(_, stepAffectedGate))
 
       List(
         capability.name.asJobId -> Job(
@@ -1516,11 +1404,8 @@ object Planner:
 
     val selector        = selectionJobId(pipeline)
     val gatedOnAffected = usesAffected && affectedGated(capability, config)
-    val gatedOnModver   = config.modverPublish && capability.name == Capability.PublishName
     val rawNeeds        =
-      (upstreamNeeds ++ crossNeeds ++
-        (if gatedOnAffected then List(selector) else Nil) ++
-        (if gatedOnModver then List(modverJobId) else Nil)).distinct.sorted
+      (upstreamNeeds ++ crossNeeds ++ (if gatedOnAffected then List(selector) else Nil)).distinct.sorted
 
     val matrix =
       if capability.matrixed && config.scalaMatrix && node.crossScalaVersions.sizeIs > 1 then
@@ -1531,10 +1416,9 @@ object Planner:
     // Every need except the jobs with a clause of their own: the module selector is read through its *output*, and
     // `verify-gate` through `applyVerifyGate`. That includes `crossNeeds`, so a failed `fmt` still blocks the tests
     // whose `!cancelled()` would otherwise let them through.
-    val guardedNeeds = rawNeeds.filterNot(id => id == selector || id == verifyGateJobId || id == modverJobId)
-    val skipTolerant =
-      gatedOnAffected || gatedOnModver || dependsOnSkippable(capability, affectedGatedNames)
-    val needs = applyVerifyGate(rawNeeds, None, capability.phase, usesVerifyGate)._1
+    val guardedNeeds = rawNeeds.filterNot(id => id == selector || id == verifyGateJobId)
+    val skipTolerant = gatedOnAffected || dependsOnSkippable(capability, affectedGatedNames)
+    val needs        = applyVerifyGate(rawNeeds, None, capability.phase, usesVerifyGate)._1
 
     // Per target, because the deploy plan selects modules per target. `affected` ignores the target, so ci.yml's
     // conditions are the same for every target of a module.
@@ -1546,7 +1430,6 @@ object Planner:
         gatedOnAffected,
         skipTolerant,
         config,
-        gatedOnModver,
         pipeline,
         target.map(t => Expr.Quoted(t.name.asExprLiteral)),
       )
@@ -1672,20 +1555,10 @@ object Planner:
     * Without this, affected-gating a Publish capability would break every dependent: `Capability.deploy` needs `docker`
     * by default, so one skipped `docker-<module>` would silently skip the deploy that wanted the other modules'.
     */
-  private def skipTolerantClauses(needs: List[JobId], upstream: UpstreamResult): List[String] =
-    val guards     = needs.distinct.sorted
-    val noneFailed = guards.map(n => (Expr.JobResult(n) !== Expr.quoted("failure")).unwrapped)
-    // Last, so callers that splice the head (`!cancelled()`) elsewhere keep it.
-    val anySucceeded = upstream match
-      case UpstreamResult.NoneFailed   => Nil
-      case UpstreamResult.AnySucceeded =>
-        guards
-          .map(n => Expr.JobResult(n) === Expr.quoted("success"))
-          .reduceLeftOption(_ || _)
-          .map(Expr.group(_).unwrapped)
-          .toList
-    ((!Expr.cancelled).unwrapped +: noneFailed) ++ anySucceeded
-  end skipTolerantClauses
+  private def skipTolerantClauses(needs: List[JobId]): List[String] =
+    (!Expr.cancelled).unwrapped +: needs.distinct.sorted.map(n =>
+      (Expr.JobResult(n) !== Expr.quoted("failure")).unwrapped
+    )
 
   /** Whether a job depending on these capability names has a need that affected-gating can skip. One hop is enough: a
     * direct dependent becomes skip-tolerant and therefore never skips itself, so its own dependents keep seeing
@@ -1707,7 +1580,7 @@ object Planner:
       affectedGatedNames: Set[CapabilityName],
   ): Option[String] =
     Option.when(dependsOnSkippable(capability, affectedGatedNames) && crossNeeds.nonEmpty)(
-      skipTolerantClauses(crossNeeds, capability.upstream).mkString(" && ")
+      skipTolerantClauses(crossNeeds).mkString(" && ")
     )
 
   /** A dispatched deploy is its own gate: a release-tag or default-push gate there could never be true. */
@@ -1730,22 +1603,18 @@ object Planner:
       gatedOnAffected: Boolean,
       skipTolerant: Boolean,
       config: PlanConfig,
-      gatedOnModver: Boolean,
       pipeline: Pipeline,
       target: Option[Expr],
   ): Option[String] =
     val releaseGate  = gateFor(capability, config, pipeline)
     val affectedGate =
       Option.when(gatedOnAffected)(selects(pipeline, Expr.Quoted(node.id.asExprLiteral), target).unwrapped)
-    val modverGate =
-      Option.when(gatedOnModver)(modverContains(node.id.asExprLiteral).unwrapped)
     val tolerance =
-      if gatedOnAffected || gatedOnModver || skipTolerant then skipTolerantClauses(guardedNeeds, capability.upstream)
+      if gatedOnAffected || skipTolerant then skipTolerantClauses(guardedNeeds)
       else Nil
 
     val clauses =
-      tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ modverGate.toList ++
-        tolerance.drop(1)
+      tolerance.headOption.toList ++ releaseGate.toList ++ affectedGate.toList ++ tolerance.drop(1)
     if clauses.isEmpty then None else Some(clauses.mkString(" && "))
   end jobCondition
 
@@ -1761,12 +1630,6 @@ object Planner:
       Expr.Quoted(member),
     )
 
-  private def modverContains(member: ExprLiteral): Expr =
-    Expr.contains(
-      Expr.fromJson(Expr.JobOutput(modverJobId, OutputName("modules"))),
-      Expr.Quoted(member),
-    )
-
   /** `'all'` is the affected job's "could not narrow it down" answer, and the one member of that array that is not a
     * module id.
     */
@@ -1778,17 +1641,6 @@ object Planner:
     */
   private val affectedModulesNonEmpty: Expr =
     Expr.JobOutput(affectedJobId, OutputName("modules")) !== Expr.lit("'[]'")
-
-  /** Job-level skip when modver found no version-moved modules. No `'all'` (fail-closed, unlike affected). */
-  private val modverModulesNonEmpty: Expr =
-    Expr.JobOutput(modverJobId, OutputName("modules")) !== Expr.lit("'[]'")
-
-  /** Per-leg modver membership for a Graph matrix-collapsed publish job. Step `if`, not job `if`. */
-  private val modverContainsMatrixModule: Expr =
-    Expr.contains(
-      Expr.fromJson(Expr.JobOutput(modverJobId, OutputName("modules"))),
-      Expr.matrix("module"),
-    )
 
   /** What differs between `ci.yml` and `zipx-deploy.yml` for the Graph jobs they share. */
   private[core] enum Pipeline:

@@ -66,15 +66,6 @@ enum RegistryStatus:
 /** Maven GAV as published, including the Scala-binary suffix on `artifact`. */
 final case class Gav(organization: String, artifact: String, version: String)
 
-final case class MovedRows(
-    versionChanged: Set[ShipRef],
-    added: Set[ShipRef],
-    newMembers: Set[ModuleId],
-)
-
-object MovedRows:
-  val empty: MovedRows = MovedRows(Set.empty, Set.empty, Set.empty)
-
 /** Identity is a Ship project id or a ShipGroup name. */
 final case class ShipBump(identity: String, from: ReleaseVersion, to: ReleaseVersion)
 
@@ -110,9 +101,6 @@ object Modver:
       case 404 | 410 => Right(RegistryStatus.Missing)
       case n         => Left(s"HTTP $n")
 
-  def isZeroSha(sha: String): Boolean =
-    sha.isEmpty || sha.forall(_ == '0')
-
   def publishingRoots(graph: ModuleGraph): Set[ModuleId] =
     graph.nodes.filter(_.publishes).map(_.matrixRoot).toSet
 
@@ -133,56 +121,6 @@ object Modver:
 
   /** sbt overwrites only a `-SNAPSHOT` on republish; any other version is written once and then skipped. */
   val UnreleasedSuffix = "-SNAPSHOT"
-
-  /** The version a row's members take on a commit that does not release it. */
-  def unreleased(row: PublishedRow): String = (row.version: String) + UnreleasedSuffix
-
-  /** When a Ship member takes its catalog number, and when it takes [[unreleased]]. */
-  enum ReleaseMoment:
-    /** This default-branch push releases the row. */
-    case ThisCommit
-
-    /** `workflow_dispatch` on a release branch. Modver looked the catalog number up; publish that number. */
-    case RegistryRecovery
-
-    /** Any other commit. `<row>-SNAPSHOT`, so `publishLocal` overwrites it. */
-    case Unreleased
-
-  /** `actions` is `GITHUB_ACTIONS=true`. `ref` is `GITHUB_REF`. A dispatch from anywhere but a release branch stays
-    * unreleased, so a feature-branch dispatch cannot publish the catalog number.
-    */
-  def releaseMoment(
-      actions: Boolean,
-      eventName: Option[String],
-      ref: Option[String],
-      branches: Seq[String],
-      releasesThisRow: Boolean,
-  ): ReleaseMoment =
-    val onBranch = ref.exists(r => branches.exists(b => r == s"refs/heads/$b"))
-    if actions && onBranch && eventName.contains("workflow_dispatch") then ReleaseMoment.RegistryRecovery
-    else if actions && onBranch && eventName.contains("push") && releasesThisRow then ReleaseMoment.ThisCommit
-    else ReleaseMoment.Unreleased
-  end releaseMoment
-
-  /** The version `version` is set to. Registry recovery publishes the catalog number, not a snapshot of it. */
-  def versionAt(row: PublishedRow, moment: ReleaseMoment): String =
-    moment match
-      case ReleaseMoment.ThisCommit | ReleaseMoment.RegistryRecovery => row.version: String
-      case ReleaseMoment.Unreleased                                  => unreleased(row)
-
-  /** What a POM names a revision. A release POM (`releasing`: the project is at its catalog number) goes to a registry,
-    * which holds only releases, so each unreleased sibling in `organization` takes its row's catalog number. Any other
-    * POM names what was built, and another organization's revisions are theirs.
-    */
-  def releasedRevision(
-      groupId: String,
-      revision: String,
-      organization: String,
-      releasing: Boolean,
-      ships: Seq[PublishedRow],
-  ): String =
-    if !releasing || groupId != organization then revision
-    else ships.find(r => unreleased(r) == revision).fold(revision)(_.version: String)
 
   /** Walk published reverse-deps after MiMa kinds exist. Never is identity so MatchBump cannot see Patch placeholders.
     */
@@ -235,7 +173,7 @@ object Modver:
     queue match
       case Nil       => out
       case src :: qs =>
-        val inherited     = if inheritTrigger then out(src) else BumpKind.Patch
+        val inherited     = if inheritTrigger then out.getOrElse(src, BumpKind.Patch) else BumpKind.Patch
         val (next, extra) =
           dependents.getOrElse(src, Set.empty).foldLeft((out, List.empty[ShipRef])) { case ((m, acc), dep) =>
             val proposed = m.get(dep).fold(inherited)(existing => minBumpOrd.max(existing, inherited))
@@ -264,47 +202,6 @@ object Modver:
     changedFiles match
       case None        => Left("could not diff changed files for modver; refusing to guess the bump set")
       case Some(files) => Right(ships.liftGroups(dirtyRoots(graph, files)))
-
-  /** Missing catalog at `before` is empty (first adoption). Failed `git show` / parse is Left. */
-  def previousIndex(
-      shown: Either[String, Option[String]],
-      parse: String => Either[String, ShipIndex],
-  ): Either[String, ShipIndex] =
-    shown match
-      case Left(err)        => Left(err)
-      case Right(None)      => Right(ShipIndex.empty)
-      case Right(Some(src)) => parse(src)
-
-  /** Catalog diff. `previous` Left is git/parse failure. Right(empty) is first adoption, not a refusal. */
-  def movedRows(
-      current: ShipIndex,
-      previous: Either[String, ShipIndex],
-  ): Either[String, MovedRows] =
-    previous.map(prev => diff(current, prev))
-
-  def thisCommitReleases(row: PublishedRow, moved: MovedRows, index: ShipIndex): Boolean =
-    val ref = index.refOf(row)
-    moved.versionChanged.contains(ref) || moved.added.contains(ref) ||
-    row.memberRoots.exists(moved.newMembers.contains)
-
-  /** Every platform row of a moved row, then drop GAVs already on the registry. Fail closed on lookup errors. */
-  def filterUnpublished(
-      moved: MovedRows,
-      index: ShipIndex,
-      graph: ModuleGraph,
-      gavs: ModuleId => List[Gav],
-      registry: Gav => Either[String, RegistryStatus],
-  ): Either[String, Map[ModuleId, List[Gav]]] =
-    val roots   = candidateRoots(moved, index)
-    val modules = graph.nodes.filter(n => roots.contains(n.matrixRoot))
-    modules.foldLeft[Either[String, Map[ModuleId, List[Gav]]]](Right(Map.empty)) { (acc, node) =>
-      acc.flatMap { m =>
-        missingGavs(gavs(node.id), registry).map { missing =>
-          if missing.isEmpty then m else m + (node.id -> missing)
-        }
-      }
-    }
-  end filterUnpublished
 
   def membership(graph: ModuleGraph, ships: Seq[PublishedRow]): Either[String, ShipIndex] =
     for
@@ -374,43 +271,6 @@ object Modver:
     missing.toLeft(())
   end uncoveredError
 
-  private def diff(current: ShipIndex, previous: ShipIndex): MovedRows =
-    val currentRefs    = current.byIdentity.keySet
-    val prevRefs       = previous.byIdentity.keySet
-    val added          = currentRefs -- prevRefs
-    val versionChanged = (currentRefs intersect prevRefs).filter { ref =>
-      val now = current.byIdentity(ref).version: String
-      val was = previous.byIdentity(ref).version: String
-      now != was
-    }
-    val newMembers = current.byIdentity.flatMap { (ref, row) =>
-      previous.byIdentity.get(ref) match
-        case None       => Set.empty[ModuleId]
-        case Some(prev) => row.memberRoots.toSet -- prev.memberRoots.toSet
-    }.toSet
-    MovedRows(versionChanged, added, newMembers)
-  end diff
-
-  private def candidateRoots(moved: MovedRows, index: ShipIndex): Set[ModuleId] =
-    val fromRows = (moved.versionChanged ++ moved.added).flatMap { ref =>
-      index.byIdentity.get(ref).toList.flatMap(_.memberRoots)
-    }
-    val fromNew = moved.newMembers.flatMap(id => index.byRoot.get(id).toList.flatMap(_.memberRoots))
-    fromRows ++ fromNew ++ moved.newMembers
-
-  private def missingGavs(
-      gavs: List[Gav],
-      registry: Gav => Either[String, RegistryStatus],
-  ): Either[String, List[Gav]] =
-    gavs.foldLeft[Either[String, List[Gav]]](Right(Nil)) { (acc, gav) =>
-      acc.flatMap { missing =>
-        registry(gav).map {
-          case RegistryStatus.Missing   => missing :+ gav
-          case RegistryStatus.Published => missing
-        }
-      }
-    }
-
   def isJsOnly(graph: ModuleGraph, root: ModuleId): Boolean =
     val rows = graph.nodes.filter(n => n.matrixRoot == root && n.publishes)
     rows.nonEmpty && rows.forall(n => (n.id: String).endsWith("JS"))
@@ -446,7 +306,7 @@ object Modver:
       else BumpStatus.Ok
 
   def checkFails(status: BumpStatus): Boolean =
-    status == BumpStatus.Missing || status == BumpStatus.Undersized || status == BumpStatus.NewMemberDirty
+    status == BumpStatus.Missing || status == BumpStatus.Undersized
 
   def suggestedCtor(row: PublishedRow, to: String): String =
     row match
@@ -459,41 +319,35 @@ object Modver:
       lifted: Set[ShipRef],
       index: ShipIndex,
       graph: ModuleGraph,
-      previous: ShipIndex,
+      lastReleases: ShipIndex,
       schemeOf: ModuleId => String,
-      probeOf: ModuleId => MemberProbe,
-  ): Map[ShipRef, BumpKind] =
-    lifted.iterator.map { ref =>
-      index.byIdentity.get(ref) match
-        case None      => ref -> BumpKind.None
-        case Some(row) =>
-          val kinds = row.memberRoots.map { root =>
-            val probe =
-              if previous.rowFor(root).isEmpty then MemberProbe.FirstPublish
-              else if isJsOnly(graph, root) then MemberProbe.JsOnly
-              else probeOf(root)
-            minBumpKind(row.version, schemeOf(root), probe)
-          }
-          ref -> maxKind(kinds)
-    }.toMap
-
-  def newMemberDirtyRefs(moved: MovedRows, lifted: Set[ShipRef], index: ShipIndex): Set[ShipRef] =
-    moved.newMembers.flatMap { id =>
-      index.byRoot.get(id).map(index.refOf).filter { ref =>
-        lifted.contains(ref) && !moved.versionChanged.contains(ref)
+      probeOf: ModuleId => Either[String, MemberProbe],
+  ): Either[String, Map[ShipRef, BumpKind]] =
+    def probe(root: ModuleId): Either[String, MemberProbe] =
+      if lastReleases.rowFor(root).isEmpty then Right(MemberProbe.FirstPublish)
+      else if isJsOnly(graph, root) then Right(MemberProbe.JsOnly)
+      else probeOf(root)
+    lifted.toList.foldLeft[Either[String, Map[ShipRef, BumpKind]]](Right(Map.empty)) { (acc, ref) =>
+      acc.flatMap { kinds =>
+        index.byIdentity.get(ref) match
+          case None      => Right(kinds + (ref -> BumpKind.None))
+          case Some(row) =>
+            row.memberRoots
+              .foldLeft[Either[String, List[BumpKind]]](Right(Nil)) { (found, root) =>
+                found.flatMap(ks => probe(root).map(p => minBumpKind(row.version, schemeOf(root), p) :: ks))
+              }
+              .map(ks => kinds + (ref -> maxKind(ks)))
       }
     }
+  end minBumps
 
   def report(
       current: ShipIndex,
-      previous: ShipIndex,
-      lifted: Set[ShipRef],
-      moved: MovedRows,
+      lastReleases: ShipIndex,
       kinds: Map[ShipRef, BumpKind],
       mimaRan: Set[ShipRef],
   ): Either[String, ModverReport] =
-    val dirty = newMemberDirtyRefs(moved, lifted, current)
-    val refs  = (kinds.keySet ++ dirty).toList.sortBy {
+    val refs = kinds.keySet.toList.sortBy {
       case ShipRef.One(id)     => id: String
       case ShipRef.Group(name) => name: String
     }
@@ -504,12 +358,10 @@ object Modver:
             case None      => Left(s"no catalog row for $ref")
             case Some(row) =>
               val written   = row.version
-              val from      = previous.byIdentity.get(ref).fold(written)(_.version)
+              val from      = lastReleases.byIdentity.get(ref).fold(written)(_.version)
               val floor     = kinds.getOrElse(ref, BumpKind.None)
               val suggested = suggestedVersion(from, floor)
-              val status0   = writtenStatus(from, written, floor)
-              val status    =
-                if dirty.contains(ref) && written == from then BumpStatus.NewMemberDirty else status0
+              val status    = writtenStatus(from, written, floor)
               Right(
                 rows :+ ModverReportRow(
                   identity = row.identity,

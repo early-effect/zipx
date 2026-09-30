@@ -234,7 +234,7 @@ object DeployWorkflow:
     */
   def plan(graph: ModuleGraph, deploy: List[Capability], config: PlanConfig, trigger: DeployTrigger): Workflow =
     val imagesEnvironment = trigger.imagesEnvironment.getOrElse(ImagesEnvironment)
-    val deployConfig      = config.copy(affectedPublish = true, affectedDeploy = true, modverPublish = false)
+    val deployConfig      = config.copy(affectedPublish = true, affectedDeploy = true)
     val perModule         = deploy.map(_.withMatrixCollapse(MatrixCollapse.Off))
     val byName            = perModule.map(c => c.name -> c).toMap
     val gated             = perModule.map(_.name).toSet
