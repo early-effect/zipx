@@ -62,8 +62,8 @@ the catalog fails generate. Other plugins extend the same trait. See **Versions*
 Versions**.
 
 Outbound versions are a fourth collection: `Ship` / `ShipGroup` when a monorepo publishes libraries on different
-cadences. Every build is `<row>-SNAPSHOT` until a deliberate release. zipx-the-product stays lockstep on a `v*` tag
-for now. See **Independent versions**.
+cadences. Every build is `<row>-SNAPSHOT` until a deliberate release; zipx itself ships that way, as one
+`ShipGroup`. See **Independent versions**.
 
 ```scala
 import zipx.*

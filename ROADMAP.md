@@ -7,7 +7,8 @@ Intent as the code a build author writes. Live behavior: the Specular docs. What
 ```scala
 // The build is the only source of truth; zipx derives CI from it.
 MyVersions.settings                        // typed catalog: what we use (Lib, Plugin, Action, Pin), what we ship (Ship)
-zipxCapabilities ++= Seq(Capability.test, ZipxCentral.release, ZipxDocs.pages())
+zipxCapabilities ++= Seq(Capability.test, ZipxCentral.snapshots, ZipxDocs.pages())
+zipxReleaseWorkflow := Some(ZipxCentral.releases)
 ```
 
 ```text
@@ -41,7 +42,7 @@ sbt "zipxModverBump zipx minor"                     // modver-check floors it wi
 // Deterministic YAML. sbt 2 only. testFull proves; test (testQuick) does not.
 ```
 
-## Now: snapshots and releases
+## Done: snapshots and releases
 
 ```scala
 // project/ZipxVersions.scala: a row is the NEXT release
@@ -83,7 +84,7 @@ Release tag v0.15.2, catalog 0.15.1    zipx-release: [error] tag v0.15.2 does no
 | 5 | `snapshots/mainline-channel` | a merge publishes every unreleased row, upload-only | [x] |
 | 6 | `snapshots/consume` | pin a snapshot: resolvers, freshness, guard, promotion | [x] |
 | 7 | `snapshots/pr-channel` | a label publishes `<row>-pr<N>-SNAPSHOT` from the PR's cache | [x] |
-| 8 | `snapshots/dogfood` | zipx on its own rows and `zipx-release.yml` | [ ] |
+| 8 | `snapshots/dogfood` | zipx on its own rows and `zipx-release.yml` | [x] |
 
 Cache invariants every layer keeps, each with a check in the layer that could break it:
 
@@ -94,7 +95,7 @@ C3 a bump starts warm                    C7 snapshot pins stay fresh; nothing el
 C4 snapshot publish is upload-only       C8 remote cacheVersion stays JDK/OS
 ```
 
-## Next: org migration
+## Now: org migration
 
 ```diff
 - addSbtPlugin("rocks.earlyeffect" % "sbt-dynver-ci" % "0.2.3")

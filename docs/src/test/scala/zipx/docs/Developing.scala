@@ -60,9 +60,15 @@ The publishable `plugin` project remains for Central publish and scripted tests.
 versioning: a `ShipGroup` for `models`/`coreLib`, a `Ship` for `client`, released from `zipx-release.yml`.
 Aggregate `test` still `zipxWorkflowCheck`s it after `publishLocal`. The version-updates companion regenerates it via
 `zipxVersionUpdatesExtraSteps` (`ExampleCheck.companionSteps`): nested `.github/workflows/` is not repo-root, so the bot
-can commit that `ci.yml`. Root dogfood stays lockstep: Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,
-both with `JobCondition.repositoryIs("early-effect/zipx")` so fork tag pushes do not publish or deploy Pages. Do not put
-`Ship` rows on zipx-the-product.
+can commit that `ci.yml`.
+
+zipx itself is one row, `ShipGroup("zipx", "0.15.0")(...)` over every published module, so every build of it is
+`0.15.0-SNAPSHOT` and `publishLocal` overwrites. `plugin/scripted` and the example check always see the tree you are on;
+there is no release-tag trap. A merge publishes `0.15.0-SNAPSHOT` to Central snapshots, a push to a PR labeled
+`snapshots` publishes `0.15.0-pr<N>-SNAPSHOT`, and a GitHub Release tagged `v0.15.0` (or Run workflow on **zipx
+release**) releases it. The first PR that changes code after a release moves the row; `modver-check` fails until it
+does. Snapshots, Pages, and releases carry `JobCondition.repositoryIs("early-effect/zipx")` so a fork publishes
+nothing.
 
 **Remote-cache live proof** lives in `core` tests (`zipx.it.RemoteCacheItSpec`): plain Testcontainers for bazel-remote
 plus an sbt fixture image (Docker required; failure is a clear test failure). It runs under Aggregate Verify / `sbt

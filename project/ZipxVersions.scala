@@ -11,6 +11,9 @@ object ZipxVersions extends zipx.ZipxVersions:
   val sbt: SbtVersion     = SbtVersion("2.1.0-M2")
   val scala: ScalaVersion = ScalaVersion("3.9.0")
 
+  val zipx: ShipGroup =
+    ShipGroup("zipx", "0.15.0")("shell", "workflow", "core", "syntax", "cli", "central", "aws", "plugin")
+
   val zio: Lib            = Lib("dev.zio", "zio", "2.1.26")
   val zioTest: Lib        = zio.mod("zio-test").test
   val zioTestSbt: Lib     = zio.mod("zio-test-sbt").test
@@ -28,7 +31,6 @@ object ZipxVersions extends zipx.ZipxVersions:
   val specularSite: Lib    = specular.mod("specular-site").test
   val specularTheme: Lib   = specular.mod("early-effect-docs-theme").test
 
-  val dynverCi: Plugin       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.3")
   val scalafmt: Plugin       = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
   val pgp: Plugin            = Plugin("com.github.sbt", "sbt-pgp", "2.3.2")
   val specularPlugin: Plugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.14.1")

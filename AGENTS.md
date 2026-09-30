@@ -16,6 +16,7 @@ When you change **emission shape** (Planner, composites, packs, pins, MatrixColl
 | --- | --- |
 | `modules/core` planner / composites / collapse | `core/testFull`, then **`docs/testFull`** (Specular examples lock job YAML) |
 | `modules/aws` / `central` packs | pack `testFull` **and** docs pages that show that pack (`Packs`, `ActionPinsDoc`, `Caching`, …) |
+| `ReleaseWorkflow`, `zipxRelease`, `zipxSnapshotPublish`, `BuildSession` | `core/testFull`, **`plugin/scripted`** (`release-workflow` publishes snapshots, PR snapshots, and a release to a file repo; `snapshot-consumer` pins one), `docs/testFull` (**Snapshots and releases**) |
 | Generated `.github/**` or plugin emission | `zipxWorkflowCheck`, **`plugin/scripted`** (asserts on ci.yml + composites), monorepo example check when those change. Catalog companion PRs regenerate `examples/monorepo` (including its `ci.yml`); repo-root `.github/workflows/` still needs a human `zipxWorkflowGenerate`. Companion apply is `zipx-cli` (`cs launch … catalog update --yes --verify-load`), not in-sbt `zipxDepUpdate`. |
 
 Pack specs and Specular examples are **different suites**. Updating `ZipxAwsSpec` does not update `docs/.../Packs.scala`. CI Aggregate `test` runs docs; a green local pack suite is not enough before push.
@@ -50,7 +51,5 @@ sbt "scalafmtAll; cleanFull; testFull"
 `scalafmtAll` is the CI formatter, not Metals. `cleanFull` is sbt 2's cache clear (`clean` is outputs only). A focused `core/testFull` is iteration, not PR proof.
 
 `plugin/scripted` and `zipxWorkflowCheck` stay extra when emission or generated `.github/**` change; they are not inside `testFull`. See the blast-radius table.
-
-**Scripted / `publishLocal` on a release tag:** do not run those from `main` sitting on the last published version. Dynver then emits that same non-SNAPSHOT (e.g. `0.6.2`), ivy refuses to overwrite, and Coursier serves Maven Central. The scripted project never sees your local API (e.g. `import zipx.*` missing a brand-new `Pin`). Check out a feature branch first so dynver is unique, then `plugin/scripted`. Do not hand-delete ivy/Coursier caches as the workaround.
 
 No AI attribution in commits or PR text. Do not force-push `main`.
