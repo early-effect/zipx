@@ -789,8 +789,7 @@ object ZipxPlugin extends AutoPlugin:
       cacheRehydrateTask = read(zipxCacheRehydrateTask, CapabilityTasks.of(Test / compile)),
       cacheRehydrateExtraSteps = read(zipxCacheRehydrateExtraSteps, (_ => Nil)),
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
-      env = read(zipxEnv, Map.empty) ++
-        Option.when(SnapshotPins.of(read(zipxVersions, Seq.empty)).nonEmpty)(SnapshotPins.CoursierTtl),
+      env = read(zipxEnv, Map.empty) ++ Option.when(ciPins(extracted).nonEmpty)(SnapshotPins.CoursierTtl),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
       verifyCleanLabel = orFail(typedVerifyCleanLabel(read(zipxVerifyCleanLabel, Some("clean")))),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
@@ -959,7 +958,7 @@ object ZipxPlugin extends AutoPlugin:
       case _ => ()
     val published = if ships.nonEmpty then builtins.filterNot(_.name == Capability.PublishName) else builtins
     val combined  = combineCapabilities(published ++ modver, userCaps.toList)
-    SnapshotPins.of(readBuildSetting(extracted, zipxVersions, Seq.empty)) match
+    ciPins(extracted) match
       case Nil          => combined
       case head :: tail =>
         val note = orFail(SnapshotPins.annotation(::(head, tail)))
@@ -1751,6 +1750,11 @@ object ZipxPlugin extends AutoPlugin:
         log.info(s"zipx: ${file.getPath} is up to date.")
     }
   end syncCatalogFiles
+
+  /** Every snapshot CI resolves: catalog rows, and a snapshot sbt-zipx that `plugins.sbt` loads. */
+  private def ciPins(extracted: Extracted): List[ZipxCoord] =
+    val coords = readBuildSetting(extracted, zipxVersions, Seq.empty)
+    SnapshotPins.of(coords ++ loadedSelfPlugins(extracted, coords.nonEmpty))
 
   private def loadedSelfPlugins(extracted: Extracted, catalogInPlay: Boolean): Seq[Plugin] =
     if !catalogInPlay then Nil

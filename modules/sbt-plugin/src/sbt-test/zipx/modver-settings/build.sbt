@@ -32,7 +32,7 @@ assertModverSettings := Def.uncached {
   assert(coreV == "1.4.2-SNAPSHOT", s"coreLib version, got $coreV")
   assert(clientV == "0.3.0-SNAPSHOT", s"client version, got $clientV")
   assert(serviceV == "0.1.0-SNAPSHOT", s"unpublished service must not take a Ship version, got $serviceV")
-  assert(rootV == "0.1.0-SNAPSHOT", s"root aggregator must not take a Ship version, got $rootV")
+  assert(rootV == "0.0.0", s"a root in no row is 0.0.0, which sonaRelease accepts, got $rootV")
   assert(zipxCacheEpoch.value == CacheEpoch.ShipCatalog, s"Ship rows key the cache epoch, got ${zipxCacheEpoch.value}")
 }
 

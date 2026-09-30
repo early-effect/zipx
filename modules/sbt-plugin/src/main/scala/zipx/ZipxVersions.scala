@@ -3,6 +3,7 @@ package zipx
 import sbt.{/, Compile, Def, LocalRootProject, ModuleID, Setting, Test}
 import sbt.librarymanagement.syntax.*
 import sbt.Keys.{
+  baseDirectory,
   crossScalaVersions,
   libraryDependencies,
   localStaging,
@@ -84,9 +85,13 @@ object ZipxVersions:
         def session =
           zipx.core.BuildSession.of(sys.props).fold(err => sys.error(s"zipx: ${err.message}"), identity)
         Seq(
+          // sonaRelease refuses while the root's version is a snapshot, and a root in no row has sbt's default.
           version := zipx.core.Modver
             .rowForProject(thisProject.value.id, zipxShips.value)
-            .fold("0.1.0-SNAPSHOT")(session.versionOf),
+            .fold(if baseDirectory.value == (LocalRootProject / baseDirectory).value then "0.0.0"
+            else "0.1.0-SNAPSHOT")(
+              session.versionOf
+            ),
           projectID := zipx.core.Modver
             .rowForProject(thisProject.value.id, zipxShips.value)
             .fold(projectID.value)(row => projectID.value.withRevision(session.publishedRevisionOf(row))),
