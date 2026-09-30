@@ -3,7 +3,7 @@ organization        := "com.example.zipx.release"
 zipxCacheEpoch      := CacheEpoch.ShipCatalog
 zipxVerify          := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 zipxReleaseWorkflow := Some(ReleaseWorkflow(ArtifactRegistry.Url("https://repo1.maven.org/maven2")))
-zipxCapabilities += Capability.snapshots()
+zipxCapabilities ++= Seq(Capability.snapshots(), ZipxCentral.pullRequestSnapshots("snapshots"))
 
 val released = file("released").getAbsoluteFile
 
@@ -44,6 +44,17 @@ assertSnapshotsPublished := {
     assert((dir / s"$artifact-$version-SNAPSHOT.jar").exists, s"$dir has no jar: ${Option(dir.list).map(_.toList)}")
     assert((dir / s"$artifact-$version-SNAPSHOT-sources.jar").exists, s"$dir has no sources jar")
     assert(!(dir / s"$artifact-$version-SNAPSHOT-javadoc.jar").exists, s"$dir has a scaladoc jar")
+}
+
+val assertPrSnapshotsPublished = taskKey[Unit]("a PR snapshot publishes <row>-pr<N>-SNAPSHOT, and builds what it tested")
+assertPrSnapshotsPublished := Def.uncached {
+  val base = released / "com" / "example" / "zipx" / "release"
+  val pom  = IO.read(base / "client_3" / "0.3.0-pr42-SNAPSHOT" / "client_3-0.3.0-pr42-SNAPSHOT.pom")
+  assert(pom.contains("<version>1.4.2-pr42-SNAPSHOT</version>"), pom)
+  assert((base / "models_3" / "1.4.2-pr42-SNAPSHOT" / "models_3-1.4.2-pr42-SNAPSHOT.jar").exists, "models has no PR jar")
+  assert((client / version).value == "0.3.0-SNAPSHOT", (client / version).value)
+  val yml = IO.read((LocalRootProject / baseDirectory).value / ".github/workflows/ci.yml")
+  assert(yml.contains("  snapshots-pr:") && yml.contains("zipxSnapshotPublish pr"), yml)
 }
 
 val assertSnapshotVersions = taskKey[Unit]("outside a release every row member is <row>-SNAPSHOT")

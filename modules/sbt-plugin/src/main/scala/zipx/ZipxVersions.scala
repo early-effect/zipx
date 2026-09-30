@@ -5,6 +5,7 @@ import sbt.Keys.{
   crossScalaVersions,
   libraryDependencies,
   packageDoc,
+  projectID,
   publishArtifact,
   scalaVersion,
   thisProject,
@@ -82,6 +83,9 @@ object ZipxVersions:
           version := zipx.core.Modver
             .rowForProject(thisProject.value.id, zipxShips.value)
             .fold("0.1.0-SNAPSHOT")(session.versionOf),
+          projectID := zipx.core.Modver
+            .rowForProject(thisProject.value.id, zipxShips.value)
+            .fold(projectID.value)(row => projectID.value.withRevision(session.publishedRevisionOf(row))),
           // Test resolves packageDoc-scoped keys through Compile before its own publishArtifact, so it is pinned too.
           Compile / packageDoc / publishArtifact := session.publishesDocs && (Compile / publishArtifact).value,
           Test / packageDoc / publishArtifact    := session.publishesDocs && (Test / publishArtifact).value,

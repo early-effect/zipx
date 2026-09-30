@@ -9,6 +9,10 @@ $ exists .github/workflows/zipx-release.yml
 > zipxSnapshotPublish
 > assertSnapshotsPublished
 
+# A labeled PR publishes the same rows at <row>-pr<N>-SNAPSHOT, compiled at <row>-SNAPSHOT like its tests.
+> zipxSnapshotPublish pr 42
+> assertPrSnapshotsPublished
+
 # A tag must name a row at its catalog number.
 -> zipxRelease refs/tags/client/v0.3.1
 -> zipxRelease refs/tags/v0.3.0

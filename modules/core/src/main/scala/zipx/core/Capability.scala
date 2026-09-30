@@ -484,6 +484,7 @@ object Capability:
   val ModverCheckName: CapabilityName   = CapabilityName("modver-check")
   val ModverSuggestName: CapabilityName = CapabilityName("modver-suggest")
   val SnapshotsName: CapabilityName     = CapabilityName("snapshots")
+  val PrSnapshotsName: CapabilityName   = CapabilityName("snapshots-pr")
 
   private def testBody(scope: CapabilityScope, matrixed: Boolean): Capability = Capability(
     name = TestName,
@@ -567,6 +568,24 @@ object Capability:
       phase = Phase.Publish,
       gate = Gate.OnDefaultPush,
       needsCapabilities = List(TestName),
+    )
+
+  /** Publishes every unreleased row at `<row>-pr<N>-SNAPSHOT` on each push to a same-repo PR carrying `label`, from the
+    * PR's own build cache. A fork's PR has no publishing secrets, so it never runs there.
+    */
+  def pullRequestSnapshots(
+      label: ExprLiteral,
+      command: SbtCommand = SbtCommand.unsafeBuilt("zipxSnapshotPublish pr"),
+  ): Capability =
+    Capability.once(
+      name = PrSnapshotsName,
+      command = command,
+      phase = Phase.Publish,
+      gate = Gate.Always,
+      needsCapabilities = List(TestName),
+      condition = Some(
+        JobCondition.eventIs("pull_request") && JobCondition.HasPrLabel(label) && JobCondition.fromSameRepository
+      ),
     )
 
   /** A Verify Once job that prints `zipx: skipping <gate>: <reason>` and exits 0. The check name stays on the PR. */

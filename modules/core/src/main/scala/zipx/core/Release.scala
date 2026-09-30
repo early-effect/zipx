@@ -12,17 +12,37 @@ object RowStatus:
       case Nil          => if binaries.isEmpty then Unreleased else Released
       case head :: tail => if missing.sizeIs == binaries.size then Unreleased else Partial(::(head, tail))
 
-enum BuildSession(val id: String):
-  case Development     extends BuildSession("development")
-  case SnapshotPublish extends BuildSession("snapshot")
-  case Release         extends BuildSession("release")
+type PullRequestNumber = PullRequestNumber.Type
+object PullRequestNumber extends neotype.Subtype[Int]:
+  override inline def validate(value: Int): Boolean | String =
+    if value > 0 then true else "a pull request number is positive"
 
+enum BuildSession:
+  case Development
+  case SnapshotPublish
+  case PullRequestSnapshot(pr: PullRequestNumber)
+  case Release
+
+  def id: String = this match
+    case Development             => "development"
+    case SnapshotPublish         => "snapshot"
+    case PullRequestSnapshot(pr) => s"pr-$pr"
+    case Release                 => "release"
+
+  /** What sbt compiles and packages, so it is the same in every session but a release and cache digests hold. */
   def versionOf(row: PublishedRow): String = this match
-    case Release                       => row.version
-    case Development | SnapshotPublish => s"${row.version}${Modver.UnreleasedSuffix}"
+    case Release => row.version
+    case _       => s"${row.version}${Modver.UnreleasedSuffix}"
+
+  /** The coordinate a publish writes, which is also what an in-repo dependency's POM names. */
+  def publishedRevisionOf(row: PublishedRow): String = this match
+    case PullRequestSnapshot(pr) => s"${row.version}-pr$pr${Modver.UnreleasedSuffix}"
+    case _                       => versionOf(row)
 
   /** Central validates docs on a release only; scaladoc is the slow part of a snapshot publish. */
-  def publishesDocs: Boolean = this != SnapshotPublish
+  def publishesDocs: Boolean = this match
+    case SnapshotPublish | PullRequestSnapshot(_) => false
+    case Development | Release                    => true
 end BuildSession
 
 object BuildSession:
@@ -31,12 +51,21 @@ object BuildSession:
 
   def of(props: collection.Map[String, String]): Either[UnknownBuildSession, BuildSession] =
     props.get(Property) match
-      case None     => Right(Development)
-      case Some(id) => values.find(_.id == id).toRight(UnknownBuildSession(id))
+      case None                => Right(Development)
+      case Some("development") => Right(Development)
+      case Some("snapshot")    => Right(SnapshotPublish)
+      case Some("release")     => Right(Release)
+      case Some(id @ s"pr-$n") =>
+        n.toIntOption
+          .flatMap(PullRequestNumber.make(_).toOption)
+          .map(PullRequestSnapshot(_))
+          .toRight(UnknownBuildSession(id))
+      case Some(id) => Left(UnknownBuildSession(id))
+end BuildSession
 
 final case class UnknownBuildSession(id: String):
   def message: String =
-    s"-D${BuildSession.Property}=$id is not one of ${BuildSession.values.map(_.id).mkString(", ")}"
+    s"-D${BuildSession.Property}=$id is not one of development, snapshot, pr-<number>, release"
 
 /** A multi-row catalog tags `<identity>/v<n>` because a bare `v*` tag there is the image tag `ci.yml` builds on. */
 enum TagScheme:

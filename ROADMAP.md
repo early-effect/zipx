@@ -82,7 +82,7 @@ Release tag v0.15.2, catalog 0.15.1    zipx-release: [error] tag v0.15.2 does no
 | 4 | `snapshots/version-model` | `version == s"$row-SNAPSHOT"`; merges never release | [x] |
 | 5 | `snapshots/mainline-channel` | a merge publishes every unreleased row, upload-only | [x] |
 | 6 | `snapshots/consume` | pin a snapshot: resolvers, freshness, guard, promotion | [x] |
-| 7 | `snapshots/pr-channel` | a label publishes `<row>-pr<N>-SNAPSHOT` from the PR's cache | [ ] |
+| 7 | `snapshots/pr-channel` | a label publishes `<row>-pr<N>-SNAPSHOT` from the PR's cache | [x] |
 | 8 | `snapshots/dogfood` | zipx on its own rows and `zipx-release.yml` | [ ] |
 
 Cache invariants every layer keeps, each with a check in the layer that could break it:

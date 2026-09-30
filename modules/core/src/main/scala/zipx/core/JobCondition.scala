@@ -18,6 +18,9 @@ enum JobCondition:
   case EventIs(name: EventName)
   case HasPrLabel(label: ExprLiteral)
 
+  /** The pull request's head branch lives in this repository, so the run has its secrets; a fork's PR does not. */
+  case FromSameRepository
+
   /** `first` plus `rest` rather than one list, so `All(Nil)` is unconstructible rather than rejected at render time. */
   case All(first: JobCondition, rest: List[JobCondition])
 
@@ -52,11 +55,13 @@ enum JobCondition:
     case RefStartsWith(prefix) => Expr.startsWith(Expr.Github(JobCondition.RefPath), Expr.Quoted(prefix))
     case EventIs(name)         =>
       Expr.Github(JobCondition.EventNamePath) === Expr.Quoted(JobCondition.asLiteral(name))
-    case HasPrLabel(label) => Expr.contains(Expr.Github(JobCondition.LabelsPath), Expr.Quoted(label))
-    case All(first, rest)  => JobCondition.joined(first, rest, _ && _)
-    case Any(first, rest)  => JobCondition.joined(first, rest, _ || _)
-    case Not(inner)        => !Expr.group(inner.expr)
-    case Raw(expression)   => Expr.Raw(expression)
+    case HasPrLabel(label)  => Expr.contains(Expr.Github(JobCondition.LabelsPath), Expr.Quoted(label))
+    case FromSameRepository =>
+      Expr.Github(JobCondition.HeadRepositoryPath) === Expr.Github(JobCondition.RepositoryPath)
+    case All(first, rest) => JobCondition.joined(first, rest, _ && _)
+    case Any(first, rest) => JobCondition.joined(first, rest, _ || _)
+    case Not(inner)       => !Expr.group(inner.expr)
+    case Raw(expression)  => Expr.Raw(expression)
 
   /** [[zipx.workflow.Expr.unwrapped]], not `render`: an `if:` is already an expression context, and two wrapped
     * conditions concatenate into a template string that evaluates to neither operand.
@@ -113,6 +118,8 @@ object JobCondition:
       case head :: tail => eventIs("push") && Any(head, tail)
     onPush || onWorkflowDispatch
 
+  def fromSameRepository: JobCondition = FromSameRepository
+
   /** `contains(github.event.pull_request.labels.*.name, 'label')`. */
   inline def hasPrLabel(inline label: String): JobCondition = HasPrLabel(ExprLiteral(label.trim))
 
@@ -161,9 +168,10 @@ object JobCondition:
     */
   private val EmptyLiteral: Expr = Expr.lit("''")
 
-  private val RepositoryPath: ContextPath = ContextPath("repository")
-  private val RefPath: ContextPath        = ContextPath("ref")
-  private val EventNamePath: ContextPath  = ContextPath("event_name")
-  private val LabelsPath: ContextPath     = ContextPath("event.pull_request.labels.*.name")
+  private val RepositoryPath: ContextPath     = ContextPath("repository")
+  private val RefPath: ContextPath            = ContextPath("ref")
+  private val EventNamePath: ContextPath      = ContextPath("event_name")
+  private val LabelsPath: ContextPath         = ContextPath("event.pull_request.labels.*.name")
+  private val HeadRepositoryPath: ContextPath = ContextPath("event.pull_request.head.repo.full_name")
 
 end JobCondition

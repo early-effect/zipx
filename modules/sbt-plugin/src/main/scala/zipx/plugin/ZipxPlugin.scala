@@ -225,6 +225,10 @@ object ZipxPlugin extends AutoPlugin:
 
       def snapshots: Capability =
         Capability.snapshots(CapabilityTasks.of(snapshotPublishCommand)).withEnv(zipx.central.ZipxCentral.snapshotEnv)
+
+      /** On each push to a same-repo PR labeled `label`: unreleased rows at `<row>-pr<N>-SNAPSHOT`. */
+      inline def pullRequestSnapshots(inline label: String): Capability =
+        zipx.central.ZipxCentral.pullRequestSnapshots(label)
     end ZipxCentral
 
     /** The AWS pack. The newtypes are re-exported as `type` + `val` pairs rather than hidden behind factories, because
@@ -948,8 +952,10 @@ object ZipxPlugin extends AutoPlugin:
       sys.error(
         "zipx: Ship rows release from zipx-release.yml (zipxReleaseWorkflow), so ci.yml has no publish job. Drop the 'publish' capability from zipxCapabilities."
       )
-    if ships.isEmpty && userCaps.exists(_.name == Capability.SnapshotsName) then
-      sys.error("zipx: the 'snapshots' capability publishes Ship / ShipGroup rows, and the catalog has none")
+    userCaps.find(c => c.name == Capability.SnapshotsName || c.name == Capability.PrSnapshotsName) match
+      case Some(c) if ships.isEmpty =>
+        sys.error(s"zipx: the '${c.name}' capability publishes Ship / ShipGroup rows, and the catalog has none")
+      case _ => ()
     val published = if ships.nonEmpty then builtins.filterNot(_.name == Capability.PublishName) else builtins
     val combined  = combineCapabilities(published ++ modver, userCaps.toList)
     SnapshotPins.of(readBuildSetting(extracted, zipxVersions, Seq.empty)) match
@@ -1272,7 +1278,24 @@ object ZipxPlugin extends AutoPlugin:
     "reload" :: commands.map(c => c.text: String) ::: next
   }
 
-  private val snapshotPublishCommand: Command = Command.command("zipxSnapshotPublish") { st =>
+  private val snapshotPublishCommand: Command = Command.args("zipxSnapshotPublish", "[pr [<number>]]") { (st, args) =>
+    val session = args.toList match
+      case Nil         => BuildSession.SnapshotPublish
+      case "pr" :: Nil =>
+        pullRequestNumber()
+          .flatMap(PullRequestNumber.make(_).toOption)
+          .fold(
+            sys
+              .error("zipx: 'zipxSnapshotPublish pr' runs on a pull_request event; pass the number to run it elsewhere")
+          )(
+            BuildSession.PullRequestSnapshot(_)
+          )
+      case "pr" :: n :: Nil =>
+        n.toIntOption
+          .flatMap(PullRequestNumber.make(_).toOption)
+          .fold(sys.error(s"zipx: '$n' is not a pull request number"))(BuildSession.PullRequestSnapshot(_))
+      case other =>
+        sys.error(s"zipx: zipxSnapshotPublish takes nothing, 'pr', or 'pr <number>'; got '${other.mkString(" ")}'")
     val extracted     = Project.extract(st)
     val (next, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
     val release       = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
@@ -1290,10 +1313,10 @@ object ZipxPlugin extends AutoPlugin:
       case Left(err)   => sys.error(s"zipx: ${err.message}")
       case Right(plan) =>
         plan.entries.foreach(e =>
-          next.log.info(s"zipx: publishing ${Modver.describe(e.row)} ${e.row.version}-SNAPSHOT")
+          next.log.info(s"zipx: publishing ${Modver.describe(e.row)} ${session.publishedRevisionOf(e.row)}")
         )
         next.log.info("zipx: this sbt session now publishes snapshots without scaladoc")
-        sys.props(BuildSession.Property) = BuildSession.SnapshotPublish.id
+        sys.props(BuildSession.Property) = session.id
         val commands =
           plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, CapabilityTasks.of(publish)))
         "reload" :: commands.map(c => c.text: String) ::: next
