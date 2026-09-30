@@ -173,9 +173,9 @@ While any row is a snapshot, zipx:
 | catalog update | rewrites the pin to the latest release once one reaches it |
 
 On a laptop, `publishLocal` of the upstream wins over Central snapshots until you delete it from `~/.ivy2/local`. A
-long-lived sbt shell keeps its resolution in memory for the life of the JVM, so a republished snapshot with a new
-transitive dependency needs a fresh sbt; new code in the same jar is seen at once. Run sbt with `COURSIER_TTL=0s` to
-revalidate remote snapshots locally too. Central deletes snapshots after 90 days, which promotion normally beats.
+long-lived sbt shell keeps its resolution in memory, so after a republished snapshot adds or changes a dependency, run
+`reboot` in that shell; `cleanFull` clears only what is on disk and does not help. New code in the same jar is seen at
+once. Run sbt with `COURSIER_TTL=0s` to revalidate remote snapshots locally too. Central deletes snapshots after 90 days, which promotion normally beats.
 """,
       exampleValue {
         val pin = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
