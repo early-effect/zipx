@@ -2336,17 +2336,15 @@ object ZipxPlugin extends AutoPlugin:
       .filter(n => index.rowFor(n.matrixRoot).isDefined)
       .flatMap { node =>
         extracted.structure.allProjectRefs.find(_.project == (node.id: String)).toList.flatMap { ref =>
-          val org     = extracted.get(ref / organization)
-          val name    = extracted.get(ref / moduleName)
-          val cross   = extracted.get(ref / crossVersion)
+          val module  = extracted.get(ref / projectID)
+          val namer   = extracted.get(ref / artifactName)
           val version = index.rowFor(node.matrixRoot).map(r => r.version: String).getOrElse("0.0.0")
           val scalaVs = extracted.getOpt(ref / crossScalaVersions).getOrElse(Seq.empty)
           val fullVs  = if scalaVs.isEmpty then extracted.getOpt(ref / scalaVersion).toSeq else scalaVs
           fullVs.toList.map { sv =>
             val bin = sbt.librarymanagement.CrossVersion.binaryScalaVersion(sv)
-            val art =
-              sbt.librarymanagement.CrossVersion(cross, sv, bin).map(f => f(name)).getOrElse(name)
-            (node.id, (bin, Gav(org, art, version)))
+            val art = PublishedModule.artifactId(module, sv, bin, namer)
+            (node.id, (bin, Gav(module.organization, art, version)))
           }
         }
       }
@@ -2404,15 +2402,12 @@ object ZipxPlugin extends AutoPlugin:
   private def previousArtifactJar(extracted: Extracted, ref: ProjectRef, version: String): Option[File] =
     if version.isEmpty then None
     else
-      val org      = extracted.get(ref / organization)
-      val name     = extracted.get(ref / moduleName)
-      val scalaBin = extracted.getOpt(ref / scalaBinaryVersion).getOrElse("")
-      val artifact =
-        extracted.getOpt(ref / crossVersion) match
-          case Some(_: sbt.librarymanagement.Disabled) => name
-          case _ if scalaBin.nonEmpty                  => s"${name}_$scalaBin"
-          case _                                       => name
-      val groupPath = org.replace('.', '/')
+      val module    = extracted.get(ref / projectID)
+      val namer     = extracted.get(ref / artifactName)
+      val scalaFull = extracted.getOpt(ref / scalaVersion).getOrElse("")
+      val scalaBin  = extracted.getOpt(ref / scalaBinaryVersion).getOrElse("")
+      val artifact  = PublishedModule.artifactId(module, scalaFull, scalaBin, namer)
+      val groupPath = module.organization.replace('.', '/')
       val url       = s"https://repo1.maven.org/maven2/$groupPath/$artifact/$version/$artifact-$version.jar"
       val dest = extracted.get(LocalRootProject / baseDirectory) / "target" / "zipx-mima" / s"$artifact-$version.jar"
       dest.getParentFile.mkdirs()
