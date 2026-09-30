@@ -2481,9 +2481,11 @@ object ZipxPlugin extends AutoPlugin:
           case Some(ref) =>
             extracted.runTask(ref / Compile / compile, st)
             val classes = extracted.get(ref / Compile / classDirectory)
-            releasedJar(extracted, ref, registry, row.version).map { old =>
-              val lib = new com.typesafe.tools.mima.lib.MiMaLib(Nil)
-              if lib.collectProblems(old, classes, Nil).isEmpty then MemberProbe.Clean else MemberProbe.BinaryBreak
+            releasedJar(extracted, ref, registry, row.version).map {
+              case None      => MemberProbe.FirstPublish
+              case Some(old) =>
+                val lib = new com.typesafe.tools.mima.lib.MiMaLib(Nil)
+                if lib.collectProblems(old, classes, Nil).isEmpty then MemberProbe.Clean else MemberProbe.BinaryBreak
             }
   end probeMember
 
@@ -2492,7 +2494,7 @@ object ZipxPlugin extends AutoPlugin:
       ref: ProjectRef,
       registry: ArtifactRegistry,
       version: ReleaseVersion,
-  ): Either[String, File] =
+  ): Either[String, Option[File]] =
     val module    = extracted.get(ref / projectID)
     val namer     = extracted.get(ref / artifactName)
     val scalaFull = extracted.getOpt(ref / scalaVersion).getOrElse("")
@@ -2504,20 +2506,30 @@ object ZipxPlugin extends AutoPlugin:
     download(registry.jarUrl(gav), registryHeaders(registry), dest)
   end releasedJar
 
-  private def download(url: String, headers: Map[String, String], dest: File): Either[String, File] =
-    try
-      val client  = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build()
-      val request = headers
-        .foldLeft(java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).GET()) { case (b, (k, v)) =>
-          b.header(k, v)
-        }
-        .build()
-      val res = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(dest.toPath))
-      if res.statusCode() == 200 then Right(dest)
-      else
-        dest.delete()
-        Left(s"download $url: HTTP ${res.statusCode()}")
-    catch case scala.util.control.NonFatal(e) => Left(s"download $url: $e")
+  /** `Right(None)` when the registry answers that the artifact is not there: a member absent from that release. */
+  private def download(url: String, headers: Map[String, String], dest: File): Either[String, Option[File]] =
+    if url.startsWith("file:") then
+      val src = java.nio.file.Path.of(java.net.URI.create(url))
+      if java.nio.file.Files.isRegularFile(src) then
+        Right(
+          Some(java.nio.file.Files.copy(src, dest.toPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING).toFile)
+        )
+      else Right(None)
+    else
+      try
+        val client  = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build()
+        val request = headers
+          .foldLeft(java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).GET()) { case (b, (k, v)) =>
+            b.header(k, v)
+          }
+          .build()
+        val res    = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(dest.toPath))
+        val result = HttpLookupResult(res.statusCode(), "", Map.empty)
+        if result.status == 200 then Right(Some(dest))
+        else
+          dest.delete()
+          if result.isMiss then Right(None) else Left(s"download $url: HTTP ${result.status}")
+      catch case scala.util.control.NonFatal(e) => Left(s"download $url: $e")
 
   private def postModverComment(body: String, log: Logger): Unit =
     val repo = sys.env.getOrElse("GITHUB_REPOSITORY", "")
