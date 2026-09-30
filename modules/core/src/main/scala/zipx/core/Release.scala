@@ -1,6 +1,5 @@
 package zipx.core
 
-/** How a row stands on its registry at its catalog number. */
 enum RowStatus:
   case Released
   case Unreleased
@@ -13,20 +12,16 @@ object RowStatus:
       case Nil          => if binaries.isEmpty then Unreleased else Released
       case head :: tail => if missing.sizeIs == binaries.size then Unreleased else Partial(::(head, tail))
 
-/** While this JVM property is set, every row member builds at its catalog number. A property rather than session
-  * settings because sbt drops session settings when `++` / `+` switch Scala versions.
-  */
+/** A JVM property, because sbt drops session settings when `++` / `+` switch Scala versions. */
 object ReleaseSession:
   val Property: String = "zipx.release"
 
   def active(props: collection.Map[String, String]): Boolean = props.contains(Property)
 
-/** `v1.4.2` in a single-row catalog, `<identity>/v1.4.2` otherwise. */
 object ReleaseTag:
   def of(row: PublishedRow, catalog: ShipIndex): String =
     if catalog.byIdentity.sizeIs == 1 then s"v${row.version}" else s"${row.identity}/v${row.version}"
 
-/** What started a `zipx-release.yml` run: a pushed tag, or a dispatch that releases every unreleased row. */
 enum ReleaseRequest:
   case Tagged(tag: String)
   case AllUnreleased
@@ -66,10 +61,8 @@ end ReleaseError
 
 final case class ReleaseEntry(row: PublishedRow, tag: String)
 
-/** The rows one run releases, in dependency order: what was asked for plus its unreleased in-repo upstream rows. */
 final case class ReleasePlan(entries: ::[ReleaseEntry]):
 
-  /** The publishing projects the plan's rows own, JS / Native platform rows included, in build order. */
   def projects(graph: ModuleGraph, catalog: ShipIndex): List[ModuleId] =
     val rows = entries.map(_.row).toSet
     graph.topologicalSort.flatMap(graph.get).collect {
@@ -145,9 +138,7 @@ object ReleasePlan:
       }
     }
 
-  /** A released artifact's POM names its in-repo dependencies at their catalog numbers, so every unreleased row the
-    * requested rows reach must release with them.
-    */
+  /** A release POM names in-repo dependencies at their catalog numbers, so their unreleased rows release with it. */
   private def upstream(
       requested: List[PublishedRow],
       catalog: ShipIndex,

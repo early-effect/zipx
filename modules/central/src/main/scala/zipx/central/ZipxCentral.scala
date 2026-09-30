@@ -137,7 +137,6 @@ object ZipxCentral:
       )
       .whenAnyUpstreamSucceeded
 
-  /** `zipxReleaseWorkflow := Some(ZipxCentral.releases)`: signed Ship-row releases, one Central deployment a run. */
   val releases: ReleaseWorkflow = ReleaseWorkflow(ArtifactRegistry.MavenCentral, signingEnv, gpgImportSteps)
 
 end ZipxCentral

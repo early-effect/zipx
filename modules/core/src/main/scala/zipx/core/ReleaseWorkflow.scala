@@ -4,18 +4,8 @@ import zipx.shell.*
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** `zipx-release.yml`: the only place a Ship row's catalog number is published.
-  *
-  * A GitHub Release's tag (`v1.4.2`, or `<row>/v1.4.2` in a multi-row catalog) releases that row; Actions → Run
-  * workflow on the default branch releases every row whose number is not on [[registry]] yet. Both run `zipxRelease` in
-  * one sbt session, so a run is one registry deployment however many rows it carries.
-  *
-  * @param env
-  *   the job's secrets, by name: signing and registry credentials.
-  * @param steps
-  *   run after sbt setup and before `zipxRelease`, such as a GPG key import.
-  * @param environment
-  *   the GitHub Environment the job binds, where required reviewers and secret scoping live.
+/** `zipx-release.yml`, the only place a Ship row's catalog number is published: a GitHub Release's tag releases its
+  * row, and a dispatch on the default branch releases every unreleased row, in one sbt session either way.
   */
 final case class ReleaseWorkflow(
     registry: ArtifactRegistry,
@@ -30,7 +20,6 @@ object ReleaseWorkflow:
   val DefaultEnvironment: String = "zipx-release"
   val TagPatterns: List[String]  = List("v*", "*/v*")
 
-  /** The tags one `zipxRelease` run released, one per line. A dispatch run creates them afterwards. */
   val TagsFile: String = "target/zipx-release-tags.txt"
 
   private val jobId: JobId  = JobId("release")
@@ -41,10 +30,7 @@ object ReleaseWorkflow:
   private val onDefaultRef  = Expr.github("ref_name") === defaultBranch
   private val buildContext  = StepContext(ModuleNode(id = ModuleId("_build")), target = None, matrixed = false)
 
-  /** @param docs
-    *   a `workflow_call` docs capability (`ZipxDocs.pages`) to deploy after a dispatched release. A tag push already
-    *   deploys docs from `ci.yml`; a dispatch creates its tags with `GITHUB_TOKEN`, which starts no other workflow.
-    */
+  /** `docs` deploys after a dispatch only: its tags are pushed with `GITHUB_TOKEN`, which starts no other workflow. */
   def plan(release: ReleaseWorkflow, config: PlanConfig, docs: Option[Capability] = None): Workflow =
     val cacheMode = if config.cache == CacheBackend.LocalDir then LocalCacheMode.Restore else LocalCacheMode.Off
     val job       = Job(
@@ -69,7 +55,6 @@ object ReleaseWorkflow:
   def render(release: ReleaseWorkflow, config: PlanConfig, docs: Option[Capability] = None): Either[String, String] =
     Render.render(plan(release, config, docs)).map(ActionPinFile.annotateUses(_, config.actions))
 
-  /** A tag can sit on any commit; only one the default branch already reached may release. */
   private val onDefaultBranchStep: Step =
     val reached = Exec(
       "git",

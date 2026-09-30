@@ -1249,9 +1249,6 @@ object ZipxPlugin extends AutoPlugin:
         sys.error(s"zipx: $rel is leftover. Set zipxReleaseWorkflow or delete $rel, then sbt zipxWorkflowGenerate.")
       case None => ()
 
-  /** `zipxRelease <ref>`, the release job's one sbt call: plan against the registry, then publish every planned row at
-    * its catalog number in this session, so one run is one registry deployment.
-    */
   private val releaseCommand: Command = Command.args("zipxRelease", "<ref>") { (st, args) =>
     val extracted     = Project.extract(st)
     val (next, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
