@@ -348,6 +348,10 @@ zipxCapabilities += ZipxAws.dockerPublishAll(Registry.destinations) // still OnR
     ),
     section("ZipxModver.publish")(
       md"""
+`zipxReleaseWorkflow := Some(ZipxCentral.releases)` replaces this whole section: merges publish nothing, and a GitHub
+Release's tag or a dispatch releases rows from `zipx-release.yml` (see **Snapshots and releases**). The merge-release
+path below remains until every repo has moved.
+
 Replace builtin Aggregate `publish` (or `Capability.publishLayers`) with `ZipxModver.publish`. Graph,
 `Gate.OnDefaultPush` (push to `zipxPushBranches` **or** `workflow_dispatch`), `MatrixCollapse.Off`. Default command is
 `zipxModverPublishSigned`. That task publishes a binary named in `target/zipx-modver-publish.json`. If the file is

@@ -20,10 +20,12 @@ object ModverRelease:
       versionsFile: String,
       root: File,
       env: Map[String, String],
+      releaseSession: Boolean,
   ): String =
     Modver.rowForProject(projectId, ships) match
-      case None      => "0.1.0-SNAPSHOT"
-      case Some(pub) =>
+      case None                        => "0.1.0-SNAPSHOT"
+      case Some(pub) if releaseSession => pub.version
+      case Some(pub)                   =>
         val releasesThisRow =
           if isReleasingPush(env, branches) then
             val moved = movedOrFail(root, versionsFile, ships, env)

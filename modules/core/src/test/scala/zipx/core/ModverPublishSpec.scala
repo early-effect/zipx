@@ -260,11 +260,11 @@ object ModverPublishSpec extends ZIOSpecDefault:
         release == ModverPublishSigned.Remote.Publish,
       )
     },
-    test("ModverRegistry pomUrl and registryStatus") {
+    test("Registry pomUrl and registryStatus") {
       val gav = Gav("org.foo", "bar_3", "1.4.2")
       assertTrue(
-        ModverRegistry.MavenCentral.pomUrl(gav).contains("repo1.maven.org"),
-        ModverRegistry.GitHubPackages("acme", "libs").pomUrl(gav).contains("maven.pkg.github.com/acme/libs"),
+        ArtifactRegistry.MavenCentral.pomUrl(gav).contains("repo1.maven.org"),
+        ArtifactRegistry.GitHubPackages("acme", "libs").pomUrl(gav).contains("maven.pkg.github.com/acme/libs"),
         Modver.registryStatus(200) == Right(RegistryStatus.Published),
         Modver.registryStatus(304) == Right(RegistryStatus.Published),
         Modver.registryStatus(404) == Right(RegistryStatus.Missing),

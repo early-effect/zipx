@@ -1,0 +1,17 @@
+> assertSnapshotVersions
+> zipxWorkflowGenerate
+$ exists .github/workflows/zipx-release.yml
+> assertReleaseWorkflow
+> zipxWorkflowCheck
+
+# A tag must name a row at its catalog number.
+-> zipxRelease refs/tags/client/v0.3.1
+-> zipxRelease refs/tags/v0.3.0
+-> zipxRelease refs/pull/7/merge
+
+# client's tag releases client and the unreleased libs row it depends on, at catalog numbers.
+> zipxRelease refs/tags/client/v0.3.0
+> assertReleased
+> assertReleaseSession
+> ++ 3.9.0!
+> assertReleaseSession

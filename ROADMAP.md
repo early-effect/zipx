@@ -77,7 +77,7 @@ Release tag v0.15.2, catalog 0.15.1    zipx-release: [error] tag v0.15.2 does no
 | 0 | `snapshots/roadmap` | this file | [x] |
 | 1 | `snapshots/retire-ci` | `-SNAPSHOT` is the only unreleased form | [x] |
 | 2 | `snapshots/typed-versions` | `Ship(id, ReleaseVersion)`: a snapshot row does not compile | [x] |
-| 3 | `snapshots/release-workflow` | `zipx-release.yml`: tag == catalog, or dispatch; one bundle | [ ] |
+| 3 | `snapshots/release-workflow` | `zipx-release.yml`: tag == catalog, or dispatch; one bundle | [x] |
 | 4 | `snapshots/version-model` | `version == s"$row-SNAPSHOT"`; merges never release | [ ] |
 | 5 | `snapshots/mainline-channel` | a merge publishes affected unreleased rows, upload-only | [ ] |
 | 6 | `snapshots/consume` | pin a snapshot: resolvers, freshness, guard, promotion | [ ] |
