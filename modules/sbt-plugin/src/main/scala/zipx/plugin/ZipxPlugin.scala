@@ -80,8 +80,12 @@ object ZipxPlugin extends AutoPlugin:
     val AsActions = zipx.core.AsActions
     type AsShips[A] = zipx.core.AsShips[A]
     val AsShips = zipx.core.AsShips
-    type PublishedRow = zipx.core.PublishedRow
-    type Ship         = zipx.core.Ship
+    type PublishedRow   = zipx.core.PublishedRow
+    type ReleaseVersion = zipx.core.ReleaseVersion
+    val ReleaseVersion = zipx.core.ReleaseVersion
+    type ReleaseBump = zipx.core.ReleaseBump
+    val ReleaseBump = zipx.core.ReleaseBump
+    type Ship = zipx.core.Ship
     val Ship = zipx.core.Ship
     type ShipGroup = zipx.core.ShipGroup
     val ShipGroup = zipx.core.ShipGroup
@@ -1688,15 +1692,15 @@ object ZipxPlugin extends AutoPlugin:
           case Nil        => ("", "patch")
         if identity.isEmpty then sys.error("zipx: zipxModverBump needs a Ship id or ShipGroup name")
         else
-          val kind = kindName.toLowerCase match
-            case "patch" => BumpKind.Patch
-            case "minor" => BumpKind.Minor
-            case "major" => BumpKind.Major
+          val bump = kindName.toLowerCase match
+            case "patch" => ReleaseBump.Patch
+            case "minor" => ReleaseBump.Minor
+            case "major" => ReleaseBump.Major
             case other   => sys.error(s"zipx: unknown bump kind '$other' (patch, minor, or major)")
           val row = ships
             .find(r => r.identity == identity)
             .getOrElse(sys.error(s"zipx: no Ship / ShipGroup named '$identity'"))
-          val to   = orFail(Modver.bumpVersion(row.version, kind))
+          val to   = row.version.bump(bump)
           val rel  = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
           val file = (LocalRootProject / baseDirectory).value / rel
           if !file.exists then sys.error(s"zipx: catalog file ${file.getPath} is missing")
