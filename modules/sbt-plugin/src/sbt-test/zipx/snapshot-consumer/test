@@ -1,0 +1,16 @@
+> forgetFixtureRepo
+> assertFreshnessScoped
+
+# Iterate across builds on a laptop: publishLocal the upstream, compile the consumer against it.
+> upstream/publishLocal
+> consumer/compile
+
+# A -SNAPSHOT republish overwrites, so the consumer compiles against the new API without cleanFull.
+$ copy-file changes/Api.scala upstream/src/main/scala/Api.scala
+> upstream/publishLocal
+$ copy-file changes/Use.scala consumer/src/main/scala/Use.scala
+> consumer/compile
+
+> zipxWorkflowGenerate
+> assertCiPins
+> forgetFixtureRepo

@@ -52,8 +52,9 @@ object ZipxCatalog:
     (self ++ rest).toList
 
   def renderPlugins(plugins: Seq[Plugin], self: Seq[Plugin] = Nil): String =
-    val lines = pluginInventory(plugins, self).map(renderPluginLine)
-    (PluginsHeader +: lines).mkString("\n") + "\n"
+    val inventory = pluginInventory(plugins, self)
+    val resolver  = Option.when(SnapshotPins.of(inventory).nonEmpty)(SnapshotPins.resolverLine).toList
+    (PluginsHeader +: (resolver ++ inventory.map(renderPluginLine))).mkString("\n") + "\n"
 
   def describePlugin(plugin: Plugin): String =
     val gav = s"${plugin.group} % ${plugin.artifact} % ${plugin.version}"

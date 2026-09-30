@@ -32,6 +32,11 @@ object PluginsSbtSpec extends ZIOSpecDefault:
       val expected = List(zipx, scalafmt, remote)
       assertTrue(PluginsSbt.parse(aligned) == Right(expected))
     },
+    test("parsePlugins round-trips a snapshot plugin with the resolver zipx writes for it") {
+      val pinned   = Plugin("rocks.earlyeffect", "sbt-zipx", "0.15.0-SNAPSHOT")
+      val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
+      assertTrue(PluginsSbt.parse(ZipxCatalog.renderPlugins(List(scalafmt, pinned))) == Right(List(scalafmt, pinned)))
+    },
     test("parsePlugins refuses resolvers and %%") {
       val resolvers = PluginsSbt.parse("""resolvers += Resolver.sonatypeCentralRepo""")
       val crossed   = PluginsSbt.parse("""addSbtPlugin("org.scalameta" %% "sbt-scalafmt" % "2.6.2")""")

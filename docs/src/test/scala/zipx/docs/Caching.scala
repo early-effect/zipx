@@ -158,6 +158,10 @@ jobs restore through `actions/cache/restore` and never save. The `snapshots` job
 `cache-rehydrate`), so it restores this run's save and only packages and uploads. A `zipx-release.yml` job restores
 and never saves: its jars carry release numbers, which no PR build would hit.
 
+A pinned snapshot keeps the cache honest without making it cold. Only projects that depend on a `-SNAPSHOT` re-resolve
+each session, and `COURSIER_TTL: 0s` revalidates only changing artifacts, so every other `update` and every
+content-addressed compile still hits. See **Snapshots and releases**.
+
 ```scala
 Capability.test                              // LocalCacheMode.Save: the default owner
 Capability.testGraph                         // Restore: its jobs compile disjoint slices of the build

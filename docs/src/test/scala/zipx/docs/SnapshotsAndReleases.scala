@@ -153,6 +153,35 @@ Nothing uploads until the plan is sound. Each refusal says what to do next.
         )
       ),
     ),
+    section("Pin a snapshot downstream")(
+      md"""
+A downstream catalog names the snapshot like any other row:
+
+```scala
+val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
+```
+
+While any row is a snapshot, zipx:
+
+| Where | What |
+|---|---|
+| `resolvers`, and `project/plugins.sbt` when a `Plugin` is pinned | add `central-snapshots`; nothing when no row is pinned |
+| each project that depends on a `-SNAPSHOT` | `forceUpdatePeriod := Some(Duration.Zero)`, so `update` re-resolves every session; other projects keep their cached `update` |
+| every `ci.yml` job | `COURSIER_TTL: 0s`, so Coursier revalidates a changing artifact instead of trusting it for 24 hours; releases stay cached forever |
+| the `test` job | a warning annotation naming the pins, without failing the run |
+| `zipxRelease` | refuses while a released project depends on a snapshot |
+| catalog update | rewrites the pin to the latest release once one reaches it |
+
+On a laptop, `publishLocal` of the upstream wins over Central snapshots until you delete it from `~/.ivy2/local`. A
+long-lived sbt shell keeps its resolution in memory for the life of the JVM, so a republished snapshot with a new
+transitive dependency needs a fresh sbt; new code in the same jar is seen at once. Run sbt with `COURSIER_TTL=0s` to
+revalidate remote snapshots locally too. Central deletes snapshots after 90 days, which promotion normally beats.
+""",
+      exampleValue {
+        val pin = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
+        ZipxCatalog.outdated(List(pin), _ => Right(Some("0.15.1"))).map(_.map(b => s"${b.from} -> ${b.to}"))
+      }.assert(promoted => assertTrue(promoted == Right(List("0.15.0-SNAPSHOT -> 0.15.1")))),
+    ),
     section("Setup")(
       md"""
 1. `zipxReleaseWorkflow := Some(ZipxCentral.releases)`, then `sbt zipxWorkflowGenerate`.

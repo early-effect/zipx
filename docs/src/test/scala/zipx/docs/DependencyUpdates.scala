@@ -203,6 +203,10 @@ Catalog apply rewrites constructors in the catalog file only: `Lib("g", "a", "fr
 Lookup skips pre-releases by default (`zipxPreRelease := PreRelease.Skip`). A stable `2.0.18` does not become
 `2.1.0-alpha1`. Set `zipxPreRelease := PreRelease.Include` to list alphas. GitHub Action lookup already ignores
 prerelease releases.
+
+A pinned snapshot is promoted the same way: `Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")` becomes the
+latest release once one at `0.15.0` or later exists, and stays pinned while the newest release is older. See
+**Snapshots and releases**.
 """
     ),
     section("Typed cron")(

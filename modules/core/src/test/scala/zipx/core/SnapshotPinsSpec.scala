@@ -1,0 +1,60 @@
+package zipx.core
+
+import zio.test.*
+
+object SnapshotPinsSpec extends ZIOSpecDefault:
+
+  private val pinned   = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
+  private val released = Lib("dev.zio", "zio", "2.1.26")
+
+  private val gRelease: Gen[Any, ReleaseVersion] =
+    (for
+      major <- Gen.int(0, 3)
+      minor <- Gen.int(0, 3)
+      patch <- Gen.int(0, 3)
+    yield ReleaseVersion.make(s"$major.$minor.$patch")).collect { case Right(v) => v }
+
+  def spec = suite("SnapshotPins")(
+    test("only a -SNAPSHOT row is a pin") {
+      assertTrue(SnapshotPins.of(List(pinned, released)) == List(pinned))
+    },
+    test("the PR annotation names every pin, and the run still passes") {
+      val steps =
+        SnapshotPins.annotation(::(pinned, Nil)).map(_(StepContext(ModuleNode(ModuleId("_build")), None, false)))
+      assertTrue(
+        steps.exists(
+          _.flatMap(_.run).exists(run =>
+            run.contains(
+              "::warning title=zipx snapshots::pinned snapshots (rocks.earlyeffect:zipx-core:0.15.0-SNAPSHOT)"
+            )
+          )
+        ),
+        steps.exists(_.forall(_.`if`.isEmpty)),
+      )
+    },
+    test("plugins.sbt resolves Central snapshots exactly when a plugin is pinned") {
+      val snapshot = Plugin("rocks.earlyeffect", "sbt-zipx", "0.15.0-SNAPSHOT")
+      val release  = Plugin("org.scalameta", "sbt-scalafmt", "2.5.4")
+      assertTrue(
+        ZipxCatalog.renderPlugins(List(release, snapshot)).linesIterator.contains(SnapshotPins.resolverLine),
+        !ZipxCatalog.renderPlugins(List(release)).linesIterator.contains(SnapshotPins.resolverLine),
+      )
+    },
+    test("a release refuses every snapshot it would depend on, and nothing else") {
+      assertTrue(
+        ReleasePlan.refuseSnapshots(List("a:b:1.0.0", "c:d:2.0.0-SNAPSHOT", "c:d:2.0.0-SNAPSHOT")) ==
+          Left(ReleaseError.SnapshotPinned(::("c:d:2.0.0-SNAPSHOT", Nil))),
+        ReleasePlan.refuseSnapshots(List("a:b:1.0.0")) == Right(()),
+        ReleaseError.SnapshotPinned(::("c:d:2.0.0-SNAPSHOT", Nil)).message.contains("c:d:2.0.0-SNAPSHOT"),
+      )
+    },
+    test("catalog update promotes a pin to the latest release once it reaches the pin, and never below it") {
+      val gPin = gRelease.map(v => DepVersion.make(s"$v-SNAPSHOT").map(v -> _)).collect { case Right(pin) => pin }
+      check(gPin, gRelease) { case ((next, version), latest) =>
+        val bumps    = ZipxCatalog.outdated(List(pinned.copy(version = version)), _ => Right(Some(latest)))
+        val promoted = ReleaseVersion.ordering.gteq(latest, next)
+        assertTrue(bumps.map(_.map(_.to)) == Right(if promoted then List(latest: String) else Nil))
+      }
+    },
+  )
+end SnapshotPinsSpec

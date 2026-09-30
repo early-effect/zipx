@@ -39,10 +39,11 @@ object PluginsSbt:
     }
 
   private def parseStats(stats: List[Tree])(using Context): Either[String, List[Plugin]] =
-    stats.filterNot(isTrivia).foldLeft[Either[String, List[Plugin]]](Right(Nil)) { (accE, stat) =>
-      accE.flatMap { acc =>
-        parseAddSbtPlugin(stat).map(acc :+ _)
-      }
+    stats.filterNot(s => isTrivia(s) || isResolver(s)).foldLeft[Either[String, List[Plugin]]](Right(Nil)) {
+      (accE, stat) =>
+        accE.flatMap { acc =>
+          parseAddSbtPlugin(stat).map(acc :+ _)
+        }
     }
 
   private def isTrivia(tree: Tree): Boolean =
@@ -51,6 +52,14 @@ object PluginsSbt:
       case dd: DefDef if dd.name.toString == "<init>" => true
       case _: TypeDef | _: ValDef | _: DefDef         => true
       case _                                          => false
+
+  /** The one resolver zipx writes, while a plugin row is pinned to a snapshot. Any other stays refused. */
+  private def isResolver(tree: Tree): Boolean =
+    tree match
+      case InfixOp(Ident(key), Ident(op), InfixOp(Literal(repo), Ident(at), Literal(url))) =>
+        key.toString == "resolvers" && op.toString == "+=" && at.toString == "at" &&
+        repo.stringValue == SnapshotPins.ResolverName && url.stringValue == SnapshotPins.CentralSnapshots
+      case _ => false
 
   private def parseAddSbtPlugin(tree: Tree)(using Context): Either[String, Plugin] =
     tree match

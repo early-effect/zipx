@@ -74,6 +74,7 @@ enum ReleaseError:
   case PartiallyReleased(row: PublishedRow, missing: ::[Gav])
   case RegistryUnreachable(row: PublishedRow, detail: String)
   case NothingToRelease
+  case SnapshotPinned(dependencies: ::[String])
 
   def message: String = this match
     case NoRows                => "zipx-release.yml releases Ship / ShipGroup rows, and the catalog has none"
@@ -89,7 +90,9 @@ enum ReleaseError:
       s"${Modver.describe(row)} ${row.version} is partly released; missing $gavs"
     case RegistryUnreachable(row, detail) =>
       s"cannot tell whether ${Modver.describe(row)} ${row.version} is released: $detail"
-    case NothingToRelease => "every row's catalog number is already released"
+    case NothingToRelease             => "every row's catalog number is already released"
+    case SnapshotPinned(dependencies) =>
+      s"a release cannot depend on a snapshot: ${dependencies.mkString(", ")}; release those first and pin the release"
 end ReleaseError
 
 final case class ReleaseEntry(row: PublishedRow, tag: String)
@@ -103,6 +106,12 @@ final case class ReleasePlan(entries: ::[ReleaseEntry]):
     }
 
 object ReleasePlan:
+
+  /** `dependencies` are `group:artifact:revision` of what the released projects declare. */
+  def refuseSnapshots(dependencies: List[String]): Either[ReleaseError, Unit] =
+    dependencies.filter(SnapshotPins.isSnapshot).distinct.sorted match
+      case head :: tail => Left(ReleaseError.SnapshotPinned(::(head, tail)))
+      case Nil          => Right(())
 
   def plan(
       request: ReleaseRequest,
