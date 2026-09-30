@@ -434,7 +434,9 @@ object ZipxPlugin extends AutoPlugin:
     val zipxEmitSelf             = settingKey[Boolean](ZipxSettings.emitSelf.description)
     val zipxPluginVersion        = settingKey[Option[String]](ZipxSettings.pluginVersion.description)
     val zipxSelfPlugins          = settingKey[Seq[Plugin]](ZipxSettings.selfPlugins.description)
-    val zipxVersionsFile         = settingKey[String](ZipxSettings.versionsFile.description)
+    private[plugin] val zipxResolvedModule =
+      settingKey[(String, String)]("The organization and artifact name this project resolves as, suffixes included")
+    val zipxVersionsFile = settingKey[String](ZipxSettings.versionsFile.description)
 
     val zipxGraph            = taskKey[Unit](ZipxSettings.graph.description)
     val zipxDepCleanup       = taskKey[DepCleanupReport](ZipxSettings.depCleanup.description)
@@ -619,6 +621,15 @@ object ZipxPlugin extends AutoPlugin:
     clean := Def.uncached {
       clean.value
       ResolutionCache.forgetIfPinned(zipxVersions.value)
+    },
+    zipxResolvedModule := {
+      val id = projectID.value
+      (id.organization, scalaModuleInfo.value.flatMap(CrossVersion(id, _)).fold(id.name)(_(id.name)))
+    },
+    // A released row meets itself again through a library built against it; sbt always keeps the in-repo project.
+    libraryDependencySchemes ++= {
+      val own = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value
+      if zipxShips.value.isEmpty then Nil else own.distinct.map((org, name) => org % name % VersionScheme.Always)
     },
     forceUpdatePeriod := {
       if libraryDependencies.value.exists(m => SnapshotPins.isSnapshot(m.revision)) then
@@ -1315,10 +1326,12 @@ object ZipxPlugin extends AutoPlugin:
         rowStatus(_, graph, catalog, binaries, release.registry),
       ) match
         case Left(ReleaseError.NothingToRelease) =>
+          warnReleasedRowsWithChanges(extracted, next, graph, catalog, binaries, release.registry)
           next.log.info("zipx: every row's catalog number is released; no snapshot to publish")
           next
         case Left(err)   => sys.error(s"zipx: ${err.message}")
         case Right(plan) =>
+          warnReleasedRowsWithChanges(extracted, next, graph, catalog, binaries, release.registry)
           val (task, destination) = target match
             case SnapshotTarget.Local    => (publishLocal, "the local ivy repository")
             case SnapshotTarget.Registry =>
@@ -1336,6 +1349,62 @@ object ZipxPlugin extends AutoPlugin:
           "reload" :: commands.map(c => c.text: String) ::: s"$SessionCommand ${restore.id}" :: "reload" :: next
       end match
     }
+
+  /** A released row with changes since its tag publishes no snapshot, so its changes reach no one until it moves. */
+  private def warnReleasedRowsWithChanges(
+      extracted: Extracted,
+      st: State,
+      graph: ModuleGraph,
+      catalog: ShipIndex,
+      binaries: Map[ModuleId, List[(String, Gav)]],
+      registry: ArtifactRegistry,
+  ): Unit =
+    val root  = extracted.get(LocalRootProject / baseDirectory)
+    val tags  = TagScheme.of(catalog)
+    val drift = catalog.byIdentity.values.toList
+      .filter(row => rowStatus(row, graph, catalog, binaries, registry) == Right(RowStatus.Released))
+      .sortBy(Modver.describe)
+      .map(row => row -> releaseDrift(root, graph, catalog, row, tags.tag(row)))
+    drift.foreach {
+      case (row, ReleaseDrift.Changed(tag)) =>
+        val warning =
+          s"${Modver.describe(row)} ${row.version} is released and has changes since $tag, so it publishes no snapshot. Move it: sbt \"zipxModverBump ${row.identity}\""
+        st.log.warn(s"zipx: ${"*" * 12} $warning ${"*" * 12}")
+        sys.env.get("GITHUB_ACTIONS").foreach(_ => println(s"::warning title=zipx released row changed::$warning"))
+      case (row, ReleaseDrift.Unreadable(detail)) =>
+        st.log.warn(s"zipx: could not check ${Modver.describe(row)} for changes since its release: $detail")
+      case (_, ReleaseDrift.Unchanged | ReleaseDrift.Untagged(_)) => ()
+    }
+    drift.collect { case (_, ReleaseDrift.Untagged(tag)) => tag } match
+      case Nil      => ()
+      case untagged =>
+        st.log.info(
+          s"zipx: no release tag in this clone for ${untagged.mkString(", ")}; those rows are not checked for changes"
+        )
+  end warnReleasedRowsWithChanges
+
+  private enum ReleaseDrift:
+    case Unchanged
+    case Changed(tag: String)
+    case Untagged(tag: String)
+    case Unreadable(detail: String)
+
+  private def releaseDrift(
+      root: File,
+      graph: ModuleGraph,
+      catalog: ShipIndex,
+      row: PublishedRow,
+      tag: String,
+  ): ReleaseDrift =
+    GitFiles.changedSince(root, tag) match
+      case Left(err)          => ReleaseDrift.Unreadable(err)
+      case Right(None)        => ReleaseDrift.Untagged(tag)
+      case Right(Some(files)) =>
+        Modver.liftedBumpSet(graph, catalog, Some(files)) match
+          case Left(err) => ReleaseDrift.Unreadable(err)
+          case Right(lifted) if lifted.exists(ref => catalog.byIdentity.get(ref).contains(row)) =>
+            ReleaseDrift.Changed(tag)
+          case Right(_) => ReleaseDrift.Unchanged
 
   private val SessionCommand = "zipxSession"
 
