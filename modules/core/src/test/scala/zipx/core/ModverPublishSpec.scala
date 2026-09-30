@@ -228,6 +228,26 @@ object ModverPublishSpec extends ZIOSpecDefault:
       val err = scala.util.Try(Planner.plan(graph, List(bad), independent)).failed.get
       assertTrue(err.getMessage.contains("can never run"))
     },
+    test(
+      "absent target/zipx-modver-publish.json does not log 'skip publishSigned for domTypesJS binary 3 (already on the registry)'"
+    ) {
+      // The publish job printed this and then [success]. Its target/ was a fresh checkout, then cleanFull.
+      val actions = "zipx: skip publishSigned for domTypesJS binary 3 (already on the registry)"
+      val absent  = ModverPublishSigned.outcome(None, "domTypesJS", "3")
+      val listed  = ModverPublishSigned.outcome(
+        Some(ModverPublishFile(Map("domTypesJS" -> List("3")))),
+        "domTypesJS",
+        "3",
+      )
+      val present = ModverPublishSigned.outcome(Some(ModverPublishFile.empty), "domTypesJS", "3")
+      assertTrue(
+        absent == ModverPublishSigned.Outcome.PublishMissingFile(
+          s"zipx: ${ModverPublishFile.RelPath} is absent; publishing domTypesJS binary 3"
+        ),
+        listed == ModverPublishSigned.Outcome.PublishListed,
+        present == ModverPublishSigned.Outcome.Skip(actions),
+      )
+    },
     test("ModverRegistry pomUrl and registryStatus") {
       val gav = Gav("org.foo", "bar_3", "1.4.2")
       assertTrue(

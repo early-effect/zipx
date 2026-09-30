@@ -49,6 +49,29 @@ object ModverPublishFile:
     file.missing.keys.toList.sorted.toJson
 end ModverPublishFile
 
+/** What `zipxModverPublishSigned` does with [[ModverPublishFile]] on this runner. */
+object ModverPublishSigned:
+
+  enum Outcome:
+    case PublishMissingFile(message: String)
+    case PublishListed
+    case Skip(message: String)
+
+  /** `None` is a runner that does not have the file: a fresh checkout, or `cleanFull` after the cache restore. That
+    * publishes. Only a file that exists and omits the binary skips.
+    */
+  def outcome(file: Option[ModverPublishFile], module: String, binary: String): Outcome =
+    file match
+      case None =>
+        Outcome.PublishMissingFile(
+          s"zipx: ${ModverPublishFile.RelPath} is absent; publishing $module binary $binary"
+        )
+      case Some(report) if report.missing.getOrElse(module, Nil).contains(binary) =>
+        Outcome.PublishListed
+      case Some(_) =>
+        Outcome.Skip(s"zipx: skip publishSigned for $module binary $binary (already on the registry)")
+end ModverPublishSigned
+
 /** Select version-moved ids in publish order for [[Capability.inOneSession]]. */
 object ModverPublishMoved:
 
