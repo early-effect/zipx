@@ -1220,12 +1220,12 @@ object ZipxPlugin extends AutoPlugin:
   private def releaseYaml(st: State, graph: ModuleGraph, cfg: PlanConfig): Option[String] =
     val extracted = Project.extract(st)
     readBuildSetting(extracted, zipxReleaseWorkflow, None).map { release =>
-      if readBuildSetting(extracted, zipxShips, Seq.empty).isEmpty then
-        sys.error(s"zipx: ${ReleaseError.NoRows.message}")
+      val ships = readBuildSetting(extracted, zipxShips, Seq.empty)
+      if ships.isEmpty then sys.error(s"zipx: ${ReleaseError.NoRows.message}")
       val docs = capabilitiesOf(extracted, graph).find { cap =>
         cap.name == zipx.specular.ZipxDocs.DocsName && cap.workflowCall.isDefined
       }
-      orFail(ReleaseWorkflow.render(release, cfg, docs))
+      orFail(ReleaseWorkflow.render(release, cfg, TagScheme.of(ShipIndex.from(ships)), docs))
     }
   end releaseYaml
 

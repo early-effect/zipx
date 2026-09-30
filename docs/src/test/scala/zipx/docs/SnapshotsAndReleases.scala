@@ -63,16 +63,17 @@ the same string on every commit, so cache digests hold (see **Caching**).
 | a GitHub Release whose tag is `client/v0.3.0` (`v0.3.0` when the catalog has one row) | that row, plus its unreleased in-repo upstream rows |
 | Actions → **zipx release** → Run workflow, on the default branch | every row whose number is not on the registry; then creates the tags and GitHub Releases |
 
-Either way it is one sbt session and one registry deployment, however many rows it carries. With a release workflow
+Either way it is one sbt session and one registry deployment, however many rows it carries. A catalog with several
+rows listens only to `<row>/v*` tags, leaving a bare `v*` tag to the image and deploy jobs in `ci.yml`. With a release workflow
 set, `ci.yml` has no publish job. The job restores the build cache and never saves one: its jars carry release
 numbers, which no PR build would hit.
 """,
       exampleValue {
-        ReleaseWorkflow.render(ZipxCentral.releases, config).yaml
+        ReleaseWorkflow.render(ZipxCentral.releases, config, TagScheme.of(catalog)).yaml
       }.assert(yml =>
         assertTrue(
-          yml.contains("- v*"),
           yml.contains("- \"*/v*\""),
+          !yml.contains("- v*"),
           yml.contains("workflow_dispatch"),
           yml.contains("environment: zipx-release"),
           yml.contains("cache-mode: restore"),

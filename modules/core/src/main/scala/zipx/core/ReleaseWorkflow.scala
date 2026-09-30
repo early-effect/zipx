@@ -18,7 +18,6 @@ object ReleaseWorkflow:
 
   val DefaultPath: String        = ".github/workflows/zipx-release.yml"
   val DefaultEnvironment: String = "zipx-release"
-  val TagPatterns: List[String]  = List("v*", "*/v*")
 
   val TagsFile: String = "target/zipx-release-tags.txt"
 
@@ -30,8 +29,10 @@ object ReleaseWorkflow:
   private val onDefaultRef  = Expr.github("ref_name") === defaultBranch
   private val buildContext  = StepContext(ModuleNode(id = ModuleId("_build")), target = None, matrixed = false)
 
-  /** `docs` deploys after a dispatch only: its tags are pushed with `GITHUB_TOKEN`, which starts no other workflow. */
-  def plan(release: ReleaseWorkflow, config: PlanConfig, docs: Option[Capability] = None): Workflow =
+  /** `docs` deploys after a release `ci.yml` never sees: a dispatch (its tags are pushed with `GITHUB_TOKEN`, which
+    * starts no other workflow) or a `<row>/v*` tag.
+    */
+  def plan(release: ReleaseWorkflow, config: PlanConfig, tags: TagScheme, docs: Option[Capability] = None): Workflow =
     val cacheMode = if config.cache == CacheBackend.LocalDir then LocalCacheMode.Restore else LocalCacheMode.Off
     val job       = Job(
       name = Some("release"),
@@ -40,20 +41,26 @@ object ReleaseWorkflow:
       environment = release.environment.map(JobEnvironment(_)),
       env = EnvValue.renderAll(config.env ++ release.env) ++ ListMap(refVar -> Expr.github("ref").render),
       steps = Planner.checkoutThenSbtSetup(config, jobId, nodeVersion = None, cacheMode) ++
+        List(onDefaultBranchStep) ++
         release.steps(buildContext.copy(actions = config.actions)) ++
-        List(onDefaultBranchStep, releaseStep, githubReleasesStep),
+        List(releaseStep, githubReleasesStep),
     )
     Workflow(
       name = "zipx release",
-      on = Triggers(push = Some(BranchFilter(tags = TagPatterns)), workflowDispatch = Some(WorkflowDispatch())),
+      on = Triggers(push = Some(BranchFilter(tags = List(tags.pattern))), workflowDispatch = Some(WorkflowDispatch())),
       permissions = ListMap("contents" -> "write"),
       concurrency = Some(Concurrency(group = "zipx-release", cancelInProgress = CancelInProgress.Never)),
-      jobs = ListMap[String, Job](jobId -> job) ++ docs.flatMap(docsJob),
+      jobs = ListMap[String, Job](jobId -> job) ++ docs.flatMap(docsJob(_, tags)),
     )
   end plan
 
-  def render(release: ReleaseWorkflow, config: PlanConfig, docs: Option[Capability] = None): Either[String, String] =
-    Render.render(plan(release, config, docs)).map(ActionPinFile.annotateUses(_, config.actions))
+  def render(
+      release: ReleaseWorkflow,
+      config: PlanConfig,
+      tags: TagScheme,
+      docs: Option[Capability] = None,
+  ): Either[String, String] =
+    Render.render(plan(release, config, tags, docs)).map(ActionPinFile.annotateUses(_, config.actions))
 
   private val onDefaultBranchStep: Step =
     val reached = Exec(
@@ -115,16 +122,20 @@ object ReleaseWorkflow:
       .withEnv("GH_TOKEN", Expr.github("token"))
       .build
 
-  private def docsJob(docs: Capability): Option[(String, Job)] =
+  private def docsJob(docs: Capability, tags: TagScheme): Option[(String, Job)] =
+    val unseenByCi = tags match
+      case TagScheme.Bare   => Some(dispatched.unwrapped)
+      case TagScheme.PerRow => None
     docs.workflowCall.map { call =>
       (docs.name.asJobId: String) -> Job(
         name = Some(docs.name),
         runsOn = Nil,
         needs = List(jobId),
-        `if` = Some(dispatched.unwrapped),
+        `if` = unseenByCi,
         permissions = ListMap.from(docs.permissions),
         uses = Some(call.uses),
         `with` = ListMap.from(call.withInputs),
       )
     }
+  end docsJob
 end ReleaseWorkflow

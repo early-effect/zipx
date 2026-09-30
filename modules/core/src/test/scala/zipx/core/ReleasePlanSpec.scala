@@ -49,11 +49,13 @@ object ReleasePlanSpec extends ZIOSpecDefault:
       }
     ),
     suite("tags")(
-      test("a single-row catalog tags v<n>; several rows tag <identity>/v<n>") {
+      test("a single-row catalog tags v<n>; several rows tag <identity>/v<n>, leaving v* to the image") {
         assertTrue(
-          ReleaseTag.of(Ship("core", "1.0.0"), lone) == "v1.0.0",
-          ReleaseTag.of(client, catalog) == "client/v0.3.0",
-          ReleaseTag.of(libs, catalog) == "libs/v1.4.2",
+          TagScheme.of(lone).tag(Ship("core", "1.0.0")) == "v1.0.0",
+          TagScheme.of(catalog).tag(client) == "client/v0.3.0",
+          TagScheme.of(catalog).tag(libs) == "libs/v1.4.2",
+          TagScheme.of(lone).pattern == "v*",
+          TagScheme.of(catalog).pattern == "*/v*",
         )
       },
       test("a tag for the right row but the wrong number names the number to tag") {

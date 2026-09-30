@@ -18,9 +18,22 @@ object ReleaseSession:
 
   def active(props: collection.Map[String, String]): Boolean = props.contains(Property)
 
-object ReleaseTag:
-  def of(row: PublishedRow, catalog: ShipIndex): String =
-    if catalog.byIdentity.sizeIs == 1 then s"v${row.version}" else s"${row.identity}/v${row.version}"
+/** A multi-row catalog tags `<identity>/v<n>` because a bare `v*` tag there is the image tag `ci.yml` builds on. */
+enum TagScheme:
+  case Bare
+  case PerRow
+
+  def tag(row: PublishedRow): String = this match
+    case Bare   => s"v${row.version}"
+    case PerRow => s"${row.identity}/v${row.version}"
+
+  def pattern: String = this match
+    case Bare   => "v*"
+    case PerRow => "*/v*"
+end TagScheme
+
+object TagScheme:
+  def of(catalog: ShipIndex): TagScheme = if catalog.byIdentity.sizeIs == 1 then Bare else PerRow
 
 enum ReleaseRequest:
   case Tagged(tag: String)
@@ -78,7 +91,7 @@ object ReleasePlan:
       status: PublishedRow => Either[ReleaseError, RowStatus],
   ): Either[ReleaseError, ReleasePlan] =
     val rows                     = inBuildOrder(catalog, graph)
-    def tagOf(row: PublishedRow) = ReleaseTag.of(row, catalog)
+    def tagOf(row: PublishedRow) = TagScheme.of(catalog).tag(row)
     for
       _        <- Either.cond(rows.nonEmpty, (), ReleaseError.NoRows)
       statuses <- rows.foldLeft[Either[ReleaseError, Map[PublishedRow, RowStatus]]](Right(Map.empty)) { (acc, row) =>

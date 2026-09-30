@@ -20,7 +20,7 @@ val assertReleaseWorkflow = taskKey[Unit]("zipx-release.yml runs zipxRelease on 
 assertReleaseWorkflow := {
   val yml = IO.read((LocalRootProject / baseDirectory).value / ".github/workflows/zipx-release.yml")
   assert(yml.contains("sbt \"zipxRelease $ZIPX_RELEASE_REF\""), yml)
-  assert(yml.contains("- v*") && yml.contains("- \"*/v*\""), yml)
+  assert(yml.contains("- \"*/v*\"") && !yml.contains("- v*"), yml)
   assert(yml.contains("workflow_dispatch"), yml)
   assert(yml.contains("environment: zipx-release"), yml)
   assert(yml.contains("cache-mode: restore") && !yml.contains("cache-mode: save"), yml)
