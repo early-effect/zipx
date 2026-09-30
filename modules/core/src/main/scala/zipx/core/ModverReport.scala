@@ -70,6 +70,16 @@ object ModverPublishSigned:
         Outcome.PublishListed
       case Some(_) =>
         Outcome.Skip(s"zipx: skip publishSigned for $module binary $binary (already on the registry)")
+
+  /** Remote `publishSigned`. `publishLocal` of a snapshot is a separate task and is not this decision. */
+  enum Remote:
+    case Publish
+    case Skip(message: String)
+
+  def remote(snapshot: Boolean, publishSnapshots: Boolean, module: String, version: String): Remote =
+    if snapshot && !publishSnapshots then
+      Remote.Skip(s"zipx: skip remote publish of $module $version; zipxPublishSnapshots is false")
+    else Remote.Publish
 end ModverPublishSigned
 
 /** Select version-moved ids in publish order for [[Capability.inOneSession]]. */

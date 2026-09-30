@@ -248,6 +248,18 @@ object ModverPublishSpec extends ZIOSpecDefault:
         present == ModverPublishSigned.Outcome.Skip(actions),
       )
     },
+    test("a snapshot is not published remotely unless zipxPublishSnapshots is set") {
+      val skip    = ModverPublishSigned.remote(true, false, "sbtAscentPreview", "0.9.0-SNAPSHOT")
+      val allow   = ModverPublishSigned.remote(true, true, "sbtAscentPreview", "0.9.0-SNAPSHOT")
+      val release = ModverPublishSigned.remote(false, false, "domTypesJS", "0.10.0")
+      assertTrue(
+        skip == ModverPublishSigned.Remote.Skip(
+          "zipx: skip remote publish of sbtAscentPreview 0.9.0-SNAPSHOT; zipxPublishSnapshots is false"
+        ),
+        allow == ModverPublishSigned.Remote.Publish,
+        release == ModverPublishSigned.Remote.Publish,
+      )
+    },
     test("ModverRegistry pomUrl and registryStatus") {
       val gav = Gav("org.foo", "bar_3", "1.4.2")
       assertTrue(
