@@ -3,11 +3,6 @@
 > assertCatalogUntouched
 > assertLocalPom
 
-# The push that releases client sets it to the catalog number; siblings it did not release stay -SNAPSHOT.
-> set client / version := "0.3.0"
-> assertReleasePom
-> set client / version := "0.3.0-SNAPSHOT"
-
 # A republish after a change replaces the jar; a release-shaped version would be skipped.
 > forgetFixtureRepo
 > models/publishLocal
@@ -21,4 +16,14 @@ $ copy-file changes/Models.scala models/src/main/scala/Models.scala
 > assertBumpedClient
 > zipxWorkflowGenerate
 $ exists .github/workflows/ci.yml
+$ exists .github/workflows/zipx-release.yml
 > assertModverWorkflow
+
+# Ship rows release only from zipx-release.yml: a ci.yml publish capability, or no release workflow, is refused.
+$ copy-file changes/publish.sbt publish.sbt
+> reload
+-> zipxWorkflowGenerate
+$ delete publish.sbt
+$ copy-file changes/no-release.sbt no-release.sbt
+> reload
+-> zipxWorkflowGenerate

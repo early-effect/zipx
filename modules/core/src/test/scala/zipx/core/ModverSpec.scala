@@ -39,9 +39,20 @@ object ModverSpec extends ZIOSpecDefault:
   private val client   = Ship("client", "0.3.0")
   private val covering = List[PublishedRow](libs, client)
 
-  private val index = Modver.membership(graph, covering) match
-    case Right(i)  => i
-    case Left(err) => throw AssertionError(s"covering fixture is invalid: $err")
+  private val index = ShipIndex.from(covering)
+
+  private val libsRef: ShipRef = ShipRef.Group(gname("libs"))
+
+  private def libsReleasedAt(version: ReleaseVersion): ShipIndex =
+    ShipIndex.from(List(libs.at(version), client))
+
+  private def bumpStatus(lastReleases: ShipIndex, probe: MemberProbe): zio.IO[String, Map[String, BumpStatus]] =
+    zio.ZIO.fromEither(
+      for
+        kinds  <- Modver.minBumps(Set(libsRef), index, graph, lastReleases, _ => "early-semver", _ => Right(probe))
+        report <- Modver.report(index, lastReleases, kinds, mimaRan = Set.empty)
+      yield report.rows.map(r => r.identity -> r.status).toMap
+    )
 
   private val matrix = GraphFixture(
     List(
@@ -163,61 +174,28 @@ object ModverSpec extends ZIOSpecDefault:
         )
       },
     ),
-    suite("unreleased")(
-      test("a release-branch dispatch publishes the catalog number, and every other commit stays a snapshot") {
-        val row       = Ship("domTypes", "0.10.0")
-        val branches  = Seq("main")
-        val recovery  = Modver.releaseMoment(true, Some("workflow_dispatch"), Some("refs/heads/main"), branches, false)
-        val releasing = Modver.releaseMoment(true, Some("push"), Some("refs/heads/main"), branches, true)
-        val idle      = Modver.releaseMoment(true, Some("push"), Some("refs/heads/main"), branches, false)
-        val local     = Modver.releaseMoment(false, None, None, branches, false)
-        val feature   =
-          Modver.releaseMoment(true, Some("workflow_dispatch"), Some("refs/heads/mcp-view-element"), branches, false)
-        assertTrue(
-          Modver.versionAt(row, recovery) == "0.10.0",
-          Modver.versionAt(row, releasing) == "0.10.0",
-          Modver.versionAt(row, idle) == "0.10.0-SNAPSHOT",
-          Modver.versionAt(row, local) == "0.10.0-SNAPSHOT",
-          Modver.versionAt(row, feature) == "0.10.0-SNAPSHOT",
-        )
-      },
-      test("an unreleased member is its row's number and -SNAPSHOT, for a Ship and a ShipGroup alike") {
-        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
-        assertTrue(rows.map(Modver.unreleased) == List("0.3.0-SNAPSHOT", "1.4.2-SNAPSHOT"))
-      },
-      test("a release POM names each unreleased sibling in the organization at its row's catalog number") {
-        val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
-        assertTrue(
-          Modver.releasedRevision("com.example", "1.4.2-SNAPSHOT", "com.example", releasing = true, rows) == "1.4.2",
-          Modver.releasedRevision("com.example", "0.3.0-SNAPSHOT", "com.example", releasing = true, rows) == "0.3.0",
-        )
-      },
-      test("an unreleased POM names what was built, as its ivy.xml does") {
-        check(Gen.fromIterable(List("0.3.0", "1.4.2", "9.9.9"))) { v =>
-          val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
+    suite("BuildSession")(
+      test("a row member builds at <row>-SNAPSHOT, and at its catalog number only in a release session") {
+        check(gVersion, Gen.boolean) { (v, grouped) =>
+          val row: PublishedRow =
+            if grouped then ShipGroup(gname("libs"), v, List(mid("models"))) else Ship(mid("client"), v)
           assertTrue(
-            Modver
-              .releasedRevision("com.example", s"$v-SNAPSHOT", "com.example", releasing = false, rows) == s"$v-SNAPSHOT"
+            BuildSession.Snapshot.versionOf(row) == s"$v-SNAPSHOT",
+            BuildSession.Release.versionOf(row) == (v: String),
           )
         }
       },
-      test("a release POM leaves another organization's revisions, and any no row owns, as written") {
-        val rows = List[PublishedRow](Ship("client", "0.8.0"))
+      test("the zipx.release JVM property is what makes a session a release") {
         assertTrue(
-          Modver
-            .releasedRevision("org.other", "0.8.0-SNAPSHOT", "com.example", releasing = true, rows) == "0.8.0-SNAPSHOT",
-          Modver.releasedRevision(
-            "com.example",
-            "0.9.0-SNAPSHOT",
-            "com.example",
-            releasing = true,
-            rows,
-          ) == "0.9.0-SNAPSHOT",
-          Modver.releasedRevision("com.example", "0.8.0", "com.example", releasing = true, rows) == "0.8.0",
+          BuildSession.of(Map(BuildSession.ReleaseProperty -> "v1.4.2")) == BuildSession.Release,
+          BuildSession.of(Map("zipx.other" -> "x")) == BuildSession.Snapshot,
         )
       },
     ),
     suite("membership")(
+      test("the fixture catalog covers its graph") {
+        assertTrue(Modver.membership(graph, covering) == Right(index))
+      },
       test("a covering catalog is Right and every publishing root is in exactly one row") {
         check(gCovered) { (g, rows) =>
           Modver.membership(g, rows) match
@@ -226,7 +204,7 @@ object ModverSpec extends ZIOSpecDefault:
               val roots = Modver.publishingRoots(g)
               assertTrue(
                 roots.forall(built.byRoot.contains),
-                roots.forall(r => built.byRoot(r).memberRoots.contains(r)),
+                roots.forall(r => built.byRoot.get(r).exists(_.memberRoots.contains(r))),
                 built.byRoot.keySet == roots,
               )
         }
@@ -325,8 +303,9 @@ object ModverSpec extends ZIOSpecDefault:
       },
       test("shared matrix sources dirty the root once") {
         val covered = List[PublishedRow](Ship("core", "1.4.2"), Ship("cli", "0.3.0"))
-        val built   = Modver.membership(matrix, covered).toOption.get
-        val lifted  = Modver.liftedBumpSet(matrix, built, Some(List("core/src/main/scala/Foo.scala")))
+        val lifted  = Modver
+          .membership(matrix, covered)
+          .flatMap(built => Modver.liftedBumpSet(matrix, built, Some(List("core/src/main/scala/Foo.scala"))))
         assertTrue(lifted == Right(Set(ShipRef.One(ModuleId("core")))))
       },
       test("min-bump order is None then Patch then Minor then Major") {
@@ -342,9 +321,10 @@ object ModverSpec extends ZIOSpecDefault:
     suite("propagate")(
       test("Never is the lifted set even when reverse-deps exist") {
         check(gCovered) { (g, rows) =>
-          val built = Modver.membership(g, rows).toOption.get
+          val built = ShipIndex.from(rows)
           val bumps = BumpSet(built.byIdentity.keys.map(_ -> BumpKind.Patch).toMap)
           assertTrue(
+            Modver.membership(g, rows) == Right(built),
             Modver.expand(bumps, g, built, ModverPropagate.Never).asMap == bumps.asMap,
             ModverPropagate.Never.expand(bumps, g, built).asMap == bumps.asMap,
           )
@@ -409,11 +389,12 @@ object ModverSpec extends ZIOSpecDefault:
           )
         )
         val rows   = List[PublishedRow](Ship("a", "1.0.0"), Ship("b", "1.0.0"), Ship("c", "1.0.0"))
-        val built  = Modver.membership(chain, rows).toOption.get
+        val built  = ShipIndex.from(rows)
         val seed   = BumpSet(Map(ShipRef.One(ModuleId("a")) -> BumpKind.Major))
         val matchB = Modver.expand(seed, chain, built, ModverPropagate.MatchBump).asMap
         val patch  = Modver.expand(seed, chain, built, ModverPropagate.PatchPublished).asMap
         assertTrue(
+          Modver.membership(chain, rows) == Right(built),
           matchB.get(ShipRef.One(ModuleId("b"))).contains(BumpKind.Major),
           matchB.get(ShipRef.One(ModuleId("c"))).contains(BumpKind.Major),
           patch.get(ShipRef.One(ModuleId("b"))).contains(BumpKind.Patch),
@@ -422,10 +403,13 @@ object ModverSpec extends ZIOSpecDefault:
       },
       test("a platform-row dependsOn contracts to the matrix root") {
         val covered = List[PublishedRow](Ship("core", "1.4.2"), Ship("cli", "0.3.0"))
-        val built   = Modver.membership(matrix, covered).toOption.get
+        val built   = ShipIndex.from(covered)
         val seed    = BumpSet(Map(ShipRef.One(ModuleId("core")) -> BumpKind.Minor))
         val out     = Modver.expand(seed, matrix, built, ModverPropagate.MatchBump).asMap
-        assertTrue(out.get(ShipRef.One(ModuleId("cli"))).contains(BumpKind.Minor))
+        assertTrue(
+          Modver.membership(matrix, covered) == Right(built),
+          out.get(ShipRef.One(ModuleId("cli"))).contains(BumpKind.Minor),
+        )
       },
       test("unpublished intermediates are not contracted edges") {
         val hole = GraphFixture(
@@ -436,10 +420,11 @@ object ModverSpec extends ZIOSpecDefault:
           )
         )
         val rows  = List[PublishedRow](Ship("core", "1.0.0"), Ship("client", "1.0.0"))
-        val built = Modver.membership(hole, rows).toOption.get
+        val built = ShipIndex.from(rows)
         val seed  = BumpSet(Map(ShipRef.One(ModuleId("core")) -> BumpKind.Major))
         val out   = Modver.expand(seed, hole, built, ModverPropagate.MatchBump).asMap
         assertTrue(
+          Modver.membership(hole, rows) == Right(built),
           out.get(ShipRef.One(ModuleId("core"))).contains(BumpKind.Major),
           !out.contains(ShipRef.One(ModuleId("client"))),
         )
@@ -462,8 +447,7 @@ object ModverSpec extends ZIOSpecDefault:
             ModverPropagate.MatchBump,
           )
           .asMap
-        val lifted = Set[ShipRef](ShipRef.Group(ShipGroupName("libs")))
-        Modver.report(index, index, lifted, MovedRows.empty, kinds, mimaRan = Set.empty) match
+        Modver.report(index, index, kinds, mimaRan = Set.empty) match
           case Left(err)     => assertTrue(err.isEmpty)
           case Right(report) =>
             val client = report.rows.find(_.identity == "client")
@@ -482,133 +466,6 @@ object ModverSpec extends ZIOSpecDefault:
           out.get(ShipRef.Group(ShipGroupName("libs"))).contains(BumpKind.None),
           !out.contains(ShipRef.One(ModuleId("client"))),
         )
-      },
-    ),
-    suite("movedRows")(
-      test("a missing previous catalog is empty, not Left") {
-        val parsed = Modver.previousIndex(Right(None), _ => Left("should not parse"))
-        assertTrue(parsed == Right(ShipIndex.empty))
-      },
-      test("a failed git show is Left") {
-        assertTrue(
-          Modver.previousIndex(Left("git show failed"), _ => Right(ShipIndex.empty)) == Left("git show failed")
-        )
-      },
-      test("a parse error is Left") {
-        val parsed = Modver.previousIndex(Right(Some("not scala")), _ => Left("parse failed"))
-        assertTrue(parsed == Left("parse failed"))
-      },
-      test("first adoption adds every current identity") {
-        Modver.movedRows(index, Right(ShipIndex.empty)) match
-          case Left(err)    => assertTrue(err == "")
-          case Right(moved) =>
-            assertTrue(
-              moved.added == Set(ShipRef.Group(ShipGroupName("libs")), ShipRef.One(ModuleId("client"))),
-              moved.versionChanged.isEmpty,
-              moved.newMembers.isEmpty,
-            )
-      },
-      test("a failed previous index is Left") {
-        assertTrue(Modver.movedRows(index, Left("no git")).isLeft)
-      },
-      test("a version-equal catalog is not moved") {
-        assertTrue(Modver.movedRows(index, Right(index)) == Right(MovedRows.empty))
-      },
-      test("a version change is versionChanged, not added") {
-        val prev = ShipIndex.from(List(ShipGroup("libs", "1.4.1")("models", "coreLib"), client))
-        Modver.movedRows(index, Right(prev)) match
-          case Left(err)    => assertTrue(err == "")
-          case Right(moved) =>
-            assertTrue(
-              moved.versionChanged == Set(ShipRef.Group(ShipGroupName("libs"))),
-              moved.added.isEmpty,
-              moved.newMembers.isEmpty,
-            )
-      },
-      test("a new group member is in newMembers without a version bump") {
-        val prev = ShipIndex.from(List(ShipGroup("libs", "1.4.2")("models"), client))
-        Modver.movedRows(index, Right(prev)) match
-          case Left(err)    => assertTrue(err == "")
-          case Right(moved) =>
-            assertTrue(
-              moved.newMembers == Set(ModuleId("coreLib")),
-              moved.versionChanged.isEmpty,
-              moved.added.isEmpty,
-            )
-      },
-    ),
-    suite("filterUnpublished")(
-      test("every member of a version-moved group is in the publish set") {
-        val moved = MovedRows(
-          versionChanged = Set(ShipRef.Group(ShipGroupName("libs"))),
-          added = Set.empty,
-          newMembers = Set.empty,
-        )
-        val gav = (id: ModuleId) => List(Gav("org", s"${id}_3", "1.4.2"))
-        Modver.filterUnpublished(moved, index, graph, gav, _ => Right(RegistryStatus.Missing)) match
-          case Left(err)  => assertTrue(err == "")
-          case Right(pub) =>
-            assertTrue(
-              pub.keySet == Set(ModuleId("models"), ModuleId("coreLib")),
-              !pub.contains(ModuleId("client")),
-            )
-      },
-      test("a new group member publishes; version-unchanged siblings skip when already on the registry") {
-        val moved = MovedRows(Set.empty, Set.empty, newMembers = Set(ModuleId("coreLib")))
-        val gav   = (id: ModuleId) => List(Gav("org", s"${id}_3", "1.4.2"))
-        val reg: Gav => Either[String, RegistryStatus] =
-          g =>
-            if g.artifact.startsWith("coreLib") then Right(RegistryStatus.Missing)
-            else Right(RegistryStatus.Published)
-        Modver.filterUnpublished(moved, index, graph, gav, reg) match
-          case Left(err)  => assertTrue(err == "")
-          case Right(pub) =>
-            assertTrue(
-              pub.keySet == Set(ModuleId("coreLib")),
-              !pub.contains(ModuleId("models")),
-            )
-      },
-      test("a version-unchanged sibling whose GAV is missing still publishes") {
-        val moved = MovedRows(Set.empty, Set.empty, newMembers = Set(ModuleId("coreLib")))
-        val gav   = (id: ModuleId) => List(Gav("org", s"${id}_3", "1.4.2"))
-        Modver.filterUnpublished(moved, index, graph, gav, _ => Right(RegistryStatus.Missing)) match
-          case Left(err)  => assertTrue(err == "")
-          case Right(pub) => assertTrue(pub.keySet == Set(ModuleId("models"), ModuleId("coreLib")))
-      },
-      test("mixed binaries keep only the Missing GAVs") {
-        val moved =
-          MovedRows(versionChanged = Set(ShipRef.One(ModuleId("client"))), added = Set.empty, newMembers = Set.empty)
-        val g213                                       = Gav("org", "client_2.13", "0.3.1")
-        val g3                                         = Gav("org", "client_3", "0.3.1")
-        val gav                                        = (_: ModuleId) => List(g213, g3)
-        val reg: Gav => Either[String, RegistryStatus] =
-          g => if g.artifact.endsWith("_3") then Right(RegistryStatus.Missing) else Right(RegistryStatus.Published)
-        Modver.filterUnpublished(moved, index, graph, gav, reg) match
-          case Left(err)  => assertTrue(err == "")
-          case Right(pub) => assertTrue(pub.get(ModuleId("client")).contains(List(g3)))
-      },
-      test("a registry lookup error is Left") {
-        val moved =
-          MovedRows(versionChanged = Set(ShipRef.One(ModuleId("client"))), added = Set.empty, newMembers = Set.empty)
-        val err =
-          Modver.filterUnpublished(
-            moved,
-            index,
-            graph,
-            _ => List(Gav("org", "client_3", "0.3.1")),
-            _ => Left("HTTP 500"),
-          )
-        assertTrue(err == Left("HTTP 500"))
-      },
-      test("both platform rows of a moved root are candidates") {
-        val rows  = List[PublishedRow](Ship("core", "1.4.2"), Ship("cli", "0.3.0"))
-        val built = Modver.membership(matrix, rows).toOption.get
-        val moved =
-          MovedRows(versionChanged = Set(ShipRef.One(ModuleId("core"))), added = Set.empty, newMembers = Set.empty)
-        val gav = (id: ModuleId) => List(Gav("org", s"${id}_3", "1.4.2"))
-        Modver.filterUnpublished(moved, built, matrix, gav, _ => Right(RegistryStatus.Missing)) match
-          case Left(err)  => assertTrue(err == "")
-          case Right(pub) => assertTrue(pub.keySet == Set(ModuleId("core"), ModuleId("coreJS")))
       },
     ),
     suite("min-bump")(
@@ -655,9 +512,8 @@ object ModverSpec extends ZIOSpecDefault:
         )
       },
       test("report JSON round-trips through zio-json and missing bump fails the gate") {
-        val kinds  = Map[ShipRef, BumpKind](ShipRef.One(ModuleId.unsafeMake("client")) -> BumpKind.Patch)
-        val lifted = Set[ShipRef](ShipRef.One(ModuleId.unsafeMake("client")))
-        Modver.report(index, index, lifted, MovedRows.empty, kinds, mimaRan = Set.empty) match
+        val kinds = Map[ShipRef, BumpKind](ShipRef.One(ModuleId.unsafeMake("client")) -> BumpKind.Patch)
+        Modver.report(index, index, kinds, mimaRan = Set.empty) match
           case Left(err)     => assertTrue(err.isEmpty)
           case Right(report) =>
             val json = ModverReport.render(report)
@@ -688,6 +544,55 @@ object ModverSpec extends ZIOSpecDefault:
         )
       },
     ),
+    suite("cache epoch")(
+      test("the ShipCatalog epoch moves exactly when some row number moves, whatever the row order") {
+        val gRows = gCovered.collect { case (_, first :: rest) => (first, rest) }
+        check(gRows, gVersion) { case ((first, rest), v) =>
+          val rows = first :: rest
+          assertTrue(
+            (Modver.epochHash(first.at(v) :: rest) == Modver.epochHash(rows)) == (first.version == v),
+            Modver.epochHash(rows.reverse) == Modver.epochHash(rows),
+          )
+        }
+      }
+    ),
+    suite("last release")(
+      test("latestRelease is the highest release number, ignoring snapshots and qualified versions") {
+        val xml =
+          "<metadata><versioning><versions><version>1.9.0</version><version>1.10.0</version>" +
+            "<version>1.11.0-SNAPSHOT</version><version>1.12.0-M1</version></versions></versioning></metadata>"
+        assertTrue(
+          MavenMetadata.latestRelease(xml).contains(ReleaseVersion("1.10.0")),
+          MavenMetadata.latestRelease("<metadata/>").isEmpty,
+        )
+      },
+      test("a changed row still at its last release must bump") {
+        bumpStatus(lastReleases = index, probe = MemberProbe.Clean).map { status =>
+          assertTrue(status.get("libs").contains(BumpStatus.Missing))
+        }
+      },
+      test("a row already past its last release takes further compatible changes without another bump") {
+        bumpStatus(lastReleases = libsReleasedAt(ReleaseVersion("1.4.1")), probe = MemberProbe.Clean).map { status =>
+          assertTrue(status.get("libs").contains(BumpStatus.Ok))
+        }
+      },
+      test("a binary break needs more than the row already declares") {
+        bumpStatus(lastReleases = libsReleasedAt(ReleaseVersion("1.4.1")), probe = MemberProbe.BinaryBreak).map {
+          status =>
+            assertTrue(status.get("libs").contains(BumpStatus.Undersized))
+        }
+      },
+      test("a row with no release is a first release, with no floor") {
+        bumpStatus(lastReleases = ShipIndex.empty, probe = MemberProbe.BinaryBreak).map { status =>
+          assertTrue(status.get("libs").contains(BumpStatus.Ok))
+        }
+      },
+      test("an unreadable released artifact fails the check") {
+        val bumps =
+          Modver.minBumps(Set(libsRef), index, graph, index, _ => "early-semver", _ => Left("download: HTTP 503"))
+        assertTrue(bumps == Left("download: HTTP 503"))
+      },
+    ),
     suite("Capability.modverCheck")(
       test("allJobIds matches plan job keys") {
         val cap = Capability.modverCheck()
@@ -697,34 +602,16 @@ object ModverSpec extends ZIOSpecDefault:
         assertTrue(ids == List("modver-check"), wf.jobs.keys.toList.sorted == ids)
       },
       test("planned YAML is pull_request and does not sit on test needs") {
-        val cfg     = PlanConfig(skipMergedPrPush = false, verifyCleanLabel = None, affected = AffectedMode.Always)
-        val wf      = Planner.plan(graph, List(Capability.modverCheck(), Capability.test), cfg)
-        val checkIf = wf.jobs("modver-check").`if`.getOrElse("")
+        val cfg   = PlanConfig(skipMergedPrPush = false, verifyCleanLabel = None, affected = AffectedMode.Always)
+        val wf    = Planner.plan(graph, List(Capability.modverCheck(), Capability.test), cfg)
+        val check = wf.jobs.get("modver-check")
         assertTrue(
-          checkIf.contains("pull_request"),
-          !wf.jobs("modver-check").needs.contains("test"),
-          !wf.jobs("test").needs.contains("modver-check"),
-          wf.jobs("modver-check").env.contains(ModverCheck.BaseShaEnv),
+          check.exists(_.`if`.exists(_.contains("pull_request"))),
+          check.exists(!_.needs.contains("test")),
+          wf.jobs.get("test").exists(!_.needs.contains("modver-check")),
+          check.exists(_.env.contains(ModverCheck.BaseShaEnv)),
         )
       },
-    ),
-    suite("thisCommitReleases")(
-      test("a version change, a first add, or a new member releases that row") {
-        val versioned = MovedRows(
-          versionChanged = Set(ShipRef.Group(ShipGroupName("libs"))),
-          added = Set.empty,
-          newMembers = Set.empty,
-        )
-        val added  = MovedRows(Set.empty, added = Set(ShipRef.One(ModuleId("client"))), newMembers = Set.empty)
-        val member = MovedRows(Set.empty, Set.empty, newMembers = Set(ModuleId("coreLib")))
-        assertTrue(
-          Modver.thisCommitReleases(libs, versioned, index),
-          !Modver.thisCommitReleases(client, versioned, index),
-          Modver.thisCommitReleases(client, added, index),
-          Modver.thisCommitReleases(libs, member, index),
-          !Modver.thisCommitReleases(client, member, index),
-        )
-      }
     ),
   )
 end ModverSpec

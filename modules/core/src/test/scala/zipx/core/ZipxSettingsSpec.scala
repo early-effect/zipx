@@ -38,9 +38,7 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
         ZipxSettings.names.contains("zipxModverCompat"),
         ZipxSettings.names.contains("zipxModverCheck"),
         ZipxSettings.names.contains("zipxModverSuggest"),
-        ZipxSettings.names.contains("zipxModverPublishModules"),
-        ZipxSettings.names.contains("zipxModverPublishSigned"),
-        ZipxSettings.names.contains("zipxModverPublishMoved"),
+        !ZipxSettings.names.contains("zipxPublishSnapshots"),
         ZipxSettings.names.contains("zipxDepCleanup"),
         ZipxSettings.names.contains("zipxDepCleanupFail"),
       )

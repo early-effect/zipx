@@ -8,6 +8,7 @@ import zipx.central.ZipxCentral
 import zipx.core.*
 import zipx.core.EnvValue.secret
 import zipx.docs.DocsFixtures.*
+import zipx.docs.DocsRender.yaml
 import zipx.github.ZipxGitHubPackages
 import zipx.specular.ZipxDocs
 import zio.test.*
@@ -25,22 +26,20 @@ Secret *names* live in Scala; values stay in GitHub.
 ```mermaid
 flowchart TD
   Caps([zipxCapabilities]) --> Central[ZipxCentral.release]
-  Caps --> Modver[ZipxModver.publish]
   Caps --> Packages[ZipxGitHubPackages]
   Caps --> Docs[ZipxDocs.pages]
   Caps --> Aws[ZipxAws.dockerPublish]
   Central --> Sonatype[(Maven Central)]
-  Modver --> Registry[(version-moved registry)]
   Packages --> GH[(GitHub Packages)]
   Docs --> Pages[(GitHub Pages)]
   Aws --> Ecr[(ECR)]
   class Caps warn
-  class Central,Modver,Packages,Docs,Aws,Sonatype,Registry,GH,Pages,Ecr happy
+  class Central,Packages,Docs,Aws,Sonatype,GH,Pages,Ecr happy
 ```
 
 Amber is the knob (`zipxCapabilities += …`). Each green pack is a paved Publish/docs capability that lands in its
-destination; you only name secrets in code, values stay in GitHub. `ZipxModver` is topology for independent library
-versions, not a registry pack; see **Independent versions**.
+destination; you only name secrets in code, values stay in GitHub. `Ship` rows release from `zipx-release.yml`
+instead; see **ZipxCentral.releases** below.
 """,
     section("ZipxCentral")(
       md"""
@@ -50,9 +49,6 @@ zipxCapabilities += ZipxCentral.release   // GPG import + publishSigned; sonaRel
 
 // Append without restating gpg-import (withExtraSteps would replace it)
 zipxCapabilities += ZipxCentral.release.plusExtraSteps(publishCleanFull)
-
-// Graph escape hatch
-zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
 ```
 """,
       exampleValue {
@@ -65,37 +61,23 @@ zipxCapabilities ++= Seq(ZipxCentral.publishSigned, ZipxCentral.releaseOnce)
         )
       ),
     ),
-    section("ZipxModver")(
+    section("ZipxCentral.releases")(
       md"""
-Independent outbound versions (`Ship` / `ShipGroup`) cannot use Aggregate `ZipxCentral.release` on a tag.
-`ZipxModver.publish` is Graph library publish on `Gate.OnDefaultPush`, `MatrixCollapse.Off`. Default command
-`zipxModverPublishSigned`. Full guide: **Independent versions**.
+A build with `Ship` / `ShipGroup` rows publishes from `zipx-release.yml`, never from `ci.yml`. `ZipxCentral.releases`
+is that workflow for Maven Central: the same secrets and key import as `ZipxCentral.release`, and one `sonaRelease` a
+run however many rows it carries. Full guide: **Snapshots and releases**.
 
 ```scala
-zipxCapabilities += ZipxModver.publish()
-
-// Optional: Central sonaRelease once after Graph publish
-zipxCapabilities += ZipxCentral.releaseOnce.copy(gate = Gate.OnDefaultPush)
+zipxReleaseWorkflow := Some(ZipxCentral.releases)
 ```
-
-The monorepo example uses ZipxModver without Central secrets. Compose `releaseOnce` only when the repo actually
-publishes to Maven Central. It runs only when at least one publish job succeeded: a merge that moves no row skips
-every publish, stages nothing, and has nothing to release.
 """,
       exampleValue {
-        DocsRender.jobs("modver", "publish-api", "central-release")(
-          ZipxModver.publish(SbtCommand.unsafeTask("zipxModverPublishSigned")),
-          ZipxCentral.releaseOnce.copy(gate = Gate.OnDefaultPush),
-        )(using libGraph, config.copy(modverPublish = true))
-      }.assert(yaml =>
+        ReleaseWorkflow.render(ZipxCentral.releases, config, TagScheme.PerRow).yaml
+      }.assert(yml =>
         assertTrue(
-          yaml.contains("modver:"),
-          yaml.contains("publish-api:"),
-          yaml.contains("zipxModverPublishSigned"),
-          yaml.contains("workflow_dispatch"),
-          yaml.contains("central-release:"),
-          yaml.contains("sonaRelease"),
-          yaml.contains("needs.publish-api.result == 'success'"),
+          yml.contains("Import signing key"),
+          yml.contains("SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}"),
+          yml.contains("sbt \"zipxRelease $ZIPX_RELEASE_REF\""),
         )
       ),
     ),

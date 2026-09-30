@@ -1,8 +1,7 @@
 MyVersions.settings
 organization := "com.example.zipx.modver"
-zipxCacheEpoch := CacheEpoch.Fixed("1.4.2-SNAPSHOT")
-zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
-zipxCapabilities += ZipxModver.publish()
+zipxVerify          := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+zipxReleaseWorkflow := Some(ReleaseWorkflow(ArtifactRegistry.Url("https://repo1.maven.org/maven2")))
 
 lazy val models = project.settings(MyVersions.libraries)
 
@@ -23,7 +22,7 @@ lazy val root = (project in file("."))
   .settings(publish / skip := true)
 
 val assertModverSettings = taskKey[Unit]("Ship-backed version is row-SNAPSHOT; aggregators keep sbt default")
-assertModverSettings := {
+assertModverSettings := Def.uncached {
   val modelsV  = (models / version).value
   val coreV    = (coreLib / version).value
   val clientV  = (client / version).value
@@ -34,6 +33,7 @@ assertModverSettings := {
   assert(clientV == "0.3.0-SNAPSHOT", s"client version, got $clientV")
   assert(serviceV == "0.1.0-SNAPSHOT", s"unpublished service must not take a Ship version, got $serviceV")
   assert(rootV == "0.1.0-SNAPSHOT", s"root aggregator must not take a Ship version, got $rootV")
+  assert(zipxCacheEpoch.value == CacheEpoch.ShipCatalog, s"Ship rows key the cache epoch, got ${zipxCacheEpoch.value}")
 }
 
 val assertLocalPom = taskKey[Unit]("An unreleased POM names what it built, as its ivy.xml does")
@@ -42,15 +42,6 @@ assertLocalPom := {
   val xml = IO.read(fileConverter.value.toPath(pom).toFile)
   assert(xml.contains("<version>1.4.2-SNAPSHOT</version>"), s"client POM should name coreLib as built, got $xml")
   assert(xml.contains("<version>0.3.0-SNAPSHOT</version>"), s"client POM should name itself as built, got $xml")
-}
-
-val assertReleasePom = taskKey[Unit]("A release POM names each unreleased sibling at its catalog number")
-assertReleasePom := {
-  val pom = (client / makePom).value
-  val xml = IO.read(fileConverter.value.toPath(pom).toFile)
-  assert(!xml.contains("-SNAPSHOT"), s"a release POM must not name a -SNAPSHOT, got $xml")
-  assert(xml.contains("<version>1.4.2</version>"), s"client POM should depend on coreLib 1.4.2, got $xml")
-  assert(xml.contains("<version>0.3.0</version>"), s"client POM should name itself 0.3.0, got $xml")
 }
 
 /** Where sbt 2's publishLocal writes this fixture's organization. It ignores `ivyPaths`, so this is the machine's. */
@@ -90,24 +81,12 @@ assertBumpedClient := {
   assert(src.contains("""ShipGroup("libs", "1.4.2")("models", "coreLib")"""), src)
 }
 
-val assertModverWorkflow = taskKey[Unit]("generated CI is ZipxModver Graph publish, no Central secrets")
+val assertModverWorkflow = taskKey[Unit]("ci.yml checks bumps on PRs and publishes nothing; releases are zipx-release.yml")
 assertModverWorkflow := {
   val content = IO.read((LocalRootProject / baseDirectory).value / ".github" / "workflows" / "ci.yml")
-  assert(content.contains("modver:"), "missing synthetic modver job")
-  assert(content.contains("publish-client:"), "missing publish-client")
-  assert(content.contains("publish-models:"), "missing publish-models")
-  assert(content.contains("publish-coreLib:"), "missing publish-coreLib")
   assert(content.contains("modver-check:"), "missing injected modver-check")
   assert(content.contains("modver-suggest:"), "missing injected modver-suggest")
-  assert(content.contains("workflow_dispatch"), "OnDefaultPush must include workflow_dispatch")
-  assert(
-    content.contains("contains(fromJson(needs.modver.outputs.modules), 'client')"),
-    "publish-client should gate on the compact modver array",
-  )
-  assert(
-    !content.contains("contains(fromJson(needs.modver.outputs.modules), 'all')"),
-    "modver JSON must not use the affected all-sentinel",
-  )
-  assert(!content.contains("SONATYPE_"), "ZipxModver must not require Central secrets")
-  assert(!content.contains("PGP_"), "ZipxModver must not require signing secrets")
+  assert(!content.contains("modver:"), "a merge must not plan a modver release job")
+  assert(!content.contains("  publish:") && !content.contains("publish-"), "a merge must not publish Ship rows")
+  assert(!content.contains("SONATYPE_") && !content.contains("PGP_"), "ci.yml must not carry release secrets")
 }

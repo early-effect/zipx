@@ -6,7 +6,7 @@ enum MemberProbe derives JsonCodec:
   case FirstPublish, JsOnly, BinaryBreak, Clean
 
 enum BumpStatus derives JsonCodec:
-  case Ok, Missing, Undersized, OverBump, NewMemberDirty
+  case Ok, Missing, Undersized, OverBump
 
 final case class ModverReportRow(
     identity: String,
@@ -30,66 +30,3 @@ object ModverReport:
 
   def render(report: ModverReport): String = report.toJson
 end ModverReport
-
-/** Object the Graph publish task reads. Keys are module ids; values are scalaBinaryVersion strings still Missing. */
-final case class ModverPublishFile(missing: Map[String, List[String]]) derives JsonCodec
-
-object ModverPublishFile:
-  val RelPath: String        = "target/zipx-modver-publish.json"
-  val ModulesRelPath: String = "target/zipx-modver-modules.json"
-
-  val empty: ModverPublishFile = ModverPublishFile(Map.empty)
-
-  def parse(json: String): Either[String, ModverPublishFile] =
-    json.fromJson[ModverPublishFile].left.map(err => s"modver publish file: $err")
-
-  def render(file: ModverPublishFile): String = file.toJson
-
-  def modulesJson(file: ModverPublishFile): String =
-    file.missing.keys.toList.sorted.toJson
-end ModverPublishFile
-
-/** What `zipxModverPublishSigned` does with [[ModverPublishFile]] on this runner. */
-object ModverPublishSigned:
-
-  enum Outcome:
-    case PublishMissingFile(message: String)
-    case PublishListed
-    case Skip(message: String)
-
-  /** `None` is a runner that does not have the file: a fresh checkout, or `cleanFull` after the cache restore. That
-    * publishes. Only a file that exists and omits the binary skips.
-    */
-  def outcome(file: Option[ModverPublishFile], module: String, binary: String): Outcome =
-    file match
-      case None =>
-        Outcome.PublishMissingFile(
-          s"zipx: ${ModverPublishFile.RelPath} is absent; publishing $module binary $binary"
-        )
-      case Some(report) if report.missing.getOrElse(module, Nil).contains(binary) =>
-        Outcome.PublishListed
-      case Some(_) =>
-        Outcome.Skip(s"zipx: skip publishSigned for $module binary $binary (already on the registry)")
-
-  /** Remote `publishSigned`. `publishLocal` of a snapshot is a separate task and is not this decision. */
-  enum Remote:
-    case Publish
-    case Skip(message: String)
-
-  def remote(snapshot: Boolean, publishSnapshots: Boolean, module: String, version: String): Remote =
-    if snapshot && !publishSnapshots then
-      Remote.Skip(s"zipx: skip remote publish of $module $version; zipxPublishSnapshots is false")
-    else Remote.Publish
-end ModverPublishSigned
-
-/** Select version-moved ids in publish order for [[Capability.inOneSession]]. */
-object ModverPublishMoved:
-
-  def parse(json: String): Either[String, List[String]] =
-    json.fromJson[List[String]].left.map(err => s"zipx: ${ModverPublishFile.ModulesRelPath}: $err")
-
-  /** Keep `publishOrder` (toposort of publishers); drop ids not in the JSON. Missing JSON is the plugin's job. */
-  def select(moved: List[String], publishOrder: List[String]): List[String] =
-    val wanted = moved.toSet
-    publishOrder.filter(wanted.contains)
-end ModverPublishMoved

@@ -74,7 +74,6 @@ when you mean `(a || b) && c`. Typed leaves also include `eventIs`, `onWorkflowD
 | test / testJoined / Layers / Graph | `Always` | `None` |
 | publish / docker / deploy | `OnReleaseTag` | `None` |
 | ZipxCentral / ZipxGitHubPackages | `OnReleaseTag` | `None` (unless you pass one) |
-| ZipxModver.publish | `OnDefaultPush` | `None` (planner ANDs the version-moved `contains`) |
 | ZipxDocs.pages | `Always` | `onReleaseTag` or `onWorkflowDispatch` |
 
 **Important:** Gate and JobCondition are ANDed. A capability with `Gate.OnReleaseTag` will **not** run on a PR even if
@@ -105,25 +104,20 @@ Capability.dockerGraph.copy(
     ),
     section("OnDefaultPush")(
       md"""
-Independent library publish uses `Gate.OnDefaultPush`: a push to `zipxPushBranches` (default `main`) **or**
-`workflow_dispatch`. Merge to the default branch is the release signal. The planner groups the rendered `if:` so `&&` /
-`||` precedence cannot swallow a later clause. Full guide: **Independent versions**.
+`Gate.OnDefaultPush` runs on a push to `zipxPushBranches` (default `main`) **or** a `workflow_dispatch`. The planner
+groups the rendered `if:` so `&&` / `||` precedence cannot swallow a later clause.
 
 ```scala
-zipxCapabilities += ZipxModver.publish()
+zipxCapabilities += Capability.publish.copy(gate = Gate.OnDefaultPush)
 ```
 """,
       exampleValue {
-        DocsRender.job("publish-api")(
-          ZipxModver.publish(SbtCommand.unsafeTask("zipxModverPublishSigned"))
-        )(using libGraph, config.copy(modverPublish = true))
+        DocsRender.job("publish")(Capability.publish.copy(gate = Gate.OnDefaultPush))(using libGraph)
       }.assert(yaml =>
         assertTrue(
           yaml.contains("workflow_dispatch"),
           yaml.contains("refs/heads/main"),
-          yaml.contains("needs.modver.outputs.modules"),
-          yaml.contains("'api'"),
-          !yaml.contains("'all'"),
+          !yaml.contains("refs/tags/v"),
         )
       ),
     ),

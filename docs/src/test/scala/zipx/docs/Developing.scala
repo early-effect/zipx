@@ -57,7 +57,7 @@ wire `dependsOn` like the existing chain.
 The publishable `plugin` project remains for Central publish and scripted tests.
 [`examples/monorepo`](https://github.com/early-effect/zipx/tree/main/examples/monorepo) is a **consumer** (uses
 `publishLocal` or a released `sbt-zipx`, with `project/ZipxVersions.scala` like a real repo). It dogfoods independent
-versioning: a `ShipGroup` for `models`/`coreLib`, a `Ship` for `client`, `ZipxModver.publish`, `CacheEpoch.ShipCatalog`.
+versioning: a `ShipGroup` for `models`/`coreLib`, a `Ship` for `client`, released from `zipx-release.yml`.
 Aggregate `test` still `zipxWorkflowCheck`s it after `publishLocal`. The version-updates companion regenerates it via
 `zipxVersionUpdatesExtraSteps` (`ExampleCheck.companionSteps`): nested `.github/workflows/` is not repo-root, so the bot
 can commit that `ci.yml`. Root dogfood stays lockstep: Aggregate `ZipxCentral.release` and `ZipxDocs.pages`,

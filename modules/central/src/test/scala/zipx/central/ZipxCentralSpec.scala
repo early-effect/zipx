@@ -1,6 +1,5 @@
 package zipx.central
 
-import neotype.unwrap
 import zio.test.*
 import zipx.core.*
 
@@ -19,44 +18,17 @@ object ZipxCentralSpec extends ZIOSpecDefault:
   private val gMode: Gen[Any, MatrixCollapse] =
     Gen.elements(MatrixCollapse.values.toList*)
 
-  /** sampleGraph's Graph publishSigned cannot collapse: cross `+publishSigned` vs single-version `publishSigned` are
-    * not isomorphic, and DependencyOrdered publishers have same-cap needs. Auto/Off expand; Strict/Coarse refuse at
-    * generate time.
-    */
-  private val gExpandingMode: Gen[Any, MatrixCollapse] =
-    Gen.elements(MatrixCollapse.Auto, MatrixCollapse.Off)
-
-  private def publishSigned(mode: MatrixCollapse): Capability =
-    ZipxCentral.publishSigned.withMatrixCollapse(mode)
-
-  private def downloadsOk(download: Option[zipx.workflow.Step]): Boolean =
-    download.exists { d =>
-      d.uses.exists(_.unwrap.startsWith("actions/download-artifact@")) &&
-      d.`with`.get("pattern").contains("sona-staging-*") &&
-      d.`with`.get("path").contains(ZipxCentral.StagingDir) &&
-      d.`with`.get("merge-multiple").contains("true")
-    }
-
   def spec = suite("ZipxCentral")(
     test("plusExtraSteps keeps gpg-import and appends the new bundle in order") {
       val clean = Steps.of("clean-full")(zipx.workflow.Step(name = Some("cleanFull"), run = Some("echo cleanFull")))
       val cap   = ZipxCentral.release.plusExtraSteps(clean)
       val names = cap.extraSteps(stepContext).flatMap(_.name)
       val wf    = Planner.plan(sampleGraph, List(cap), config)
-      val job   = wf.jobs("publish")
-      val shown = job.steps.flatMap(_.name)
+      val shown = wf.jobs.get("publish").toList.flatMap(_.steps.flatMap(_.name))
       assertTrue(
         names == List("Import signing key", "cleanFull"),
         shown.indexOf("Import signing key") >= 0,
         shown.indexOf("cleanFull") > shown.indexOf("Import signing key"),
-      )
-    },
-    test("dropExtraSteps(gpg-import) on releaseOnce keeps download-staging") {
-      val dropped = ZipxCentral.releaseOnce.dropExtraSteps("gpg-import")
-      val names   = dropped.extraSteps(stepContext).flatMap(_.name)
-      assertTrue(
-        names == List("Download sona staging"),
-        !names.exists(_.contains("Import signing key")),
       )
     },
     test("withExtraSteps still replaces the pack extras") {
@@ -65,7 +37,7 @@ object ZipxCentralSpec extends ZIOSpecDefault:
       assertTrue(names == List("cleanFull"))
     },
     test("the typed gpg import script renders the exact bytes the hand-written one did") {
-      val importRun = ZipxCentral.gpgImportSteps(stepContext).head.run.getOrElse("")
+      val importRun = ZipxCentral.gpgImportSteps(stepContext).headOption.flatMap(_.run).getOrElse("")
       assertTrue(
         importRun ==
           """mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
@@ -82,136 +54,6 @@ object ZipxCentralSpec extends ZIOSpecDefault:
         ZipxCentral.OrgSecretNames.toSet ==
           Set("PGP_KEY_HEX", "PGP_SECRET", "PGP_PASSPHRASE", "SONATYPE_USERNAME", "SONATYPE_PASSWORD")
       )
-    },
-    test("Strict and Coarse refuse Graph publishSigned on the sample diamond") {
-      check(Gen.elements(MatrixCollapse.Strict, MatrixCollapse.Coarse)) { mode =>
-        val err =
-          try
-            Planner.plan(sampleGraph, List(publishSigned(mode)), config)
-            None
-          catch case e: RuntimeException => Some(e.getMessage)
-        assertTrue(err.exists(_.startsWith("zipx:")))
-      }
-    },
-    test("gpg import uses $PGP_SECRET (NOT $$) so bash expands the env var instead of the PID") {
-      check(gExpandingMode) { mode =>
-        val cap        = publishSigned(mode)
-        val wf         = Planner.plan(sampleGraph, List(cap), config)
-        val importRuns =
-          Planner
-            .allJobIds(cap, sampleGraph, config)
-            .map(id => id: String)
-            .flatMap(id => wf.jobs(id).steps)
-            .collect { case s if s.name.contains("Import signing key") => s.run.getOrElse("") }
-        assertTrue(
-          importRuns.nonEmpty,
-          importRuns.forall(_.contains("""echo "$PGP_SECRET" | base64 --decode | gpg --batch --import""")),
-          importRuns.forall(!_.contains("$$PGP_SECRET")),
-        )
-      }
-    },
-    test("publishSigned jobs carry publishSigned, org secrets, and GPG import under expanding collapse modes") {
-      check(gExpandingMode) { mode =>
-        val cap  = publishSigned(mode)
-        val wf   = Planner.plan(sampleGraph, List(cap), config)
-        val jobs = Planner.allJobIds(cap, sampleGraph, config).map(id => id: String).map(wf.jobs(_))
-        assertTrue(
-          jobs.nonEmpty,
-          jobs.forall { job =>
-            val run = job.steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
-            run.contains("publishSigned") &&
-            !run.contains("/publish'") &&
-            job.env.get("PGP_PASSPHRASE").contains("${{ secrets.PGP_PASSPHRASE }}") &&
-            job.env.get("SONATYPE_USERNAME").contains("${{ secrets.SONATYPE_USERNAME }}") &&
-            !job.env.contains("PGP_SECRET") &&
-            job.steps.exists(s =>
-              s.name.contains("Import signing key") &&
-                s.env.get("PGP_SECRET").contains("${{ secrets.PGP_SECRET }}")
-            ) &&
-            job.`if`.exists(_.contains("refs/tags/v"))
-          },
-        )
-      }
-    },
-    test("cross-built modules get +publishSigned; single-version do not") {
-      check(gExpandingMode) { mode =>
-        val cap  = publishSigned(mode)
-        val wf   = Planner.plan(sampleGraph, List(cap), config)
-        val runs = Planner
-          .allJobIds(cap, sampleGraph, config)
-          .map(id => id: String)
-          .flatMap(id => wf.jobs(id).steps.find(_.name.contains("publish")).flatMap(_.run))
-        val joined = runs.mkString("\n")
-        assertTrue(
-          joined.contains("+api/publishSigned") || joined.contains("api/publishSigned"),
-          joined.contains("legacyClient/publishSigned"),
-          !joined.contains("+legacyClient"),
-        )
-      }
-    },
-    test("staging upload/download and release needs track allJobIds under expanding collapse modes") {
-      check(gExpandingMode) { mode =>
-        val pub      = publishSigned(mode)
-        val wf       = Planner.plan(sampleGraph, List(pub, ZipxCentral.releaseOnce), config)
-        val pubIds   = Planner.allJobIds(pub, sampleGraph, config).map(id => id: String)
-        val rel      = wf.jobs("central-release")
-        val download = rel.steps.find(_.name.contains("Download sona staging"))
-        val dlIdx    = rel.steps.indexWhere(_.name.contains("Download sona staging"))
-        val runIdx   = rel.steps.indexWhere(_.run.exists(_.contains("sonaRelease")))
-        val uploads  = pubIds.map { id =>
-          val job    = wf.jobs(id)
-          val upload = job.steps.find(_.name.contains("Upload sona staging"))
-          val pubIdx = job.steps.indexWhere(_.name.contains("publish"))
-          val upIdx  = job.steps.indexWhere(_.name.contains("Upload sona staging"))
-          (id, job, upload, pubIdx, upIdx)
-        }
-        assertTrue(
-          pubIds.nonEmpty,
-          pubIds.forall(wf.jobs.contains),
-          rel.needs.sorted == pubIds.sorted,
-          !rel.needs.exists(_.startsWith("test-")),
-          downloadsOk(download),
-          dlIdx >= 0,
-          runIdx > dlIdx,
-          uploads.forall { case (_, _, upload, pubIdx, upIdx) =>
-            upload.exists(_.uses.exists(_.unwrap.startsWith("actions/upload-artifact@"))) &&
-            upload.exists(_.`with`.get("path").contains(ZipxCentral.StagingDir)) &&
-            pubIdx >= 0 && upIdx > pubIdx
-          },
-          rel.`if`.exists(_.contains("refs/tags/v")),
-          rel.env.get("SONATYPE_PASSWORD").contains("${{ secrets.SONATYPE_PASSWORD }}"),
-        )
-      }
-    },
-    test("after a modver-gated publish, the release runs only when at least one publish job succeeded") {
-      val pub     = zipx.core.ZipxModver.publish(SbtCommand.unsafeTask("zipxModverPublishSigned"))
-      val release = ZipxCentral.releaseOnce.copy(gate = Gate.OnDefaultPush)
-      val cfg     = config.copy(modverPublish = true)
-      val pubIds  = Planner.allJobIds(pub, sampleGraph, cfg).map(id => id: String)
-      val gated   = Planner.plan(sampleGraph, List(pub, release), cfg).jobs("central-release").`if`.getOrElse("")
-      val plain   = Planner
-        .plan(sampleGraph, List(pub, release.copy(upstream = UpstreamResult.NoneFailed)), cfg)
-        .jobs("central-release")
-        .`if`
-        .getOrElse("")
-      val anySucceeded = pubIds.sorted.map(id => s"needs.$id.result == 'success'").mkString("(", " || ", ")")
-      assertTrue(
-        pubIds.size > 1,
-        pubIds.forall(id => plain.contains(s"needs.$id.result != 'failure'")),
-        !plain.contains("== 'success'"),
-        gated.contains(anySucceeded),
-        gated.replace(s" && $anySucceeded", "") == plain,
-      )
-    },
-    test("where no publish can skip, requiring one to succeed changes nothing") {
-      check(gExpandingMode) { mode =>
-        val pub     = publishSigned(mode)
-        val optedIn = Planner.plan(sampleGraph, List(pub, ZipxCentral.releaseOnce), config).jobs("central-release")
-        val plain   = Planner
-          .plan(sampleGraph, List(pub, ZipxCentral.releaseOnce.copy(upstream = UpstreamResult.NoneFailed)), config)
-          .jobs("central-release")
-        assertTrue(optedIn.`if` == plain.`if`, !optedIn.`if`.exists(_.contains("== 'success'")))
-      }
     },
     test("Once needsCapabilities fans out over allJobIds of the dependency under every collapse mode") {
       check(gMode) { mode =>
@@ -237,28 +79,39 @@ object ZipxCentralSpec extends ZIOSpecDefault:
         )
         val wf       = Planner.plan(graph, List(multiDocker, after), config)
         val expected = Planner.allJobIds(multiDocker, graph, config).map(id => id: String).sorted
-        assertTrue(wf.jobs("notify").needs.sorted == expected)
+        assertTrue(wf.jobs.get("notify").exists(_.needs.sorted == expected))
       }
     },
     test(
-      "release is one Aggregate publish job: every publisher's publishSigned then sonaRelease, no staging artifacts"
+      "release is one Aggregate publish job: every publisher's publishSigned, cross only where built, then sonaRelease"
     ) {
       check(gMode) { mode =>
         val wf  = Planner.plan(sampleGraph, List(ZipxCentral.release.withMatrixCollapse(mode)), config)
-        val job = wf.jobs("publish")
-        val run = job.steps.find(_.name.contains("publish")).flatMap(_.run).getOrElse("")
+        val job = wf.jobs.get("publish")
+        val run = job.flatMap(_.steps.find(_.name.contains("publish")).flatMap(_.run)).getOrElse("")
         assertTrue(
           wf.jobs.keys.filter(_.startsWith("publish")).toList == List("publish"),
-          run.contains("schema/publishSigned"),
-          run.contains("api/publishSigned"),
+          run.contains("+schema/publishSigned"),
+          run.contains("+api/publishSigned"),
+          run.contains("legacyClient/publishSigned"),
+          !run.contains("+legacyClient"),
           run.endsWith("sonaRelease'") || run.contains("; sonaRelease"),
-          !wf.jobs.contains("central-release"),
-          !job.steps.exists(_.name.contains("Upload sona staging")),
-          job.steps.exists(_.name.contains("Import signing key")),
-          job.env.get("SONATYPE_USERNAME").contains("${{ secrets.SONATYPE_USERNAME }}"),
-          job.`if`.exists(_.contains("refs/tags/v")),
+          job.exists(_.`if`.exists(_.contains("refs/tags/v"))),
         )
       }
+    },
+    test("release signs with org secrets by name, and only the key import step sees PGP_SECRET") {
+      val job        = Planner.plan(sampleGraph, List(ZipxCentral.release), config).jobs.get("publish")
+      val env        = job.map(_.env).getOrElse(Map.empty)
+      val signingKey = job.flatMap(_.steps.find(_.name.contains("Import signing key")))
+      assertTrue(
+        env.get("PGP_PASSPHRASE").contains("${{ secrets.PGP_PASSPHRASE }}"),
+        env.get("SONATYPE_USERNAME").contains("${{ secrets.SONATYPE_USERNAME }}"),
+        !env.contains("PGP_SECRET"),
+        signingKey.exists(_.env.get("PGP_SECRET").contains("${{ secrets.PGP_SECRET }}")),
+        signingKey.exists(_.run.exists(_.contains("""echo "$PGP_SECRET" | base64 --decode | gpg --batch --import"""))),
+        signingKey.exists(_.run.forall(!_.contains("$$PGP_SECRET"))),
+      )
     },
   )
 end ZipxCentralSpec

@@ -1,27 +1,16 @@
 package zipx
 
-import sbt.{Def, LocalRootProject, ModuleID, Setting}
-import sbt.Keys.{
-  baseDirectory,
-  crossScalaVersions,
-  libraryDependencies,
-  organization,
-  pomPostProcess,
-  scalaVersion,
-  thisProject,
-  version,
-}
+import sbt.{Def, ModuleID, Setting}
+import sbt.Keys.{crossScalaVersions, libraryDependencies, scalaVersion, thisProject, version}
 import zipx.plugin.ZipxDeps
 import zipx.plugin.ZipxPlugin.autoImport.{
   zipxActionRows,
   zipxCheckDeps,
   zipxPins,
-  zipxPushBranches,
   zipxSbt,
   zipxScala,
   zipxShips,
   zipxVersions,
-  zipxVersionsFile,
 }
 
 val ZipxSelf = zipx.plugin.ZipxSelf
@@ -79,55 +68,12 @@ object ZipxVersions:
     val versions =
       if shipRows.isEmpty then Nil
       else
-        Seq(
-          version := Def.uncached {
-            zipx.plugin.ModverRelease.versionString(
-              thisProject.value.id,
-              zipxShips.value,
-              zipxPushBranches.value,
-              zipxVersionsFile.value,
-              (LocalRootProject / baseDirectory).value,
-              sys.env,
-              zipx.core.ReleaseSession.active(sys.props),
-            )
-          },
-          pomPostProcess := {
-            val ships     = zipxShips.value
-            val org       = organization.value
-            val releasing = !version.value.endsWith(zipx.core.Modver.UnreleasedSuffix)
-            (node: scala.xml.Node) => releasedPomVersions(node, org, releasing, ships)
-          },
-        )
+        Seq(version := {
+          val session = zipx.core.BuildSession.of(sys.props)
+          zipx.core.Modver
+            .rowForProject(thisProject.value.id, zipxShips.value)
+            .fold("0.1.0-SNAPSHOT")(session.versionOf)
+        })
     catalog ++ versions
   end applySettings
-
-  /** A release POM goes to a registry, which holds only releases: each in-repo sibling built at `<row>-SNAPSHOT` takes
-    * its row's catalog number. Any other POM (`publishLocal` of an unreleased build) names what was built, as its
-    * `ivy.xml` does, and another organization's revisions are theirs.
-    */
-  private def releasedPomVersions(
-      node: scala.xml.Node,
-      org: String,
-      releasing: Boolean,
-      ships: Seq[PublishedRow],
-  ): scala.xml.Node =
-    def child(e: scala.xml.Elem, label: String): Option[String] =
-      e.child.collectFirst { case c: scala.xml.Elem if c.label == label => c.text }
-    def released(e: scala.xml.Elem): scala.xml.Elem =
-      child(e, "groupId").fold(e) { groupId =>
-        e.copy(child = e.child.map {
-          case v: scala.xml.Elem if v.label == "version" =>
-            v.copy(child =
-              Seq(scala.xml.Text(zipx.core.Modver.releasedRevision(groupId, v.text, org, releasing, ships)))
-            )
-          case other => other
-        })
-      }
-    def walk(n: scala.xml.Node): scala.xml.Node =
-      n match
-        case e: scala.xml.Elem if e.label == "dependency" => released(e)
-        case e: scala.xml.Elem                            => e.copy(child = e.child.map(walk))
-        case other                                        => other
-    walk(node)
-  end releasedPomVersions
 end ZipxVersions

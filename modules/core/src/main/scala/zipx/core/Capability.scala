@@ -103,18 +103,6 @@ final case class StepContext(
 enum Phase:
   case Verify, Publish, Deploy
 
-/** What a job needs from upstream jobs that may skip (an affected-gated or modver-gated publish, say).
-  *
-  *   - [[UpstreamResult.NoneFailed]]: run unless one failed, so skipped upstreams are fine. The default.
-  *   - [[UpstreamResult.AnySucceeded]]: also require at least one to have succeeded. For a job that only acts on what
-  *     its upstreams produced: `ZipxCentral.releaseOnce` has nothing to release when every publish skipped.
-  *
-  * Either way the clause is written only where the planner already tolerates a skipped upstream; when none can skip,
-  * GitHub's implicit `success()` already requires them all, and the job's `if:` is unchanged.
-  */
-enum UpstreamResult:
-  case NoneFailed, AnySucceeded
-
 /** How a capability's per-module ([[CapabilityScope.Graph]]) jobs are wired to each other.
   *
   *   - [[Ordering.ParallelWithUpstream]] needs the same-capability jobs of a module's *direct* upstreams, so everything
@@ -319,14 +307,9 @@ final case class Capability(
     localCache: LocalCacheMode = LocalCacheMode.Restore,
     /** A Once or Aggregate job runs only when one of these modules is affected. See [[withAffectedBy]]. */
     affectedBy: Option[ModuleNode => Boolean] = None,
-    /** What this job needs from upstream jobs that may skip. See [[UpstreamResult]]. */
-    upstream: UpstreamResult = UpstreamResult.NoneFailed,
 ):
   def withCondition(condition: JobCondition): Capability =
     copy(condition = Some(condition))
-
-  /** Runs only when at least one upstream job succeeded. See [[UpstreamResult.AnySucceeded]]. */
-  def whenAnyUpstreamSucceeded: Capability = copy(upstream = UpstreamResult.AnySucceeded)
 
   /** Under [[AffectedMode.AffectedOnPR]], run this Once or Aggregate job only when a module matching `modules` is
     * affected, or when the diff could not narrow anything.
@@ -356,9 +339,7 @@ final case class Capability(
   def withMatrixCollapse(mode: MatrixCollapse): Capability =
     copy(matrixCollapse = Some(mode))
 
-  /** Graph same-capability `needs`. Prefer a pack combinator (`ZipxModver.publish(...).withoutUpstreamJobs`) when one
-    * exists; this is the hatch for a custom Graph capability.
-    */
+  /** Graph same-capability `needs`. */
   def withOrdering(ordering: Ordering): Capability =
     copy(ordering = ordering)
 
@@ -369,16 +350,6 @@ final case class Capability(
   /** Replaces job `permissions`. Same bar as [[withEnv]]. */
   def withPermissions(permissions: Map[String, String]): Capability =
     copy(permissions = permissions)
-
-  /** One sbt JVM over the version-moved set. Job id is the capability name; the command is `zipxModverPublishMoved`. */
-  def inOneSession: Capability =
-    copy(
-      scope = CapabilityScope.Once,
-      matrixed = false,
-      matrixCollapse = None,
-      ordering = Ordering.Independent,
-      command = CommandSource.Fixed(SbtCommand.unsafeTask("zipxModverPublishMoved")),
-    )
 
   /** Destinations that share **one** job: [[TargetFanOut.SharedJob]] plus the targets, set together because setting
     * either alone is the mistake. The shape for registries; see [[TargetFanOut]].

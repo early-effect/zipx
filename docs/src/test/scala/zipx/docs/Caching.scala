@@ -15,8 +15,8 @@ zipx restores sbt's cache on the CI runner so the test job does not start from z
 knobs on this page until CI feels slow.
 
 sbt 2 caches task results **across JVM runs**. zipx restores that cache before the Verify test task, keyed by a
-**commit-stable epoch** (`zipxCacheEpoch`, default `CacheEpoch.GitTags()`). Every push within a PR reuses prior hits;
-cutting a release tag rolls the epoch **without regenerating** `ci.yml`. Remote backends share the same hits across
+**commit-stable epoch** (`zipxCacheEpoch`: `CacheEpoch.ShipCatalog` when the catalog has `Ship` / `ShipGroup` rows,
+else `CacheEpoch.GitTags()`). Every push within a PR reuses prior hits; a row bump or a release tag rolls the epoch. Remote backends share the same hits across
 machines, including developer laptops when CI hydrates a shared store (see **Remote cache for teams**).
 Hits need a `version` that is the same from commit to commit, such as `<row>-SNAPSHOT` (see **Independent versions**).
 
@@ -45,14 +45,14 @@ goal is CI-from-graph plus content-addressed reuse, not a second product to conf
     section("Epoch strategies")(
       md"""
 ```scala
-zipxCacheEpoch := CacheEpoch.GitTags()                 // default: resolve from git tags on the runner
+zipxCacheEpoch := CacheEpoch.ShipCatalog               // default with Ship / ShipGroup rows: hash of row numbers
+zipxCacheEpoch := CacheEpoch.GitTags()                 // default without rows: resolve from git tags on the runner
 zipxCacheEpoch := CacheEpoch.GitTags(tagMatch = "v*")  // same, explicit match glob
-zipxCacheEpoch := CacheEpoch.Fixed(version.value)      // bake at generate time (old behaviour)
-zipxCacheEpoch := CacheEpoch.ShipCatalog               // LocalDir namespace from Ship / ShipGroup rows
+zipxCacheEpoch := CacheEpoch.Fixed(version.value)      // bake at generate time
 zipxCacheEpoch := CacheEpoch.Script(myEpochShell)      // custom shell; must write epoch= and release=
 ```
 
-**GitTags (default):** a `Resolve cache epoch` step runs after checkout (`fetch-depth: 0`, `fetch-tags: true`). On a
+**GitTags (default without rows):** a `Resolve cache epoch` step runs after checkout (`fetch-depth: 0`, `fetch-tags: true`). On a
 `v*` tag ref, epoch = release = tag without `v`. Otherwise the latest matching tag becomes release and epoch is
 `$${release}-SNAPSHOT`. If local tags lag `origin` (or none match), the step emits an Actions `::warning` titled
 `zipx cache epoch` so shallow/missing tags are obvious in the run summary.
@@ -62,10 +62,11 @@ Prefer GitTags so post-tag PRs warm from the release cache without a regenerate 
 
 **Script:** supply your own shell; write `epoch=` and `release=` to `$$GITHUB_OUTPUT`. Restore-keys use both outputs.
 
-**ShipCatalog:** for independent outbound versions (`Ship` / `ShipGroup`; see **Independent versions**). Bakes a SHA-256
-of sorted Ship identity and version as the setup composite `cache-epoch` input (same generate-time path as `Fixed`).
-One row bump rolls the **repo-wide** LocalDir key, the same way a `v*` tag does under `GitTags()`. Recommended when
-ships are present. Lockstep OSS keeps `GitTags()`. `examples/monorepo` sets `ShipCatalog`.
+**ShipCatalog (default with rows):** bakes a SHA-256 of sorted row identity and number as the setup composite
+`cache-epoch` input (same generate-time path as `Fixed`). The epoch rolls exactly when a row number moves, which is
+exactly when `<row>-SNAPSHOT` version strings, and so digests, change. A release does not roll it: the release run
+restores and never saves. `GitTags()` would roll one step late, at the tag, after the bump PR already moved the
+digests.
 """,
       exampleValue {
         val ships = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))

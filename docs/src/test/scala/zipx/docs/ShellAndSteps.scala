@@ -318,19 +318,20 @@ zipxCapabilities += ZipxCentral.release.plusExtraSteps(OrgSteps.playwright)
 
 A YAML resource file would have *relocated* the string splicing rather than removed it, and the composition operators
 above have no YAML equivalent. `zipx-central`'s own steps are the first consumers of exactly this: `ZipxCentral`'s GPG
-import is a published `Steps`, and `releaseOnce` composes two bundles with `++`.
+import is a published `Steps`, and `plusExtraSteps` composes it with yours using `++`.
 """,
       exampleValue {
-        val composed = ZipxCentral.releaseOnce.extraSteps
-        val name     = composed match
+        val cleanFull = Steps.built("clean-full")(Step.run(Script(Exec("sbt", Word.lit("cleanFull")))).named("Clean"))
+        val release   = ZipxCentral.release.plusExtraSteps(cleanFull)
+        val name      = release.extraSteps match
           case s: Steps => s.name
           case _        => "not a bundle"
-        s"releaseOnce.extraSteps: $name\n---\n${DocsRender.job("central-release")(ZipxCentral.releaseOnce)}"
+        s"release.extraSteps: $name\n---\n${DocsRender.job("publish")(release)}"
       }.assert(yaml =>
         assertTrue(
-          yaml.contains("releaseOnce.extraSteps: download-staging+gpg-import"),
-          yaml.contains("Download sona staging"),
+          yaml.contains("release.extraSteps: gpg-import+clean-full"),
           yaml.contains("Import signing key"),
+          yaml.contains("sbt cleanFull"),
         )
       ),
     ),

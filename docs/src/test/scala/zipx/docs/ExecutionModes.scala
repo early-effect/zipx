@@ -120,7 +120,6 @@ Capability.testGraph / publishGraph / dockerGraph
 Capability.deployGraph(participates, command, targets)
 
 ZipxCentral.release                              // Aggregate Central
-ZipxCentral.publishSigned + ZipxCentral.releaseOnce  // Graph + staging
 ```
 
 Same-name override: a user capability whose `name` matches a built-in **replaces** it.

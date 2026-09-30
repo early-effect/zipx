@@ -105,9 +105,9 @@ Library, plugin, pin, and Action versions live in one object you write under `pr
 `ZipxVersions`. Drop `MyVersions.settings` at the top of `build.sbt`. Every `Lib` / `Plugin` / `Pin` / `Action` val is
 a catalog row; you do not list them again. Each module picks a group. Full guide: **Versions**.
 
-A multi-artifact repo that publishes libraries on different cadences adds outbound `Ship` / `ShipGroup` rows. Merge to
-`main` is the release signal; image and deploy still wait on a human `v*` tag. That loop, the graphs, and the fail-closed
-gate are **Independent versions**.
+A multi-artifact repo that publishes libraries on different cadences adds outbound `Ship` / `ShipGroup` rows. Every
+build is `<row>-SNAPSHOT`; a GitHub Release or a dispatch of `zipx-release.yml` releases rows; image and deploy still
+wait on a human `v*` tag. That loop, the graphs, and the fail-closed gate are **Independent versions**.
 
 ```scala
 // project/ZipxVersions.scala

@@ -1,0 +1,1 @@
+zipxCapabilities += Capability.publish

@@ -47,8 +47,9 @@ sbt "zipxModverBump zipx minor"                     // modver-check floors it wi
 // project/ZipxVersions.scala: a row is the NEXT release
 val zipx = ShipGroup("zipx", "0.15.0")("shell", "workflow", "core", "syntax", "cli", "central", "aws", "plugin")
 
-// build.sbt: the Central paved path over the ZipxModver topology
-zipxCapabilities ++= Seq(Capability.test, ZipxCentral.snapshots, ZipxCentral.release, ZipxDocs.pages())
+// build.sbt: ci.yml builds and publishes snapshots; zipx-release.yml releases
+zipxCapabilities ++= Seq(Capability.test, ZipxCentral.snapshots, ZipxDocs.pages())
+zipxReleaseWorkflow := Some(ZipxCentral.releases)
 ```
 
 ```text
@@ -78,7 +79,7 @@ Release tag v0.15.2, catalog 0.15.1    zipx-release: [error] tag v0.15.2 does no
 | 1 | `snapshots/retire-ci` | `-SNAPSHOT` is the only unreleased form | [x] |
 | 2 | `snapshots/typed-versions` | `Ship(id, ReleaseVersion)`: a snapshot row does not compile | [x] |
 | 3 | `snapshots/release-workflow` | `zipx-release.yml`: tag == catalog, or dispatch; one bundle | [x] |
-| 4 | `snapshots/version-model` | `version == s"$row-SNAPSHOT"`; merges never release | [ ] |
+| 4 | `snapshots/version-model` | `version == s"$row-SNAPSHOT"`; merges never release | [x] |
 | 5 | `snapshots/mainline-channel` | a merge publishes affected unreleased rows, upload-only | [ ] |
 | 6 | `snapshots/consume` | pin a snapshot: resolvers, freshness, guard, promotion | [ ] |
 | 7 | `snapshots/pr-channel` | a label publishes `<row>-pr<N>-SNAPSHOT` from the PR's cache | [ ] |
@@ -98,8 +99,9 @@ C4 snapshot publish is upload-only       C8 remote cacheVersion stays JDK/OS
 ```diff
 - addSbtPlugin("rocks.earlyeffect" % "sbt-dynver-ci" % "0.2.3")
 + val lib = ShipGroup("specular", "0.19.0")(/* every published project */)
-- zipxCapabilities += ZipxCentral.release          // tag-gated, in ci.yml
-+ zipxCapabilities ++= Seq(ZipxCentral.snapshots, ZipxCentral.release)   // merge -> snapshots; zipx-release.yml
+- zipxCapabilities += ZipxCentral.release           // tag-gated, in ci.yml
++ zipxCapabilities += ZipxCentral.snapshots          // merge -> Central snapshots
++ zipxReleaseWorkflow := Some(ZipxCentral.releases)  // GitHub Release or dispatch -> zipx-release.yml
 ```
 
 Order: ascent, specular, heddle, then the rest. sbt-dynver-ci archives after the last one; sbt-specular drops

@@ -40,8 +40,8 @@ when feeds are present. `Capability.pinCheck` remains if you want a dedicated jo
 Use `testGraph` / `publishGraph` / `dockerGraph` for one-job-per-module. Use `*Layers` for wave scheduling. Use
 `testJoined` if Aggregate must join `<module>/<testTask>` instead of a root task. `Capability.testAffected` is the
 builtin `test` a build gets under `zipxAffectedOnPR`; replacing `test` by name opts out of it. Packs (`ZipxCentral.release`,
-`ZipxModver.publish`, `ZipxGitHubPackages`, `ZipxDocs.pages`, AWS helpers) replace or extend these by **name**; see
-**Packs**, **Independent versions**, and **Docker and deploy**.
+`ZipxGitHubPackages`, `ZipxDocs.pages`, AWS helpers) replace or extend these by **name**; see **Packs** and **Docker and
+deploy**. `Ship` rows publish from `zipx-release.yml`, never from a capability; see **Snapshots and releases**.
 """
     ),
     section("Phases and replace-by-name")(
@@ -65,8 +65,8 @@ destination-driven and **never** path-affected.
 
 `Gate` today is `Always` | `OnReleaseTag` | `OnDefaultPush` | `AffectedOnly`. **`AffectedOnly` is rejected at generate
 time**: affected gating is derived from phase, scope and the two settings, not from `Gate`, so this would be a silent
-Always. See **Affected**. `OnDefaultPush` is the independent-versioning library publish gate (see **Independent
-versions**).
+Always. See **Affected**. `OnDefaultPush` runs on a default-branch push or a `workflow_dispatch` (see **Job
+conditions**).
 
 `zipxCapabilities += ...` merges with built-ins; the **same `name` replaces** a built-in (e.g. turn Aggregate docker
 into a multi-registry Graph capability). A custom `extraSteps` `uses:` should be a full commit SHA (or an `Action`

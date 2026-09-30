@@ -64,8 +64,8 @@ the same string on every commit, so cache digests hold (see **Caching**).
 | Actions → **zipx release** → Run workflow, on the default branch | every row whose number is not on the registry; then creates the tags and GitHub Releases |
 
 Either way it is one sbt session and one registry deployment, however many rows it carries. A catalog with several
-rows listens only to `<row>/v*` tags, leaving a bare `v*` tag to the image and deploy jobs in `ci.yml`. With a release workflow
-set, `ci.yml` has no publish job. The job restores the build cache and never saves one: its jars carry release
+rows listens only to `<row>/v*` tags, leaving a bare `v*` tag to the image and deploy jobs in `ci.yml`. With `Ship`
+rows, `ci.yml` has no publish job. The job restores the build cache and never saves one: its jars carry release
 numbers, which no PR build would hit.
 """,
       exampleValue {
