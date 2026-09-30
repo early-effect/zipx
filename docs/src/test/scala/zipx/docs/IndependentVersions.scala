@@ -194,17 +194,21 @@ group of one is legal and pointless (it is just `Ship`). Empty members are refus
     ),
     section("Catalog rows")(
       md"""
-Drop the repo-wide `version := "…"`. Members take the catalog number on the push that releases their row, and
-`<row>-SNAPSHOT` everywhere else, in CI and on a developer's machine alike. Aggregators and unpublished apps keep sbt's
-default version.
+Drop the repo-wide `version := "…"`. Members take the catalog number on the push that releases their row, and on a
+`workflow_dispatch` from a release branch. Every other commit is `<row>-SNAPSHOT`, in CI and on a developer's machine
+alike. Aggregators and unpublished apps keep sbt's default version.
 
 | Where | Number | Why |
 |---|---|---|
 | Catalog constructor | release number only (`1.4.2`, never `1.4.2-SNAPSHOT`) | the human writes the next release |
-| Any commit that does not release this row | `<row>-SNAPSHOT` (`1.4.2-SNAPSHOT`) | the same from commit to commit, so caches hold; and `publishLocal` overwrites it |
+| A commit that does not release this row | `<row>-SNAPSHOT` (`1.4.2-SNAPSHOT`) | the same from commit to commit, so caches hold; and `publishLocal` overwrites it |
 | Default-branch push that **releases** this row | catalog number | |
+| `workflow_dispatch` on a release branch | catalog number | modver looked that number up; the publish uploads that number |
 | POM of a release | each in-organization sibling at its catalog number | a registry holds only releases |
 | POM and `ivy.xml` of anything else | what was built (`1.4.2-SNAPSHOT`) | an unreleased build is not a release |
+
+`zipxPublishSnapshots` (default `false`) refuses a remote publish of a `-SNAPSHOT`. `publishLocal` of that snapshot
+still runs. Set it `true` only for a build that really does publish to a snapshot repository.
 
 A cache needs only a version that does not change between commits; `-SNAPSHOT` is as stable as any fixed suffix. What
 breaks a cache is a per-commit version, such as dynver's hash. What `-SNAPSHOT` adds is that sbt 2 overwrites it: a

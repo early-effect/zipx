@@ -141,6 +141,39 @@ object Modver:
   /** The version a row's members take on a commit that does not release it. */
   def unreleased(row: PublishedRow): String = (row.version: String) + UnreleasedSuffix
 
+  /** When a Ship member takes its catalog number, and when it takes [[unreleased]]. */
+  enum ReleaseMoment:
+    /** This default-branch push releases the row. */
+    case ThisCommit
+
+    /** `workflow_dispatch` on a release branch. Modver looked the catalog number up; publish that number. */
+    case RegistryRecovery
+
+    /** Any other commit. `<row>-SNAPSHOT`, so `publishLocal` overwrites it. */
+    case Unreleased
+
+  /** `actions` is `GITHUB_ACTIONS=true`. `ref` is `GITHUB_REF`. A dispatch from anywhere but a release branch stays
+    * unreleased, so a feature-branch dispatch cannot publish the catalog number.
+    */
+  def releaseMoment(
+      actions: Boolean,
+      eventName: Option[String],
+      ref: Option[String],
+      branches: Seq[String],
+      releasesThisRow: Boolean,
+  ): ReleaseMoment =
+    val onBranch = ref.exists(r => branches.exists(b => r == s"refs/heads/$b"))
+    if actions && onBranch && eventName.contains("workflow_dispatch") then ReleaseMoment.RegistryRecovery
+    else if actions && onBranch && eventName.contains("push") && releasesThisRow then ReleaseMoment.ThisCommit
+    else ReleaseMoment.Unreleased
+  end releaseMoment
+
+  /** The version `version` is set to. Registry recovery publishes the catalog number, not a snapshot of it. */
+  def versionAt(row: PublishedRow, moment: ReleaseMoment): String =
+    moment match
+      case ReleaseMoment.ThisCommit | ReleaseMoment.RegistryRecovery => row.version: String
+      case ReleaseMoment.Unreleased                                  => unreleased(row)
+
   /** What a POM names a revision. A release POM (`releasing`: the project is at its catalog number) goes to a registry,
     * which holds only releases, so each unreleased sibling in `organization` takes its row's catalog number. Any other
     * POM names what was built, and another organization's revisions are theirs.

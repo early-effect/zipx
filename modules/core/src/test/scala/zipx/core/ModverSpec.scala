@@ -139,6 +139,23 @@ object ModverSpec extends ZIOSpecDefault:
       },
     ),
     suite("unreleased")(
+      test("a release-branch dispatch publishes the catalog number, and every other commit stays a snapshot") {
+        val row       = Ship("domTypes", "0.10.0")
+        val branches  = Seq("main")
+        val recovery  = Modver.releaseMoment(true, Some("workflow_dispatch"), Some("refs/heads/main"), branches, false)
+        val releasing = Modver.releaseMoment(true, Some("push"), Some("refs/heads/main"), branches, true)
+        val idle      = Modver.releaseMoment(true, Some("push"), Some("refs/heads/main"), branches, false)
+        val local     = Modver.releaseMoment(false, None, None, branches, false)
+        val feature   =
+          Modver.releaseMoment(true, Some("workflow_dispatch"), Some("refs/heads/mcp-view-element"), branches, false)
+        assertTrue(
+          Modver.versionAt(row, recovery) == "0.10.0",
+          Modver.versionAt(row, releasing) == "0.10.0",
+          Modver.versionAt(row, idle) == "0.10.0-SNAPSHOT",
+          Modver.versionAt(row, local) == "0.10.0-SNAPSHOT",
+          Modver.versionAt(row, feature) == "0.10.0-SNAPSHOT",
+        )
+      },
       test("an unreleased member is its row's number and -SNAPSHOT, for a Ship and a ShipGroup alike") {
         val rows = List[PublishedRow](Ship("client", "0.3.0"), ShipGroup("libs", "1.4.2")("models", "coreLib"))
         assertTrue(rows.map(Modver.unreleased) == List("0.3.0-SNAPSHOT", "1.4.2-SNAPSHOT"))

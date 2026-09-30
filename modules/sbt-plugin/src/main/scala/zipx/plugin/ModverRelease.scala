@@ -24,12 +24,20 @@ object ModverRelease:
     Modver.rowForProject(projectId, ships) match
       case None      => "0.1.0-SNAPSHOT"
       case Some(pub) =>
-        if isReleasingPush(env, branches) then
-          val moved = movedOrFail(root, versionsFile, ships, env)
-          val index = ShipIndex.from(ships)
-          if Modver.thisCommitReleases(pub, moved, index) then pub.version: String
-          else Modver.unreleased(pub)
-        else Modver.unreleased(pub)
+        val releasesThisRow =
+          if isReleasingPush(env, branches) then
+            val moved = movedOrFail(root, versionsFile, ships, env)
+            val index = ShipIndex.from(ships)
+            Modver.thisCommitReleases(pub, moved, index)
+          else false
+        val moment = Modver.releaseMoment(
+          actions = env.get("GITHUB_ACTIONS").contains("true"),
+          eventName = env.get("GITHUB_EVENT_NAME"),
+          ref = env.get("GITHUB_REF"),
+          branches = branches,
+          releasesThisRow = releasesThisRow,
+        )
+        Modver.versionAt(pub, moment)
 
   def isReleasingPush(env: Map[String, String], branches: Seq[String]): Boolean =
     env.get("GITHUB_ACTIONS").contains("true") &&

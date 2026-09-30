@@ -402,6 +402,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxVersionUpdatesExtraSteps = settingKey[Seq[Step]](ZipxSettings.versionUpdatesExtraSteps.description)
     val zipxCoverageWorkflow         = settingKey[Option[CoverageWorkflow]](ZipxSettings.coverageWorkflow.description)
     val zipxWorkflowDispatch         = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
+    val zipxPublishSnapshots         = settingKey[Boolean](ZipxSettings.publishSnapshots.description)
     val zipxCiRelevant               = settingKey[Boolean](ZipxSettings.ciRelevant.description)
     val zipxPublish                  = settingKey[Option[Boolean]](ZipxSettings.publish.description)
     val zipxTestTask                 = settingKey[SbtCommand](ZipxSettings.testTask.description)
@@ -532,6 +533,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxSelfPlugins              := Seq.empty,
     zipxVersionsFile             := ZipxCatalog.DefaultVersionsFile,
     zipxWorkflowDispatch         := false,
+    zipxPublishSnapshots         := false,
   )
 
   /** Wires sbt's remote cache from the environment the generated workflow sets up, and is inert when that env is unset:
@@ -2277,19 +2279,27 @@ object ZipxPlugin extends AutoPlugin:
     val id     = thisProject.value.id
     val bin    = scalaBinaryVersion.value
     import com.jsuereth.sbtpgp.PgpKeys.publishSigned
-    ModverPublishSigned.outcome(parsed, id, bin) match
-      case ModverPublishSigned.Outcome.PublishMissingFile(message) =>
-        Def.taskDyn {
-          streams.value.log.warn(message)
-          publishSigned
-        }
-      case ModverPublishSigned.Outcome.PublishListed =>
-        publishSigned
-      case ModverPublishSigned.Outcome.Skip(message) =>
+    ModverPublishSigned.remote(isSnapshot.value, zipxPublishSnapshots.value, id, version.value) match
+      case ModverPublishSigned.Remote.Skip(message) =>
         Def.task {
           streams.value.log.info(message)
           ()
         }
+      case ModverPublishSigned.Remote.Publish =>
+        ModverPublishSigned.outcome(parsed, id, bin) match
+          case ModverPublishSigned.Outcome.PublishMissingFile(message) =>
+            Def.taskDyn {
+              streams.value.log.warn(message)
+              publishSigned
+            }
+          case ModverPublishSigned.Outcome.PublishListed =>
+            publishSigned
+          case ModverPublishSigned.Outcome.Skip(message) =>
+            Def.task {
+              streams.value.log.info(message)
+              ()
+            }
+        end match
     end match
   }
 

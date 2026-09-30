@@ -325,8 +325,18 @@ object ZipxSettings:
     SettingDef.task(
       SettingName("zipxModverPublishSigned"),
       SettingPurpose(
-        "Publish this scalaBinaryVersion when the missing list names it, or when target/zipx-modver-publish.json is absent. An existing file that omits the binary skips."
+        "Publish this scalaBinaryVersion when the missing list names it, or when target/zipx-modver-publish.json is absent. An existing file that omits the binary skips. A -SNAPSHOT remote publish also skips unless zipxPublishSnapshots."
       ),
+    )
+
+  val publishSnapshots: SettingDef[Boolean] =
+    SettingDef.setting(
+      SettingName("zipxPublishSnapshots"),
+      false,
+      SettingPurpose(
+        "Publish -SNAPSHOT versions to the remote repository. Default false. publishLocal is unaffected."
+      ),
+      Build,
     )
 
   val modverPublishMoved: SettingDef[Unit] =
@@ -770,6 +780,7 @@ object ZipxSettings:
     selfPlugins,
     versionsFile,
     workflowDispatch,
+    publishSnapshots,
     cache,
     cacheEpoch,
     pushBranches,
