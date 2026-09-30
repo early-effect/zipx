@@ -265,10 +265,30 @@ on `reload`, `set`, and `clean` (which `cleanFull` runs): after a republished sn
 1. `zipxReleaseWorkflow := Some(ZipxCentral.releases)`, then `sbt zipxWorkflowGenerate`.
 2. Create the GitHub Environment `zipx-release` (Settings → Environments). Add required reviewers there if a release
    should wait for a human; scope the signing secrets to it if you want them nowhere else.
-3. Release: draft a GitHub Release with the row's tag, or run **zipx release** from the Actions tab.
+3. With several rows and docs on GitHub Pages, let the `github-pages` environment deploy from tags matching `*/v*`
+   (Settings → Environments → github-pages → Deployment branches and tags). A release tag's docs deploy otherwise
+   fails its environment rule, even though the release itself succeeds.
+4. Release: draft a GitHub Release with the row's tag, or run **zipx release** from the Actions tab.
 
 A tag pushed on a commit the default branch has not reached is refused before sbt starts. A dispatch from any other
-branch does not run.
+branch does not run. The Central deployment is named for what it carries, `<organization> <row> <n>, ...`; the root
+project keeps version `0.0.0` when it is in no row, because `sonaRelease` refuses a root at `-SNAPSHOT`.
+"""
+    ),
+    section("After a release")(
+      md"""
+A row stays at its released number until a PR moves it, so between releases it builds as a `-SNAPSHOT` of a number
+that already exists. Two consequences:
+
+- **It publishes no snapshot.** `zipxSnapshotPublish` skips a released row, since its snapshot would sort before the
+  release. When the row has changes since its release tag, that means its changes reach no one, so zipx says so
+  loudly, in the log and as a CI annotation, and `sbt zipxReleaseDrift` lists every such row. `modver-check` already
+  fails a PR that changes a released row without moving it; this covers direct pushes and local work.
+- **A library built against the release meets the in-repo copy.** sbt always uses the in-repo project, and its
+  eviction check reads `0.10.0-SNAPSHOT` against `0.10.0` literally; early-semver compares `0.y.0` and `x.0.0`
+  exactly, tag included. zipx exempts the build's own artifacts from that check and checks them itself after `update`:
+  the row's next number against the release the library needs, under the module's own `versionScheme`. `0.10.0-SNAPSHOT`
+  over `0.10.0` resolves; `0.11.0-SNAPSHOT` over `0.10.0` fails, naming both.
 """
     ),
   )

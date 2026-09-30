@@ -457,6 +457,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxModverBump       = inputKey[Unit](ZipxSettings.modverBump.description)
     val zipxModverCompat     = taskKey[Unit](ZipxSettings.modverCompat.description)
     val zipxModverCheck      = taskKey[Unit](ZipxSettings.modverCheck.description)
+    val zipxReleaseDrift     = taskKey[Seq[String]](ZipxSettings.releaseDrift.description)
     val zipxModverSuggest    = taskKey[Unit](ZipxSettings.modverSuggest.description)
   end autoImport
 
@@ -594,6 +595,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxModverBump               := modverBumpTask.evaluated,
     zipxModverCompat             := Def.uncached { modverCompatTask.value },
     zipxModverCheck              := Def.uncached { modverCheckTask.value },
+    zipxReleaseDrift             := Def.uncached { releaseDriftTask.value },
     zipxModverSuggest            := Def.uncached { modverSuggestTask.value },
     zipxDepUpdate / aggregate    := false,
     zipxActionUpdate / aggregate := false,
@@ -630,6 +632,18 @@ object ZipxPlugin extends AutoPlugin:
     libraryDependencySchemes ++= {
       val own = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value
       if zipxShips.value.isEmpty then Nil else own.distinct.map((org, name) => org % name % VersionScheme.Always)
+    },
+    // `update` drops eviction details, so the check reads `updateFull`, which shares its resolution.
+    update := Def.uncached {
+      val report = update.value
+      val full   = updateFull.value
+      val own    = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.toSet
+      if zipxShips.value.nonEmpty then
+        OwnEvictions.incompatible(full, own, scalaModuleInfo.value) match
+          case Nil      => ()
+          case problems =>
+            sys.error(("zipx: the build's own artifacts conflict with a release:" :: problems).mkString("\n  * "))
+      report
     },
     forceUpdatePeriod := {
       if libraryDependencies.value.exists(m => SnapshotPins.isSnapshot(m.revision)) then
@@ -1276,6 +1290,8 @@ object ZipxPlugin extends AutoPlugin:
     plan.entries.foreach(e => next.log.info(s"zipx: releasing ${Modver.describe(e.row)} ${e.row.version} as ${e.tag}"))
     next.log.info("zipx: this sbt session now builds every row at its catalog number")
     sys.props(BuildSession.Property) = BuildSession.Release.id
+    sys.props(BuildSession.ReleaseNameProperty) =
+      plan.entries.map(e => s"${e.row.identity} ${e.row.version}").mkString(", ")
     val (publishTask, finish) = release.registry match
       case ArtifactRegistry.MavenCentral =>
         import com.jsuereth.sbtpgp.PgpKeys.publishSigned
@@ -1326,12 +1342,12 @@ object ZipxPlugin extends AutoPlugin:
         rowStatus(_, graph, catalog, binaries, release.registry),
       ) match
         case Left(ReleaseError.NothingToRelease) =>
-          warnReleasedRowsWithChanges(extracted, next, graph, catalog, binaries, release.registry)
+          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release.registry))
           next.log.info("zipx: every row's catalog number is released; no snapshot to publish")
           next
         case Left(err)   => sys.error(s"zipx: ${err.message}")
         case Right(plan) =>
-          warnReleasedRowsWithChanges(extracted, next, graph, catalog, binaries, release.registry)
+          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release.registry))
           val (task, destination) = target match
             case SnapshotTarget.Local    => (publishLocal, "the local ivy repository")
             case SnapshotTarget.Registry =>
@@ -1351,24 +1367,29 @@ object ZipxPlugin extends AutoPlugin:
     }
 
   /** A released row with changes since its tag publishes no snapshot, so its changes reach no one until it moves. */
-  private def warnReleasedRowsWithChanges(
+  private def releasedDrift(
       extracted: Extracted,
-      st: State,
       graph: ModuleGraph,
       catalog: ShipIndex,
       binaries: Map[ModuleId, List[(String, Gav)]],
       registry: ArtifactRegistry,
-  ): Unit =
-    val root  = extracted.get(LocalRootProject / baseDirectory)
-    val tags  = TagScheme.of(catalog)
-    val drift = catalog.byIdentity.values.toList
+  ): List[(PublishedRow, ReleaseDrift)] =
+    val root = extracted.get(LocalRootProject / baseDirectory)
+    val tags = TagScheme.of(catalog)
+    catalog.byIdentity.values.toList
       .filter(row => rowStatus(row, graph, catalog, binaries, registry) == Right(RowStatus.Released))
       .sortBy(Modver.describe)
       .map(row => row -> releaseDrift(root, graph, catalog, row, tags.tag(row)))
+  end releasedDrift
+
+  private def driftWarning(row: PublishedRow, tag: String): String =
+    s"${Modver.describe(row)} ${row.version} is released and has changes since $tag, so it publishes no snapshot. Move it: sbt \"zipxModverBump ${row.identity}\""
+
+  /** A released row with changes since its tag publishes no snapshot, so its changes reach no one until it moves. */
+  private def warnReleasedRowsWithChanges(st: State, drift: List[(PublishedRow, ReleaseDrift)]): Unit =
     drift.foreach {
       case (row, ReleaseDrift.Changed(tag)) =>
-        val warning =
-          s"${Modver.describe(row)} ${row.version} is released and has changes since $tag, so it publishes no snapshot. Move it: sbt \"zipxModverBump ${row.identity}\""
+        val warning = driftWarning(row, tag)
         st.log.warn(s"zipx: ${"*" * 12} $warning ${"*" * 12}")
         sys.env.get("GITHUB_ACTIONS").foreach(_ => println(s"::warning title=zipx released row changed::$warning"))
       case (row, ReleaseDrift.Unreadable(detail)) =>
@@ -1382,6 +1403,17 @@ object ZipxPlugin extends AutoPlugin:
           s"zipx: no release tag in this clone for ${untagged.mkString(", ")}; those rows are not checked for changes"
         )
   end warnReleasedRowsWithChanges
+
+  private def releaseDriftTask: Def.Initialize[Task[Seq[String]]] = Def.task {
+    val st        = state.value
+    val extracted = Project.extract(st)
+    val graph     = buildGraph.value
+    val release   = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
+    val catalog   = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
+    val drift     = releasedDrift(extracted, graph, catalog, liveBinaries(extracted, graph, catalog), release.registry)
+    warnReleasedRowsWithChanges(st, drift)
+    drift.collect { case (row, ReleaseDrift.Changed(tag)) => s"${Modver.describe(row)} ${row.version} since $tag" }
+  }
 
   private enum ReleaseDrift:
     case Unchanged

@@ -49,6 +49,9 @@ object BuildSession:
   /** A JVM property, because sbt drops session settings when `++` / `+` switch Scala versions. */
   val Property: String = "zipx.session"
 
+  /** The rows a release session publishes, which names its Central deployment. */
+  val ReleaseNameProperty: String = "zipx.release.name"
+
   def of(props: collection.Map[String, String]): Either[UnknownBuildSession, BuildSession] =
     props.get(Property) match
       case None                => Right(Development)

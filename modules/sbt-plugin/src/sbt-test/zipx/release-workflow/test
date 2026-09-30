@@ -33,5 +33,18 @@ $ exists .github/workflows/zipx-release.yml
 > zipxRelease refs/tags/client/v0.3.0
 > assertReleased
 > assertReleaseSession
+> assertDeploymentName
 > ++ 3.9.0!
 > assertReleaseSession
+
+# Back in development, client builds 0.3.0-SNAPSHOT; a library built against released client 0.3.0 still resolves.
+> zipxSession development
+$ touch ext
+> reload
+> writeExternalLib
+> consumer/update
+
+# Once client moves to 0.4.0, a library built against 0.3.0 is incompatible under client's early-semver.
+$ touch client-next
+> reload
+-> consumer/update

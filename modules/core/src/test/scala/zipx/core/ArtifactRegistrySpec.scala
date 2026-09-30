@@ -23,6 +23,20 @@ object ArtifactRegistrySpec extends ZIOSpecDefault:
         file.credentialHost.isEmpty,
       )
     },
+    test("a file: registry lists an artifact's releases from its version directories, as metadata would") {
+      val artifact = java.nio.file.Files.createTempDirectory("zipx-registry").resolve("models_3")
+      for v <- List("1.0.0", "1.1.0") do
+        java.nio.file.Files.createDirectories(artifact.resolve(v))
+        java.nio.file.Files.writeString(artifact.resolve(v).resolve(s"models_3-$v.pom"), "<project/>")
+      java.nio.file.Files.createDirectories(artifact.resolve("scratch"))
+      val metadata = HttpLookup.get(artifact.resolve("maven-metadata.xml").toUri.toString)
+      val none     = HttpLookup.get(artifact.resolveSibling("absent_3").resolve("maven-metadata.xml").toUri.toString)
+      assertTrue(
+        metadata.map(_.status) == Right(200),
+        metadata.toOption.flatMap(r => MavenMetadata.latestRelease(r.body)).contains(ReleaseVersion("1.1.0")),
+        none.exists(_.isMiss),
+      )
+    },
     test("a file: registry is read from disk: present is 200, absent is a miss") {
       val dir  = java.nio.file.Files.createTempDirectory("zipx-registry")
       val pom  = java.nio.file.Files.writeString(dir.resolve("a.pom"), "<project/>")

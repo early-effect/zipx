@@ -169,6 +169,16 @@ object SettingDef:
       kind = SettingKind.Setting,
     )
 
+  inline def taskOf[A](name: SettingName, purpose: SettingPurpose): SettingDef[A] =
+    SettingDef(
+      name = name,
+      typeLabel = TypeLabel.of[A],
+      default = SettingDefault.Derived("—"),
+      purpose = purpose,
+      scope = SettingScope.Build,
+      kind = SettingKind.Task,
+    )
+
   inline def task(name: SettingName, purpose: SettingPurpose): SettingDef[Unit] =
     SettingDef(
       name = name,

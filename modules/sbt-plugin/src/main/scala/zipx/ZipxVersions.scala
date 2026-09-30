@@ -6,11 +6,13 @@ import sbt.Keys.{
   baseDirectory,
   crossScalaVersions,
   libraryDependencies,
+  organization,
   localStaging,
   packageDoc,
   projectID,
   publishArtifact,
   publishTo,
+  sonaDeploymentName,
   scalaVersion,
   thisProject,
   version,
@@ -98,7 +100,12 @@ object ZipxVersions:
           // Test resolves packageDoc-scoped keys through Compile before its own publishArtifact, so it is pinned too.
           Compile / packageDoc / publishArtifact := session.publishesDocs && (Compile / publishArtifact).value,
           Test / packageDoc / publishArtifact    := session.publishesDocs && (Test / publishArtifact).value,
-          publishTo                              := zipx.core.Modver
+          sonaDeploymentName                     := {
+            (session, sys.props.get(zipx.core.BuildSession.ReleaseNameProperty)) match
+              case (zipx.core.BuildSession.Release, Some(rows)) => s"${organization.value} $rows"
+              case _                                            => sonaDeploymentName.value
+          },
+          publishTo := zipx.core.Modver
             .rowForProject(thisProject.value.id, zipxShips.value)
             .flatMap(_ => (LocalRootProject / zipxReleaseWorkflow).value.map(_.registry))
             .fold(publishTo.value)(registry =>

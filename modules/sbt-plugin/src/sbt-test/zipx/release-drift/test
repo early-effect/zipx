@@ -1,0 +1,26 @@
+$ exec git init -q .
+$ exec git config user.email scripted@example.com
+$ exec git config user.name scripted
+$ exec git config commit.gpgsign false
+
+> zipxRelease refs/tags/v1.0.0
+> zipxSession development
+> reload
+$ exec git add .
+$ exec git commit -q -m release
+$ exec git tag v1.0.0
+> assertNoDrift
+
+# A released row changed since its tag publishes no snapshot until its number moves.
+$ copy-file changes/Models.scala models/src/main/scala/Models.scala
+$ exec git commit -q -am change-models
+> assertDrift
+
+# A member new to a released group is its first release, not an unreadable registry.
+$ touch v2
+$ copy-file changes/Extra.scala extra/src/main/scala/Extra.scala
+> reload
+$ exec git add .
+$ exec git commit -q -m grow-libs
+> zipxModverCheck
+> assertMeasuredFromRelease
