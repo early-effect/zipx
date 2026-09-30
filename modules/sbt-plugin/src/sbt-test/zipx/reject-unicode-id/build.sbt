@@ -5,7 +5,7 @@
 // zipx therefore refuses at the boundary, naming the project. It used to get all the way into planning before throwing,
 // which reported the symptom rather than the cause.
 scalaVersion := "3.8.4"
-version      := "1.0.0-ci"
+version      := "1.0.0-SNAPSHOT"
 
 lazy val café = project
 

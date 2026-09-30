@@ -15,7 +15,7 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
   import Rendered.yaml
 
   private val config = PlanConfig(
-    cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"),
+    cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
     verifyCleanLabel = None,

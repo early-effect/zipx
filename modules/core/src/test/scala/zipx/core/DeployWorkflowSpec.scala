@@ -11,7 +11,7 @@ object DeployWorkflowSpec extends ZIOSpecDefault:
     case n                               => n
   }
 
-  private val config = PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"))
+  private val config = PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT"))
 
   private val stg = TargetName("stg")
   private val prd = TargetName("prd")

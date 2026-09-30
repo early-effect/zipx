@@ -239,7 +239,7 @@ val client = Ship("client", "0.3.0")
           text.contains("""Lib("dev.zio", "zio", "2.1.27")"""),
           text.contains("""Ship("client", "0.3.0")"""),
           Modver.bumpVersion("0.3.0", BumpKind.Patch) == Right("0.3.1"),
-          Modver.bumpVersion("0.3.1-ci", BumpKind.Patch).isLeft,
+          Modver.bumpVersion("0.3.1-SNAPSHOT", BumpKind.Patch).isLeft,
         )
       ),
     ),
@@ -588,7 +588,7 @@ in the planner when ships are present.
 | The same root is in two rows | `Each publishes=true module must be in exactly one row` |
 | `ShipGroup` with empty members | `has no members` |
 | A member that does not publish | `does not publish` |
-| Catalog version already ends in `-SNAPSHOT` (or `-ci`) | `must be the release number, not a -SNAPSHOT suffix` |
+| Catalog version already ends in `-SNAPSHOT` | `must be the release number, not a -SNAPSHOT suffix` |
 | `sbt-dynver-ci` still loaded | `cannot share version with sbt-dynver-ci` |
 
 Docker Aggregate on a tag is **not** this table. `service` in the example is unpublished, so it is not a membership

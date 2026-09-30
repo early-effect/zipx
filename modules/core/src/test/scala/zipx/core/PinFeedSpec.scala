@@ -14,7 +14,7 @@ object PinFeedSpec extends ZIOSpecDefault:
   )
 
   private val planConfig = PlanConfig(
-    cacheEpoch = CacheEpoch.Fixed("1.0.0-ci"),
+    cacheEpoch = CacheEpoch.Fixed("1.0.0-SNAPSHOT"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
     verifyCleanLabel = None,

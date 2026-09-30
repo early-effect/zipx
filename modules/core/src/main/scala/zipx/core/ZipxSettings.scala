@@ -285,7 +285,7 @@ object ZipxSettings:
     SettingDef.input(
       SettingName("zipxModverBump"),
       SettingPurpose(
-        "Rewrite a Ship / ShipGroup version in zipxVersionsFile. Default patch. Identity is a project id or group name. Never writes -ci."
+        "Rewrite a Ship / ShipGroup version in zipxVersionsFile. Default patch. Identity is a project id or group name."
       ),
     )
 

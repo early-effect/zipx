@@ -13,8 +13,8 @@
 
 MyVersions.settings
 organization := "com.example"
-// No repo-wide version. Ship / ShipGroup rows own library versions (`<row>-ci` locally;
-// catalog number on publish). Root and `service` keep sbt's default (never published).
+// No repo-wide version. Ship / ShipGroup rows own library versions (`<row>-SNAPSHOT` until the
+// row is released). Root and `service` keep sbt's default (never published).
 zipxCacheEpoch := CacheEpoch.ShipCatalog
 
 // Build-level zipx config: plain bare settings (sbt 2.0 common settings). zipx reads these from the root project's

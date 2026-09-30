@@ -5,7 +5,7 @@ import zio.test.*
 object AffectedBySpec extends ZIOSpecDefault:
   import Fixtures.*
 
-  private val config = PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"))
+  private val config = PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT"))
 
   private val imageIt =
     Capability

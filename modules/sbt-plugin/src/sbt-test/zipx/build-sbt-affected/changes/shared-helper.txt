@@ -1,6 +1,6 @@
 scalaVersion   := "3.8.4"
-version        := "1.0.0-ci"
-zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+version        := "1.0.0-SNAPSHOT"
+zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 
 def shared: Seq[Setting[?]] = Seq(publish / skip := true, run / fork := true)
 

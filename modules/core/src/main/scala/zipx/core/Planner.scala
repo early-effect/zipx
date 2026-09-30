@@ -2014,15 +2014,14 @@ object Planner:
   private val checkoutWith: ListMap[String, String] =
     ListMap("fetch-depth" -> "0", "fetch-tags" -> "true")
 
-  /** A `-ci` / `-SNAPSHOT` epoch is the post-tag continuation of a release, so its first restore fallback is that
-    * release's own bare epoch.
+  /** A `-SNAPSHOT` epoch is the post-tag continuation of a release, so its first restore fallback is that release's own
+    * bare epoch.
     */
   private[core] def priorReleaseEpochKey(prefix: String, cacheEpoch: String): Option[String] =
-    val release =
-      if cacheEpoch.endsWith("-ci") then Some(cacheEpoch.stripSuffix("-ci"))
-      else if cacheEpoch.endsWith("-SNAPSHOT") then Some(cacheEpoch.stripSuffix("-SNAPSHOT"))
-      else None
-    release.filter(_.nonEmpty).map(e => s"$prefix$e-")
+    Option
+      .when(cacheEpoch.endsWith(Modver.UnreleasedSuffix))(cacheEpoch.stripSuffix(Modver.UnreleasedSuffix))
+      .filter(_.nonEmpty)
+      .map(e => s"$prefix$e-")
 
   private def cacheContribution(config: PlanConfig): CacheContribution =
     config.cache match

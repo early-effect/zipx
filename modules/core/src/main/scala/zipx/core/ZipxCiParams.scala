@@ -3,8 +3,7 @@ package zipx.core
 /** Generated `project/zipx-ci.env`: JDK and runner labels the version-updates companion reads at runtime so Action and
   * JDK bumps do not rewrite `.github/workflows/`.
   *
-  * `ZIPX_CLI_VERSION` is optional and only a **release** (not dynver `-ci`, not `SNAPSHOT`). Baking the in-dev version
-  * here makes `zipxWorkflowCheck` fail on the next SHA. Dogfood sets it at runtime via `zipxVersionUpdatesPreSteps`.
+  * `ZIPX_CLI_VERSION` is only ever a release: an in-dev version here would fail `zipxWorkflowCheck` on the next SHA.
   */
 object ZipxCiParams:
 
@@ -12,8 +11,7 @@ object ZipxCiParams:
 
   def isReleaseCli(version: String): Boolean =
     version.nonEmpty &&
-      !version.endsWith("-SNAPSHOT") &&
-      !version.endsWith("-ci") &&
+      !version.endsWith(Modver.UnreleasedSuffix) &&
       !version.contains('+')
 
   def render(javaVersion: String, runnerOs: String, cliVersion: String = ""): String =

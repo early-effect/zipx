@@ -12,7 +12,7 @@ object CoverageSpec extends ZIOSpecDefault:
   import Fixtures.*
 
   private val config = PlanConfig(
-    cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"),
+    cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
     verifyCleanLabel = None,

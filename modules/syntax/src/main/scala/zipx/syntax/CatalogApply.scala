@@ -51,7 +51,8 @@ object CatalogApply:
     }
 
   private def applyOneShipBump(src: String, bump: ShipBump): Either[String, String] =
-    if bump.to.endsWith("-ci") then Left(s"zipx: zipxModverBump must not write a -ci suffix (got '${bump.to}')")
+    if bump.to.endsWith(Modver.UnreleasedSuffix) then
+      Left(s"zipx: zipxModverBump writes release numbers, not '${bump.to}'")
     else
       given Context = ScalaParse.freshContext()
       ScalaParse.untyped(src, "ZipxVersions.scala").flatMap { tree =>

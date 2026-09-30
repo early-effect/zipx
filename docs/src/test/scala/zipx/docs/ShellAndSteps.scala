@@ -112,7 +112,7 @@ then` does not compile.
             If(
               ShTest.GlobMatch(Word.vq("GITHUB_REF"), GlobPattern("refs/tags/v*")),
               Block(Assign("epoch", Word.subst(Exec("git", Word.lit("describe"), Word.lit("--tags"))))),
-              elseDo = Some(Block(Assign("epoch", Word.quoted("0.0.0-ci")))),
+              elseDo = Some(Block(Assign("epoch", Word.quoted("0.0.0-SNAPSHOT")))),
             )
           )
           .render

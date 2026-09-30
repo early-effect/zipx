@@ -10,7 +10,7 @@ object PlannerSpec extends ZIOSpecDefault:
 
   private val config = PlanConfig(
     workflowName = WorkflowName("CI"),
-    cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"),
+    cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
     verifyCleanLabel = None,
@@ -277,7 +277,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("LocalDir cache paths cover sbt tooling and target directories") {
       val paths = ZipxComposites
-        .sbtSetup(ActionPins.Defaults, CacheEpoch.Fixed("1.2.3-ci"))
+        .sbtSetup(ActionPins.Defaults, CacheEpoch.Fixed("1.2.3-SNAPSHOT"))
         .steps
         .find(_.name.contains("Cache sbt"))
         .map(_.`with`("path"))
@@ -290,7 +290,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("LocalDir cache disables setup-java and sbt/setup-sbt internal caching") {
-      val setup = ZipxComposites.sbtSetup(ActionPins.Defaults, CacheEpoch.Fixed("1.2.3-ci"))
+      val setup = ZipxComposites.sbtSetup(ActionPins.Defaults, CacheEpoch.Fixed("1.2.3-SNAPSHOT"))
       val java  = setup.steps.find(_.uses.exists(_.unwrap.startsWith("actions/setup-java@")))
       val sbt   = setup.steps.find(_.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@")))
       assertTrue(
@@ -298,19 +298,18 @@ object PlannerSpec extends ZIOSpecDefault:
         sbt.exists(_.`with`.get("disk-cache").contains("${{ inputs.sbt-disk-cache }}")),
       )
     },
-    test("LocalDir restore-keys bridge -ci / -SNAPSHOT epochs to the prior release epoch") {
+    test("LocalDir restore-keys bridge a -SNAPSHOT epoch to the prior release epoch") {
       val prefix = "ubuntu-latest-jdk21-sbt-"
       val step   = ZipxComposites.sbtSetupStep(
-        PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-ci")),
+        PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT")),
         zipx.workflow.JobId("test"),
         None,
         cacheMode = LocalCacheMode.Save,
       )
       assertTrue(
-        Planner.priorReleaseEpochKey(prefix, "1.2.3-ci").contains(s"${prefix}1.2.3-"),
         Planner.priorReleaseEpochKey(prefix, "1.2.3-SNAPSHOT").contains(s"${prefix}1.2.3-"),
         Planner.priorReleaseEpochKey(prefix, "1.2.3").isEmpty,
-        step.`with`.get("cache-epoch").contains("1.2.3-ci"),
+        step.`with`.get("cache-epoch").contains("1.2.3-SNAPSHOT"),
       )
     },
     test("cache key is identical across commits with the same epoch+job template, differs across epochs") {
@@ -322,8 +321,8 @@ object PlannerSpec extends ZIOSpecDefault:
           .find(_.uses.contains(ZipxComposites.SbtSetupRef))
           .flatMap(_.`with`.get("cache-epoch"))
       assertTrue(
-        epochFor("1.2.3-ci") == epochFor("1.2.3-ci"),
-        epochFor("1.2.3-ci") != epochFor("1.3.0"),
+        epochFor("1.2.3-SNAPSHOT") == epochFor("1.2.3-SNAPSHOT"),
+        epochFor("1.2.3-SNAPSHOT") != epochFor("1.3.0"),
       )
     },
     test("GitTags epoch configures checkout with full history and tags") {
@@ -374,7 +373,7 @@ object PlannerSpec extends ZIOSpecDefault:
     },
     test("Script epoch strategy uses the caller step id and run body") {
       val custom = CacheEpoch.Script(
-        run = """echo "epoch=9.9.9-ci" >> "$GITHUB_OUTPUT"
+        run = """echo "epoch=9.9.9-SNAPSHOT" >> "$GITHUB_OUTPUT"
                 |echo "release=9.9.9" >> "$GITHUB_OUTPUT"
                 |""".stripMargin,
         stepId = StepId("my-epoch"),
@@ -386,7 +385,7 @@ object PlannerSpec extends ZIOSpecDefault:
         .map(_.`with`("key"))
         .getOrElse("")
       assertTrue(
-        resolve.flatMap(_.run).exists(_.contains("epoch=9.9.9-ci")),
+        resolve.flatMap(_.run).exists(_.contains("epoch=9.9.9-SNAPSHOT")),
         key.contains("${{ steps.my-epoch.outputs.epoch }}"),
       )
     },

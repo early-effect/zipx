@@ -10,7 +10,7 @@ object ActionOnlyCapabilitySpec extends ZIOSpecDefault:
 
   private val config = PlanConfig(
     workflowName = WorkflowName("CI"),
-    cacheEpoch = CacheEpoch.Fixed("1.2.3-ci"),
+    cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT"),
     affected = AffectedMode.Always,
     skipMergedPrPush = false,
     verifyCleanLabel = None,

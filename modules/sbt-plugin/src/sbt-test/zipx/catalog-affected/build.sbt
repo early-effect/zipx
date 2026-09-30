@@ -1,6 +1,6 @@
 MyVersions.settings
-version        := "1.0.0-ci"
-zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-ci")
+version        := "1.0.0-SNAPSHOT"
+zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 
 lazy val models = project.settings(libraryDependencies ++= MyVersions.deps(MyVersions.upickle))
 lazy val svcA   = project.dependsOn(models)
