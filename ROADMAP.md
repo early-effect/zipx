@@ -1,116 +1,134 @@
-# zipx Roadmap
+# zipx roadmap
 
-A self-describing CI plugin for Scala monorepos: Scala 3 libraries plus an **sbt 2.x AutoPlugin** that lets a build
-describe its own dependency-ordered GitHub Actions pipeline (test, library publish, docker publish, deploy) with
-pluggable caching.
+Intent as the code a build author writes. Live behavior: the Specular docs. What shipped: git.
 
-**zipx thesis:** the sbt build is the single source of truth. An sbt task introspects the real graph and generates (and
-check-verifies) a GHA workflow. Topology lives in zipx; what to run lives in the build as typed `Capability` values and
-Scala packs.
+## Thesis
 
-Live behavior is documented in Specular (`docs/`), not here. Git history records what shipped. This file stays
-**forward-looking**.
+```scala
+// The build is the only source of truth; zipx derives CI from it.
+MyVersions.settings                        // typed catalog: what we use (Lib, Plugin, Action, Pin), what we ship (Ship)
+zipxCapabilities ++= Seq(Capability.test, ZipxCentral.release, ZipxDocs.pages())
+```
 
-**Status legend:** done · in progress · not started
+```text
+sbt zipxWorkflowGenerate    # .github/** is output: commit it
+sbt zipxWorkflowCheck       # drift gate
+```
 
-| Milestone | Status |
-|---|---|
-| M0–M8, M9a, M10 (skeleton through zipx-aws, Aggregate/Layer/Graph, typed DSL, Central) | done |
-| M12a: In-repo composites + MatrixCollapse.Auto (default size reduction) | done |
-| M9: Dynver-ci + publishSigned auto-detect | not started |
-| M11: "Extend with Scala" docs & org rollout | not started |
-| M12: Typed SbtCommand (keys in plugin, wire form in core) | in progress |
+## Ethos
 
-## Decisions locked
+```scala
+// Topology in zipx, semantics in the build.
+Capability.publish.runningEachCross(publishSigned)   // the build says what; zipx says when, where, in what order
 
-- **Scope:** whole pipeline (test → build → library publish → docker-image publish on the sbt-native-packager paved path).
-- **Workflow generation:** own GHA AST + deterministic YAML + check task (not sbt-github-actions' single-matrix model).
-- **Caching:** `CacheBackend` abstraction (local or remote).
-- **Action pins:** SHA pins; editable source is ZipxVersions `Action` vals. YAML is jar/generate output, never an input.
-- **Secrets:** zipx renders secret *references*; packs name org secrets. Values never enter the plugin.
-- **Extension language:** Scala (`Capability`, `Steps`, `Expr`, packs), not external YAML soup. Raw escape hatches stay typed and generate-time warned.
-- **Refuse rather than drop:** a field the planner cannot honor fails generate with an explaining error.
-- **sbt owns its API:** core holds `SbtCommand` wire form only; the plugin builds commands from real `TaskKey` / `Command` values (`zipxTasks.of`, `ZipxCentral.release` from `publishSigned` + `sonaRelease`).
+// Refuse rather than drop.
+// [error] zipx: tag v0.15.2 does not match ShipGroup("zipx") 0.15.1
 
-## Central design principle
+// Unrepresentable > compile-time > typed error. Never strings; never throw below the sbt boundary.
+Ship("core", "1.4.2-SNAPSHOT")                      // does not compile: a row is the next release
+ReleaseError.SnapshotPinned(rows)                   // failures are enum cases the sbt boundary renders once
 
-**zipx owns topology; the build owns what to run.** Topology = graph, layers, `needs`, matrix, gating, environments,
-env injection, target fan-out, cache wiring. Semantics live in Scala packs on the meta-build classpath.
+// Secrets by name, never value.
+secret"SONATYPE_PASSWORD"
 
-## Forward
+// A version is identity, order, and mutability. Iterate on -SNAPSHOT; release on purpose.
+version == s"$row-SNAPSHOT"                         // every build except a release run
 
-### M9: Dynver-ci + publishSigned auto-detect
+// The human writes the number; CI checks it and never commits the catalog.
+sbt "zipxModverBump zipx minor"                     // modver-check floors it with MiMa against the last release
 
-- Recommend `sbt-dynver-ci` alongside zipx for a PR-stable *build* version (cache epoch already has `CacheEpoch.GitTags`).
-- When `sbt-pgp` is on the classpath, default publish toward `publishSigned` with an explicit override (`zipx-central`
-  already covers the pack path).
+// Caches key on content, so versions stay commit-stable and digests hold.
+// Deterministic YAML. sbt 2 only. testFull proves; test (testQuick) does not.
+```
 
-### M11: "Extend with Scala" docs & org rollout
+## Now: snapshots and releases
 
-- First-class guide: typed config, `zipxTasks`, `Expr` / secrets, `Steps`, packs (`zipx-central`, `zipx-aws`).
-- Org: publish `0.1.0`, adopt in early-effect libraries, prefer generated topology over hand-maintained release YAML,
-  adopt `zipx-aws` instead of copied OIDC/ECR blocks.
+```scala
+// project/ZipxVersions.scala: a row is the NEXT release
+val zipx = ShipGroup("zipx", "0.15.0")("shell", "workflow", "core", "syntax", "cli", "central", "aws", "plugin")
 
-### M12: Typed SbtCommand
+// build.sbt: the Central paved path over the ZipxModver topology
+zipxCapabilities ++= Seq(Capability.test, ZipxCentral.snapshots, ZipxCentral.release, ZipxDocs.pages())
+```
 
-- **Done / landing:** step wire form in core; `CommandSource` + `runningEach` / `thenOnce`; plugin `zipxTasks.of` /
-  project-axis honouring; `zipxTestTask` as `SbtCommand` defaulting to `testFull`; plugin `ZipxCentral.release` from
-  real `publishSigned` + `sonaRelease`; `zipxCheckCommandNames`; Specular **Composing sbt commands** page.
-- **Still open:** move Coverage / VerifyClean / docker command construction fully onto plugin keys where those plugins
-  are on the classpath; consumer migrations (mechanoid / saferis / marklit) after release.
+```text
+any build, laptop or CI        0.15.0-SNAPSHOT            publishLocal overwrites; digests stable across commits
+merge to main                  0.15.0-SNAPSHOT        ->  Central snapshots
+PR labeled for snapshots       0.15.0-pr42-SNAPSHOT   ->  Central snapshots
+GitHub Release v0.15.0 | Run   0.15.0                 ->  Central (one bundle), tags, docs
+```
 
-### Pin feeds
+```scala
+// downstream, before the release exists
+val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
+// resolvers + freshness: automatic while pinned
+// zipxRelease:           refuses while pinned
+// catalog update:        rewrites to 0.15.0 once it is released
+```
 
-Issue [#105](https://github.com/early-effect/zipx/issues/105). Typed `PinFeed` so zipx owns topology, Ignore / Report /
-Update policy, OSV, and catalog rewrite. Inventory is catalog `Pin` vals (`zipxPins`), not a list on the feed. Lookup
-returns a `PinCandidate` (version plus checksum / PURL). Optional `materialize` writes extra files after the catalog
-rewrite. The PR advisory merge gate folds into the builtin **advisories** job (`zipxAdvisoryCheck`). Scheduled outdated/apply and snapshot
-submit stay companion workflows (cron is not a `Gate`; PR snapshots pollute the Security tab). Local
-`zipxPinUpdate` lists outdated pins and rewrites `Pin(...)` after approval, ignoring `PinAction` so alert-only feeds can
-still bump before a PR. Not an M12 item. First consumer feed is sbt-splice, in that repo.
+```text
+PR changes core after 0.15.0 shipped   modver-check: [error] ShipGroup("zipx") 0.15.0 is released; bump to >= 0.15.1
+PR breaks binary compat                modver-check: [error] ShipGroup("zipx") 0.15.1 < 0.16.0 (MiMa vs 0.15.0)
+Release tag v0.15.2, catalog 0.15.1    zipx-release: [error] tag v0.15.2 does not match ShipGroup("zipx") 0.15.1
+```
 
-### Versions catalog
+| # | Branch | Intent | Done |
+|---|---|---|---|
+| 0 | `snapshots/roadmap` | this file | [x] |
+| 1 | `snapshots/retire-ci` | `-SNAPSHOT` is the only unreleased form | [ ] |
+| 2 | `snapshots/typed-versions` | `Ship(id, ReleaseVersion)`; `Revision.{Release, Snapshot}` | [ ] |
+| 3 | `snapshots/release-workflow` | `zipx-release.yml`: tag == catalog, or dispatch; one bundle | [ ] |
+| 4 | `snapshots/version-model` | `version == s"$row-SNAPSHOT"`; merges never release | [ ] |
+| 5 | `snapshots/mainline-channel` | a merge publishes affected unreleased rows, upload-only | [ ] |
+| 6 | `snapshots/consume` | pin a snapshot: resolvers, freshness, guard, promotion | [ ] |
+| 7 | `snapshots/pr-channel` | a label publishes `<row>-pr<N>-SNAPSHOT` from the PR's cache | [ ] |
+| 8 | `snapshots/dogfood` | zipx on its own rows and `zipx-release.yml` | [ ] |
 
-Typed inbound `Lib` / `Plugin` / `Pin` / `Action` rows in `project/ZipxVersions.scala`, plus optional outbound
-`Ship` / `ShipGroup` rows for independent library versions. Apply rewrites inbound constructors (not a regex over
-the build, not a whole-file regen) and never rewrites `Ship` / `ShipGroup`; generate writes `plugins.sbt` / `build.properties`; `zipxCheckDeps` fails generate
-when `libraryDependencies` contain a GAV that is not a `Lib` row. A `Pin` with no matching `PinFeed` fails generate.
-Independent versioning is opt-in: merge to the default branch publishes version-moved modules via `ZipxModver.publish`.
-zipx-the-product stays lockstep dynver-ci. See Specular **Independent versions**.
-Default `zipxVersionUpdates` emits `.github/workflows/zipx-version-updates.yml`: schedule plus dispatch, `cs launch`
-`zipx-cli` (`catalog update --yes --verify-load`) above the target sbt, then `zipxPinUpdate yes` / `zipxCatalogGenerate`
-(not workflow YAML; `GITHUB_TOKEN` cannot push `.github/workflows`), `gh pr create` on
-`zipx/version-updates-$GITHUB_RUN_ID` labeled `clean`. Local `zipxDepUpdate` / `zipxPinUpdate` / `zipxActionUpdate` remain
-the in-sbt apply. Pin policy (lookup, OSV, Update) still lives on `PinFeed`. ZipxVersions is required; leftover
-`zipx-scala-steward.yml` fails generate. Not an M12 item.
+Cache invariants every layer keeps, each with a check in the layer that could break it:
 
-### CI at scale
+```text
+C1 commit-stable versions keep hits      C5 PR snapshots reuse the PR's cache
+C2 epoch rolls iff a row number moves    C6 release jobs restore, never save
+C3 a bump starts warm                    C7 snapshot pins stay fresh; nothing else goes cold
+C4 snapshot publish is upload-only       C8 remote cacheVersion stays JDK/OS
+```
 
-The builtin `test` is affected-scoped, a catalog bump affects the modules that declare the library, an edit inside
-one project's `build.sbt` definition affects that project, coverage and deploys have their own workflows, and the
-cache saves once per run (Specular **CI for a busy monorepo**). What is left, each proven in
-[zipx-ci-lab](https://github.com/early-effect/zipx-ci-lab) before it ships:
+## Next: org migration
 
-- **`zipxAffected <capability>`**: scope user Aggregate capabilities with per-module commands the way
-  `zipxTestAffected` scopes the builtin `test`, if a build needs it.
+```diff
+- addSbtPlugin("rocks.earlyeffect" % "sbt-dynver-ci" % "0.2.3")
++ val lib = ShipGroup("specular", "0.19.0")(/* every published project */)
+- zipxCapabilities += ZipxCentral.release          // tag-gated, in ci.yml
++ zipxCapabilities ++= Seq(ZipxCentral.snapshots, ZipxCentral.release)   // merge -> snapshots; zipx-release.yml
+```
 
-### Design guardrails
+Order: ascent, specular, heddle, then the rest. sbt-dynver-ci archives after the last one; sbt-specular drops
+`stripCi`.
 
-1. Topology in zipx; semantics in Scala packs.
-2. Generate-time resolution; deterministic YAML for `zipxWorkflowCheck`.
-3. Org secrets by name, never value.
-4. sbt 2.0 remains the unlock; do not regress to sbt 1.x shapes.
-5. No stringly-typed public API where a validated newtype exists; failures are unrepresentable > compile-time check >
-   `Either` > throw only at the sbt boundary. `grep -rn "throw \|makeOrThrow\|orThrow" modules/*/src/main` must stay empty.
+## Later
 
-## Verification (how we prove changes)
+```scala
+// M12 remainder: core stops spelling sbt commands as strings
+SbtCommand.unsafeTask("coverageReport")      // Coverage, VerifyClean, Docker/publish: built from real keys in the plugin
 
-Always `testFull`, never plain `test` (sbt 2's `test` is `testQuick`). Prefer Metals for format and focused suite runs
-while iterating; CI Aggregate `test` runs unit/IT (including live remote-cache via Testcontainers; Docker required) and
-the examples/monorepo workflow check, and a parallel `scripted` job runs `plugin/scripted`.
+// One publishTo, derived from the registry (the same block is copied across the org today)
+ThisBuild / publishTo := Registry.MavenCentral.publishTo(isSnapshot.value)
 
-Behavior that only shows on a real repository (cache eviction, approvals, deployment records, what a PR runs) is
-proven in [zipx-ci-lab](https://github.com/early-effect/zipx-ci-lab) against a snapshot of the branch, with the
-measurement in the PR. Generated workflows pass `actionlint` before a push.
+// Typed errors outside the snapshot stack
+Either[String, Plan]  ->  Either[PlanError, Plan]
 
-Agent-oriented blast radius (docs vs packs vs `allJobIds` laws): **[AGENTS.md](AGENTS.md)**.
+// Only if a build asks for it
+zipxAffected <capability>
+```
+
+## How we prove changes
+
+```text
+sbt "scalafmtAll; cleanFull; testFull"     # every PR
+sbt plugin/scripted zipxWorkflowCheck       # emission or .github/** changed; feature branch, unique version
+sbt docsDev                                 # ~docs/specularPreview
+```
+
+Real-repo behavior (cache eviction, approvals, what a PR runs) is proven in
+[zipx-ci-lab](https://github.com/early-effect/zipx-ci-lab), with the numbers in the PR. Blast radius per module:
+[AGENTS.md](AGENTS.md).
