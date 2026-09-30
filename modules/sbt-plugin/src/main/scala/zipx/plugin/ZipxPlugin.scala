@@ -2273,19 +2273,24 @@ object ZipxPlugin extends AutoPlugin:
   private def modverPublishSignedTask: Def.Initialize[Task[Unit]] = Def.taskDyn {
     val root   = (LocalRootProject / baseDirectory).value
     val file   = root / ModverPublishFile.RelPath
-    val report =
-      if file.exists then orFail(ModverPublishFile.parse(IO.read(file))) else ModverPublishFile.empty
-    val id      = thisProject.value.id
-    val bin     = scalaBinaryVersion.value
-    val missing = report.missing.getOrElse(id, Nil)
-    if missing.contains(bin) then
-      import com.jsuereth.sbtpgp.PgpKeys.publishSigned
-      publishSigned
-    else
-      Def.task {
-        streams.value.log.info(s"zipx: skip publishSigned for $id binary $bin (already on the registry)")
-        ()
-      }
+    val parsed = if file.exists then Some(orFail(ModverPublishFile.parse(IO.read(file)))) else None
+    val id     = thisProject.value.id
+    val bin    = scalaBinaryVersion.value
+    import com.jsuereth.sbtpgp.PgpKeys.publishSigned
+    ModverPublishSigned.outcome(parsed, id, bin) match
+      case ModverPublishSigned.Outcome.PublishMissingFile(message) =>
+        Def.taskDyn {
+          streams.value.log.warn(message)
+          publishSigned
+        }
+      case ModverPublishSigned.Outcome.PublishListed =>
+        publishSigned
+      case ModverPublishSigned.Outcome.Skip(message) =>
+        Def.task {
+          streams.value.log.info(message)
+          ()
+        }
+    end match
   }
 
   private def resolveRegistry(extracted: Extracted, graph: ModuleGraph): ModverRegistry =

@@ -347,7 +347,10 @@ zipxCapabilities += ZipxAws.dockerPublishAll(Registry.destinations) // still OnR
       md"""
 Replace builtin Aggregate `publish` (or `Capability.publishLayers`) with `ZipxModver.publish`. Graph,
 `Gate.OnDefaultPush` (push to `zipxPushBranches` **or** `workflow_dispatch`), `MatrixCollapse.Off`. Default command is
-`zipxModverPublishSigned`. No Central secrets unless you compose them.
+`zipxModverPublishSigned`. That task publishes a binary named in `target/zipx-modver-publish.json`. If the file is
+absent on the publish runner, it publishes anyway: the modver job's `target/` is not this job's, and a `cleanFull`
+extra step deletes a restored one. An existing file that omits the binary logs `already on the registry` and skips.
+No Central secrets unless you compose them.
 
 ```mermaid
 flowchart TD

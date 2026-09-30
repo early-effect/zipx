@@ -325,7 +325,7 @@ object ZipxSettings:
     SettingDef.task(
       SettingName("zipxModverPublishSigned"),
       SettingPurpose(
-        "Publish this scalaBinaryVersion only when it is in the module's missing list from zipxModverPublishModules."
+        "Publish this scalaBinaryVersion when the missing list names it, or when target/zipx-modver-publish.json is absent. An existing file that omits the binary skips."
       ),
     )
 
