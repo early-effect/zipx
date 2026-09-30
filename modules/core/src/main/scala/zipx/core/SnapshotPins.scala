@@ -23,6 +23,11 @@ object SnapshotPins:
 
   def resolverLine: String = s"""resolvers += "$ResolverName" at "$CentralSnapshots""""
 
+  /** A pinned snapshot plugin re-resolves on every load: sbt otherwise replays the meta-build's cached `update`. */
+  val forceUpdateLine: String = "forceUpdatePeriod := Some(scala.concurrent.duration.Duration.Zero)"
+
+  def pluginsSbtLines: List[String] = List(resolverLine, forceUpdateLine)
+
   def annotation(pins: ::[ZipxCoord]): Either[String, Steps] =
     Word
       .quotedMake(s"::warning title=zipx snapshots::pinned snapshots (${pins.map(describe).mkString(", ")})")

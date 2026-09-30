@@ -1799,7 +1799,8 @@ object ZipxPlugin extends AutoPlugin:
           .checkPlugins(file.getPath, zipx.syntax.PluginsSbt.parse(actual), inventory)
           .left
           .foreach(sys.error)
-        if SnapshotPins.of(inventory).nonEmpty && !actual.linesIterator.contains(SnapshotPins.resolverLine) then
+        if SnapshotPins.of(inventory).nonEmpty && !SnapshotPins.pluginsSbtLines.forall(actual.linesIterator.contains)
+        then
           sys.error(
             s"zipx: ${file.getPath} pins a snapshot plugin but lacks the snapshot resolver. Run 'sbt zipxWorkflowGenerate'."
           )
