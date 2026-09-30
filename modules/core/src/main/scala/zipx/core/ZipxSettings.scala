@@ -315,6 +315,14 @@ object ZipxSettings:
       ),
     )
 
+  val releaseDrift: SettingDef[Seq[String]] =
+    SettingDef.taskOf[Seq[String]](
+      SettingName("zipxReleaseDrift"),
+      SettingPurpose(
+        "Released rows with changes since their release tag: each publishes no snapshot until its number moves."
+      ),
+    )
+
   val modverSuggest: SettingDef[Unit] =
     SettingDef.task(
       SettingName("zipxModverSuggest"),
@@ -809,6 +817,7 @@ object ZipxSettings:
     modverBump,
     modverCompat,
     modverCheck,
+    releaseDrift,
     modverSuggest,
   )
 

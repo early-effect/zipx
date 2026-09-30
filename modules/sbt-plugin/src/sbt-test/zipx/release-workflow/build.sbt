@@ -2,12 +2,12 @@ MyVersions.settings
 organization        := "com.example.zipx.release"
 zipxCacheEpoch      := CacheEpoch.ShipCatalog
 zipxVerify          := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
-zipxReleaseWorkflow := Some(ReleaseWorkflow(ArtifactRegistry.Url("https://repo1.maven.org/maven2")))
+LocalRootProject / zipxReleaseWorkflow := Some(ReleaseWorkflow(ArtifactRegistry.Url(file("released").getAbsoluteFile.toURI.toString)))
 zipxCapabilities ++= Seq(Capability.snapshots(), ZipxCentral.pullRequestSnapshots("snapshots"))
 
 val released = file("released").getAbsoluteFile
 
-val toFixtureRepo = Seq(publishTo := Some(Resolver.file("fixture", released)))
+val toFixtureRepo = Seq.empty[Setting[?]]
 
 lazy val models = project.settings(toFixtureRepo)
 
@@ -15,7 +15,42 @@ lazy val coreLib = (project in file("core-lib")).dependsOn(models).settings(toFi
 
 lazy val client = project.dependsOn(coreLib).settings(toFixtureRepo)
 
+ThisBuild / versionScheme := Some("early-semver")
+
+// Built against the released client, as a library from another repo would be. early-semver compares 0.y.0 and x.0.0
+// exactly, -SNAPSHOT included, so sbt alone rejects the in-repo 0.3.0-SNAPSHOT against it.
+lazy val consumer = project
+  .dependsOn(client)
+  .settings(
+    publish / skip := true,
+    if (file("ext").exists)
+      Seq(
+        libraryDependencies += "com.example.ext" %% "uses-client" % "1.0.0",
+        resolvers += "fixture" at released.toURI.toString,
+      )
+    else Nil,
+  )
+
 lazy val root = (project in file(".")).aggregate(models, coreLib, client).settings(publish / skip := true)
+
+val writeExternalLib = taskKey[Unit]("An external library in the registry, built against client 0.3.0")
+writeExternalLib := Def.uncached {
+  val dir = released / "com" / "example" / "ext" / "uses-client_3" / "1.0.0"
+  IO.write(
+    dir / "uses-client_3-1.0.0.pom",
+    """<project><modelVersion>4.0.0</modelVersion><groupId>com.example.ext</groupId>
+      |<artifactId>uses-client_3</artifactId><version>1.0.0</version>
+      |<dependencies><dependency><groupId>com.example.zipx.release</groupId><artifactId>client_3</artifactId>
+      |<version>0.3.0</version></dependency></dependencies></project>""".stripMargin,
+  )
+  IO.zip(Seq.empty, dir / "uses-client_3-1.0.0.jar", None)
+}
+
+val assertDeploymentName = taskKey[Unit]("A Central deployment is named after the rows it releases")
+assertDeploymentName := Def.uncached {
+  val name = sonaDeploymentName.value
+  assert(name == "com.example.zipx.release libs 1.4.2, client 0.3.0", name)
+}
 
 val assertReleaseWorkflow = taskKey[Unit]("zipx-release.yml runs zipxRelease on a tag or a default-branch dispatch")
 assertReleaseWorkflow := {
@@ -55,6 +90,20 @@ assertPrSnapshotsPublished := Def.uncached {
   assert((client / version).value == "0.3.0-SNAPSHOT", (client / version).value)
   val yml = IO.read((LocalRootProject / baseDirectory).value / ".github/workflows/ci.yml")
   assert(yml.contains("  snapshots-pr:") && yml.contains("zipxSnapshotPublish pr"), yml)
+}
+
+def ivyLocalRepo: File = file(sys.props("user.home")) / ".ivy2" / "local" / "com.example.zipx.release"
+
+val forgetIvyLocal = taskKey[Unit]("Remove this fixture's organization from the machine's ivy repository")
+forgetIvyLocal := Def.uncached(IO.delete(ivyLocalRepo))
+
+val assertLocalSnapshots = taskKey[Unit]("zipxSnapshotPublish local publishes unreleased rows to ivy-local, and the shell is a development session again")
+assertLocalSnapshots := Def.uncached {
+  val models = ivyLocalRepo / "models_3" / "1.4.2-SNAPSHOT"
+  assert((models / "jars" / "models_3.jar").exists, s"no local models jar under $models")
+  assert(!(models / "docs").exists, "a local snapshot publish carries no scaladoc")
+  assert(!sys.props.contains("zipx.session"), s"session left at ${sys.props.get("zipx.session")}")
+  assert((client / Compile / packageDoc / publishArtifact).value, "a development session publishes docs again")
 }
 
 val assertSnapshotVersions = taskKey[Unit]("outside a release every row member is <row>-SNAPSHOT")

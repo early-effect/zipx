@@ -434,7 +434,9 @@ object ZipxPlugin extends AutoPlugin:
     val zipxEmitSelf             = settingKey[Boolean](ZipxSettings.emitSelf.description)
     val zipxPluginVersion        = settingKey[Option[String]](ZipxSettings.pluginVersion.description)
     val zipxSelfPlugins          = settingKey[Seq[Plugin]](ZipxSettings.selfPlugins.description)
-    val zipxVersionsFile         = settingKey[String](ZipxSettings.versionsFile.description)
+    private[plugin] val zipxResolvedModule =
+      settingKey[(String, String)]("The organization and artifact name this project resolves as, suffixes included")
+    val zipxVersionsFile = settingKey[String](ZipxSettings.versionsFile.description)
 
     val zipxGraph            = taskKey[Unit](ZipxSettings.graph.description)
     val zipxDepCleanup       = taskKey[DepCleanupReport](ZipxSettings.depCleanup.description)
@@ -455,6 +457,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxModverBump       = inputKey[Unit](ZipxSettings.modverBump.description)
     val zipxModverCompat     = taskKey[Unit](ZipxSettings.modverCompat.description)
     val zipxModverCheck      = taskKey[Unit](ZipxSettings.modverCheck.description)
+    val zipxReleaseDrift     = taskKey[Seq[String]](ZipxSettings.releaseDrift.description)
     val zipxModverSuggest    = taskKey[Unit](ZipxSettings.modverSuggest.description)
   end autoImport
 
@@ -560,6 +563,7 @@ object ZipxPlugin extends AutoPlugin:
     commands += testAffectedCommand,
     commands += releaseCommand,
     commands += snapshotPublishCommand,
+    commands += sessionCommand,
     // `Def.uncached` because a file write is not a valid cached-task output.
     zipxCatalogGenerate := Def.uncached {
       Def
@@ -591,6 +595,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxModverBump               := modverBumpTask.evaluated,
     zipxModverCompat             := Def.uncached { modverCompatTask.value },
     zipxModverCheck              := Def.uncached { modverCheckTask.value },
+    zipxReleaseDrift             := Def.uncached { releaseDriftTask.value },
     zipxModverSuggest            := Def.uncached { modverSuggestTask.value },
     zipxDepUpdate / aggregate    := false,
     zipxActionUpdate / aggregate := false,
@@ -618,6 +623,27 @@ object ZipxPlugin extends AutoPlugin:
     clean := Def.uncached {
       clean.value
       ResolutionCache.forgetIfPinned(zipxVersions.value)
+    },
+    zipxResolvedModule := {
+      val id = projectID.value
+      (id.organization, scalaModuleInfo.value.flatMap(CrossVersion(id, _)).fold(id.name)(_(id.name)))
+    },
+    // A released row meets itself again through a library built against it; sbt always keeps the in-repo project.
+    libraryDependencySchemes ++= {
+      val own = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value
+      if zipxShips.value.isEmpty then Nil else own.distinct.map((org, name) => org % name % VersionScheme.Always)
+    },
+    // `update` drops eviction details, so the check reads `updateFull`, which shares its resolution.
+    update := Def.uncached {
+      val report = update.value
+      val full   = updateFull.value
+      val own    = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.toSet
+      if zipxShips.value.nonEmpty then
+        OwnEvictions.incompatible(full, own, scalaModuleInfo.value) match
+          case Nil      => ()
+          case problems =>
+            sys.error(("zipx: the build's own artifacts conflict with a release:" :: problems).mkString("\n  * "))
+      report
     },
     forceUpdatePeriod := {
       if libraryDependencies.value.exists(m => SnapshotPins.isSnapshot(m.revision)) then
@@ -788,8 +814,7 @@ object ZipxPlugin extends AutoPlugin:
       cacheRehydrateTask = read(zipxCacheRehydrateTask, CapabilityTasks.of(Test / compile)),
       cacheRehydrateExtraSteps = read(zipxCacheRehydrateExtraSteps, (_ => Nil)),
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
-      env = read(zipxEnv, Map.empty) ++
-        Option.when(SnapshotPins.of(read(zipxVersions, Seq.empty)).nonEmpty)(SnapshotPins.CoursierTtl),
+      env = read(zipxEnv, Map.empty) ++ Option.when(ciPins(extracted).nonEmpty)(SnapshotPins.CoursierTtl),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
       verifyCleanLabel = orFail(typedVerifyCleanLabel(read(zipxVerifyCleanLabel, Some("clean")))),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
@@ -958,7 +983,7 @@ object ZipxPlugin extends AutoPlugin:
       case _ => ()
     val published = if ships.nonEmpty then builtins.filterNot(_.name == Capability.PublishName) else builtins
     val combined  = combineCapabilities(published ++ modver, userCaps.toList)
-    SnapshotPins.of(readBuildSetting(extracted, zipxVersions, Seq.empty)) match
+    ciPins(extracted) match
       case Nil          => combined
       case head :: tail =>
         val note = orFail(SnapshotPins.annotation(::(head, tail)))
@@ -1265,6 +1290,8 @@ object ZipxPlugin extends AutoPlugin:
     plan.entries.foreach(e => next.log.info(s"zipx: releasing ${Modver.describe(e.row)} ${e.row.version} as ${e.tag}"))
     next.log.info("zipx: this sbt session now builds every row at its catalog number")
     sys.props(BuildSession.Property) = BuildSession.Release.id
+    sys.props(BuildSession.ReleaseNameProperty) =
+      plan.entries.map(e => s"${e.row.identity} ${e.row.version}").mkString(", ")
     val (publishTask, finish) = release.registry match
       case ArtifactRegistry.MavenCentral =>
         import com.jsuereth.sbtpgp.PgpKeys.publishSigned
@@ -1278,50 +1305,158 @@ object ZipxPlugin extends AutoPlugin:
     "reload" :: commands.map(c => c.text: String) ::: next
   }
 
-  private val snapshotPublishCommand: Command = Command.args("zipxSnapshotPublish", "[pr [<number>]]") { (st, args) =>
-    val session = args.toList match
-      case Nil         => BuildSession.SnapshotPublish
-      case "pr" :: Nil =>
-        pullRequestNumber()
-          .flatMap(PullRequestNumber.make(_).toOption)
-          .fold(
-            sys
-              .error("zipx: 'zipxSnapshotPublish pr' runs on a pull_request event; pass the number to run it elsewhere")
-          )(
-            BuildSession.PullRequestSnapshot(_)
+  private enum SnapshotTarget:
+    case Registry
+    case Local
+
+  private val snapshotPublishCommand: Command =
+    Command.args("zipxSnapshotPublish", "[local | pr [<number>]]") { (st, args) =>
+      val (session, target) = args.toList match
+        case Nil            => (BuildSession.SnapshotPublish, SnapshotTarget.Registry)
+        case "local" :: Nil => (BuildSession.SnapshotPublish, SnapshotTarget.Local)
+        case "pr" :: Nil    =>
+          pullRequestNumber()
+            .flatMap(PullRequestNumber.make(_).toOption)
+            .fold(sys.error("zipx: 'zipxSnapshotPublish pr' runs on a pull_request event; pass the number elsewhere"))(
+              pr => (BuildSession.PullRequestSnapshot(pr), SnapshotTarget.Registry)
+            )
+        case "pr" :: n :: Nil =>
+          n.toIntOption
+            .flatMap(PullRequestNumber.make(_).toOption)
+            .fold(sys.error(s"zipx: '$n' is not a pull request number"))(pr =>
+              (BuildSession.PullRequestSnapshot(pr), SnapshotTarget.Registry)
+            )
+        case other =>
+          sys.error(
+            s"zipx: zipxSnapshotPublish takes nothing, 'local', or 'pr [<number>]'; got '${other.mkString(" ")}'"
           )
-      case "pr" :: n :: Nil =>
-        n.toIntOption
-          .flatMap(PullRequestNumber.make(_).toOption)
-          .fold(sys.error(s"zipx: '$n' is not a pull request number"))(BuildSession.PullRequestSnapshot(_))
-      case other =>
-        sys.error(s"zipx: zipxSnapshotPublish takes nothing, 'pr', or 'pr <number>'; got '${other.mkString(" ")}'")
-    val extracted     = Project.extract(st)
-    val (next, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
-    val release       = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
-    val catalog       = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
-    val binaries      = liveBinaries(extracted, graph, catalog)
-    ReleasePlan.plan(
-      ReleaseRequest.AllUnreleased,
-      catalog,
-      graph,
-      rowStatus(_, graph, catalog, binaries, release.registry),
-    ) match
-      case Left(ReleaseError.NothingToRelease) =>
-        next.log.info("zipx: every row's catalog number is released; no snapshot to publish")
-        next
-      case Left(err)   => sys.error(s"zipx: ${err.message}")
-      case Right(plan) =>
-        plan.entries.foreach(e =>
-          next.log.info(s"zipx: publishing ${Modver.describe(e.row)} ${session.publishedRevisionOf(e.row)}")
+      val extracted     = Project.extract(st)
+      val (next, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
+      val release       = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
+      val catalog       = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
+      val binaries      = liveBinaries(extracted, graph, catalog)
+      ReleasePlan.plan(
+        ReleaseRequest.AllUnreleased,
+        catalog,
+        graph,
+        rowStatus(_, graph, catalog, binaries, release.registry),
+      ) match
+        case Left(ReleaseError.NothingToRelease) =>
+          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release.registry))
+          next.log.info("zipx: every row's catalog number is released; no snapshot to publish")
+          next
+        case Left(err)   => sys.error(s"zipx: ${err.message}")
+        case Right(plan) =>
+          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release.registry))
+          val (task, destination) = target match
+            case SnapshotTarget.Local    => (publishLocal, "the local ivy repository")
+            case SnapshotTarget.Registry =>
+              requireCredentials(extracted, next, release.registry)
+              (publish, release.registry.snapshotRepository)
+          plan.entries.foreach(e =>
+            next.log.info(
+              s"zipx: publishing ${Modver.describe(e.row)} ${session.publishedRevisionOf(e.row)} to $destination"
+            )
+          )
+          val restore = BuildSession.of(sys.props).getOrElse(BuildSession.Development)
+          sys.props(BuildSession.Property) = session.id
+          val commands =
+            plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, CapabilityTasks.of(task)))
+          "reload" :: commands.map(c => c.text: String) ::: s"$SessionCommand ${restore.id}" :: "reload" :: next
+      end match
+    }
+
+  /** A released row with changes since its tag publishes no snapshot, so its changes reach no one until it moves. */
+  private def releasedDrift(
+      extracted: Extracted,
+      graph: ModuleGraph,
+      catalog: ShipIndex,
+      binaries: Map[ModuleId, List[(String, Gav)]],
+      registry: ArtifactRegistry,
+  ): List[(PublishedRow, ReleaseDrift)] =
+    val root = extracted.get(LocalRootProject / baseDirectory)
+    val tags = TagScheme.of(catalog)
+    catalog.byIdentity.values.toList
+      .filter(row => rowStatus(row, graph, catalog, binaries, registry) == Right(RowStatus.Released))
+      .sortBy(Modver.describe)
+      .map(row => row -> releaseDrift(root, graph, catalog, row, tags.tag(row)))
+  end releasedDrift
+
+  private def driftWarning(row: PublishedRow, tag: String): String =
+    s"${Modver.describe(row)} ${row.version} is released and has changes since $tag, so it publishes no snapshot. Move it: sbt \"zipxModverBump ${row.identity}\""
+
+  /** A released row with changes since its tag publishes no snapshot, so its changes reach no one until it moves. */
+  private def warnReleasedRowsWithChanges(st: State, drift: List[(PublishedRow, ReleaseDrift)]): Unit =
+    drift.foreach {
+      case (row, ReleaseDrift.Changed(tag)) =>
+        val warning = driftWarning(row, tag)
+        st.log.warn(s"zipx: ${"*" * 12} $warning ${"*" * 12}")
+        sys.env.get("GITHUB_ACTIONS").foreach(_ => println(s"::warning title=zipx released row changed::$warning"))
+      case (row, ReleaseDrift.Unreadable(detail)) =>
+        st.log.warn(s"zipx: could not check ${Modver.describe(row)} for changes since its release: $detail")
+      case (_, ReleaseDrift.Unchanged | ReleaseDrift.Untagged(_)) => ()
+    }
+    drift.collect { case (_, ReleaseDrift.Untagged(tag)) => tag } match
+      case Nil      => ()
+      case untagged =>
+        st.log.info(
+          s"zipx: no release tag in this clone for ${untagged.mkString(", ")}; those rows are not checked for changes"
         )
-        next.log.info("zipx: this sbt session now publishes snapshots without scaladoc")
-        sys.props(BuildSession.Property) = session.id
-        val commands =
-          plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, CapabilityTasks.of(publish)))
-        "reload" :: commands.map(c => c.text: String) ::: next
-    end match
+  end warnReleasedRowsWithChanges
+
+  private def releaseDriftTask: Def.Initialize[Task[Seq[String]]] = Def.task {
+    val st        = state.value
+    val extracted = Project.extract(st)
+    val graph     = buildGraph.value
+    val release   = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
+    val catalog   = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
+    val drift     = releasedDrift(extracted, graph, catalog, liveBinaries(extracted, graph, catalog), release.registry)
+    warnReleasedRowsWithChanges(st, drift)
+    drift.collect { case (row, ReleaseDrift.Changed(tag)) => s"${Modver.describe(row)} ${row.version} since $tag" }
   }
+
+  private enum ReleaseDrift:
+    case Unchanged
+    case Changed(tag: String)
+    case Untagged(tag: String)
+    case Unreadable(detail: String)
+
+  private def releaseDrift(
+      root: File,
+      graph: ModuleGraph,
+      catalog: ShipIndex,
+      row: PublishedRow,
+      tag: String,
+  ): ReleaseDrift =
+    GitFiles.changedSince(root, tag) match
+      case Left(err)          => ReleaseDrift.Unreadable(err)
+      case Right(None)        => ReleaseDrift.Untagged(tag)
+      case Right(Some(files)) =>
+        Modver.liftedBumpSet(graph, catalog, Some(files)) match
+          case Left(err) => ReleaseDrift.Unreadable(err)
+          case Right(lifted) if lifted.exists(ref => catalog.byIdentity.get(ref).contains(row)) =>
+            ReleaseDrift.Changed(tag)
+          case Right(_) => ReleaseDrift.Unchanged
+
+  private val SessionCommand = "zipxSession"
+
+  private val sessionCommand: Command = Command.single(SessionCommand) { (st, id) =>
+    BuildSession.of(Map(BuildSession.Property -> id)) match
+      case Right(BuildSession.Development) => sys.props -= BuildSession.Property
+      case Right(session)                  => sys.props(BuildSession.Property) = session.id
+      case Left(err)                       => sys.error(s"zipx: ${err.message}")
+    st
+  }
+
+  /** Fails before any upload, so a missing token never leaves some modules published and the rest not. */
+  private def requireCredentials(extracted: Extracted, st: State, registry: ArtifactRegistry): Unit =
+    registry.credentialHost.foreach { host =>
+      val (_, declared) = extracted.runTask(LocalRootProject / credentials, st)
+      if sbt.librarymanagement.CredentialUtils.forHost(declared, host).isEmpty then
+        sys.error(
+          s"zipx: no credentials for $host. Set SONATYPE_USERNAME and SONATYPE_PASSWORD, or add a credentials file for $host."
+        )
+    }
 
   private def rowStatus(
       row: PublishedRow,
@@ -1696,7 +1831,8 @@ object ZipxPlugin extends AutoPlugin:
           .checkPlugins(file.getPath, zipx.syntax.PluginsSbt.parse(actual), inventory)
           .left
           .foreach(sys.error)
-        if SnapshotPins.of(inventory).nonEmpty && !actual.linesIterator.contains(SnapshotPins.resolverLine) then
+        if SnapshotPins.of(inventory).nonEmpty && !SnapshotPins.pluginsSbtLines.forall(actual.linesIterator.contains)
+        then
           sys.error(
             s"zipx: ${file.getPath} pins a snapshot plugin but lacks the snapshot resolver. Run 'sbt zipxWorkflowGenerate'."
           )
@@ -1716,6 +1852,11 @@ object ZipxPlugin extends AutoPlugin:
         log.info(s"zipx: ${file.getPath} is up to date.")
     }
   end syncCatalogFiles
+
+  /** Every snapshot CI resolves: catalog rows, and a snapshot sbt-zipx that `plugins.sbt` loads. */
+  private def ciPins(extracted: Extracted): List[ZipxCoord] =
+    val coords = readBuildSetting(extracted, zipxVersions, Seq.empty)
+    SnapshotPins.of(coords ++ loadedSelfPlugins(extracted, coords.nonEmpty))
 
   private def loadedSelfPlugins(extracted: Extracted, catalogInPlay: Boolean): Seq[Plugin] =
     if !catalogInPlay then Nil
@@ -2446,9 +2587,11 @@ object ZipxPlugin extends AutoPlugin:
           case Some(ref) =>
             extracted.runTask(ref / Compile / compile, st)
             val classes = extracted.get(ref / Compile / classDirectory)
-            releasedJar(extracted, ref, registry, row.version).map { old =>
-              val lib = new com.typesafe.tools.mima.lib.MiMaLib(Nil)
-              if lib.collectProblems(old, classes, Nil).isEmpty then MemberProbe.Clean else MemberProbe.BinaryBreak
+            releasedJar(extracted, ref, registry, row.version).map {
+              case None      => MemberProbe.FirstPublish
+              case Some(old) =>
+                val lib = new com.typesafe.tools.mima.lib.MiMaLib(Nil)
+                if lib.collectProblems(old, classes, Nil).isEmpty then MemberProbe.Clean else MemberProbe.BinaryBreak
             }
   end probeMember
 
@@ -2457,7 +2600,7 @@ object ZipxPlugin extends AutoPlugin:
       ref: ProjectRef,
       registry: ArtifactRegistry,
       version: ReleaseVersion,
-  ): Either[String, File] =
+  ): Either[String, Option[File]] =
     val module    = extracted.get(ref / projectID)
     val namer     = extracted.get(ref / artifactName)
     val scalaFull = extracted.getOpt(ref / scalaVersion).getOrElse("")
@@ -2469,20 +2612,30 @@ object ZipxPlugin extends AutoPlugin:
     download(registry.jarUrl(gav), registryHeaders(registry), dest)
   end releasedJar
 
-  private def download(url: String, headers: Map[String, String], dest: File): Either[String, File] =
-    try
-      val client  = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build()
-      val request = headers
-        .foldLeft(java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).GET()) { case (b, (k, v)) =>
-          b.header(k, v)
-        }
-        .build()
-      val res = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(dest.toPath))
-      if res.statusCode() == 200 then Right(dest)
-      else
-        dest.delete()
-        Left(s"download $url: HTTP ${res.statusCode()}")
-    catch case scala.util.control.NonFatal(e) => Left(s"download $url: $e")
+  /** `Right(None)` when the registry answers that the artifact is not there: a member absent from that release. */
+  private def download(url: String, headers: Map[String, String], dest: File): Either[String, Option[File]] =
+    if url.startsWith("file:") then
+      val src = java.nio.file.Path.of(java.net.URI.create(url))
+      if java.nio.file.Files.isRegularFile(src) then
+        Right(
+          Some(java.nio.file.Files.copy(src, dest.toPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING).toFile)
+        )
+      else Right(None)
+    else
+      try
+        val client  = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build()
+        val request = headers
+          .foldLeft(java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).GET()) { case (b, (k, v)) =>
+            b.header(k, v)
+          }
+          .build()
+        val res    = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(dest.toPath))
+        val result = HttpLookupResult(res.statusCode(), "", Map.empty)
+        if result.status == 200 then Right(Some(dest))
+        else
+          dest.delete()
+          if result.isMiss then Right(None) else Left(s"download $url: HTTP ${result.status}")
+      catch case scala.util.control.NonFatal(e) => Left(s"download $url: $e")
 
   private def postModverComment(body: String, log: Logger): Unit =
     val repo = sys.env.getOrElse("GITHUB_REPOSITORY", "")

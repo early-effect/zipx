@@ -7,7 +7,7 @@ import zipx.workflow.Step
   * snapshots and re-resolves them on every session.
   */
 object SnapshotPins:
-  val CentralSnapshots: String = "https://central.sonatype.com/repository/maven-snapshots/"
+  val CentralSnapshots: String = ArtifactRegistry.MavenCentral.snapshotRepository
 
   val ResolverName: String = "central-snapshots"
 
@@ -22,6 +22,11 @@ object SnapshotPins:
   def describe(coord: ZipxCoord): String = s"${coord.group}:${coord.artifact}:${coord.version}"
 
   def resolverLine: String = s"""resolvers += "$ResolverName" at "$CentralSnapshots""""
+
+  /** A pinned snapshot plugin re-resolves on every load: sbt otherwise replays the meta-build's cached `update`. */
+  val forceUpdateLine: String = "forceUpdatePeriod := Some(scala.concurrent.duration.Duration.Zero)"
+
+  def pluginsSbtLines: List[String] = List(resolverLine, forceUpdateLine)
 
   def annotation(pins: ::[ZipxCoord]): Either[String, Steps] =
     Word

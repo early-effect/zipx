@@ -53,7 +53,37 @@ object HttpLookup:
       firstJitter: Duration = FirstAttemptJitter,
       etags: ConcurrentHashMap[String, String] = sharedEtags,
   ): Either[String, HttpLookupResult] =
-    runEither(getZio(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, etags))
+    if url.startsWith("file:") then Right(readFile(url))
+    else runEither(getZio(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, etags))
+
+  /** A `file:` registry, for a release or snapshot rehearsed entirely on one machine. */
+  private def readFile(url: String): HttpLookupResult =
+    val path = java.nio.file.Path.of(URI.create(url))
+    if java.nio.file.Files.isRegularFile(path) then
+      HttpLookupResult(200, java.nio.file.Files.readString(path), Map.empty)
+    else if path.getFileName.toString == "maven-metadata.xml" then
+      publishedVersions(path.getParent) match
+        case Nil      => HttpLookupResult(404, "", Map.empty)
+        case versions =>
+          val listed = versions.map(v => s"<version>$v</version>").mkString
+          HttpLookupResult(
+            200,
+            s"<metadata><versioning><versions>$listed</versions></versioning></metadata>",
+            Map.empty,
+          )
+    else HttpLookupResult(404, "", Map.empty)
+    end if
+  end readFile
+
+  /** sbt writes no `maven-metadata.xml` into a `file:` repository, so a version is a directory holding a POM. */
+  private def publishedVersions(artifactDir: java.nio.file.Path): List[String] =
+    def children(dir: java.nio.file.Path): List[java.nio.file.Path] =
+      if !java.nio.file.Files.isDirectory(dir) then Nil
+      else scala.util.Using.resource(java.nio.file.Files.list(dir))(_.iterator.asScala.toList)
+    children(artifactDir)
+      .filter(version => children(version).exists(_.getFileName.toString.endsWith(".pom")))
+      .map(_.getFileName.toString)
+      .sorted
 
   def post(
       url: String,

@@ -23,13 +23,6 @@ ThisBuild / developers := List(
   )
 )
 
-// Sonatype Central Portal. sbt 2 has localStaging / publishSigned / sonaRelease.
-publishTo := {
-  val centralSnapshots = "https://central.sonatype.com/repository/maven-snapshots/"
-  if (isSnapshot.value) Some("central-snapshots" at centralSnapshots)
-  else localStaging.value
-}
-
 // CI-only publishing: key hex from PGP_KEY_HEX (org secret). Sentinel keeps local loads working.
 usePgpKeyHex(sys.env.getOrElse("PGP_KEY_HEX", "MISSING_KEY_HEX"))
 

@@ -1,0 +1,47 @@
+package zipx.plugin
+
+import sbt.VersionScheme
+import sbt.internal.librarymanagement.mavenint.SbtPomExtraProperties
+import sbt.librarymanagement.{EvictionWarningOptions, ModuleID, ScalaModuleInfo, UpdateReport}
+import zipx.core.Modver
+
+/** sbt reads a row's `<n>-SNAPSHOT` against a released `<n>` literally, so zipx exempts the build's own artifacts from
+  * its eviction check and asks the question here instead: is the row's next release compatible, under the module's own
+  * `versionScheme`, with the release a library was built against?
+  */
+private[plugin] object OwnEvictions:
+
+  private type Compatible = ((ModuleID, Option[ModuleID], Option[ScalaModuleInfo])) => Boolean
+
+  /** sbt keeps the PVP evaluator private, so a PVP module goes unchecked. */
+  private def compatible(scheme: String): Option[Compatible] =
+    scheme match
+      case VersionScheme.EarlySemVer => Some(EvictionWarningOptions.guessEarlySemVer)
+      case VersionScheme.SemVerSpec  => Some(EvictionWarningOptions.guessSemVer)
+      case VersionScheme.Strict      => Some(EvictionWarningOptions.guessStrict)
+      case VersionScheme.Always      => Some(EvictionWarningOptions.guessTrue)
+      case _                         => None
+
+  def incompatible(
+      report: UpdateReport,
+      own: Set[(String, String)],
+      scalaModule: Option[ScalaModuleInfo],
+  ): List[String] =
+    val found = for
+      config <- report.configurations
+      detail <- config.details
+      if own((detail.organization, detail.name))
+      winner <- detail.modules.find(!_.evicted).toSeq
+      if winner.module.revision.endsWith(Modver.UnreleasedSuffix)
+      scheme = (winner.extraAttributes ++ winner.module.extraAttributes)
+        .get(SbtPomExtraProperties.VERSION_SCHEME_KEY)
+        .getOrElse(VersionScheme.EarlySemVer)
+      isCompatible <- compatible(scheme).toSeq
+      next = winner.module.withRevision(winner.module.revision.stripSuffix(Modver.UnreleasedSuffix))
+      evicted <- detail.modules.filter(_.evicted)
+      if !isCompatible((evicted.module, Some(next), scalaModule))
+    yield s"${detail.organization}:${detail.name}:${winner.module.revision} ($scheme) is selected over " +
+      s"${evicted.module.revision}: ${next.revision} is not $scheme-compatible with it"
+    found.distinct.toList
+  end incompatible
+end OwnEvictions

@@ -32,6 +32,15 @@ object PluginsSbtSpec extends ZIOSpecDefault:
       val expected = List(zipx, scalafmt, remote)
       assertTrue(PluginsSbt.parse(aligned) == Right(expected))
     },
+    test("a pinned snapshot plugin's plugins.sbt resolves Central snapshots and re-resolves on every load") {
+      val rendered = ZipxCatalog.renderPlugins(List(Plugin("rocks.earlyeffect", "sbt-zipx", "0.15.0-SNAPSHOT")))
+      assertTrue(
+        rendered.linesIterator.contains(SnapshotPins.resolverLine),
+        rendered.linesIterator.contains(SnapshotPins.forceUpdateLine),
+        PluginsSbt.parse("forceUpdatePeriod := Some(scala.concurrent.duration.Duration.Zero)\n") == Right(Nil),
+        PluginsSbt.parse("forceUpdatePeriod := Some(scala.concurrent.duration.Duration.Inf)\n").isLeft,
+      )
+    },
     test("parsePlugins round-trips a snapshot plugin with the resolver zipx writes for it") {
       val pinned   = Plugin("rocks.earlyeffect", "sbt-zipx", "0.15.0-SNAPSHOT")
       val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")

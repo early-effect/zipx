@@ -39,12 +39,13 @@ object PluginsSbt:
     }
 
   private def parseStats(stats: List[Tree])(using Context): Either[String, List[Plugin]] =
-    stats.filterNot(s => isTrivia(s) || isResolver(s)).foldLeft[Either[String, List[Plugin]]](Right(Nil)) {
-      (accE, stat) =>
+    stats
+      .filterNot(s => isTrivia(s) || isResolver(s) || isForcedUpdate(s))
+      .foldLeft[Either[String, List[Plugin]]](Right(Nil)) { (accE, stat) =>
         accE.flatMap { acc =>
           parseAddSbtPlugin(stat).map(acc :+ _)
         }
-    }
+      }
 
   private def isTrivia(tree: Tree): Boolean =
     tree match
@@ -54,6 +55,20 @@ object PluginsSbt:
       case _                                          => false
 
   /** The one resolver zipx writes, while a plugin row is pinned to a snapshot. Any other stays refused. */
+  /** `forceUpdatePeriod := Some(scala.concurrent.duration.Duration.Zero)`, which zipx writes beside that resolver. */
+  private def isForcedUpdate(tree: Tree): Boolean =
+    tree match
+      case InfixOp(Ident(key), Ident(op), Apply(Ident(some), List(zero))) =>
+        key.toString == "forceUpdatePeriod" && op.toString == ":=" && some.toString == "Some" &&
+        path(zero).contains(List("scala", "concurrent", "duration", "Duration", "Zero"))
+      case _ => false
+
+  private def path(tree: Tree): Option[List[String]] =
+    tree match
+      case Ident(name)          => Some(List(name.toString))
+      case Select(prefix, name) => path(prefix).map(_ :+ name.toString)
+      case _                    => None
+
   private def isResolver(tree: Tree): Boolean =
     tree match
       case InfixOp(Ident(key), Ident(op), InfixOp(Literal(repo), Ident(at), Literal(url))) =>

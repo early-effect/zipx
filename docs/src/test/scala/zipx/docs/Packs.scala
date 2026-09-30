@@ -92,7 +92,8 @@ zipxCapabilities ++= Seq(
 // Shared registry PAT: ZipxGitHubPackages.sharedRegistry(token = secret"GH_PACKAGES_TOKEN")
 ```
 
-Thin CI wiring (`packages: write` + token + `PUBLISH_GITHUB_PACKAGES=true`). **sbt** owns `publishTo` / Credentials.
+Thin CI wiring (`packages: write` + token + `PUBLISH_GITHUB_PACKAGES=true`). **sbt** owns `publishTo` / Credentials,
+except for `Ship` rows, whose publishes zipx routes from `zipxReleaseWorkflow`'s registry.
 See **Job conditions** for fork gates and multi-publish recipes.
 """,
       exampleValue {

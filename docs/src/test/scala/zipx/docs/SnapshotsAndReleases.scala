@@ -49,14 +49,65 @@ zipxReleaseWorkflow := Some(ZipxCentral.releases)
 
 | Build | `models` | `client` | Published to |
 |---|---|---|---|
-| any build, `publishLocal` included | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | `~/.ivy2/local` |
+| any build | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | nowhere until you publish |
+| `sbt zipxSnapshotPublish local`, on a laptop | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | `~/.ivy2/local` |
+| `sbt zipxSnapshotPublish`, on a laptop | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | Central snapshots |
 | a merge to the default branch | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | Central snapshots |
 | a push to PR #42 labeled `snapshots` | `1.4.2-pr42-SNAPSHOT` | `0.3.0-pr42-SNAPSHOT` | Central snapshots |
 | a `zipxRelease` session | `1.4.2` | `0.3.0` | Central |
 
-`-SNAPSHOT` is what sbt overwrites on republish, so `publishLocal` after every edit reaches a sibling build. It is also
-the same string on every commit, so cache digests hold (see **Caching**).
+`-SNAPSHOT` is what sbt overwrites on republish, so a republish after every edit reaches a sibling build. It is also
+the same string on every commit, so cache digests hold (see **Caching**). None of it spends a release.
 """,
+    section("Iterate from your machine")(
+      md"""
+Proving a change across two libraries needs no PR, no CI, and no release. In the upstream repo:
+
+```text
+sbt zipxSnapshotPublish local     # every unreleased row to ~/.ivy2/local, which sbt and cs resolve
+```
+
+In the downstream repo, pin the coordinate like any other row, then `reload` a running shell:
+
+```scala
+val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
+```
+
+Edit upstream, publish again, compile downstream: a `-SNAPSHOT` overwrites, and a project that depends on one
+re-resolves every session. When the upstream change adds or changes a dependency, `reload` the downstream shell;
+zipx forgets sbt's in-memory resolutions on `reload` and `clean` while a snapshot is pinned.
+
+To share the same bits with a teammate, or with a downstream PR's CI, publish them to the registry instead:
+
+```text
+sbt zipxSnapshotPublish           # the same rows to the registry's snapshot repository
+```
+
+Both forms publish exactly the rows a merge would (every row whose number is not released yet), skip scaladoc, and
+return the shell to a development session when they finish. The registry form checks credentials before anything
+uploads: for Central, `SONATYPE_USERNAME` / `SONATYPE_PASSWORD`, or a credentials file for `central.sonatype.com`. A
+missing token never leaves some modules published and the rest not.
+
+A build writes no `publishTo` for any of this. While zipx publishes a row, it routes the upload from
+`zipxReleaseWorkflow`'s registry; a development session keeps whatever `publishTo` the build sets. A `file:` registry
+rehearses snapshots and releases entirely on one machine.
+""",
+      exampleValue {
+        List(
+          ArtifactRegistry.MavenCentral,
+          ArtifactRegistry.GitHubPackages("early-effect", "zipx"),
+          ArtifactRegistry.Url("file:///tmp/zipx-repo"),
+        ).map(r =>
+          s"$r: snapshots -> ${r.snapshotRepository}; releases -> ${r.releaseRepository.getOrElse("localStaging, then sonaRelease")}"
+        ).mkString("\n")
+      }.assert(routes =>
+        assertTrue(
+          routes.contains("MavenCentral: snapshots -> https://central.sonatype.com/repository/maven-snapshots/"),
+          routes.contains("releases -> localStaging, then sonaRelease"),
+          routes.contains("snapshots -> file:///tmp/zipx-repo/; releases -> file:///tmp/zipx-repo/"),
+        )
+      ),
+    ),
     section("Mainline snapshots")(
       md"""
 With `ZipxCentral.snapshots`, every push to the default branch publishes each row whose catalog number is not
@@ -65,9 +116,9 @@ that is already released is skipped: its snapshot would sort before the release.
 
 The `snapshots` job waits on this run's cache owner (`test`, or `cache-rehydrate` on a merge push that skipped
 Verify), restores that save, and never saves one, so it packages and uploads without recompiling. It skips scaladoc,
-which Central checks only on a release, and signs nothing. It needs `SONATYPE_USERNAME` / `SONATYPE_PASSWORD` and a
-`publishTo` that routes `-SNAPSHOT` to `https://central.sonatype.com/repository/maven-snapshots/`, and SNAPSHOTs
-enabled for the namespace in the Central Portal (Namespaces). Central deletes snapshots after 90 days.
+which Central checks only on a release, and signs nothing. It needs `SONATYPE_USERNAME` / `SONATYPE_PASSWORD` and
+SNAPSHOTs enabled for the namespace in the Central Portal (Namespaces). Central deletes snapshots after 90 days. It is
+the same `zipxSnapshotPublish` you run from a laptop.
 """,
       exampleValue {
         DocsRender.job("snapshots")(Capability.test, ZipxCentral.snapshots)(using graph)
@@ -214,10 +265,30 @@ on `reload`, `set`, and `clean` (which `cleanFull` runs): after a republished sn
 1. `zipxReleaseWorkflow := Some(ZipxCentral.releases)`, then `sbt zipxWorkflowGenerate`.
 2. Create the GitHub Environment `zipx-release` (Settings → Environments). Add required reviewers there if a release
    should wait for a human; scope the signing secrets to it if you want them nowhere else.
-3. Release: draft a GitHub Release with the row's tag, or run **zipx release** from the Actions tab.
+3. With several rows and docs on GitHub Pages, let the `github-pages` environment deploy from tags matching `*/v*`
+   (Settings → Environments → github-pages → Deployment branches and tags). A release tag's docs deploy otherwise
+   fails its environment rule, even though the release itself succeeds.
+4. Release: draft a GitHub Release with the row's tag, or run **zipx release** from the Actions tab.
 
 A tag pushed on a commit the default branch has not reached is refused before sbt starts. A dispatch from any other
-branch does not run.
+branch does not run. The Central deployment is named for what it carries, `<organization> <row> <n>, ...`; the root
+project keeps version `0.0.0` when it is in no row, because `sonaRelease` refuses a root at `-SNAPSHOT`.
+"""
+    ),
+    section("After a release")(
+      md"""
+A row stays at its released number until a PR moves it, so between releases it builds as a `-SNAPSHOT` of a number
+that already exists. Two consequences:
+
+- **It publishes no snapshot.** `zipxSnapshotPublish` skips a released row, since its snapshot would sort before the
+  release. When the row has changes since its release tag, that means its changes reach no one, so zipx says so
+  loudly, in the log and as a CI annotation, and `sbt zipxReleaseDrift` lists every such row. `modver-check` already
+  fails a PR that changes a released row without moving it; this covers direct pushes and local work.
+- **A library built against the release meets the in-repo copy.** sbt always uses the in-repo project, and its
+  eviction check reads `0.10.0-SNAPSHOT` against `0.10.0` literally; early-semver compares `0.y.0` and `x.0.0`
+  exactly, tag included. zipx exempts the build's own artifacts from that check and checks them itself after `update`:
+  the row's next number against the release the library needs, under the module's own `versionScheme`. `0.10.0-SNAPSHOT`
+  over `0.10.0` resolves; `0.11.0-SNAPSHOT` over `0.10.0` fails, naming both.
 """
     ),
   )
