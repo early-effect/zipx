@@ -649,31 +649,41 @@ object ModverSpec extends ZIOSpecDefault:
           check.exists(_.env.contains(ModverCheck.BaseShaEnv)),
         )
       },
-      test("GitHub Packages metadata reads keep the declared scopes and add packages read") {
+      test("GitHub Packages metadata reads keep the declared scopes and send the token") {
         val packages = ArtifactRegistry.GitHubPackages("early-effect", "zipx-ci-lab")
+        val creds    = RegistryCredentials.UserPassword(EnvValue.plain("early-effect"), EnvValue.githubToken)
         val cfg      = PlanConfig(skipMergedPrPush = false, verifyCleanLabel = None, affected = AffectedMode.Always)
-        val check    = Capability.modverCheck().readingRelease(packages)
-        val suggest  = Capability.modverSuggest().readingRelease(packages)
+        val check    = Capability.modverCheck().readingRelease(packages, creds)
+        val suggest  = Capability.modverSuggest().readingRelease(packages, creds)
         val job      = Planner.plan(graph, List(check), cfg).jobs.get("modver-check")
         assertTrue(
           job.exists(_.permissions.get("contents").contains("read")),
           job.exists(_.permissions.get("packages").contains("read")),
+          job.exists(_.env.get("GITHUB_TOKEN").contains("${{ github.token }}")),
+          job.exists(_.env.contains(ModverCheck.BaseShaEnv)),
           suggest.permissions.get("contents").contains("read"),
           suggest.permissions.get("pull-requests").contains("write"),
           suggest.permissions.get("packages").contains("read"),
+          suggest.env.get("GITHUB_TOKEN").contains(EnvValue.githubToken),
         )
       },
       test("a registry other than GitHub Packages does not take a packages scope") {
-        val check = Capability.modverCheck().readingRelease(ArtifactRegistry.MavenCentral)
-        val maven = Capability
+        val centralCreds =
+          RegistryCredentials.UserPassword(EnvValue.plain("central"), EnvValue.secret("SONATYPE_PASSWORD"))
+        val check      = Capability.modverCheck().readingRelease(ArtifactRegistry.MavenCentral, centralCreds)
+        val mavenCreds = RegistryCredentials.UserPassword(EnvValue.plain("ci"), EnvValue.secret("MAVEN_PASSWORD"))
+        val maven      = Capability
           .modverCheck()
           .readingRelease(
-            ArtifactRegistry.Maven("https://snaps.example/maven", "https://rels.example/maven")
+            ArtifactRegistry.Maven("https://snaps.example/maven", "https://rels.example/maven"),
+            mavenCreds,
           )
         assertTrue(
           !check.permissions.contains("packages"),
           check.permissions.get("contents").contains("read"),
+          !check.env.contains("SONATYPE_PASSWORD"),
           !maven.permissions.contains("packages"),
+          maven.env.get("MAVEN_PASSWORD").contains(EnvValue.secret("MAVEN_PASSWORD")),
         )
       },
     ),

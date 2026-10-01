@@ -32,16 +32,20 @@ end RegistryCredentials
 
 object RegistryCredentials:
 
+  /** `${{ github.token }}` is not a secret name. The runner exports it as this env var, and the metadata GET has to
+    * read that var. A request that leaves it off is anonymous, and GitHub Packages answers 401.
+    */
+  val GithubTokenEnv: String = "GITHUB_TOKEN"
+
   def read(value: EnvValue, env: Map[String, String]): Option[String] = value match
-    case EnvValue.Plain(text)      => Option.when(text.nonEmpty)(text)
-    case EnvValue.FromSecret(name) => env.get(name.unwrap).filter(_.nonEmpty)
-    case EnvValue.FromEnv(name)    => env.get(name.unwrap).filter(_.nonEmpty)
-    case _                         => None
+    case EnvValue.Plain(text) => Option.when(text.nonEmpty)(text)
+    case other                => envName(other).flatMap(env.get).filter(_.nonEmpty)
 
   def envName(value: EnvValue): Option[String] = value match
-    case EnvValue.FromSecret(name) => Some(name.unwrap)
-    case EnvValue.FromEnv(name)    => Some(name.unwrap)
-    case _                         => None
+    case EnvValue.FromSecret(name)              => Some(name.unwrap)
+    case EnvValue.FromEnv(name)                 => Some(name.unwrap)
+    case other if other == EnvValue.githubToken => Some(GithubTokenEnv)
+    case _                                      => None
 
   private def binding(value: EnvValue): Option[(String, EnvValue)] =
     envName(value).map(_ -> value)

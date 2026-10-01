@@ -95,8 +95,9 @@ flowchart TD
 3. `modver-check` reads each changed row's last release from the registry's `maven-metadata.xml`. A row still at that
    number must move; a moved row must clear the MiMa floor measured against that release's jar. Over-bump is fine. An
    unreadable registry or jar fails the check; it never reads as a first release. When the release registry is GitHub
-   Packages, `modver-check` and `modver-suggest` also get `packages: read`: a `permissions` block drops every scope it
-   does not name, and Packages answers 401 without that scope.
+   Packages, `modver-check` and `modver-suggest` also get `packages: read` and `GITHUB_TOKEN`: a `permissions` block
+   drops every scope it does not name, and the metadata request sends that token. Packages answers 401 to either
+   omission.
 4. You write the number (`zipxModverBump client`, or by hand) and push.
 5. Before merging, prove the change downstream without a release: `sbt zipxSnapshotPublish local` here, pin
    `0.3.1-SNAPSHOT` there (or `sbt zipxSnapshotPublish` for another machine's CI). See **Snapshots and releases**.

@@ -1000,14 +1000,14 @@ object ZipxPlugin extends AutoPlugin:
       affectedOnPR = readBuildSetting(extracted, zipxAffectedOnPR, true),
       affectedOnPush = readBuildSetting(extracted, zipxAffectedOnPush, false),
     )
-    val registry = readBuildSetting(extracted, zipxReleaseWorkflow, None).map(_.registry)
-    val modver   =
+    val release = readBuildSetting(extracted, zipxReleaseWorkflow, None)
+    val modver  =
       if ships.isEmpty then Nil
       else
         List(
           Capability.modverSuggest(CapabilityTasks.of(zipxModverSuggest)),
           Capability.modverCheck(CapabilityTasks.of(zipxModverCheck)),
-        ).map(cap => registry.fold(cap)(cap.readingRelease))
+        ).map(cap => release.fold(cap)(wf => cap.readingRelease(wf.registry, wf.credentials)))
     if ships.nonEmpty && userCaps.exists(_.name == Capability.PublishName) then
       sys.error(
         "zipx: Ship rows release from zipx-release.yml (zipxReleaseWorkflow), so ci.yml has no publish job. Drop the 'publish' capability from zipxCapabilities."
