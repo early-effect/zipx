@@ -124,6 +124,18 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
         !yml.contains("Import signing key"),
       )
     },
+    test("a github.token release exports GITHUB_TOKEN for the metadata lookup") {
+      val release = ZipxGitHubPackages.releases(
+        "early-effect",
+        "zipx-ci-lab",
+        token = EnvValue.githubToken,
+      )
+      val yml = ReleaseWorkflow.render(release, config, TagScheme.PerRow).fold(identity, identity)
+      assertTrue(
+        release.credentials.supplied(Map("GITHUB_TOKEN" -> "ghs_abc")),
+        yml.contains("GITHUB_TOKEN: ${{ github.token }}"),
+      )
+    },
     test("a fork gate ANDs with a second filter through the condition itself") {
       val cap = ZipxGitHubPackages.sameRepo(
         condition = Some(JobCondition.repositoryIs("acme/fork") && JobCondition.varNonEmpty("EXTRA"))

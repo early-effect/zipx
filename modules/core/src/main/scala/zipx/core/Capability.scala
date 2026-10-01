@@ -351,6 +351,20 @@ final case class Capability(
   def withPermissions(permissions: Map[String, String]): Capability =
     copy(permissions = permissions)
 
+  /** A job that sets `permissions` loses every scope it does not name, and the metadata GET sends whatever credentials
+    * this job exports. GitHub Packages answers 401 to a missing `packages: read` and to a request that does not carry
+    * the token. Central's metadata is public, so that registry takes neither.
+    */
+  def readingRelease(
+      registry: ArtifactRegistry,
+      credentials: RegistryCredentials = RegistryCredentials.Anonymous,
+  ): Capability =
+    val authed =
+      if registry == ArtifactRegistry.MavenCentral then this
+      else plusEnv(credentials.env.toSeq*)
+    if registry.usesGithubToken then authed.copy(permissions = authed.permissions + ("packages" -> "read"))
+    else authed
+
   /** Destinations that share **one** job: [[TargetFanOut.SharedJob]] plus the targets, set together because setting
     * either alone is the mistake. The shape for registries; see [[TargetFanOut]].
     */

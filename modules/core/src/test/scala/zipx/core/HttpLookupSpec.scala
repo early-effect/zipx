@@ -120,5 +120,17 @@ object HttpLookupSpec extends ZIOSpecDefault:
     test("parseRetryAfter reads delta-seconds") {
       HttpLookup.parseRetryAfter("12").map(d => assertTrue(d.contains(12.seconds)))
     },
+    test("a packages jar redirect is one hop, and a miss is not") {
+      val jar    = "https://maven.pkg.github.com/acme/repo/org/artifact/1.0.0/artifact-1.0.0.jar"
+      val signed = "https://github-registry-files.githubusercontent.com/1/file"
+      assertTrue(
+        HttpLookup.redirectTarget(302, Some(signed), jar).contains(signed),
+        HttpLookup.redirectTarget(302, Some("artifact.jar"), jar).exists(_.endsWith("/artifact.jar")),
+        HttpLookup.redirectTarget(302, None, jar).isEmpty,
+        HttpLookup.redirectTarget(302, Some(""), jar).isEmpty,
+        HttpLookup.redirectTarget(200, Some(signed), jar).isEmpty,
+        HttpLookup.redirectTarget(404, None, jar).isEmpty,
+      )
+    },
   )
 end HttpLookupSpec
