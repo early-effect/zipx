@@ -4,14 +4,18 @@ import zipx.shell.*
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** `zipx-release.yml`, the only place a Ship row's catalog number is published: a GitHub Release's tag releases its
-  * row, and a dispatch on the default branch releases every unreleased row, in one sbt session either way.
+import ReleaseRequest.All
+
+/** `zipx-release.yml`, the only place a ship's catalog number is published. A tag releases that ship. A dispatch
+  * releases the ships named in `inputs.ships` (default `all`). Either way one sbt session and one deployment, plus
+  * unreleased in-repo upstreams.
   */
 final case class ReleaseWorkflow(
     registry: ArtifactRegistry,
     env: Map[String, EnvValue] = Map.empty,
     steps: Steps = Steps.empty,
     environment: Option[String] = Some(ReleaseWorkflow.DefaultEnvironment),
+    credentials: RegistryCredentials = RegistryCredentials.Anonymous,
 )
 
 object ReleaseWorkflow:
@@ -21,8 +25,12 @@ object ReleaseWorkflow:
 
   val TagsFile: String = "target/zipx-release-tags.txt"
 
+  /** The Run workflow field's description. The input id is the literal `ships`: `InputName` and `Expr.input` need a
+    * compile-time string, and a reference to this val does not fold into one.
+    */
+  val ShipsDescription: String = "all, or comma-separated ship names (client, libs)"
+
   private val jobId: JobId  = JobId("release")
-  private val refVar        = "ZIPX_RELEASE_REF"
   private val tagPushed     = Expr.github("event_name") === Expr.quoted("push")
   private val dispatched    = Expr.github("event_name") === Expr.quoted("workflow_dispatch")
   private val defaultBranch = Expr.github("event.repository.default_branch")
@@ -39,16 +47,20 @@ object ReleaseWorkflow:
       runsOn = List(config.runnerOs),
       `if` = Some((tagPushed || onDefaultRef).unwrapped),
       environment = release.environment.map(JobEnvironment(_)),
-      env = EnvValue.renderAll(config.env ++ release.env) ++ ListMap(refVar -> Expr.github("ref").render),
+      env = EnvValue.renderAll(config.env ++ release.env ++ release.credentials.env),
       steps = Planner.checkoutThenSbtSetup(config, jobId, nodeVersion = None, cacheMode) ++
         List(onDefaultBranchStep) ++
         release.steps(buildContext.copy(actions = config.actions)) ++
-        List(releaseStep, githubReleasesStep),
+        List(bindRefStep, releaseStep, githubReleasesStep),
     )
+    val packages = if release.registry.usesGithubToken then ListMap("packages" -> "write") else ListMap.empty
     Workflow(
       name = "zipx release",
-      on = Triggers(push = Some(BranchFilter(tags = List(tags.pattern))), workflowDispatch = Some(WorkflowDispatch())),
-      permissions = ListMap("contents" -> "write"),
+      on = Triggers(
+        push = Some(BranchFilter(tags = List(tags.pattern))),
+        workflowDispatch = Some(shipsDispatch),
+      ),
+      permissions = ListMap("contents" -> "write") ++ packages,
       concurrency = Some(Concurrency(group = "zipx-release", cancelInProgress = CancelInProgress.Never)),
       jobs = ListMap[String, Job](jobId -> job) ++ docs.flatMap(docsJob(_, tags)),
     )
@@ -89,6 +101,40 @@ object ReleaseWorkflow:
       .withEnv("ZIPX_DEFAULT_BRANCH", defaultBranch)
       .build
   end onDefaultBranchStep
+
+  /** A dispatch passes `inputs.ships` through unchanged, including the empty string, which `zipxRelease` refuses. A tag
+    * push passes `github.ref`. An expression cannot do this: an empty string is falsy, so `inputs.ships || github.ref`
+    * would turn a cleared field into the branch ref and release every unreleased ship.
+    */
+  private val bindRefStep: Step =
+    val write = (value: Word.Quotable) =>
+      Exec("echo", Word.dquote(Word.lit("ZIPX_RELEASE_REF="), value)).appendTo(Word.vq("GITHUB_ENV"))
+    Step
+      .run(
+        Script.strict(
+          If(
+            ShTest.varEquals("GITHUB_EVENT_NAME", "workflow_dispatch"),
+            Block(write(Word.v("ZIPX_SHIPS"))),
+            elifs = Nil,
+            elseDo = Some(Block(write(Word.v("GITHUB_REF")))),
+          )
+        )
+      )
+      .named("Release request")
+      .withEnv("ZIPX_SHIPS", Expr.input("ships"))
+      .build
+  end bindRefStep
+
+  private val shipsDispatch: WorkflowDispatch =
+    WorkflowDispatch(
+      ListMap(
+        InputName("ships") -> DispatchInput.Text(
+          description = ShipsDescription,
+          default = Some(All),
+          required = true,
+        )
+      )
+    )
 
   private val releaseStep: Step =
     Step

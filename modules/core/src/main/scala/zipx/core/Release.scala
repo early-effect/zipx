@@ -49,7 +49,7 @@ object BuildSession:
   /** A JVM property, because sbt drops session settings when `++` / `+` switch Scala versions. */
   val Property: String = "zipx.session"
 
-  /** The rows a release session publishes, which names its Central deployment. */
+  /** The rows a release session publishes, which names its registry deployment. */
   val ReleaseNameProperty: String = "zipx.release.name"
 
   def of(props: collection.Map[String, String]): Either[UnknownBuildSession, BuildSession] =
@@ -91,15 +91,34 @@ enum ReleaseRequest:
   case Tagged(tag: String)
   case AllUnreleased
 
+  /** Catalog identities, in the order the dispatch named them. Unreleased in-repo upstreams still ride along. */
+  case Ships(identities: ::[String])
+
 object ReleaseRequest:
-  def fromRef(ref: String): Either[ReleaseError, ReleaseRequest] = ref match
-    case s"refs/tags/$tag" if tag.nonEmpty        => Right(Tagged(tag))
-    case s"refs/heads/$branch" if branch.nonEmpty => Right(AllUnreleased)
-    case other                                    => Left(ReleaseError.UnknownRef(other))
+
+  /** The Run workflow default: every unreleased ship. */
+  val All: String = "all"
+
+  def fromRef(ref: String): Either[ReleaseError, ReleaseRequest] =
+    val raw = ref.trim
+    raw match
+      case s"refs/tags/$tag" if tag.nonEmpty        => Right(Tagged(tag))
+      case s"refs/heads/$branch" if branch.nonEmpty => Right(AllUnreleased)
+      case other if other.startsWith("refs/")       => Left(ReleaseError.UnknownRef(other))
+      case All                                      => Right(AllUnreleased)
+      case ""                                       => Left(ReleaseError.UnknownRef(ref))
+      case other                                    => shipsOf(other)
+
+  private def shipsOf(raw: String): Either[ReleaseError, ReleaseRequest] =
+    raw.split(',').iterator.map(_.trim).filter(_.nonEmpty).toList.distinct match
+      case head :: tail => Right(Ships(::(head, tail)))
+      case Nil          => Left(ReleaseError.UnknownRef(raw))
+end ReleaseRequest
 
 enum ReleaseError:
   case NoRows
   case UnknownRef(ref: String)
+  case UnknownShip(name: String, ships: List[String])
   case UnknownTag(tag: String, tags: List[String])
   case TagMismatch(tag: String, row: PublishedRow, expected: String)
   case AlreadyReleased(row: PublishedRow)
@@ -109,8 +128,11 @@ enum ReleaseError:
   case SnapshotPinned(dependencies: ::[String])
 
   def message: String = this match
-    case NoRows                => "zipx-release.yml releases Ship / ShipGroup rows, and the catalog has none"
-    case UnknownRef(ref)       => s"'$ref' is neither a tag nor a branch"
+    case NoRows                   => "zipx-release.yml releases Ship / ShipGroup rows, and the catalog has none"
+    case UnknownRef(ref)          => s"'$ref' is not a tag, a branch, all, or a comma-separated list of ships"
+    case UnknownShip(name, ships) =>
+      val known = if ships.isEmpty then "none" else ships.mkString(", ")
+      s"ship '$name' is not in the catalog; this catalog releases $known"
     case UnknownTag(tag, tags) =>
       s"tag $tag names no catalog row; this catalog releases ${tags.mkString(", ")}"
     case TagMismatch(tag, row, expected) =>
@@ -162,6 +184,7 @@ object ReleasePlan:
       requested <- request match
         case ReleaseRequest.Tagged(tag)   => byTag(tag, rows, tagOf).flatMap(releasable(_, statusOf))
         case ReleaseRequest.AllUnreleased => unreleased(rows, statusOf)
+        case ReleaseRequest.Ships(names)  => selected(names, rows, statusOf)
       closure <- upstream(requested, catalog, graph, statusOf)
       entries <- rows.filter(closure.contains).map(r => ReleaseEntry(r, tagOf(r))) match
         case head :: tail => Right(::(head, tail))
@@ -198,6 +221,30 @@ object ReleasePlan:
       case RowStatus.Unreleased       => Right(List(row))
       case RowStatus.Released         => Left(ReleaseError.AlreadyReleased(row))
       case RowStatus.Partial(missing) => Left(ReleaseError.PartiallyReleased(row, missing))
+
+  /** Named ships only. A name the catalog does not have, or a named ship already released, fails before upload. */
+  private def selected(
+      names: ::[String],
+      rows: List[PublishedRow],
+      statusOf: PublishedRow => RowStatus,
+  ): Either[ReleaseError, List[PublishedRow]] =
+    val known = rows.map(_.identity).toSet
+    names.toList.filterNot(known.contains) match
+      case head :: _ => Left(ReleaseError.UnknownShip(head, rows.map(_.identity)))
+      case Nil       =>
+        val wanted = names.toSet
+        rows
+          .filter(row => wanted.contains(row.identity))
+          .foldLeft[Either[ReleaseError, List[PublishedRow]]](Right(Nil)) { (acc, row) =>
+            acc.flatMap { picked =>
+              statusOf(row) match
+                case RowStatus.Unreleased       => Right(picked :+ row)
+                case RowStatus.Released         => Left(ReleaseError.AlreadyReleased(row))
+                case RowStatus.Partial(missing) => Left(ReleaseError.PartiallyReleased(row, missing))
+            }
+          }
+    end match
+  end selected
 
   private def unreleased(
       rows: List[PublishedRow],

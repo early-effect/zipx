@@ -51,9 +51,14 @@ object ZipxCatalog:
     val rest     = plugins.filterNot(p => selfKeys.contains((p.group: String, p.artifact: String)))
     (self ++ rest).toList
 
-  def renderPlugins(plugins: Seq[Plugin], self: Seq[Plugin] = Nil): String =
+  def renderPlugins(
+      plugins: Seq[Plugin],
+      self: Seq[Plugin] = Nil,
+      registries: Seq[ArtifactRegistry] = Seq(ArtifactRegistry.MavenCentral),
+  ): String =
     val inventory = pluginInventory(plugins, self)
-    val resolver  = if SnapshotPins.of(inventory).nonEmpty then SnapshotPins.pluginsSbtLines else Nil
+    val resolver  =
+      if SnapshotPins.of(inventory).nonEmpty then SnapshotPins.pluginsSbtLines(registries.toList) else Nil
     (PluginsHeader +: (resolver ++ inventory.map(renderPluginLine))).mkString("\n") + "\n"
 
   def describePlugin(plugin: Plugin): String =

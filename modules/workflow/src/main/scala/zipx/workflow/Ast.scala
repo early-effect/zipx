@@ -36,11 +36,17 @@ final case class WorkflowDispatch(inputs: ListMap[InputName, DispatchInput] = Li
 
 enum DispatchInput(val description: String):
 
-  /** A required dropdown whose first option is the default. */
+  /** A required dropdown whose first option is the default. GitHub renders one choice, so a set is [[Text]]. */
   case Choice(override val description: String, options: ::[String]) extends DispatchInput(description)
 
-  /** Optional free text. */
-  case Text(override val description: String) extends DispatchInput(description)
+  /** Free text. Optional and without a default unless the caller says otherwise. A default fills the Run workflow form.
+    */
+  case Text(
+      override val description: String,
+      default: Option[String] = None,
+      required: Boolean = false,
+  ) extends DispatchInput(description)
+end DispatchInput
 
 /** @param types
   *   empty keeps GitHub's default: opened, synchronize, reopened.

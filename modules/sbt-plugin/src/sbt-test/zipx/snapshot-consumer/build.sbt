@@ -7,7 +7,7 @@ lazy val helper   = project
 lazy val upstream = project.settings(
   if (file("v2").exists) MyVersions.withHelper else Nil,
   allDependencies ++= Def.uncached {
-    if (file("v3").exists) Seq("org.typelevel" %% "cats-kernel" % "2.13.0") else Nil
+    if (file("v3").exists) Seq("org.slf4j" % "slf4j-api" % "2.0.18") else Nil
   },
 )
 lazy val consumer = project.settings(MyVersions.pinned)

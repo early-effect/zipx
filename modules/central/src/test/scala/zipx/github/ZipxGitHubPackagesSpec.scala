@@ -104,6 +104,26 @@ object ZipxGitHubPackagesSpec extends ZIOSpecDefault:
         assertTrue(ids == keys, ids.nonEmpty)
       }
     },
+    test("releases publishes ships to that Packages repository, unsigned, with ships default all") {
+      val release = ZipxGitHubPackages.releases(
+        "iterable",
+        "maven-packages",
+        token = EnvValue.secret("GH_PACKAGES_TOKEN"),
+      )
+      val yml = ReleaseWorkflow.render(release, config, TagScheme.PerRow).fold(identity, identity)
+      assertTrue(
+        release.registry == ArtifactRegistry.GitHubPackages("iterable", "maven-packages"),
+        release.registry.snapshotRepository == "https://maven.pkg.github.com/iterable/maven-packages/",
+        release.registry.releaseRepository.contains("https://maven.pkg.github.com/iterable/maven-packages/"),
+        yml.contains("ships:"),
+        yml.contains("default: all"),
+        yml.contains("GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}"),
+        yml.contains("packages: write"),
+        !yml.contains("sonaRelease"),
+        !yml.contains("PGP_"),
+        !yml.contains("Import signing key"),
+      )
+    },
     test("a fork gate ANDs with a second filter through the condition itself") {
       val cap = ZipxGitHubPackages.sameRepo(
         condition = Some(JobCondition.repositoryIs("acme/fork") && JobCondition.varNonEmpty("EXTRA"))

@@ -196,7 +196,17 @@ object ZipxSettings:
       SettingName("zipxReleaseWorkflow"),
       None,
       SettingPurpose(
-        "Emit .github/workflows/zipx-release.yml: a GitHub Release's tag (v1.4.2, or row/v1.4.2 with several rows) or a default-branch dispatch runs zipxRelease, publishing unreleased Ship rows at their catalog numbers in one session. ZipxCentral.releases is the Central preset. Default None. None deletes the companion."
+        "Emit .github/workflows/zipx-release.yml. A tag publishes that ship. A dispatch publishes the ships named in the ships field (default all), plus unreleased in-repo upstreams, in one session and one deployment. Presets: ZipxCentral.releases, ZipxGitHubPackages.releases, ZipxMaven.releases. Default None. None deletes the companion."
+      ),
+      Build,
+    )
+
+  val snapshotRegistries: SettingDef[Seq[ArtifactRegistry]] =
+    SettingDef.setting(
+      SettingName("zipxSnapshotRegistries"),
+      Seq.empty,
+      SettingPurpose(
+        "Snapshot repositories resolved beside the publish registry while a catalog pin ends in -SNAPSHOT. The publish registry's snapshot repository is already included. A pin names no registry of its own. Default empty."
       ),
       Build,
     )
@@ -748,6 +758,7 @@ object ZipxSettings:
     versionUpdatesPreSteps,
     versionUpdatesExtraSteps,
     releaseWorkflow,
+    snapshotRegistries,
     coverageWorkflow,
     pinFeeds,
     pinPrGate,

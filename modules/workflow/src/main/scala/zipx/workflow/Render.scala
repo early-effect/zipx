@@ -122,12 +122,12 @@ object Render:
               "default"     -> Yaml.Scalar(options.head),
               "options"     -> Yaml.Sequence(Chunk.from(options.map(Yaml.Scalar(_)))),
             )
-          case DispatchInput.Text(description) =>
+          case DispatchInput.Text(description, default, required) =>
             Seq(
               "description" -> Yaml.Scalar(description),
               "type"        -> Yaml.Scalar("string"),
-              "required"    -> bool(false),
-            )
+              "required"    -> bool(required),
+            ) ++ default.map(value => "default" -> Yaml.Scalar(value))
         Yaml.Scalar(name: String) -> Yaml.Mapping.fromStringKeys(fields*)
       }
       Yaml.Mapping.fromStringKeys("inputs" -> Yaml.Mapping(Chunk.from(inputs)))

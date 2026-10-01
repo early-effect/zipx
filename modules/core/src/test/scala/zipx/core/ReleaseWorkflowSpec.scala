@@ -49,7 +49,7 @@ object ReleaseWorkflowSpec extends ZIOSpecDefault:
       assertTrue(
         job.flatMap(_.environment).contains(JobEnvironment("zipx-release")),
         job.flatMap(_.env.get("PGP_PASSPHRASE")).contains("${{ secrets.PGP_PASSPHRASE }}"),
-        job.flatMap(_.env.get("ZIPX_RELEASE_REF")).contains("${{ github.ref }}"),
+        job.exists(_.env.get("ZIPX_RELEASE_REF").isEmpty),
         job.exists(_.steps.exists(_.`with`.get("cache-mode").contains("restore"))),
         !job.exists(_.steps.exists(_.`with`.get("cache-mode").contains("save"))),
       )
@@ -68,6 +68,27 @@ object ReleaseWorkflowSpec extends ZIOSpecDefault:
         onMain >= 0,
         onMain < keyed,
         keyed < release,
+      )
+    },
+    test("a dispatch names ships, default all, and a tag push still passes github.ref") {
+      val wf    = ReleaseWorkflow.plan(central, config, TagScheme.PerRow)
+      val bind  = releaseJob().flatMap(_.steps.find(_.name.contains("Release request")))
+      val input = wf.on.workflowDispatch.flatMap(_.inputs.get(zipx.workflow.InputName("ships")))
+      assertTrue(
+        input.contains(
+          zipx.workflow.DispatchInput.Text(
+            description = ReleaseWorkflow.ShipsDescription,
+            default = Some("all"),
+            required = true,
+          )
+        ),
+        bind.flatMap(_.env.get("ZIPX_SHIPS")).contains("${{ inputs.ships }}"),
+        bind.flatMap(_.run).exists { script =>
+          script.contains("""[ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]""") &&
+          script.contains("""echo "ZIPX_RELEASE_REF=$ZIPX_SHIPS" >> "$GITHUB_ENV"""") &&
+          script.contains("""echo "ZIPX_RELEASE_REF=$GITHUB_REF" >> "$GITHUB_ENV"""")
+        },
+        !wf.permissions.contains("packages"),
       )
     },
     test("only a dispatch creates the tags and GitHub Releases, with the workflow's own token") {

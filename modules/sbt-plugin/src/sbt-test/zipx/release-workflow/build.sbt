@@ -59,6 +59,8 @@ assertReleaseWorkflow := {
   assert(yml.contains("sbt \"zipxRelease $ZIPX_RELEASE_REF\""), yml)
   assert(yml.contains("- \"*/v*\"") && !yml.contains("- v*"), yml)
   assert(yml.contains("workflow_dispatch"), yml)
+  assert(yml.contains("ships:"), yml)
+  assert(yml.contains("default: all"), yml)
   assert(yml.contains("environment: zipx-release"), yml)
   assert(yml.contains("cache-mode: restore") && !yml.contains("cache-mode: save"), yml)
 }

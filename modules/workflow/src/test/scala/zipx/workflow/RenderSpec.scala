@@ -216,6 +216,28 @@ object RenderSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("a required string input renders its default after required") {
+      val dispatch = WorkflowDispatch(
+        ListMap(
+          InputName("ships") -> DispatchInput.Text(
+            "all, or comma-separated ship names (client, libs)",
+            Some("all"),
+            true,
+          )
+        )
+      )
+      val out = Render.render(sample.copy(on = Triggers(workflowDispatch = Some(dispatch)))).yaml
+      assertTrue(
+        out.contains(
+          """|      ships:
+             |        description: all, or comma-separated ship names (client, libs)
+             |        type: string
+             |        required: true
+             |        default: all
+             |""".stripMargin
+        )
+      )
+    },
     test("inputs, member access, and indexing render inside an expression") {
       val plan = Expr.fromJson(Expr.jobOutput("resolve", "plan"))
       assertTrue(

@@ -32,6 +32,18 @@ object SnapshotPinsSpec extends ZIOSpecDefault:
         steps.exists(_.forall(_.`if`.isEmpty)),
       )
     },
+    test("a pin resolves the publish registry, and an extra registry beside it, not Central by habit") {
+      val packages = ArtifactRegistry.GitHubPackages("iterable", "maven-packages")
+      val central  = ArtifactRegistry.MavenCentral
+      val lines    = SnapshotPins.pluginsSbtLines(SnapshotPins.registries(Some(packages), List(central)))
+      assertTrue(
+        SnapshotPins.registries(None, Nil) == List(central),
+        lines.exists(_.contains(packages.snapshotRepository)),
+        lines.exists(_.contains(central.snapshotRepository)),
+        lines.contains(SnapshotPins.forceUpdateLine),
+        SnapshotPins.isOwnResolver(SnapshotPins.resolverName(packages)),
+      )
+    },
     test("plugins.sbt resolves Central snapshots exactly when a plugin is pinned") {
       val snapshot = Plugin("rocks.earlyeffect", "sbt-zipx", "0.15.0-SNAPSHOT")
       val release  = Plugin("org.scalameta", "sbt-scalafmt", "2.5.4")

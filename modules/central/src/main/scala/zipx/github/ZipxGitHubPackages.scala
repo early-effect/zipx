@@ -3,9 +3,14 @@ package zipx.github
 import zipx.core.*
 import zipx.core.EnvValue.{plain, secret}
 
-/** GitHub Packages paved path for zipx: CI wiring only, so the build keeps ownership of `publishTo` and Credentials.
-  * What this generates is `packages: write`, a token in `GITHUB_TOKEN`, and [[PublishFlagEnv]] for the build to branch
-  * on.
+/** GitHub Packages paved path for zipx.
+  *
+  * [[releases]] is the Ship path: `zipxReleaseWorkflow` publishes to `maven.pkg.github.com/<owner>/<repo>`, snapshots
+  * and releases at that same root, unsigned. The token is the password and `owner` is the username.
+  *
+  * [[sameRepo]] and [[sharedRegistry]] stay CI wiring for a build that publishes without ships. The build keeps
+  * `publishTo` and Credentials on that path. What they generate is `packages: write`, a token in `GITHUB_TOKEN`, and
+  * [[PublishFlagEnv]].
   *
   * The default capability name differs from [[zipx.central.ZipxCentral.release]]'s `publish`, so the two coexist rather
   * than one replacing the other by name.
@@ -25,6 +30,25 @@ object ZipxGitHubPackages:
     Map("contents" -> "read", "packages" -> "write")
 
   val PublishFlagEnv: String = "PUBLISH_GITHUB_PACKAGES"
+
+  /** Ship rows. The token is exported under its own name. Lookup and publish both authenticate with it. The username
+    * sent to Packages is `owner`.
+    *
+    * {{{
+    * zipxReleaseWorkflow := Some(
+    *   ZipxGitHubPackages.releases("iterable", "maven-packages", token = secret"GH_PACKAGES_TOKEN")
+    * )
+    * }}}
+    */
+  def releases(
+      owner: String,
+      repo: String,
+      token: EnvValue = secret"GH_PACKAGES_TOKEN",
+  ): ReleaseWorkflow =
+    ReleaseWorkflow(
+      registry = ArtifactRegistry.GitHubPackages(owner, repo),
+      credentials = RegistryCredentials.UserPassword(EnvValue.plain(owner), token),
+    )
 
   /** Publishes to this repository's own Packages registry, using the workflow's injected token. A fork gate is a
     * [[zipx.core.JobCondition]] like any other: `condition = Some(JobCondition.repositoryIs("acme/my-fork"))`.

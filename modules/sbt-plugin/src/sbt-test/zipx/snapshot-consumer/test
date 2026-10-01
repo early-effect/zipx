@@ -23,7 +23,7 @@ $ copy-file changes/UseHelper.scala consumer/src/main/scala/Use.scala
 # clean forgets them too: a republish from outside this shell's settings stays stale until clean.
 $ touch v3
 > upstream/publishLocal
-$ copy-file changes/UseKernel.scala consumer/src/main/scala/Use.scala
+$ copy-file changes/UseLog.scala consumer/src/main/scala/Use.scala
 -> consumer/compile
 > consumer/clean
 > consumer/compile
