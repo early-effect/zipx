@@ -41,6 +41,16 @@ object PluginsSbtSpec extends ZIOSpecDefault:
         PluginsSbt.parse("forceUpdatePeriod := Some(scala.concurrent.duration.Duration.Inf)\n").isLeft,
       )
     },
+    test("parsePlugins round-trips a snapshot plugin resolved from the publish registry") {
+      val pinned   = Plugin("com.iterable", "luminary", "1.2.0-SNAPSHOT")
+      val packages = ArtifactRegistry.GitHubPackages("iterable", "maven-packages")
+      val rendered = ZipxCatalog.renderPlugins(List(pinned), registries = List(packages))
+      assertTrue(
+        rendered.linesIterator.exists(_.contains("zipx-github-packages-iterable-maven-packages")),
+        rendered.linesIterator.exists(_.contains("https://maven.pkg.github.com/iterable/maven-packages/")),
+        PluginsSbt.parse(rendered) == Right(List(pinned)),
+      )
+    },
     test("parsePlugins round-trips a snapshot plugin with the resolver zipx writes for it") {
       val pinned   = Plugin("rocks.earlyeffect", "sbt-zipx", "0.15.0-SNAPSHOT")
       val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")

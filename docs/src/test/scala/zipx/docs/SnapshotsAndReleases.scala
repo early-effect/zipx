@@ -85,8 +85,9 @@ sbt zipxSnapshotPublish           # the same rows to the registry's snapshot rep
 
 Both forms publish exactly the rows a merge would (every row whose number is not released yet), skip scaladoc, and
 return the shell to a development session when they finish. The registry form checks credentials before anything
-uploads: for Central, `SONATYPE_USERNAME` / `SONATYPE_PASSWORD`, or a credentials file for `central.sonatype.com`. A
-missing token never leaves some modules published and the rest not.
+uploads: the secrets that registry declared (for Central, `SONATYPE_USERNAME` / `SONATYPE_PASSWORD`), or a credentials
+file for its host. A `file:` registry needs neither. A missing credential never leaves some modules published and the
+rest not.
 
 A build writes no `publishTo` for any of this. While zipx publishes a row, it routes the upload from
 `zipxReleaseWorkflow`'s registry; a development session keeps whatever `publishTo` the build sets. A `file:` registry
@@ -97,6 +98,10 @@ rehearses snapshots and releases entirely on one machine.
           ArtifactRegistry.MavenCentral,
           ArtifactRegistry.GitHubPackages("early-effect", "zipx"),
           ArtifactRegistry.Url("file:///tmp/zipx-repo"),
+          ArtifactRegistry.Maven(
+            "https://acme.artifactory.example/maven-snapshots",
+            "https://acme.artifactory.example/maven-releases",
+          ),
         ).map(r =>
           s"$r: snapshots -> ${r.snapshotRepository}; releases -> ${r.releaseRepository.getOrElse("localStaging, then sonaRelease")}"
         ).mkString("\n")
@@ -105,6 +110,9 @@ rehearses snapshots and releases entirely on one machine.
           routes.contains("MavenCentral: snapshots -> https://central.sonatype.com/repository/maven-snapshots/"),
           routes.contains("releases -> localStaging, then sonaRelease"),
           routes.contains("snapshots -> file:///tmp/zipx-repo/; releases -> file:///tmp/zipx-repo/"),
+          routes.contains(
+            "snapshots -> https://acme.artifactory.example/maven-snapshots/; releases -> https://acme.artifactory.example/maven-releases/"
+          ),
         )
       ),
     ),
@@ -164,13 +172,21 @@ zipxCapabilities ++= Seq(ZipxCentral.snapshots, ZipxCentral.pullRequestSnapshots
 
 | Start | Releases |
 |---|---|
-| a GitHub Release whose tag is `client/v0.3.0` (`v0.3.0` when the catalog has one row) | that row, plus its unreleased in-repo upstream rows |
-| Actions → **zipx release** → Run workflow, on the default branch | every row whose number is not on the registry; then creates the tags and GitHub Releases |
+| a GitHub Release whose tag is `client/v0.3.0` (`v0.3.0` when the catalog has one ship) | that ship, plus its unreleased in-repo upstream ships |
+| Actions → **zipx release** → Run workflow, on the default branch | the `ships` field. The form opens on `all`: every ship whose number is not on the registry. Then it creates the tags and GitHub Releases |
 
-Either way it is one sbt session and one registry deployment, however many rows it carries. A catalog with several
-rows listens only to `<row>/v*` tags, leaving a bare `v*` tag to the image and deploy jobs in `ci.yml`. With `Ship`
-rows, `ci.yml` has no publish job. The job restores the build cache and never saves one: its jars carry release
-numbers, which no PR build would hit.
+`client,libs` is those ships, plus any unreleased in-repo upstream they depend on. A name the catalog does not have
+fails before anything uploads. An empty field fails the same way: a cleared box does not mean every ship.
+
+Either way it is one sbt session and one registry deployment, however many ships it carries. The registry is whatever
+`zipxReleaseWorkflow` names: Central, GitHub Packages, Artifactory, CodeArtifact, Nexus, or any other Maven repository.
+Tagging each finished ship is a separate run, so a separate deployment. One run that carries every finished ship spends
+one deployment. A second run spends another. Central's monthly allowance is one reason that second run is expensive.
+GitHub Packages, Artifactory, and CodeArtifact make a second run waste too. A ship left out of the list stays a snapshot.
+
+A catalog with several ships listens only to `<ship>/v*` tags, leaving a bare `v*` tag to the image and deploy jobs in
+`ci.yml`. With `Ship` rows, `ci.yml` has no publish job. The job restores the build cache and never saves one: its jars
+carry release numbers, which no PR build would hit.
 """,
       exampleValue {
         ReleaseWorkflow.render(ZipxCentral.releases, config, TagScheme.of(catalog)).yaml
@@ -179,32 +195,70 @@ numbers, which no PR build would hit.
           yml.contains("- \"*/v*\""),
           !yml.contains("- v*"),
           yml.contains("workflow_dispatch"),
+          yml.contains("ships:"),
+          yml.contains("default: all"),
+          yml.contains("all, or comma-separated ship names (client, libs)"),
           yml.contains("environment: zipx-release"),
           yml.contains("cache-mode: restore"),
           !yml.contains("cache-mode: save"),
           yml.contains("sbt \"zipxRelease $ZIPX_RELEASE_REF\""),
+          yml.contains("ZIPX_RELEASE_REF=$ZIPX_SHIPS"),
+          yml.contains("ZIPX_RELEASE_REF=$GITHUB_REF"),
           yml.contains("gh release create"),
         )
       ),
     ),
     section("What a run releases")(
       md"""
-A released POM names its in-repo dependencies at their catalog numbers, so a row always releases with every unreleased
-row it depends on. A row that depends on it never rides along.
+A released POM names its in-repo dependencies at their catalog numbers, so a ship always releases with every unreleased
+ship it depends on. A ship that depends on it never rides along.
+
+`all` releases every unreleased ship. `client,libs` releases those ships and their unreleased upstreams. `tools` is not
+in that list, so it stays a snapshot. That list is still one deployment. Tagging each finished ship instead is one
+deployment per tag.
 """,
       exampleValue {
+        val tools          = Ship("tools", "0.1.0")
+        val withTools      = ShipIndex.from(List(libs, client, tools))
+        val withToolsGraph = GraphFixture(
+          List(
+            ModuleNode(ModuleId("models"), publishes = true),
+            ModuleNode(ModuleId("coreLib"), dependsOn = List("models"), publishes = true),
+            ModuleNode(ModuleId("client"), dependsOn = List("coreLib"), publishes = true),
+            ModuleNode(ModuleId("tools"), publishes = true),
+          )
+        )
+        def named(ref: String): String =
+          ReleaseRequest
+            .fromRef(ref)
+            .flatMap(ReleasePlan.plan(_, withTools, withToolsGraph, released()))
+            .fold(err => s"$ref -> refused: ${err.message}", p => s"$ref -> ${p.entries.map(_.tag).mkString(", ")}")
         List(
           run("refs/tags/client/v0.3.0", released()),
           run("refs/tags/client/v0.3.0", released(libs)),
           run("refs/tags/libs/v1.4.2", released()),
           run("refs/heads/main", released(libs)),
+          named("all"),
+          named("client,libs"),
+          named("client"),
         ).mkString("\n")
       }.assert(text =>
+        def has(prefix: String)(p: String => Boolean): Boolean =
+          text.linesIterator.find(_.startsWith(prefix)).exists(p)
         assertTrue(
           text.contains("refs/tags/client/v0.3.0 -> libs/v1.4.2, client/v0.3.0"),
           text.contains("refs/tags/client/v0.3.0 -> client/v0.3.0"),
           text.contains("refs/tags/libs/v1.4.2 -> libs/v1.4.2"),
           text.contains("refs/heads/main -> client/v0.3.0"),
+          has("all ->")(line =>
+            line.contains("libs/v1.4.2") && line.contains("client/v0.3.0") && line.contains("tools/v0.1.0")
+          ),
+          has("client,libs ->")(line =>
+            line.contains("libs/v1.4.2") && line.contains("client/v0.3.0") && !line.contains("tools")
+          ),
+          has("client ->")(line =>
+            line.contains("libs/v1.4.2") && line.contains("client/v0.3.0") && !line.contains("tools")
+          ),
         )
       ),
     ),
@@ -219,6 +273,7 @@ Nothing uploads until the plan is sound. Each refusal says what to do next.
           run("refs/tags/client/v0.3.0", released(client)),
           run("refs/heads/main", released(libs, client)),
           run("refs/heads/main", row => Left(ReleaseError.RegistryUnreachable(row, "connect timed out"))),
+          run("nope", released()),
         ).mkString("\n")
       }.assert(text =>
         assertTrue(
@@ -227,6 +282,7 @@ Nothing uploads until the plan is sound. Each refusal says what to do next.
           text.contains("""Ship("client") 0.3.0 is already released; move the row to release again"""),
           text.contains("every row's catalog number is already released"),
           text.contains("""cannot tell whether ShipGroup("libs") 1.4.2 is released: connect timed out"""),
+          text.contains("ship 'nope' is not in the catalog; this catalog releases libs, client"),
         )
       ),
     ),
@@ -242,7 +298,7 @@ While any row is a snapshot, zipx:
 
 | Where | What |
 |---|---|
-| `resolvers`, and `project/plugins.sbt` when a `Plugin` is pinned | add `central-snapshots`; nothing when no row is pinned |
+| `resolvers`, and `project/plugins.sbt` when a `Plugin` is pinned | the publish registry's snapshot repository, plus any `zipxSnapshotRegistries`; Central snapshots when the build has no release workflow; nothing when no ship is pinned |
 | each project that depends on a `-SNAPSHOT` | `forceUpdatePeriod := Some(Duration.Zero)`, so `update` re-resolves every session; other projects keep their cached `update` |
 | every `ci.yml` job | `COURSIER_TTL: 0s`, so Coursier revalidates a changing artifact instead of trusting it for 24 hours; releases stay cached forever |
 | the `test` job | a warning annotation naming the pins, without failing the run |
@@ -259,20 +315,39 @@ on `reload`, `set`, and `clean` (which `cleanFull` runs): after a republished sn
         val pin = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
         ZipxCatalog.outdated(List(pin), _ => Right(Some("0.15.1"))).map(_.map(b => s"${b.from} -> ${b.to}"))
       }.assert(promoted => assertTrue(promoted == Right(List("0.15.0-SNAPSHOT -> 0.15.1")))),
+      exampleValue {
+        val packages = ArtifactRegistry.GitHubPackages("iterable", "maven-packages")
+        List(
+          SnapshotPins.resolverLine(packages),
+          SnapshotPins.pluginsSbtLines(SnapshotPins.registries(None, Nil)).mkString("\n"),
+        ).mkString("\n")
+      }.assert(text =>
+        assertTrue(
+          text.contains(
+            """resolvers += "zipx-github-packages-iterable-maven-packages" at "https://maven.pkg.github.com/iterable/maven-packages/""""
+          ),
+          text.contains(
+            """resolvers += "central-snapshots" at "https://central.sonatype.com/repository/maven-snapshots/""""
+          ),
+        )
+      ),
     ),
     section("Setup")(
       md"""
-1. `zipxReleaseWorkflow := Some(ZipxCentral.releases)`, then `sbt zipxWorkflowGenerate`.
+1. `zipxReleaseWorkflow := Some(ZipxCentral.releases)`, or `ZipxGitHubPackages.releases` / `ZipxMaven.releases` (see
+   **Packs**), then `sbt zipxWorkflowGenerate`.
 2. Create the GitHub Environment `zipx-release` (Settings → Environments). Add required reviewers there if a release
    should wait for a human; scope the signing secrets to it if you want them nowhere else.
-3. With several rows and docs on GitHub Pages, let the `github-pages` environment deploy from tags matching `*/v*`
+3. With several ships and docs on GitHub Pages, let the `github-pages` environment deploy from tags matching `*/v*`
    (Settings → Environments → github-pages → Deployment branches and tags). A release tag's docs deploy otherwise
    fails its environment rule, even though the release itself succeeds.
-4. Release: draft a GitHub Release with the row's tag, or run **zipx release** from the Actions tab.
+4. Release: draft a GitHub Release with the ship's tag, or run **zipx release** from the Actions tab. The form opens
+   with `ships` = `all`. `client,libs` releases those ships plus unreleased in-repo upstreams, in one deployment. A
+   name the catalog does not have fails before anything uploads.
 
 A tag pushed on a commit the default branch has not reached is refused before sbt starts. A dispatch from any other
-branch does not run. The Central deployment is named for what it carries, `<organization> <row> <n>, ...`; the root
-project keeps version `0.0.0` when it is in no row, because `sonaRelease` refuses a root at `-SNAPSHOT`.
+branch does not run. A Central deployment is named for what it carries, `<organization> <ship> <n>, ...`; the root
+project keeps version `0.0.0` when it is in no ship, because `sonaRelease` refuses a root at `-SNAPSHOT`.
 """
     ),
     section("After a release")(

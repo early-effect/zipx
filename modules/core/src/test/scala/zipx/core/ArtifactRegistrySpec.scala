@@ -23,6 +23,19 @@ object ArtifactRegistrySpec extends ZIOSpecDefault:
         file.credentialHost.isEmpty,
       )
     },
+    test("a two-URL Maven registry keeps snapshots and releases apart") {
+      val maven = ArtifactRegistry.Maven(
+        "https://acme.example/maven-snapshots/",
+        "https://acme.example/maven-releases",
+      )
+      assertTrue(
+        maven.snapshotRepository == "https://acme.example/maven-snapshots/",
+        maven.releaseRepository.contains("https://acme.example/maven-releases/"),
+        maven.credentialHost.contains("acme.example"),
+        maven.publishHosts == List("acme.example"),
+        maven.metadataUrl("com.acme", "client_3").startsWith("https://acme.example/maven-releases/"),
+      )
+    },
     test("a file: registry lists an artifact's releases from its version directories, as metadata would") {
       val artifact = java.nio.file.Files.createTempDirectory("zipx-registry").resolve("models_3")
       for v <- List("1.0.0", "1.1.0") do

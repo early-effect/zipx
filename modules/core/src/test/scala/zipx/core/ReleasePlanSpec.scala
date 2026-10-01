@@ -89,6 +89,48 @@ object ReleasePlanSpec extends ZIOSpecDefault:
       test("a downstream row never rides along") {
         assertTrue(rowsOf(plan("refs/tags/libs/v1.4.2")).contains(List("libs")))
       },
+      test("all, a branch, and a cleared field are not the same request") {
+        assertTrue(
+          ReleaseRequest.fromRef("all") == Right(ReleaseRequest.AllUnreleased),
+          ReleaseRequest.fromRef("  all  ") == Right(ReleaseRequest.AllUnreleased),
+          ReleaseRequest.fromRef("client, libs") == Right(ReleaseRequest.Ships(::("client", List("libs")))),
+          ReleaseRequest.fromRef("client,client") == Right(ReleaseRequest.Ships(::("client", Nil))),
+          ReleaseRequest.fromRef(",,") == Left(ReleaseError.UnknownRef(",,")),
+          ReleaseRequest.fromRef("   ") == Left(ReleaseError.UnknownRef("   ")),
+        )
+      },
+      test("a named set releases those ships plus unreleased upstreams, and leaves an unnamed ship out") {
+        val tools     = Ship("tools", "0.1.0")
+        val withTools = ShipIndex.from(List(libs, client, tools))
+        val wider     = GraphFixture(
+          List(
+            node("models"),
+            node("modelsJS", root = "models"),
+            node("coreLib", deps = List("models")),
+            node("client", deps = List("coreLib")),
+            node("tools"),
+          )
+        )
+        def planned(ref: String, releasedRows: Set[PublishedRow] = Set.empty) =
+          ReleaseRequest
+            .fromRef(ref)
+            .flatMap(ReleasePlan.plan(_, withTools, wider, statuses(releasedRows)))
+        def ids(ref: String, releasedRows: Set[PublishedRow] = Set.empty) =
+          planned(ref, releasedRows).toOption.map(_.entries.map(_.row.identity).toSet)
+        val unknown = planned("nope")
+        assertTrue(
+          ids("client").contains(Set("libs", "client")),
+          ids("client,libs").contains(Set("libs", "client")),
+          ids("tools").contains(Set("tools")),
+          ids("all").contains(Set("libs", "client", "tools")),
+          ids("client", Set(libs)).contains(Set("client")),
+          planned("client", Set(client)) == Left(ReleaseError.AlreadyReleased(client)),
+          unknown.swap.exists {
+            case ReleaseError.UnknownShip("nope", ships) => ships.toSet == Set("libs", "client", "tools")
+            case _                                       => false
+          },
+        )
+      },
       test("a dispatch releases every unreleased row and stops when there are none") {
         assertTrue(
           rowsOf(plan("refs/heads/main")).contains(List("libs", "client")),

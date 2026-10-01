@@ -54,7 +54,7 @@ object PluginsSbt:
       case _: TypeDef | _: ValDef | _: DefDef         => true
       case _                                          => false
 
-  /** The one resolver zipx writes, while a plugin row is pinned to a snapshot. Any other stays refused. */
+  /** A resolver zipx writes while a plugin row is pinned to a snapshot. Any other stays refused. */
   /** `forceUpdatePeriod := Some(scala.concurrent.duration.Duration.Zero)`, which zipx writes beside that resolver. */
   private def isForcedUpdate(tree: Tree): Boolean =
     tree match
@@ -73,7 +73,7 @@ object PluginsSbt:
     tree match
       case InfixOp(Ident(key), Ident(op), InfixOp(Literal(repo), Ident(at), Literal(url))) =>
         key.toString == "resolvers" && op.toString == "+=" && at.toString == "at" &&
-        repo.stringValue == SnapshotPins.ResolverName && url.stringValue == SnapshotPins.CentralSnapshots
+        SnapshotPins.isOwnResolver(repo.stringValue) && url.stringValue.nonEmpty
       case _ => false
 
   private def parseAddSbtPlugin(tree: Tree)(using Context): Either[String, Plugin] =

@@ -321,10 +321,32 @@ object ZipxPlugin extends AutoPlugin:
           publishOrg,
           publishOrgName,
         )
+      def releases(
+          owner: String,
+          repo: String,
+          token: EnvValue = zipx.core.EnvValue.secret("GH_PACKAGES_TOKEN"),
+      ): ReleaseWorkflow =
+        zipx.github.ZipxGitHubPackages.releases(owner, repo, token)
       def packagesPermissions = zipx.github.ZipxGitHubPackages.packagesPermissions
       def DefaultName         = zipx.github.ZipxGitHubPackages.DefaultName
       def PublishFlagEnv      = zipx.github.ZipxGitHubPackages.PublishFlagEnv
     end ZipxGitHubPackages
+
+    object ZipxMaven:
+      def releases(
+          snapshots: String,
+          releases: String,
+          username: EnvValue,
+          password: EnvValue,
+      ): ReleaseWorkflow =
+        zipx.maven.ZipxMaven.releases(snapshots, releases, username, password)
+      def releases(
+          snapshots: String,
+          releases: String,
+          token: EnvValue,
+      ): ReleaseWorkflow =
+        zipx.maven.ZipxMaven.releases(snapshots, releases, token)
+    end ZipxMaven
 
     /** scoverage, as `zipxCoverageWorkflow := Some(Coverage.workflow(...))` or `zipxCapabilities += Coverage.once()`.
       * In `zipx-core` rather than a pack because the thing it guards against, sbt 2's `test` being `testQuick`, is a
@@ -395,6 +417,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxVersionUpdatesExtraSteps = settingKey[Seq[Step]](ZipxSettings.versionUpdatesExtraSteps.description)
     val zipxCoverageWorkflow         = settingKey[Option[CoverageWorkflow]](ZipxSettings.coverageWorkflow.description)
     val zipxReleaseWorkflow          = settingKey[Option[ReleaseWorkflow]](ZipxSettings.releaseWorkflow.description)
+    val zipxSnapshotRegistries       = settingKey[Seq[ArtifactRegistry]](ZipxSettings.snapshotRegistries.description)
     val zipxWorkflowDispatch         = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
     val zipxCiRelevant               = settingKey[Boolean](ZipxSettings.ciRelevant.description)
     val zipxPublish                  = settingKey[Option[Boolean]](ZipxSettings.publish.description)
@@ -503,6 +526,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxVersionUpdatesExtraSteps := Seq.empty,
     zipxCoverageWorkflow         := None,
     zipxReleaseWorkflow          := None,
+    zipxSnapshotRegistries       := Seq.empty,
     zipxDeployTrigger            := DeployTrigger.OnMerge,
     zipxPinFeeds                 := Seq.empty,
     zipxPinPrGate                := PinPrGate.All,
@@ -617,9 +641,15 @@ object ZipxPlugin extends AutoPlugin:
     zipxImageRefs    := Seq.empty,
     zipxImageMissing := Def.uncached { imageMissingTask.value },
     zipxDepCleanup   := Def.uncached { depCleanupTask.value },
-    resolvers ++= Option
-      .when(SnapshotPins.of(zipxVersions.value).nonEmpty)(SnapshotPins.ResolverName at SnapshotPins.CentralSnapshots)
-      .toList,
+    resolvers ++= {
+      if SnapshotPins.of(zipxVersions.value).isEmpty then Nil
+      else
+        snapshotRegistriesOf(
+          (LocalRootProject / zipxReleaseWorkflow).value,
+          (LocalRootProject / zipxSnapshotRegistries).value,
+        ).map(registry => SnapshotPins.resolverName(registry) at registry.snapshotRepository)
+    },
+    credentials ++= (LocalRootProject / zipxReleaseWorkflow).value.toList.flatMap(directCredentials),
     clean := Def.uncached {
       clean.value
       ResolutionCache.forgetIfPinned(zipxVersions.value)
@@ -1278,7 +1308,7 @@ object ZipxPlugin extends AutoPlugin:
     val plan          = orFail(
       ReleaseRequest
         .fromRef(args.mkString(" ").trim)
-        .flatMap(ReleasePlan.plan(_, catalog, graph, rowStatus(_, graph, catalog, binaries, release.registry)))
+        .flatMap(ReleasePlan.plan(_, catalog, graph, rowStatus(_, graph, catalog, binaries, release)))
         .left
         .map(_.message)
     )
@@ -1290,6 +1320,7 @@ object ZipxPlugin extends AutoPlugin:
     orFail(
       ReleasePlan.refuseSnapshots(declared.map(m => s"${m.organization}:${m.name}:${m.revision}")).left.map(_.message)
     )
+    requireCredentials(extracted, next, release)
     IO.writeLines(extracted.get(LocalRootProject / baseDirectory) / ReleaseWorkflow.TagsFile, plan.entries.map(_.tag))
     plan.entries.foreach(e => next.log.info(s"zipx: releasing ${Modver.describe(e.row)} ${e.row.version} as ${e.tag}"))
     next.log.info("zipx: this sbt session now builds every row at its catalog number")
@@ -1303,7 +1334,8 @@ object ZipxPlugin extends AutoPlugin:
           CapabilityTasks.of(publishSigned),
           List(CapabilityTasks.of(sbt.internal.librarymanagement.Publishing.sonaRelease)),
         )
-      case ArtifactRegistry.GitHubPackages(_, _) | ArtifactRegistry.Url(_) => (CapabilityTasks.of(publish), Nil)
+      case ArtifactRegistry.GitHubPackages(_, _) | ArtifactRegistry.Url(_) | ArtifactRegistry.Maven(_, _) =>
+        (CapabilityTasks.of(publish), Nil)
     val commands =
       plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, publishTask)) ++ finish
     "reload" :: commands.map(c => c.text: String) ::: next
@@ -1343,19 +1375,19 @@ object ZipxPlugin extends AutoPlugin:
         ReleaseRequest.AllUnreleased,
         catalog,
         graph,
-        rowStatus(_, graph, catalog, binaries, release.registry),
+        rowStatus(_, graph, catalog, binaries, release),
       ) match
         case Left(ReleaseError.NothingToRelease) =>
-          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release.registry))
+          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release))
           next.log.info("zipx: every row's catalog number is released; no snapshot to publish")
           next
         case Left(err)   => sys.error(s"zipx: ${err.message}")
         case Right(plan) =>
-          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release.registry))
+          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release))
           val (task, destination) = target match
             case SnapshotTarget.Local    => (publishLocal, "the local ivy repository")
             case SnapshotTarget.Registry =>
-              requireCredentials(extracted, next, release.registry)
+              requireCredentials(extracted, next, release)
               (publish, release.registry.snapshotRepository)
           plan.entries.foreach(e =>
             next.log.info(
@@ -1376,12 +1408,12 @@ object ZipxPlugin extends AutoPlugin:
       graph: ModuleGraph,
       catalog: ShipIndex,
       binaries: Map[ModuleId, List[(String, Gav)]],
-      registry: ArtifactRegistry,
+      release: ReleaseWorkflow,
   ): List[(PublishedRow, ReleaseDrift)] =
     val root = extracted.get(LocalRootProject / baseDirectory)
     val tags = TagScheme.of(catalog)
     catalog.byIdentity.values.toList
-      .filter(row => rowStatus(row, graph, catalog, binaries, registry) == Right(RowStatus.Released))
+      .filter(row => rowStatus(row, graph, catalog, binaries, release) == Right(RowStatus.Released))
       .sortBy(Modver.describe)
       .map(row => row -> releaseDrift(root, graph, catalog, row, tags.tag(row)))
   end releasedDrift
@@ -1414,7 +1446,7 @@ object ZipxPlugin extends AutoPlugin:
     val graph     = buildGraph.value
     val release   = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
     val catalog   = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
-    val drift     = releasedDrift(extracted, graph, catalog, liveBinaries(extracted, graph, catalog), release.registry)
+    val drift     = releasedDrift(extracted, graph, catalog, liveBinaries(extracted, graph, catalog), release)
     warnReleasedRowsWithChanges(st, drift)
     drift.collect { case (row, ReleaseDrift.Changed(tag)) => s"${Modver.describe(row)} ${row.version} since $tag" }
   }
@@ -1453,21 +1485,51 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   /** Fails before any upload, so a missing token never leaves some modules published and the rest not. */
-  private def requireCredentials(extracted: Extracted, st: State, registry: ArtifactRegistry): Unit =
-    registry.credentialHost.foreach { host =>
-      val (_, declared) = extracted.runTask(LocalRootProject / credentials, st)
-      if sbt.librarymanagement.CredentialUtils.forHost(declared, host).isEmpty then
-        sys.error(
-          s"zipx: no credentials for $host. Set SONATYPE_USERNAME and SONATYPE_PASSWORD, or add a credentials file for $host."
-        )
+  private def requireCredentials(extracted: Extracted, st: State, release: ReleaseWorkflow): Unit =
+    val (_, declared) = extracted.runTask(LocalRootProject / credentials, st)
+    release.registry.publishHosts.foreach { host =>
+      val fromFile = sbt.librarymanagement.CredentialUtils.forHost(declared, host).nonEmpty
+      if !fromFile && !release.credentials.supplied(sys.env) then
+        val named = release.credentials.described
+        val hint  =
+          if named.isEmpty then s"Add a credentials file for $host."
+          else s"Set ${named.mkString(" and ")}, or add a credentials file for $host."
+        sys.error(s"zipx: no credentials for $host. $hint")
     }
+  end requireCredentials
+
+  /** sbt credentials from the registry's declared env, present only when those vars are set. A credentials file the
+    * build already has stays ahead of these.
+    */
+  private def directCredentials(release: ReleaseWorkflow): List[Credentials] =
+    val realm = release.registry match
+      case ArtifactRegistry.GitHubPackages(_, _) => "GitHub Package Registry"
+      case ArtifactRegistry.MavenCentral         => "central.sonatype.com"
+      case _                                     => release.registry.credentialHost.getOrElse("zipx")
+    release.registry.publishHosts.flatMap { host =>
+      release.credentials match
+        case RegistryCredentials.Anonymous                => Nil
+        case RegistryCredentials.UserPassword(user, pass) =>
+          (RegistryCredentials.read(user, sys.env), RegistryCredentials.read(pass, sys.env)) match
+            case (Some(u), Some(p)) => List(Credentials(realm, host, u, p))
+            case _                  => Nil
+        case RegistryCredentials.Bearer(token) =>
+          RegistryCredentials.read(token, sys.env).toList.map(value => Credentials(realm, host, "token", value))
+    }
+  end directCredentials
+
+  private def snapshotRegistriesOf(
+      release: Option[ReleaseWorkflow],
+      extra: Seq[ArtifactRegistry],
+  ): List[ArtifactRegistry] =
+    SnapshotPins.registries(release.map(_.registry), extra)
 
   private def rowStatus(
       row: PublishedRow,
       graph: ModuleGraph,
       catalog: ShipIndex,
       binaries: Map[ModuleId, List[(String, Gav)]],
-      registry: ArtifactRegistry,
+      release: ReleaseWorkflow,
   ): Either[ReleaseError, RowStatus] =
     val gavs = graph.nodes.filter(n => catalog.rowFor(n.matrixRoot).contains(row)).flatMap { node =>
       binaries.getOrElse(node.id, Nil).map(_._2)
@@ -1475,7 +1537,7 @@ object ZipxPlugin extends AutoPlugin:
     gavs
       .foldLeft[Either[ReleaseError, List[(Gav, RegistryStatus)]]](Right(Nil)) { (acc, gav) =>
         acc.flatMap { seen =>
-          lookupGav(registry, gav).map(s => seen :+ (gav -> s)).left.map(ReleaseError.RegistryUnreachable(row, _))
+          lookupGav(release, gav).map(s => seen :+ (gav -> s)).left.map(ReleaseError.RegistryUnreachable(row, _))
         }
       }
       .map(RowStatus.of)
@@ -1818,12 +1880,16 @@ object ZipxPlugin extends AutoPlugin:
     }
 
   private def syncCatalogFiles(extracted: Extracted, root: File, log: Logger, write: Boolean): Unit =
-    val coords  = readBuildSetting(extracted, zipxVersions, Seq.empty)
-    val sbtVer  = readBuildSetting(extracted, zipxSbt, None)
-    val plugins = ZipxCatalog.plugins(coords)
-    val self    = loadedSelfPlugins(extracted, coords.nonEmpty)
+    val coords     = readBuildSetting(extracted, zipxVersions, Seq.empty)
+    val sbtVer     = readBuildSetting(extracted, zipxSbt, None)
+    val plugins    = ZipxCatalog.plugins(coords)
+    val self       = loadedSelfPlugins(extracted, coords.nonEmpty)
+    val registries = snapshotRegistriesOf(
+      readBuildSetting(extracted, zipxReleaseWorkflow, None),
+      readBuildSetting(extracted, zipxSnapshotRegistries, Seq.empty),
+    )
     if plugins.nonEmpty || self.nonEmpty then
-      val expected = ZipxCatalog.renderPlugins(plugins, self)
+      val expected = ZipxCatalog.renderPlugins(plugins, self, registries)
       val file     = root / ZipxCatalog.PluginsPath
       if write then
         IO.write(file, expected)
@@ -1835,7 +1901,8 @@ object ZipxPlugin extends AutoPlugin:
           .checkPlugins(file.getPath, zipx.syntax.PluginsSbt.parse(actual), inventory)
           .left
           .foreach(sys.error)
-        if SnapshotPins.of(inventory).nonEmpty && !SnapshotPins.pluginsSbtLines.forall(actual.linesIterator.contains)
+        if SnapshotPins.of(inventory).nonEmpty &&
+          !SnapshotPins.pluginsSbtLines(registries).forall(actual.linesIterator.contains)
         then
           sys.error(
             s"zipx: ${file.getPath} pins a snapshot plugin but lacks the snapshot resolver. Run 'sbt zipxWorkflowGenerate'."
@@ -2476,18 +2543,18 @@ object ZipxPlugin extends AutoPlugin:
   ): Either[String, ModverReport] =
     val baseSha = sys.env.get(ModverCheck.BaseShaEnv).filter(_.nonEmpty).getOrElse("HEAD^")
     for
-      registry <- releaseWorkflow(extracted).map(_.registry)
+      release  <- releaseWorkflow(extracted)
       index    <- Modver.membership(graph, ships)
       files    <- gitDiffNames(root, baseSha).toRight(s"could not diff changed files against '$baseSha'")
       lifted   <- Modver.liftedBumpSet(graph, index, Some(files))
-      released <- lastReleases(extracted, graph, index, registry)
+      released <- lastReleases(extracted, graph, index, release)
       kinds    <- Modver.minBumps(
         lifted,
         index,
         graph,
         released,
         schemeOf = id => versionSchemeOf(extracted, id),
-        probeOf = id => probeMember(extracted, graph, released, registry, id, st),
+        probeOf = id => probeMember(extracted, graph, released, release, id, st),
       )
       mimaRan = kinds.keySet.filter { ref =>
         index.byIdentity.get(ref).exists { row =>
@@ -2502,7 +2569,7 @@ object ZipxPlugin extends AutoPlugin:
   end writeModverReport
 
   private val NoReleaseWorkflow =
-    "Ship rows release from zipx-release.yml: set zipxReleaseWorkflow := Some(ZipxCentral.releases), or a ReleaseWorkflow for your registry"
+    "Ship rows release from zipx-release.yml: set zipxReleaseWorkflow := Some(ZipxCentral.releases)"
 
   private def releaseWorkflow(extracted: Extracted): Either[String, ReleaseWorkflow] =
     readBuildSetting(extracted, zipxReleaseWorkflow, None).toRight(NoReleaseWorkflow)
@@ -2511,9 +2578,10 @@ object ZipxPlugin extends AutoPlugin:
       extracted: Extracted,
       graph: ModuleGraph,
       catalog: ShipIndex,
-      registry: ArtifactRegistry,
+      release: ReleaseWorkflow,
   ): Either[String, ShipIndex] =
     val binaries = liveBinaries(extracted, graph, catalog)
+    val registry = release.registry
     catalog.byIdentity.values.toList
       .foldLeft[Either[String, List[PublishedRow]]](Right(Nil)) { (acc, row) =>
         acc.flatMap { found =>
@@ -2521,7 +2589,7 @@ object ZipxPlugin extends AutoPlugin:
             case None           => Right(found)
             case Some((_, gav)) =>
               val url = registry.metadataUrl(gav.organization, gav.artifact)
-              HttpLookup.get(url, headers = registryHeaders(registry)) match
+              HttpLookup.get(url, headers = registryHeaders(release)) match
                 case Left(err)                       => Left(s"$url: $err")
                 case Right(res) if res.status == 200 =>
                   Right(found ++ MavenMetadata.latestRelease(res.body).map(row.at))
@@ -2532,13 +2600,27 @@ object ZipxPlugin extends AutoPlugin:
       .map(ShipIndex.from)
   end lastReleases
 
-  private def registryHeaders(registry: ArtifactRegistry): Map[String, String] =
-    if registry.usesGithubToken then
-      sys.env.get("GITHUB_TOKEN").filter(_.nonEmpty).map(t => Map("Authorization" -> s"Bearer $t")).getOrElse(Map.empty)
-    else Map.empty
+  /** Central's public metadata needs no auth. A private registry sends the credentials the constructor declared. */
+  private def registryHeaders(release: ReleaseWorkflow): Map[String, String] =
+    if release.registry == ArtifactRegistry.MavenCentral then Map.empty
+    else
+      release.credentials match
+        case RegistryCredentials.Anonymous     => Map.empty
+        case RegistryCredentials.Bearer(token) =>
+          RegistryCredentials
+            .read(token, sys.env)
+            .map(value => Map("Authorization" -> s"Bearer $value"))
+            .getOrElse(Map.empty)
+        case RegistryCredentials.UserPassword(user, pass) =>
+          (RegistryCredentials.read(user, sys.env), RegistryCredentials.read(pass, sys.env)) match
+            case (Some(u), Some(p)) =>
+              val raw = java.util.Base64.getEncoder
+                .encodeToString(s"$u:$p".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+              Map("Authorization" -> s"Basic $raw")
+            case _ => Map.empty
 
-  private def lookupGav(registry: ArtifactRegistry, gav: Gav): Either[String, RegistryStatus] =
-    HttpLookup.get(registry.pomUrl(gav), headers = registryHeaders(registry)) match
+  private def lookupGav(release: ReleaseWorkflow, gav: Gav): Either[String, RegistryStatus] =
+    HttpLookup.get(release.registry.pomUrl(gav), headers = registryHeaders(release)) match
       case Left(err)  => Left(err)
       case Right(res) => Modver.registryStatus(res.status)
 
@@ -2578,7 +2660,7 @@ object ZipxPlugin extends AutoPlugin:
       extracted: Extracted,
       graph: ModuleGraph,
       released: ShipIndex,
-      registry: ArtifactRegistry,
+      release: ReleaseWorkflow,
       id: ModuleId,
       st: State,
   ): Either[String, MemberProbe] =
@@ -2591,7 +2673,7 @@ object ZipxPlugin extends AutoPlugin:
           case Some(ref) =>
             extracted.runTask(ref / Compile / compile, st)
             val classes = extracted.get(ref / Compile / classDirectory)
-            releasedJar(extracted, ref, registry, row.version).map {
+            releasedJar(extracted, ref, release, row.version).map {
               case None      => MemberProbe.FirstPublish
               case Some(old) =>
                 val lib = new com.typesafe.tools.mima.lib.MiMaLib(Nil)
@@ -2602,7 +2684,7 @@ object ZipxPlugin extends AutoPlugin:
   private def releasedJar(
       extracted: Extracted,
       ref: ProjectRef,
-      registry: ArtifactRegistry,
+      release: ReleaseWorkflow,
       version: ReleaseVersion,
   ): Either[String, Option[File]] =
     val module    = extracted.get(ref / projectID)
@@ -2613,7 +2695,7 @@ object ZipxPlugin extends AutoPlugin:
     val dest      =
       extracted.get(LocalRootProject / baseDirectory) / "target" / "zipx-mima" / s"${gav.artifact}-$version.jar"
     dest.getParentFile.mkdirs()
-    download(registry.jarUrl(gav), registryHeaders(registry), dest)
+    download(release.registry.jarUrl(gav), registryHeaders(release), dest)
   end releasedJar
 
   /** `Right(None)` when the registry answers that the artifact is not there: a member absent from that release. */

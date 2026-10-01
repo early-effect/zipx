@@ -10,6 +10,7 @@ import zipx.core.EnvValue.secret
 import zipx.docs.DocsFixtures.*
 import zipx.docs.DocsRender.yaml
 import zipx.github.ZipxGitHubPackages
+import zipx.maven.ZipxMaven
 import zipx.specular.ZipxDocs
 import zio.test.*
 
@@ -39,7 +40,7 @@ flowchart TD
 
 Amber is the knob (`zipxCapabilities += …`). Each green pack is a paved Publish/docs capability that lands in its
 destination; you only name secrets in code, values stay in GitHub. `Ship` rows release from `zipx-release.yml`
-instead; see **ZipxCentral.releases** below.
+instead; see **Release workflows** below.
 """,
     section("ZipxCentral")(
       md"""
@@ -61,16 +62,35 @@ zipxCapabilities += ZipxCentral.release.plusExtraSteps(publishCleanFull)
         )
       ),
     ),
-    section("ZipxCentral.releases")(
+    section("Release workflows")(
       md"""
-A build with `Ship` / `ShipGroup` rows publishes from `zipx-release.yml`, never from `ci.yml`. `ZipxCentral.releases`
-is that workflow for Maven Central: the same secrets and key import as `ZipxCentral.release`, and one `sonaRelease` a
-run however many rows it carries. Full guide: **Snapshots and releases**.
+A build with `Ship` / `ShipGroup` rows publishes from `zipx-release.yml`, never from `ci.yml`. The workflow is one
+registry. These three are the same shape: a `ships` field that opens on `all`, one sbt session, one deployment.
+Signing and `sonaRelease` stay on Central. GitHub Packages and a two-URL Maven repository `publish` unsigned. How a
+run chooses ships, and why one run is one deployment: **Snapshots and releases**.
 
 ```scala
 zipxReleaseWorkflow := Some(ZipxCentral.releases)
 zipxCapabilities += ZipxCentral.snapshots   // each merge: unreleased rows at <row>-SNAPSHOT, unsigned
+
+zipxReleaseWorkflow := Some(
+  ZipxGitHubPackages.releases("iterable", "maven-packages", token = secret"GH_PACKAGES_TOKEN")
+)
+
+zipxReleaseWorkflow := Some(
+  ZipxMaven.releases(
+    snapshots = "https://acme.artifactory.example/maven-snapshots",
+    releases  = "https://acme.artifactory.example/maven-releases",
+    username  = secret"MAVEN_USERNAME",
+    password  = secret"MAVEN_PASSWORD",
+  )
+)
 ```
+
+A bearer token is the other Maven constructor:
+`ZipxMaven.releases(snapshots, releases, token = secret"CODEARTIFACT_TOKEN")`. A fixed username such as CodeArtifact's
+`aws` is `EnvValue.plain("aws")` on the username/password constructor. Minting that token is a workflow step the build
+adds, the same way Central imports a signing key. The registry does not learn AWS.
 """,
       exampleValue {
         ReleaseWorkflow.render(ZipxCentral.releases, config, TagScheme.PerRow).yaml
@@ -79,6 +99,52 @@ zipxCapabilities += ZipxCentral.snapshots   // each merge: unreleased rows at <r
           yml.contains("Import signing key"),
           yml.contains("SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}"),
           yml.contains("sbt \"zipxRelease $ZIPX_RELEASE_REF\""),
+          yml.contains("ships:"),
+          yml.contains("default: all"),
+        )
+      ),
+      exampleValue {
+        ReleaseWorkflow
+          .render(
+            ZipxGitHubPackages.releases("iterable", "maven-packages", token = secret"GH_PACKAGES_TOKEN"),
+            config,
+            TagScheme.PerRow,
+          )
+          .yaml
+      }.assert(yml =>
+        assertTrue(
+          yml.contains("ships:"),
+          yml.contains("default: all"),
+          yml.contains("GH_PACKAGES_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}"),
+          yml.contains("packages: write"),
+          !yml.contains("sonaRelease"),
+          !yml.contains("PGP_"),
+          !yml.contains("Import signing key"),
+        )
+      ),
+      exampleValue {
+        ReleaseWorkflow
+          .render(
+            ZipxMaven.releases(
+              snapshots = "https://acme.artifactory.example/maven-snapshots",
+              releases = "https://acme.artifactory.example/maven-releases",
+              username = secret"MAVEN_USERNAME",
+              password = secret"MAVEN_PASSWORD",
+            ),
+            config,
+            TagScheme.PerRow,
+          )
+          .yaml
+      }.assert(yml =>
+        assertTrue(
+          yml.contains("ships:"),
+          yml.contains("default: all"),
+          yml.contains("MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}"),
+          yml.contains("MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}"),
+          !yml.contains("sonaRelease"),
+          !yml.contains("PGP_"),
+          !yml.contains("Import signing key"),
+          !yml.contains("packages: write"),
         )
       ),
     ),
@@ -92,9 +158,9 @@ zipxCapabilities ++= Seq(
 // Shared registry PAT: ZipxGitHubPackages.sharedRegistry(token = secret"GH_PACKAGES_TOKEN")
 ```
 
-Thin CI wiring (`packages: write` + token + `PUBLISH_GITHUB_PACKAGES=true`). **sbt** owns `publishTo` / Credentials,
-except for `Ship` rows, whose publishes zipx routes from `zipxReleaseWorkflow`'s registry.
-See **Job conditions** for fork gates and multi-publish recipes.
+Thin CI wiring (`packages: write` + token + `PUBLISH_GITHUB_PACKAGES=true`) for a build that publishes without ships.
+`Ship` rows use `ZipxGitHubPackages.releases` in **Release workflows** instead. **sbt** owns `publishTo` / Credentials
+on this capability path. See **Job conditions** for fork gates and multi-publish recipes.
 """,
       exampleValue {
         DocsRender.job("github-packages")(

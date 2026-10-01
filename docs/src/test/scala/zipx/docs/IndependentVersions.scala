@@ -307,7 +307,7 @@ flowchart TD
 
 | What | Signal | Where |
 |---|---|---|
-| Library coordinates | a GitHub Release tagged `<row>/v<n>`, or a dispatch | `zipx-release.yml` (`zipxReleaseWorkflow`) |
+| Library coordinates | a GitHub Release tagged `<row>/v<n>`, or a dispatch (`ships`, default `all`) | `zipx-release.yml` (`zipxReleaseWorkflow`) |
 | Docker image / deploy | a **human** `v*` tag | `ci.yml` (`ZipxAws.dockerPublishAll`, deploy) |
 
 With rows, `ci.yml` has no library publish job, and generate refuses one. A library-only release does not push an
