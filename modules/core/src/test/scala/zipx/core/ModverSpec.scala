@@ -343,6 +343,19 @@ object ModverSpec extends ZIOSpecDefault:
       },
     ),
     suite("propagate")(
+      test("by default a published row whose in-repo upstream breaks must take the same bump") {
+        val policy = ZipxSettings.modverPropagate.default match
+          case SettingDefault.Value(value, _) => Some(value)
+          case _                              => None
+        val seed = BumpSet(Map(libsRef -> BumpKind.Minor))
+        assertTrue(
+          policy.contains(ModverPropagate.MatchBump),
+          policy.exists(p =>
+            Modver.expand(seed, graph, index, p).asMap.get(ShipRef.One(mid("client"))).contains(BumpKind.Minor)
+          ),
+          Modver.expand(seed, graph, index, ModverPropagate.Never).asMap.get(ShipRef.One(mid("client"))).isEmpty,
+        )
+      },
       test("Never is the lifted set even when reverse-deps exist") {
         check(gCovered) { (g, rows) =>
           val built = ShipIndex.from(rows)

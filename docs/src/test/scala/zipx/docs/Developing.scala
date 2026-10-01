@@ -66,7 +66,7 @@ zipx itself is one row, `ShipGroup("zipx", "0.15.0")(...)` over every published 
 `0.15.0-SNAPSHOT` and a republish overwrites. `plugin/scripted` and the example check always see the tree you are on;
 there is no release-tag trap.
 
-To try an unmerged zipx on a real repo (ascent, say), run `sbt zipxSnapshotPublish local` here, pin
+To try an unmerged zipx on another repo, run `sbt zipxSnapshotPublish local` here, pin
 `Plugin("rocks.earlyeffect", "sbt-zipx", "0.15.0-SNAPSHOT")` in that repo's catalog, and run its
 `zipxWorkflowGenerate` then `reload`. `sbt zipxSnapshotPublish` puts the same bits on Central snapshots, for a
 teammate or that repo's CI. See **Snapshots and releases**. A merge publishes `0.15.0-SNAPSHOT` to Central snapshots, a push to a PR labeled

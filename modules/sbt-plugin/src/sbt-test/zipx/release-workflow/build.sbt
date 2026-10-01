@@ -19,17 +19,18 @@ ThisBuild / versionScheme := Some("early-semver")
 
 // Built against the released client, as a library from another repo would be. early-semver compares 0.y.0 and x.0.0
 // exactly, -SNAPSHOT included, so sbt alone rejects the in-repo 0.3.0-SNAPSHOT against it.
+def usesClient = Seq(
+  libraryDependencies += "com.example.ext" %% "uses-client" % "1.0.0",
+  resolvers += "fixture" at released.toURI.toString,
+)
+
+// Does not publish, like a docs site: its own build is the proof, so a conflict is a warning.
 lazy val consumer = project
   .dependsOn(client)
-  .settings(
-    publish / skip := true,
-    if (file("ext").exists)
-      Seq(
-        libraryDependencies += "com.example.ext" %% "uses-client" % "1.0.0",
-        resolvers += "fixture" at released.toURI.toString,
-      )
-    else Nil,
-  )
+  .settings(publish / skip := true, if (file("ext").exists) usesClient else Nil)
+
+// Publishes, so a conflict would ship in its POM and fails.
+lazy val downstream = project.dependsOn(client).settings(if (file("ext").exists) usesClient else Nil)
 
 lazy val root = (project in file(".")).aggregate(models, coreLib, client).settings(publish / skip := true)
 

@@ -274,9 +274,9 @@ object ZipxSettings:
   val modverPropagate: SettingDef[ModverPropagate] =
     SettingDef.setting(
       SettingName("zipxModverPropagate"),
-      ModverPropagate.Never,
+      ModverPropagate.MatchBump,
       SettingPurpose(
-        "Reverse-dep bump policy across Ship groups. Never (default) is the lifted+MiMa set; PatchPublished patches published reverse-deps; MatchBump floors them at the triggering kind; Custom is the whole policy."
+        "Reverse-dep bump policy across Ship rows. MatchBump (default) floors each published reverse-dep at the triggering kind, so a row re-releases when an upstream row it depends on breaks; PatchPublished patches them; Never is only the lifted+MiMa set; Custom is the whole policy."
       ),
       Build,
     )

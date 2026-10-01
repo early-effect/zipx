@@ -510,7 +510,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxVersions                 := Seq.empty,
     zipxPins                     := Seq.empty,
     zipxShips                    := Seq.empty,
-    zipxModverPropagate          := ModverPropagate.Never,
+    zipxModverPropagate          := ModverPropagate.MatchBump,
     zipxSbt                      := None,
     zipxScala                    := None,
     zipxCheckDeps                := false,
@@ -642,7 +642,11 @@ object ZipxPlugin extends AutoPlugin:
         OwnEvictions.incompatible(full, own, scalaModuleInfo.value) match
           case Nil      => ()
           case problems =>
-            sys.error(("zipx: the build's own artifacts conflict with a release:" :: problems).mkString("\n  * "))
+            val message = ("zipx: the build's own artifacts conflict with a release:" :: problems).mkString("\n  * ")
+            // A project that publishes would ship the mix in its POM; one that does not is proven by its own build.
+            if (publish / skip).value then
+              streams.value.log.warn(s"$message\n  (a warning: this project does not publish)")
+            else sys.error(message)
       report
     },
     forceUpdatePeriod := {
@@ -2490,7 +2494,7 @@ object ZipxPlugin extends AutoPlugin:
           row.memberRoots.exists(id => !Modver.isJsOnly(graph, id) && released.rowFor(id).isDefined)
         }
       }
-      policy = readBuildSetting(extracted, zipxModverPropagate, ModverPropagate.Never)
+      policy = readBuildSetting(extracted, zipxModverPropagate, ModverPropagate.MatchBump)
       bumps  = Modver.expand(BumpSet(kinds), graph, index, policy)
       report <- Modver.report(index, released, bumps.asMap, mimaRan)
     yield report

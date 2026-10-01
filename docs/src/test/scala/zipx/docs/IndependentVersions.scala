@@ -331,8 +331,17 @@ zipxCapabilities += ZipxAws.dockerPublishAll(Registry.destinations) // still OnR
     ),
     section("Propagate")(
       md"""
-Default is `Never`: only dirty published roots, lifted through groups. Built-ins walk **published reverse-deps across
-groups** after MiMa kinds exist. Intra-group `dependsOn` (models → coreLib inside `libs`) is not a propagate edge.
+Propagation answers one question: when a row moves, which of the rows built on it must move too? Default is
+`MatchBump`. A published row whose in-repo upstream takes a bump must take at least the same kind, so `modver-check`
+fails the PR until it does. Built-ins walk **published reverse-deps across rows** after MiMa kinds exist. Intra-group
+`dependsOn` (models → coreLib inside `libs`) is not a propagate edge: a group already moves as one.
+
+The reason is what a release carries. A row's POM names its in-repo dependencies at the numbers they had when it
+released. Say `libs` breaks and releases 1.5.0 while `client` stays at its released 0.3.0: `client` 0.3.0 on the
+registry still names `libs` 1.4.2. A consumer that takes the new `libs` and any `client` now resolves a mix sbt
+rejects (`libs 1.5.0 is selected over 1.4.2`), and nothing in *this* repo fails, because in-repo builds always use the
+current `libs`. Only a consumer finds out, one release later. `MatchBump` makes the PR that breaks `libs` also move
+`client`, so one release carries both and every released POM agrees.
 
 ```mermaid
 flowchart LR
@@ -345,22 +354,25 @@ flowchart LR
   subgraph alone["Ship client"]
     Client
   end
-  CoreLib -.->|propagate edge · Never ignores it| Client
+  CoreLib -.->|propagate edge · MatchBump moves client| Client
   class Models,CoreLib,Client happy
 ```
 
 ```scala
-zipxModverPropagate := ModverPropagate.Never            // default
+zipxModverPropagate := ModverPropagate.MatchBump        // default: at least the triggering kind
 zipxModverPropagate := ModverPropagate.PatchPublished   // patch published reverse-deps
-zipxModverPropagate := ModverPropagate.MatchBump        // at least the triggering kind
+zipxModverPropagate := ModverPropagate.Never            // opt out: only the rows the diff touches
 zipxModverPropagate := ModverPropagate.custom { (kinds, graph, ships) => kinds }
 ```
 
-| Policy | What a dirty `libs` does to `client` |
-|---|---|
-| `Never` | nothing |
-| `PatchPublished` | patch, if `client` publishes |
-| `MatchBump` | at least the `libs` kind (a binary break floors `client` at major too) |
+| Policy | What a dirty `libs` does to `client` | Released POMs afterwards |
+|---|---|---|
+| `MatchBump` (default) | at least the `libs` kind (a binary break floors `client` at major too) | agree |
+| `PatchPublished` | patch, if `client` publishes | agree, but a patch may carry a break |
+| `Never` | nothing | `client` keeps naming the old `libs` |
+
+Propagation acts when a PR moves the upstream row. A repo whose rows are already out of step (released under `Never`,
+say) catches up with one PR that moves each stale dependent itself; after that, `MatchBump` keeps them in step.
 """,
       exampleValue {
         val kinds                    = BumpSet(Map(ShipRef.Group(libsRow.name) -> BumpKind.Minor))
