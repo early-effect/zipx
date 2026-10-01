@@ -43,6 +43,16 @@ object HttpLookup:
   private val client: HttpClient =
     HttpClient.newBuilder().connectTimeout(ConnectTimeout).build()
 
+  /** Where a 3xx GET keeps the bytes. GitHub Packages answers 302 for an authenticated jar and puts the artifact at
+    * `Location`, a pre-signed URL on another host. `None` means this status is the answer, including a 302 with no
+    * location.
+    */
+  def redirectTarget(status: Int, location: Option[String], requestUrl: String): Option[String] =
+    status match
+      case 301 | 302 | 303 | 307 | 308 =>
+        location.filter(_.nonEmpty).map(loc => URI.create(requestUrl).resolve(loc).toString)
+      case _ => None
+
   def get(
       url: String,
       headers: Map[String, String] = Map.empty,

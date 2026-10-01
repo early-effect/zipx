@@ -2710,13 +2710,35 @@ object ZipxPlugin extends AutoPlugin:
       else Right(None)
     else
       try
-        val client  = java.net.http.HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(10)).build()
-        val request = headers
-          .foldLeft(java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).GET()) { case (b, (k, v)) =>
-            b.header(k, v)
-          }
+        // The authenticated jar URL is a 302. Follow that one hop without the registry Authorization: the body is a
+        // pre-signed URL on another host.
+        val client = java.net.http.HttpClient
+          .newBuilder()
+          .followRedirects(java.net.http.HttpClient.Redirect.NEVER)
+          .connectTimeout(java.time.Duration.ofSeconds(10))
           .build()
-        val res    = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofFile(dest.toPath))
+        def fetch(target: String, sendHeaders: Boolean) =
+          val builder = java.net.http.HttpRequest
+            .newBuilder(java.net.URI.create(target))
+            .timeout(java.time.Duration.ofSeconds(20))
+            .GET()
+          if sendHeaders then headers.foreach { (k, v) => builder.header(k, v) }
+          client.send(
+            builder.build(),
+            java.net.http.HttpResponse.BodyHandlers.ofFile(
+              dest.toPath,
+              java.nio.file.StandardOpenOption.CREATE,
+              java.nio.file.StandardOpenOption.WRITE,
+              java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+            ),
+          )
+        end fetch
+        val first    = fetch(url, sendHeaders = true)
+        val raw      = first.headers().firstValue("location")
+        val location = if raw.isEmpty then None else Some(raw.get())
+        val res      = HttpLookup.redirectTarget(first.statusCode(), location, url) match
+          case Some(next) => fetch(next, sendHeaders = false)
+          case None       => first
         val result = HttpLookupResult(res.statusCode(), "", Map.empty)
         if result.status == 200 then Right(Some(dest))
         else
