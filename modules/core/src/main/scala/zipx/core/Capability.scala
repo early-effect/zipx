@@ -351,6 +351,14 @@ final case class Capability(
   def withPermissions(permissions: Map[String, String]): Capability =
     copy(permissions = permissions)
 
+  /** A job that sets `permissions` loses every scope it does not name. GitHub Packages then answers 401 for
+    * `maven-metadata.xml`, including a coordinate that was never published, so the lookup cannot tell an unpublished
+    * row from a refused token. Grant `packages: read` for that registry only. Other registries are unchanged.
+    */
+  def readingRelease(registry: ArtifactRegistry): Capability =
+    if registry.usesGithubToken then copy(permissions = permissions + ("packages" -> "read"))
+    else this
+
   /** Destinations that share **one** job: [[TargetFanOut.SharedJob]] plus the targets, set together because setting
     * either alone is the mistake. The shape for registries; see [[TargetFanOut]].
     */

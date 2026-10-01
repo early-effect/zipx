@@ -649,6 +649,33 @@ object ModverSpec extends ZIOSpecDefault:
           check.exists(_.env.contains(ModverCheck.BaseShaEnv)),
         )
       },
+      test("GitHub Packages metadata reads keep the declared scopes and add packages read") {
+        val packages = ArtifactRegistry.GitHubPackages("early-effect", "zipx-ci-lab")
+        val cfg      = PlanConfig(skipMergedPrPush = false, verifyCleanLabel = None, affected = AffectedMode.Always)
+        val check    = Capability.modverCheck().readingRelease(packages)
+        val suggest  = Capability.modverSuggest().readingRelease(packages)
+        val job      = Planner.plan(graph, List(check), cfg).jobs.get("modver-check")
+        assertTrue(
+          job.exists(_.permissions.get("contents").contains("read")),
+          job.exists(_.permissions.get("packages").contains("read")),
+          suggest.permissions.get("contents").contains("read"),
+          suggest.permissions.get("pull-requests").contains("write"),
+          suggest.permissions.get("packages").contains("read"),
+        )
+      },
+      test("a registry other than GitHub Packages does not take a packages scope") {
+        val check = Capability.modverCheck().readingRelease(ArtifactRegistry.MavenCentral)
+        val maven = Capability
+          .modverCheck()
+          .readingRelease(
+            ArtifactRegistry.Maven("https://snaps.example/maven", "https://rels.example/maven")
+          )
+        assertTrue(
+          !check.permissions.contains("packages"),
+          check.permissions.get("contents").contains("read"),
+          !maven.permissions.contains("packages"),
+        )
+      },
     ),
   )
 end ModverSpec
