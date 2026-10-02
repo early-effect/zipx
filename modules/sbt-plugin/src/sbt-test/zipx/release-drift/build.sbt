@@ -7,13 +7,46 @@ LocalRootProject / zipxReleaseWorkflow :=
 
 lazy val models = project
 lazy val extra  = project.settings(if (file("v2").exists) Nil else Seq(publish / skip := true))
+lazy val side   = project
 
-lazy val root = (project in file(".")).aggregate(models, extra).settings(publish / skip := true)
+lazy val root = (project in file(".")).aggregate(models, extra, side).settings(publish / skip := true)
+
+def ivyLocalRepo: File = file(sys.props("user.home")) / ".ivy2" / "local" / "com.example.zipx.drift"
+
+val forgetIvyLocal = taskKey[Unit]("Remove this fixture's organization from the machine's ivy repository")
+forgetIvyLocal := Def.uncached(IO.delete(ivyLocalRepo))
 
 val assertDrift = taskKey[Unit]("A released row with changes since its tag is reported, naming the tag")
 assertDrift := Def.uncached {
   val drift = zipxReleaseDrift.value
-  assert(drift == Seq("""ShipGroup("libs") 1.0.0 since v1.0.0"""), drift.toString)
+  assert(drift == Seq("""ShipGroup("libs") 1.0.0 since libs/v1.0.0"""), drift.toString)
+}
+
+val assertOpenRowPublished = taskKey[Unit]("an unreleased sibling publishes, and the released row's snapshot does not")
+assertOpenRowPublished := Def.uncached {
+  val shadowed = ivyLocalRepo / "models_3" / "1.0.0-SNAPSHOT"
+  val sideJar  = ivyLocalRepo / "side_3" / "0.2.0-SNAPSHOT" / "jars" / "side_3.jar"
+  assert(!shadowed.exists, s"published a shadowed snapshot at $shadowed")
+  assert(sideJar.isFile, s"no open-row snapshot at $sideJar")
+}
+
+val assertNotShadowed = taskKey[Unit]("the released row's snapshot coordinate was not published")
+assertNotShadowed := Def.uncached {
+  val shadowed = ivyLocalRepo / "models_3" / "1.0.0-SNAPSHOT"
+  assert(!shadowed.exists, s"published a shadowed snapshot at $shadowed")
+}
+
+val assertBumped = taskKey[Unit]("no-arg zipxModverBump patches the released row and leaves the unreleased sibling")
+assertBumped := Def.uncached {
+  val src = IO.read((LocalRootProject / baseDirectory).value / "project" / "ZipxVersions.scala")
+  assert(src.contains("""ShipGroup("libs", "1.0.1")("models")"""), src)
+  assert(src.contains("""Ship("side", "0.2.0")"""), src)
+}
+
+val assertOpened = taskKey[Unit]("the bumped row publishes its new snapshot")
+assertOpened := Def.uncached {
+  val opened = ivyLocalRepo / "models_3" / "1.0.1-SNAPSHOT" / "jars" / "models_3.jar"
+  assert(opened.isFile, s"no opened snapshot at $opened")
 }
 
 val assertNoDrift = taskKey[Unit]("A row released at its number with no changes since its tag is not reported")

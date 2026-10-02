@@ -99,6 +99,18 @@ object ReleaseWorkflowSpec extends ZIOSpecDefault:
         publish.flatMap(_.run).exists(_.contains("target/zipx-release-tags.txt")),
       )
     },
+    test("the summary step names the tags file and the bump, and does not rewrite the GitHub Release body") {
+      val summary = releaseJob().toList.flatMap(_.steps).find(_.name.contains("Open the next snapshot"))
+      val body    = summary.flatMap(_.run).getOrElse("")
+      val notes   = releaseJob().toList.flatMap(_.steps).find(_.run.exists(_.contains("--generate-notes")))
+      assertTrue(
+        summary.isDefined,
+        body.contains("GITHUB_STEP_SUMMARY"),
+        body.contains("target/zipx-release-tags.txt"),
+        body.contains("sbt zipxModverBump"),
+        notes.flatMap(_.run).exists(!_.contains("zipxModverBump")),
+      )
+    },
     test("docs deploy after every release ci.yml cannot see: a dispatch, or any <row>/v* tag") {
       val bare   = ReleaseWorkflow.plan(central, config, TagScheme.Bare, Some(docs)).jobs.get("docs")
       val perRow = ReleaseWorkflow.plan(central, config, TagScheme.PerRow, Some(docs)).jobs.get("docs")

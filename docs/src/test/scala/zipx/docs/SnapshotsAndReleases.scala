@@ -205,6 +205,10 @@ carry release numbers, which no PR build would hit.
           yml.contains("ZIPX_RELEASE_REF=$ZIPX_SHIPS"),
           yml.contains("ZIPX_RELEASE_REF=$GITHUB_REF"),
           yml.contains("gh release create"),
+          yml.contains("Open the next snapshot"),
+          yml.contains("GITHUB_STEP_SUMMARY"),
+          yml.contains("target/zipx-release-tags.txt"),
+          yml.contains("sbt zipxModverBump"),
         )
       ),
     ),
@@ -352,19 +356,51 @@ project keeps version `0.0.0` when it is in no ship, because `sonaRelease` refus
     ),
     section("After a release")(
       md"""
-A row stays at its released number until a PR moves it, so between releases it builds as a `-SNAPSHOT` of a number
-that already exists. Two consequences:
+A row stays at its released number until someone moves it, so the next build is `<row>-SNAPSHOT` of a number the
+release registry already has. Maven sorts `1.0.0-SNAPSHOT` before `1.0.0`, so that snapshot is shadowed: the commits
+publish nothing a consumer can select. The registry is whatever `zipxReleaseWorkflow` names (Central, GitHub Packages,
+CodeArtifact, Artifactory, Nexus, or any other Maven release URL), read at its release root, not its snapshot
+repository. A pre-signed 302 on the POM counts as published. A 401, a missing token, or a registry that cannot be
+reached fails the publish. It is not read as "not released".
 
-- **It publishes no snapshot.** `zipxSnapshotPublish` skips a released row, since its snapshot would sort before the
-  release. When the row has changes since its release tag, that means its changes reach no one, so zipx says so
-  loudly, in the log and as a CI annotation, and `sbt zipxReleaseDrift` lists every such row. `modver-check` already
-  fails a PR that changes a released row without moving it; this covers direct pushes and local work.
+`zipxDriftGate` defaults to `Fail`:
+
+- `Compile / compile` and `Test / compile` of a module in that row do not start. The message names the row, its
+  number, and its tag, and ends with `sbt zipxModverBump`. On GitHub Actions, `Fail` emits `::error` and `Warn` emits
+  `::warning`.
+- `zipxSnapshotPublish` (including `local` and `pr`) still publishes rows that are not released, restores the session,
+  then fails.
+- `Warn` logs the same sentence, compile succeeds, and the snapshot publish of the open rows exits 0. Use it when a
+  green compile of a shadowed row is what you want.
+- `sbt zipxReleaseDrift` lists changed rows and does not fail the shell.
+- A row with no tag in this clone stays quiet at compile (a laptop without the release tag still builds). Snapshot
+  publish still refuses it when the registry says the number is released, because the clone cannot prove the tree is
+  clean.
+- An unreleased row's nightly still publishes. A docs-only push whose released rows are unchanged stays green.
+
+`sbt zipxModverBump` rewrites every released row to the next patch. A kind word (`minor`, `major`) does that for every
+released row. A ship id rewrites that one row even when it is not released. The command does not run MiMa.
+`modver-check` still floors the PR. The release job does not commit the catalog. Its last step appends the tags in
+`target/zipx-release-tags.txt` and `sbt zipxModverBump` to the Actions step summary. The GitHub Release body stays
+`--generate-notes`.
+
 - **A library built against the release meets the in-repo copy.** sbt always uses the in-repo project, and its
   eviction check reads `0.10.0-SNAPSHOT` against `0.10.0` literally; early-semver compares `0.y.0` and `x.0.0`
   exactly, tag included. zipx exempts the build's own artifacts from that check and checks them itself after `update`:
-  the row's next number against the release the library needs, under the module's own `versionScheme`. `0.10.0-SNAPSHOT`
+  the row's next number against the release the library needs, under the module's own `versionScheme`. zipx sets that
+  key to `early-semver`. A module opts into `semver-spec`, `pvp`, `strict`, or `always` by setting it. An empty value
+  fails the publish, and `semver` is rejected as ambiguous. `0.10.0-SNAPSHOT`
   over `0.10.0` resolves; `0.11.0-SNAPSHOT` over `0.10.0` is a conflict, naming both.
-"""
+""",
+      exampleValue {
+        val libs = ShipGroup("libs", "1.0.0")("models")
+        SnapshotGuard.shadowed(libs, "v1.0.0")
+      }.assert(text =>
+        assertTrue(
+          text ==
+            """ShipGroup("libs") 1.0.0 is released and has changes since v1.0.0, so 1.0.0-SNAPSHOT is shadowed and these commits publish nothing. sbt zipxModverBump"""
+        )
+      ),
     ),
     section("A conflict's severity follows what ships")(
       md"""

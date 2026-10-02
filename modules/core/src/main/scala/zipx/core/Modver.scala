@@ -275,18 +275,12 @@ object Modver:
     val rows = graph.nodes.filter(n => n.matrixRoot == root && n.publishes)
     rows.nonEmpty && rows.forall(n => (n.id: String).endsWith("JS"))
 
-  def minBumpKind(version: ReleaseVersion, scheme: String, probe: MemberProbe): BumpKind =
+  def minBumpKind(version: ReleaseVersion, scheme: LibraryVersionScheme, probe: MemberProbe): BumpKind =
     probe match
       case MemberProbe.FirstPublish => BumpKind.None
       case MemberProbe.JsOnly       => BumpKind.Patch
       case MemberProbe.Clean        => BumpKind.Patch
-      case MemberProbe.BinaryBreak  =>
-        if version.isInitialDevelopment && isEarlySemver(scheme) then BumpKind.Minor else BumpKind.Major
-
-  def isEarlySemver(scheme: String): Boolean =
-    scheme.trim.toLowerCase match
-      case "semver-spec" => false
-      case _             => true
+      case MemberProbe.BinaryBreak  => scheme.binaryBreak(version)
 
   def maxKind(kinds: Iterable[BumpKind]): BumpKind =
     val counted = kinds.filter(k => k != BumpKind.None && k != BumpKind.PreRelease)
@@ -320,7 +314,7 @@ object Modver:
       index: ShipIndex,
       graph: ModuleGraph,
       lastReleases: ShipIndex,
-      schemeOf: ModuleId => String,
+      schemeOf: ModuleId => Either[String, LibraryVersionScheme],
       probeOf: ModuleId => Either[String, MemberProbe],
   ): Either[String, Map[ShipRef, BumpKind]] =
     def probe(root: ModuleId): Either[String, MemberProbe] =
@@ -334,7 +328,9 @@ object Modver:
           case Some(row) =>
             row.memberRoots
               .foldLeft[Either[String, List[BumpKind]]](Right(Nil)) { (found, root) =>
-                found.flatMap(ks => probe(root).map(p => minBumpKind(row.version, schemeOf(root), p) :: ks))
+                found.flatMap { ks =>
+                  probe(root).flatMap(p => schemeOf(root).map(scheme => minBumpKind(row.version, scheme, p) :: ks))
+                }
               }
               .map(ks => kinds + (ref -> maxKind(ks)))
       }

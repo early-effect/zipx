@@ -3,6 +3,7 @@ package zipx.docs
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zipx.core.*
+import zio.test.*
 
 /** Settings and tasks reference (tables generated from [[ZipxSettings]]). */
 object Settings extends DocSpecSuite:
@@ -21,7 +22,20 @@ fails at load). Declared command names are checked at `zipxWorkflowGenerate`. Se
     section("Build-level")(
       md"""
 ${SettingDef.settingsTable(ZipxSettings.buildLevel)}
-"""
+
+${ZipxSettings.driftGate.description}
+""",
+      exampleValue {
+        ZipxSettings.driftGate.description: String
+      }.assert(text =>
+        assertTrue(
+          text.contains("Fail"),
+          text.contains("stops that row's compile"),
+          text.contains("fails zipxSnapshotPublish"),
+          text.contains("GitHub Packages"),
+          text.contains("CodeArtifact"),
+        )
+      ),
     ),
     section("Per-project")(
       md"""

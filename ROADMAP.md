@@ -36,7 +36,7 @@ secret"SONATYPE_PASSWORD"
 version == s"$row-SNAPSHOT"                         // every build except a release run
 
 // The human writes the number; CI checks it and never commits the catalog.
-sbt "zipxModverBump zipx minor"                     // modver-check floors it with MiMa against the last release
+sbt zipxModverBump                                  // every released row, patch; a shadowed snapshot fails
 
 // Caches key on content, so versions stay commit-stable and digests hold.
 // Deterministic YAML. sbt 2 only. testFull proves; test (testQuick) does not.

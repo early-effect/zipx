@@ -51,7 +51,7 @@ object ReleaseWorkflow:
       steps = Planner.checkoutThenSbtSetup(config, jobId, nodeVersion = None, cacheMode) ++
         List(onDefaultBranchStep) ++
         release.steps(buildContext.copy(actions = config.actions)) ++
-        List(bindRefStep, releaseStep, githubReleasesStep),
+        List(bindRefStep, releaseStep, githubReleasesStep, openCycleStep),
     )
     val packages = if release.registry.usesGithubToken then ListMap("packages" -> "write") else ListMap.empty
     Workflow(
@@ -167,6 +167,24 @@ object ReleaseWorkflow:
       .when(dispatched)
       .withEnv("GH_TOKEN", Expr.github("token"))
       .build
+
+  /** The release commit cannot contain the bump. Say so where the person who just released is looking. */
+  private val openCycleStep: Step =
+    val summary                          = Word.vq("GITHUB_STEP_SUMMARY")
+    inline def line(inline text: String) =
+      Exec("echo", Word.dquote(Word.lit(text))).appendTo(summary)
+    Step
+      .run(
+        Script.strict(
+          line("## Open the next snapshot"),
+          line("These rows are released. Further snapshots of them publish nothing until the catalog moves."),
+          Exec("cat", Word.lit("target/zipx-release-tags.txt")).appendTo(summary),
+          line("On this commit: sbt zipxModverBump"),
+        )
+      )
+      .named("Open the next snapshot")
+      .build
+  end openCycleStep
 
   private def docsJob(docs: Capability, tags: TagScheme): Option[(String, Job)] =
     val unseenByCi = tags match

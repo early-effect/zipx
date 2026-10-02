@@ -14,6 +14,7 @@
 MyVersions.settings
 organization := "com.example"
 zipxReleaseWorkflow := Some(ZipxCentral.releases)
+zipxDriftGate       := DriftGate.Fail
 
 // Build-level zipx config: plain bare settings (sbt 2.0 common settings). zipx reads these from the root project's
 // scope, so no `ThisBuild /` prefix is needed.

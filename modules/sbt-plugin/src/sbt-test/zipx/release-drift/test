@@ -3,20 +3,46 @@ $ exec git config user.email scripted@example.com
 $ exec git config user.name scripted
 $ exec git config commit.gpgsign false
 
-> zipxRelease refs/tags/v1.0.0
+> zipxRelease refs/tags/libs/v1.0.0
 > zipxSession development
 > reload
 $ exec git add .
 $ exec git commit -q -m release
-$ exec git tag v1.0.0
+$ exec git tag libs/v1.0.0
 > assertNoDrift
+
+# At the release commit the open row publishes and the released row does not.
+> forgetIvyLocal
+> zipxSnapshotPublish local
+> assertOpenRowPublished
 
 # A released row changed since its tag publishes no snapshot until its number moves.
 $ copy-file changes/Models.scala models/src/main/scala/Models.scala
 $ exec git commit -q -am change-models
 > assertDrift
+-> models/compile
+> side/compile
+> forgetIvyLocal
+-> zipxSnapshotPublish local
+> assertNotShadowed
+
+# Warn logs and lets compile and the snapshot publish succeed. The released coordinate is still not uploaded.
+> set zipxDriftGate := DriftGate.Warn
+> models/compile
+> forgetIvyLocal
+> zipxSnapshotPublish local
+> assertNotShadowed
+
+# No args patches every released row and leaves the unreleased sibling. Reload, then the new snapshot publishes.
+> zipxModverBump
+> assertBumped
+> reload
+> forgetIvyLocal
+> zipxSnapshotPublish local
+> assertOpened
 
 # A member new to a released group is its first release, not an unreadable registry.
+$ copy-file changes/ZipxVersions.v2.scala project/ZipxVersions.scala
 $ touch v2
 $ copy-file changes/Extra.scala extra/src/main/scala/Extra.scala
 > reload

@@ -49,7 +49,14 @@ object ModverSpec extends ZIOSpecDefault:
   private def bumpStatus(lastReleases: ShipIndex, probe: MemberProbe): zio.IO[String, Map[String, BumpStatus]] =
     zio.ZIO.fromEither(
       for
-        kinds  <- Modver.minBumps(Set(libsRef), index, graph, lastReleases, _ => "early-semver", _ => Right(probe))
+        kinds <- Modver.minBumps(
+          Set(libsRef),
+          index,
+          graph,
+          lastReleases,
+          _ => Right(LibraryVersionScheme.EarlySemVer),
+          _ => Right(probe),
+        )
         report <- Modver.report(index, lastReleases, kinds, mimaRan = Set.empty)
       yield report.rows.map(r => r.identity -> r.status).toMap
     )
@@ -506,15 +513,33 @@ object ModverSpec extends ZIOSpecDefault:
       },
     ),
     suite("min-bump")(
-      test("early-semver 0.y binary break is minor; 1.y is major") {
+      test("each scheme floors a binary break where its eviction check would notice") {
+        inline def floor(inline version: String, scheme: LibraryVersionScheme) =
+          Modver.minBumpKind(ReleaseVersion(version), scheme, MemberProbe.BinaryBreak)
         assertTrue(
-          Modver.minBumpKind(ReleaseVersion("0.4.2"), "early-semver", MemberProbe.BinaryBreak) == BumpKind.Minor,
-          Modver.minBumpKind(ReleaseVersion("1.4.2"), "early-semver", MemberProbe.BinaryBreak) == BumpKind.Major,
-          Modver.minBumpKind(ReleaseVersion("1.4.2"), "pvp", MemberProbe.BinaryBreak) == BumpKind.Major,
-          Modver.minBumpKind(ReleaseVersion("1.4.2"), "semver-spec", MemberProbe.BinaryBreak) == BumpKind.Major,
-          Modver.minBumpKind(ReleaseVersion("1.4.2"), "early-semver", MemberProbe.Clean) == BumpKind.Patch,
-          Modver.minBumpKind(ReleaseVersion("1.4.2"), "early-semver", MemberProbe.JsOnly) == BumpKind.Patch,
-          Modver.minBumpKind(ReleaseVersion("1.4.2"), "early-semver", MemberProbe.FirstPublish) == BumpKind.None,
+          floor("0.4.2", LibraryVersionScheme.EarlySemVer) == BumpKind.Minor,
+          floor("1.4.2", LibraryVersionScheme.EarlySemVer) == BumpKind.Major,
+          floor("0.4.2", LibraryVersionScheme.SemVerSpec) == BumpKind.Patch,
+          floor("1.4.2", LibraryVersionScheme.SemVerSpec) == BumpKind.Major,
+          floor("0.4.2", LibraryVersionScheme.Pvp) == BumpKind.Minor,
+          floor("1.4.2", LibraryVersionScheme.Pvp) == BumpKind.Minor,
+          floor("1.4.2", LibraryVersionScheme.Strict) == BumpKind.Patch,
+          floor("1.4.2", LibraryVersionScheme.Always) == BumpKind.Patch,
+          Modver.minBumpKind(
+            ReleaseVersion("1.4.2"),
+            LibraryVersionScheme.EarlySemVer,
+            MemberProbe.Clean,
+          ) == BumpKind.Patch,
+          Modver.minBumpKind(
+            ReleaseVersion("1.4.2"),
+            LibraryVersionScheme.EarlySemVer,
+            MemberProbe.JsOnly,
+          ) == BumpKind.Patch,
+          Modver.minBumpKind(
+            ReleaseVersion("1.4.2"),
+            LibraryVersionScheme.EarlySemVer,
+            MemberProbe.FirstPublish,
+          ) == BumpKind.None,
         )
       },
       test("group max ignores None and uses minBumpOrd") {
@@ -626,7 +651,14 @@ object ModverSpec extends ZIOSpecDefault:
       },
       test("an unreadable released artifact fails the check") {
         val bumps =
-          Modver.minBumps(Set(libsRef), index, graph, index, _ => "early-semver", _ => Left("download: HTTP 503"))
+          Modver.minBumps(
+            Set(libsRef),
+            index,
+            graph,
+            index,
+            _ => Right(LibraryVersionScheme.EarlySemVer),
+            _ => Left("download: HTTP 503"),
+          )
         assertTrue(bumps == Left("download: HTTP 503"))
       },
     ),

@@ -53,6 +53,11 @@ object HttpLookup:
         location.filter(_.nonEmpty).map(loc => URI.create(requestUrl).resolve(loc).toString)
       case _ => None
 
+  /** `followRedirect` fetches one 301/302/303/307/308 hop and drops `Authorization` on it. GitHub Packages and
+    * CodeArtifact answer an authenticated POM, jar, or `maven-metadata.xml` with a pre-signed URL on another host. The
+    * hop's status is the artifact: 200 is published, 404 is a miss. A redirect with no location stays an error. API
+    * callers leave this off, because their redirects still need the credential.
+    */
   def get(
       url: String,
       headers: Map[String, String] = Map.empty,
@@ -62,9 +67,10 @@ object HttpLookup:
       retry: Schedule[Any, Any, ?] = DefaultRetry,
       firstJitter: Duration = FirstAttemptJitter,
       etags: ConcurrentHashMap[String, String] = sharedEtags,
+      followRedirect: Boolean = false,
   ): Either[String, HttpLookupResult] =
     if url.startsWith("file:") then Right(readFile(url))
-    else runEither(getZio(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, etags))
+    else runEither(getZio(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, etags, followRedirect))
 
   /** A `file:` registry, for a release or snapshot rehearsed entirely on one machine. */
   private def readFile(url: String): HttpLookupResult =
@@ -115,11 +121,35 @@ object HttpLookup:
       retry: Schedule[Any, Any, ?] = DefaultRetry,
       firstJitter: Duration = FirstAttemptJitter,
       etags: ConcurrentHashMap[String, String] = sharedEtags,
+      followRedirect: Boolean = false,
   ): IO[String, HttpLookupResult] =
-    val inm = ifNoneMatch.orElse(Option(etags.get(url))).filter(_.nonEmpty)
-    val req = request(url, headers, timeout, body = None, ifNoneMatch = inm)
-    execute(url, req, send, retry, firstJitter, Some(etags))
+    fetchGet(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, Some(etags), passRedirects = followRedirect)
+      .flatMap { first =>
+        if !followRedirect then ZIO.succeed(first)
+        else
+          redirectTarget(first.status, first.header("location"), url) match
+            case None       => ZIO.succeed(first)
+            case Some(next) =>
+              val bare = headers.filter((name, _) => !name.equalsIgnoreCase("Authorization"))
+              fetchGet(next, bare, timeout, None, send, retry, Duration.Zero, None, passRedirects = false)
+      }
   end getZio
+
+  private def fetchGet(
+      url: String,
+      headers: Map[String, String],
+      timeout: JDuration,
+      ifNoneMatch: Option[String],
+      send: Send,
+      retry: Schedule[Any, Any, ?],
+      firstJitter: Duration,
+      etags: Option[ConcurrentHashMap[String, String]],
+      passRedirects: Boolean,
+  ): IO[String, HttpLookupResult] =
+    val inm = ifNoneMatch.orElse(etags.flatMap(map => Option(map.get(url)))).filter(_.nonEmpty)
+    val req = request(url, headers, timeout, body = None, ifNoneMatch = inm)
+    execute(url, req, send, retry, firstJitter, etags, passRedirects)
+  end fetchGet
 
   private[core] def postZio(
       url: String,
@@ -131,7 +161,7 @@ object HttpLookup:
       firstJitter: Duration = FirstAttemptJitter,
   ): IO[String, HttpLookupResult] =
     val req = request(url, headers, timeout, body = Some(body), ifNoneMatch = None)
-    execute(url, req, send, retry, firstJitter, etags = None)
+    execute(url, req, send, retry, firstJitter, etags = None, passRedirects = false)
   end postZio
 
   private[core] def jdkSend(req: HttpRequest): Task[HttpLookupResult] =
@@ -155,9 +185,10 @@ object HttpLookup:
       retry: Schedule[Any, Any, ?],
       firstJitter: Duration,
       etags: Option[ConcurrentHashMap[String, String]],
+      passRedirects: Boolean,
   ): IO[String, HttpLookupResult] =
     val once: IO[LookupFailure, HttpLookupResult] =
-      send(req).mapError(throwableFailure).flatMap(classify(_, url, etags))
+      send(req).mapError(throwableFailure).flatMap(classify(_, url, etags, passRedirects))
     val policy = retry.whileInput[LookupFailure] {
       case LookupFailure.Retryable(_, _) => true
       case LookupFailure.Fatal(_)        => false
@@ -173,6 +204,7 @@ object HttpLookup:
       result: HttpLookupResult,
       url: String,
       etags: Option[ConcurrentHashMap[String, String]],
+      passRedirects: Boolean,
   ): IO[LookupFailure, HttpLookupResult] =
     result.status match
       case s if s >= 200 && s < 300 =>
@@ -181,6 +213,8 @@ object HttpLookup:
         }
         ZIO.succeed(result)
       case 304 | 404 | 410 =>
+        ZIO.succeed(result)
+      case 301 | 302 | 303 | 307 | 308 if passRedirects && result.header("location").exists(_.nonEmpty) =>
         ZIO.succeed(result)
       case s if s == 429 || s >= 500 =>
         retryAfterDelay(result).flatMap { wait =>
