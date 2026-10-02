@@ -138,12 +138,30 @@ end ReleaseVersion
 enum ReleaseBump:
   case Patch, Minor, Major
 
+  /** The word `zipxModverBump` accepts. */
+  def token: String = this match
+    case Patch => "patch"
+    case Minor => "minor"
+    case Major => "major"
+
+  /** The next catalog number. Patch of `0.3.0` is `0.3.1`. This does not consult MiMa or the version scheme. */
+  def next(version: ReleaseVersion): ReleaseVersion = version.bump(this)
+end ReleaseBump
+
 object ReleaseBump:
+  def fromToken(raw: String): Option[ReleaseBump] =
+    raw.toLowerCase match
+      case "patch" => Some(Patch)
+      case "minor" => Some(Minor)
+      case "major" => Some(Major)
+      case _       => None
+
   def of(kind: BumpKind): Option[ReleaseBump] = kind match
     case BumpKind.Patch                      => Some(Patch)
     case BumpKind.Minor                      => Some(Minor)
     case BumpKind.Major                      => Some(Major)
     case BumpKind.None | BumpKind.PreRelease => None
+end ReleaseBump
 
 /** One outbound version row: a lone [[Ship]] or a [[ShipGroup]] whose members share a number. */
 sealed trait PublishedRow:

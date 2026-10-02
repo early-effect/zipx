@@ -120,6 +120,54 @@ object HttpLookupSpec extends ZIOSpecDefault:
     test("parseRetryAfter reads delta-seconds") {
       HttpLookup.parseRetryAfter("12").map(d => assertTrue(d.contains(12.seconds)))
     },
+    test("a pre-signed artifact hop drops Authorization, and its 200 is published") {
+      val signed                = "https://signed.example/pom"
+      val send: HttpLookup.Send = req =>
+        val auth = req.headers().firstValue("Authorization").orElse("")
+        if req.uri().toString == url then ZIO.succeed(status(302, Map("Location" -> signed)))
+        else ZIO.succeed(HttpLookupResult(200, auth, Map.empty))
+      val denied: HttpLookup.Send = _ => ZIO.succeed(status(401))
+      val stayed: HttpLookup.Send = _ => ZIO.succeed(status(302, Map("Location" -> signed)))
+      for
+        hopped <- HttpLookup.getZio(
+          url,
+          headers = Map("Authorization" -> "Bearer secret"),
+          send = send,
+          retry = Schedule.stop,
+          firstJitter = Duration.Zero,
+          followRedirect = true,
+        )
+        blocked <- HttpLookup
+          .getZio(url, send = denied, retry = Schedule.stop, firstJitter = Duration.Zero, followRedirect = true)
+          .either
+        plain <- HttpLookup
+          .getZio(url, send = stayed, retry = Schedule.stop, firstJitter = Duration.Zero)
+          .either
+      yield assertTrue(
+        hopped.status == 200,
+        hopped.body.isEmpty,
+        Modver.registryStatus(hopped.status) == Right(RegistryStatus.Published),
+        Modver.registryStatus(401) == Left("HTTP 401"),
+        blocked == Left("HTTP 401"),
+        plain == Left("HTTP 302"),
+      )
+      end for
+    },
+    test("a pre-signed hop that is missing is a miss, not an unreachable registry") {
+      val signed                = "https://signed.example/missing"
+      val send: HttpLookup.Send = req =>
+        if req.uri().toString == url then ZIO.succeed(status(302, Map("Location" -> signed)))
+        else ZIO.succeed(status(404))
+      for result <- HttpLookup.getZio(
+          url,
+          headers = Map("Authorization" -> "Bearer secret"),
+          send = send,
+          retry = Schedule.stop,
+          firstJitter = Duration.Zero,
+          followRedirect = true,
+        )
+      yield assertTrue(result.isMiss, Modver.registryStatus(result.status) == Right(RegistryStatus.Missing))
+    },
     test("a packages jar redirect is one hop, and a miss is not") {
       val jar    = "https://maven.pkg.github.com/acme/repo/org/artifact/1.0.0/artifact-1.0.0.jar"
       val signed = "https://github-registry-files.githubusercontent.com/1/file"

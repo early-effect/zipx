@@ -35,6 +35,7 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
         ZipxSettings.names.contains("zipxModverPropagate"),
         ZipxSettings.names.contains("zipxMatrixRoot"),
         ZipxSettings.names.contains("zipxModverBump"),
+        ZipxSettings.names.contains("zipxDriftGate"),
         ZipxSettings.names.contains("zipxModverCompat"),
         ZipxSettings.names.contains("zipxModverCheck"),
         ZipxSettings.names.contains("zipxModverSuggest"),

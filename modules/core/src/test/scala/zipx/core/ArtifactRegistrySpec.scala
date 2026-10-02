@@ -10,6 +10,8 @@ object ArtifactRegistrySpec extends ZIOSpecDefault:
         ArtifactRegistry.MavenCentral.snapshotRepository == "https://central.sonatype.com/repository/maven-snapshots/",
         ArtifactRegistry.MavenCentral.releaseRepository.isEmpty,
         ArtifactRegistry.MavenCentral.credentialHost.contains("central.sonatype.com"),
+        ArtifactRegistry.MavenCentral.pomUrl(Gav("com.acme", "client_3", "1.2.0")) ==
+          "https://repo1.maven.org/maven2/com/acme/client_3/1.2.0/client_3-1.2.0.pom",
       )
     },
     test("any other registry takes snapshots and releases at its own URL") {
@@ -19,6 +21,8 @@ object ArtifactRegistrySpec extends ZIOSpecDefault:
         packages.snapshotRepository == "https://maven.pkg.github.com/early-effect/zipx/",
         packages.releaseRepository.contains("https://maven.pkg.github.com/early-effect/zipx/"),
         packages.credentialHost.contains("maven.pkg.github.com"),
+        packages.pomUrl(Gav("com.acme", "client_3", "1.2.0")) ==
+          "https://maven.pkg.github.com/early-effect/zipx/com/acme/client_3/1.2.0/client_3-1.2.0.pom",
         file.snapshotRepository == "file:///tmp/zipx-repo/",
         file.credentialHost.isEmpty,
       )
@@ -34,6 +38,8 @@ object ArtifactRegistrySpec extends ZIOSpecDefault:
         maven.credentialHost.contains("acme.example"),
         maven.publishHosts == List("acme.example"),
         maven.metadataUrl("com.acme", "client_3").startsWith("https://acme.example/maven-releases/"),
+        maven.pomUrl(Gav("com.acme", "client_3", "1.2.0")) ==
+          "https://acme.example/maven-releases/com/acme/client_3/1.2.0/client_3-1.2.0.pom",
       )
     },
     test("a file: registry lists an artifact's releases from its version directories, as metadata would") {

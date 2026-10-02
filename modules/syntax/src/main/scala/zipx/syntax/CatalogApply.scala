@@ -6,6 +6,17 @@ import dotty.tools.dotc.ast.untpd.*
 import dotty.tools.dotc.core.Constants
 import dotty.tools.dotc.core.Contexts.*
 
+/** 1-based position in a catalog source. */
+final case class CatalogPoint(line: Int, column: Int)
+
+object CatalogPoint:
+  def at(source: String, offset: Int): CatalogPoint =
+    val bounded = math.max(0, math.min(offset, source.length))
+    val line    = source.iterator.take(bounded).count(_ == '\n') + 1
+    val newline = source.lastIndexOf('\n', bounded - 1)
+    val column  = if newline < 0 then bounded + 1 else bounded - newline
+    CatalogPoint(line, column)
+
 /** Rewrite catalog constructors at tree spans. No `String.replace` of the whole file. */
 object CatalogApply:
 
@@ -43,6 +54,16 @@ object CatalogApply:
 
   def applyPinBumps(source: String, bumps: List[PinBump]): Either[String, String] =
     ZipxCatalog.applyPinBumps(source, bumps)
+
+  /** 1-based line and column of the version literal on `Ship` / `ShipGroup` for `identity`. */
+  def shipVersionPoint(source: String, identity: String): Option[CatalogPoint] =
+    given Context = ScalaParse.freshContext()
+    ScalaParse.untyped(source, "ZipxVersions.scala").toOption.flatMap { tree =>
+      findShipVersionLit(tree, identity).map { lit =>
+        val (start, _) = spanOf(lit)
+        CatalogPoint.at(source, start)
+      }
+    }
 
   /** Rewrite the version literal of `Ship(` / `ShipGroup(` by tree span. Missing constructor is Left. */
   def applyShipBumps(source: String, bumps: List[ShipBump]): Either[String, String] =

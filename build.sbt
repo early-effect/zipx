@@ -58,6 +58,7 @@ lazy val root = (project in file("."))
     },
     // Dogfood: snapshots on merge and on labeled PRs, Pages, fork-gated. Releases run from zipx-release.yml.
     zipxReleaseWorkflow := Some(ZipxCentral.releases),
+    zipxDriftGate       := DriftGate.Fail,
     zipxCapabilities ++= {
       val upstream = JobCondition.repositoryIs("early-effect/zipx")
       Seq(

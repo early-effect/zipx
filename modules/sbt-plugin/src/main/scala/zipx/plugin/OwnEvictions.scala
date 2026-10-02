@@ -13,14 +13,29 @@ private[plugin] object OwnEvictions:
 
   private type Compatible = ((ModuleID, Option[ModuleID], Option[ScalaModuleInfo])) => Boolean
 
-  /** sbt keeps the PVP evaluator private, so a PVP module goes unchecked. */
+  /** sbt keeps `evalPvp` private. The second-component rule is the same check, written here. */
   private def compatible(scheme: String): Option[Compatible] =
     scheme match
       case VersionScheme.EarlySemVer => Some(EvictionWarningOptions.guessEarlySemVer)
       case VersionScheme.SemVerSpec  => Some(EvictionWarningOptions.guessSemVer)
+      case VersionScheme.PVP         => Some(pvpCompatible)
       case VersionScheme.Strict      => Some(EvictionWarningOptions.guessStrict)
       case VersionScheme.Always      => Some(EvictionWarningOptions.guessTrue)
       case _                         => None
+
+  /** True when the first two components match. A patch stays compatible. A minor or major does not. */
+  private def pvpCompatible: Compatible =
+    (current, selected, _) =>
+      selected match
+        case Some(next) =>
+          (
+            sbt.librarymanagement.VersionNumber(current.revision).numbers,
+            sbt.librarymanagement.VersionNumber(next.revision).numbers,
+          ) match
+            case (major +: minor +: _, otherMajor +: otherMinor +: _) =>
+              major == otherMajor && minor == otherMinor
+            case _ => false
+        case None => false
 
   def incompatible(
       report: UpdateReport,

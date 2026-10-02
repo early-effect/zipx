@@ -305,8 +305,18 @@ object ZipxSettings:
     SettingDef.input(
       SettingName("zipxModverBump"),
       SettingPurpose(
-        "Rewrite a Ship / ShipGroup version in zipxVersionsFile. Default patch. Identity is a project id or group name."
+        "Rewrite Ship / ShipGroup versions in zipxVersionsFile. No args, or a kind alone, opens every row the release registry already has, at patch unless a kind is named. A ship id rewrites that row even when it is not released. Does not run MiMa."
       ),
+    )
+
+  val driftGate: SettingDef[DriftGate] =
+    SettingDef.setting(
+      SettingName("zipxDriftGate"),
+      DriftGate.Fail,
+      SettingPurpose(
+        "Fail (default) or Warn when a row's release tag is in the clone and its sources have changed. Fail stops that row's compile and fails zipxSnapshotPublish. Warn logs and continues. Snapshot publish confirms the number on the zipxReleaseWorkflow registry (Central, GitHub Packages, CodeArtifact, or any other Maven release URL) and fails closed when that registry cannot be read."
+      ),
+      Build,
     )
 
   val modverCompat: SettingDef[Unit] =
@@ -767,6 +777,7 @@ object ZipxSettings:
     pins,
     ships,
     modverPropagate,
+    driftGate,
     sbtVersionCoord,
     scalaVersionCoord,
     checkDeps,

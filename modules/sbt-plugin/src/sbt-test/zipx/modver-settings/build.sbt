@@ -1,7 +1,8 @@
 MyVersions.settings
 organization := "com.example.zipx.modver"
 zipxVerify          := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
-zipxReleaseWorkflow := Some(ReleaseWorkflow(ArtifactRegistry.Url("https://repo1.maven.org/maven2")))
+// A file: registry this fixture never publishes to. The rows stay unreleased without calling Maven Central.
+zipxReleaseWorkflow := Some(ReleaseWorkflow(ArtifactRegistry.Url(file("released").getAbsoluteFile.toURI.toString)))
 
 lazy val models = project.settings(MyVersions.libraries)
 

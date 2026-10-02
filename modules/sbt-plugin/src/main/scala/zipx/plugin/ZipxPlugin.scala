@@ -93,6 +93,8 @@ object ZipxPlugin extends AutoPlugin:
     val ShipGroup = zipx.core.ShipGroup
     type ModverPropagate = zipx.core.ModverPropagate
     val ModverPropagate = zipx.core.ModverPropagate
+    type DriftGate = zipx.core.DriftGate
+    val DriftGate = zipx.core.DriftGate
     type ArtifactRegistry = zipx.core.ArtifactRegistry
     val ArtifactRegistry = zipx.core.ArtifactRegistry
     type ModuleId = zipx.core.ModuleId
@@ -478,6 +480,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxDepUpdate        = inputKey[Unit](ZipxSettings.depUpdate.description)
     val zipxActionUpdate     = inputKey[Unit](ZipxSettings.actionUpdate.description)
     val zipxModverBump       = inputKey[Unit](ZipxSettings.modverBump.description)
+    val zipxDriftGate        = settingKey[DriftGate](ZipxSettings.driftGate.description)
     val zipxModverCompat     = taskKey[Unit](ZipxSettings.modverCompat.description)
     val zipxModverCheck      = taskKey[Unit](ZipxSettings.modverCheck.description)
     val zipxReleaseDrift     = taskKey[Seq[String]](ZipxSettings.releaseDrift.description)
@@ -485,6 +488,18 @@ object ZipxPlugin extends AutoPlugin:
   end autoImport
 
   import autoImport.*
+
+  /** Git-only. Build-scoped so one compile wave diffs once. Not a documented task. */
+  private val zipxGitDrift =
+    taskKey[List[(PublishedRow, ReleasedDrift)]]("Git drift of every ship row against its catalog tag.")
+
+  /** Project-scoped. Compile depends on it. Not a documented task. */
+  private val zipxEnforceDrift =
+    taskKey[Unit]("Warn or fail when this project's released row has changed since its tag.")
+
+  /** Project-scoped. `publish` depends on it. Not a documented task. */
+  private val zipxRequireVersionScheme =
+    taskKey[Unit]("Fail when versionScheme is empty or not a scheme sbt accepts.")
 
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
     onUnload := onUnload.value.andThen(
@@ -535,6 +550,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxPins                     := Seq.empty,
     zipxShips                    := Seq.empty,
     zipxModverPropagate          := ModverPropagate.MatchBump,
+    zipxDriftGate                := DriftGate.Fail,
     zipxSbt                      := None,
     zipxScala                    := None,
     zipxCheckDeps                := false,
@@ -581,12 +597,16 @@ object ZipxPlugin extends AutoPlugin:
     hash & Long.MaxValue
 
   override def buildSettings: Seq[Setting[?]] = Seq(
+    // sbt only warns when this is empty, then stamps nothing on the POM. early-semver is the default. A build opts
+    // into semver-spec, pvp, strict, or always by setting the key. publish fails if it is cleared.
+    versionScheme    := Some(LibraryVersionScheme.Default.token),
     zipxGraph        := graphTask.value,
     zipxPublishOrder := publishOrderTask.value,
     zipxModuleGraph  := Def.uncached(buildGraph.value),
     commands += testAffectedCommand,
     commands += releaseCommand,
     commands += snapshotPublishCommand,
+    commands += snapshotRefuseCommand,
     commands += sessionCommand,
     // `Def.uncached` because a file write is not a valid cached-task output.
     zipxCatalogGenerate := Def.uncached {
@@ -620,6 +640,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxModverCompat             := Def.uncached { modverCompatTask.value },
     zipxModverCheck              := Def.uncached { modverCheckTask.value },
     zipxReleaseDrift             := Def.uncached { releaseDriftTask.value },
+    zipxGitDrift                 := Def.uncached { gitDriftTask.value },
     zipxModverSuggest            := Def.uncached { modverSuggestTask.value },
     zipxDepUpdate / aggregate    := false,
     zipxActionUpdate / aggregate := false,
@@ -679,7 +700,12 @@ object ZipxPlugin extends AutoPlugin:
             else sys.error(message)
       report
     },
-    forceUpdatePeriod := {
+    Compile / compile        := (Compile / compile).dependsOn(zipxEnforceDrift).value,
+    Test / compile           := (Test / compile).dependsOn(zipxEnforceDrift).value,
+    zipxEnforceDrift         := Def.uncached { enforceDriftTask.value },
+    publishConfiguration     := publishConfiguration.dependsOn(zipxRequireVersionScheme).value,
+    zipxRequireVersionScheme := Def.uncached { requireVersionScheme.value },
+    forceUpdatePeriod        := {
       if libraryDependencies.value.exists(m => SnapshotPins.isSnapshot(m.revision)) then
         Some(scala.concurrent.duration.Duration.Zero)
       else forceUpdatePeriod.value
@@ -1325,6 +1351,12 @@ object ZipxPlugin extends AutoPlugin:
     IO.writeLines(extracted.get(LocalRootProject / baseDirectory) / ReleaseWorkflow.TagsFile, plan.entries.map(_.tag))
     plan.entries.foreach(e => next.log.info(s"zipx: releasing ${Modver.describe(e.row)} ${e.row.version} as ${e.tag}"))
     next.log.info("zipx: this sbt session now builds every row at its catalog number")
+    val released = plan.entries.map(e => s"${Modver.describe(e.row)} ${e.row.version}").mkString(", ")
+    next.log.info(
+      s"zipx: $released ${
+          if plan.entries.sizeIs == 1 then "is" else "are"
+        } released. Further snapshots publish nothing until the catalog moves. sbt zipxModverBump"
+    )
     sys.props(BuildSession.Property) = BuildSession.Release.id
     sys.props(BuildSession.ReleaseNameProperty) =
       plan.entries.map(e => s"${e.row.identity} ${e.row.version}").mkString(", ")
@@ -1379,12 +1411,13 @@ object ZipxPlugin extends AutoPlugin:
         rowStatus(_, graph, catalog, binaries, release),
       ) match
         case Left(ReleaseError.NothingToRelease) =>
-          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release))
-          next.log.info("zipx: every row's catalog number is released; no snapshot to publish")
-          next
+          val verdict = publishVerdict(extracted, graph, catalog, binaries, release)
+          reportVerdict(next, verdict)
+          if verdict.refuses then refuseNow(verdict) else next
         case Left(err)   => sys.error(s"zipx: ${err.message}")
         case Right(plan) =>
-          warnReleasedRowsWithChanges(next, releasedDrift(extracted, graph, catalog, binaries, release))
+          val verdict = publishVerdict(extracted, graph, catalog, binaries, release)
+          reportVerdict(next, verdict)
           val (task, destination) = target match
             case SnapshotTarget.Local    => (publishLocal, "the local ivy repository")
             case SnapshotTarget.Registry =>
@@ -1397,49 +1430,82 @@ object ZipxPlugin extends AutoPlugin:
           )
           val restore = BuildSession.of(sys.props).getOrElse(BuildSession.Development)
           sys.props(BuildSession.Property) = session.id
-          val commands =
+          val publishes =
             plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, CapabilityTasks.of(task)))
-          "reload" :: commands.map(c => c.text: String) ::: s"$SessionCommand ${restore.id}" :: "reload" :: next
+          val restoreCommands =
+            val back = List(s"$SessionCommand ${restore.id}", "reload")
+            if verdict.refuses then
+              sys.props(RefuseProperty) = verdict.refusals.mkString("\n")
+              back :+ "zipxSnapshotRefuse"
+            else back
+          ("reload" :: publishes.map(c => c.text: String) ::: restoreCommands).foldRight(next)(_ :: _)
       end match
     }
 
-  /** A released row with changes since its tag publishes no snapshot, so its changes reach no one until it moves. */
+  private val RefuseProperty = "zipx.snapshot.refuse"
+
+  /** Runs after the open rows have published and the previous session is restored. */
+  private val snapshotRefuseCommand: Command = Command.command("zipxSnapshotRefuse") { _ =>
+    val message = sys.props.getOrElse(RefuseProperty, "a snapshot publish was refused")
+    sys.props -= RefuseProperty
+    sys.error(s"zipx: $message")
+  }
+
+  private def refuseNow(verdict: SnapshotVerdict): Nothing =
+    sys.error(verdict.refusals.map(line => s"zipx: $line").mkString("\n"))
+
+  private def publishVerdict(
+      extracted: Extracted,
+      graph: ModuleGraph,
+      catalog: ShipIndex,
+      binaries: Map[ModuleId, List[(String, Gav)]],
+      release: ReleaseWorkflow,
+  ): SnapshotVerdict =
+    val gate  = readBuildSetting(extracted, zipxDriftGate, DriftGate.Fail)
+    val drift = releasedDrift(extracted, graph, catalog, binaries, release)
+      .fold(err => sys.error(s"zipx: ${err.message}"), identity)
+    SnapshotGuard.decide(drift, gate)
+  end publishVerdict
+
+  private def reportVerdict(st: State, verdict: SnapshotVerdict): Unit =
+    verdict.hints.foreach(line => st.log.info(s"zipx: $line"))
+    verdict.warnings.foreach { line =>
+      st.log.warn(s"zipx: $line")
+      annotate("warning", "zipx shadowed snapshot", line)
+    }
+    verdict.refusals.foreach { line =>
+      st.log.error(s"zipx: $line")
+      annotate("error", "zipx shadowed snapshot", line)
+    }
+  end reportVerdict
+
+  private def annotate(kind: String, title: String, text: String): Unit =
+    if sys.env.contains("GITHUB_ACTIONS") then println(s"::$kind title=$title::$text")
+
+  /** Rows the release registry already has. A private registry (GitHub Packages, CodeArtifact) that cannot be read is
+    * [[ReleaseError.RegistryUnreachable]], never "not released".
+    */
   private def releasedDrift(
       extracted: Extracted,
       graph: ModuleGraph,
       catalog: ShipIndex,
       binaries: Map[ModuleId, List[(String, Gav)]],
       release: ReleaseWorkflow,
-  ): List[(PublishedRow, ReleaseDrift)] =
+  ): Either[ReleaseError, List[(PublishedRow, ReleasedDrift)]] =
     val root = extracted.get(LocalRootProject / baseDirectory)
     val tags = TagScheme.of(catalog)
     catalog.byIdentity.values.toList
-      .filter(row => rowStatus(row, graph, catalog, binaries, release) == Right(RowStatus.Released))
       .sortBy(Modver.describe)
-      .map(row => row -> releaseDrift(root, graph, catalog, row, tags.tag(row)))
+      .foldLeft[Either[ReleaseError, List[(PublishedRow, ReleasedDrift)]]](Right(Nil)) { (acc, row) =>
+        acc.flatMap { found =>
+          rowStatus(row, graph, catalog, binaries, release) match
+            case Left(err)                 => Left(err)
+            case Right(RowStatus.Released) =>
+              Right(found :+ (row -> rowDrift(root, graph, catalog, row, tags.tag(row))))
+            case Right(_) => Right(found)
+        }
+      }
   end releasedDrift
-
-  private def driftWarning(row: PublishedRow, tag: String): String =
-    s"${Modver.describe(row)} ${row.version} is released and has changes since $tag, so it publishes no snapshot. Move it: sbt \"zipxModverBump ${row.identity}\""
-
-  /** A released row with changes since its tag publishes no snapshot, so its changes reach no one until it moves. */
-  private def warnReleasedRowsWithChanges(st: State, drift: List[(PublishedRow, ReleaseDrift)]): Unit =
-    drift.foreach {
-      case (row, ReleaseDrift.Changed(tag)) =>
-        val warning = driftWarning(row, tag)
-        st.log.warn(s"zipx: ${"*" * 12} $warning ${"*" * 12}")
-        sys.env.get("GITHUB_ACTIONS").foreach(_ => println(s"::warning title=zipx released row changed::$warning"))
-      case (row, ReleaseDrift.Unreadable(detail)) =>
-        st.log.warn(s"zipx: could not check ${Modver.describe(row)} for changes since its release: $detail")
-      case (_, ReleaseDrift.Unchanged | ReleaseDrift.Untagged(_)) => ()
-    }
-    drift.collect { case (_, ReleaseDrift.Untagged(tag)) => tag } match
-      case Nil      => ()
-      case untagged =>
-        st.log.info(
-          s"zipx: no release tag in this clone for ${untagged.mkString(", ")}; those rows are not checked for changes"
-        )
-  end warnReleasedRowsWithChanges
 
   private def releaseDriftTask: Def.Initialize[Task[Seq[String]]] = Def.task {
     val st        = state.value
@@ -1448,32 +1514,78 @@ object ZipxPlugin extends AutoPlugin:
     val release   = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
     val catalog   = orFail(Modver.membership(graph, readBuildSetting(extracted, zipxShips, Seq.empty)))
     val drift     = releasedDrift(extracted, graph, catalog, liveBinaries(extracted, graph, catalog), release)
-    warnReleasedRowsWithChanges(st, drift)
-    drift.collect { case (row, ReleaseDrift.Changed(tag)) => s"${Modver.describe(row)} ${row.version} since $tag" }
+    drift match
+      case Left(err) =>
+        streams.value.log.error(s"zipx: ${err.message}")
+        Nil
+      case Right(found) =>
+        reportVerdict(st, SnapshotGuard.decide(found, DriftGate.Warn))
+        found.collect { case (row, ReleasedDrift.Changed(tag)) => s"${Modver.describe(row)} ${row.version} since $tag" }
   }
 
-  private enum ReleaseDrift:
-    case Unchanged
-    case Changed(tag: String)
-    case Untagged(tag: String)
-    case Unreadable(detail: String)
+  private def gitDriftTask: Def.Initialize[Task[List[(PublishedRow, ReleasedDrift)]]] = Def.task {
+    val extracted = Project.extract(state.value)
+    val ships     = readBuildSetting(extracted, zipxShips, Seq.empty)
+    if ships.isEmpty then Nil
+    else
+      val graph   = buildGraph.value
+      val catalog = orFail(Modver.membership(graph, ships))
+      val root    = (LocalRootProject / baseDirectory).value
+      val tags    = TagScheme.of(catalog)
+      catalog.byIdentity.values.toList.sortBy(Modver.describe).map { row =>
+        row -> rowDrift(root, graph, catalog, row, tags.tag(row))
+      }
+  }
 
-  private def releaseDrift(
+  private def enforceDriftTask: Def.Initialize[Task[Unit]] = Def.task {
+    val ships = (LocalRootProject / zipxShips).value
+    if ships.isEmpty then ()
+    else
+      val message = Modver.rowForProject(thisProject.value.id, ships) match
+        case None      => None
+        case Some(row) =>
+          (ThisBuild / zipxGitDrift).value.find((found, _) => found == row) match
+            case Some((_, ReleasedDrift.Changed(tag)))       => Some(SnapshotGuard.shadowed(row, tag) -> row)
+            case Some((_, ReleasedDrift.Unreadable(detail))) => Some(SnapshotGuard.unreadable(row, detail) -> row)
+            case _                                           => None
+      message match
+        case None              => ()
+        case Some((text, row)) =>
+          val gate    = (LocalRootProject / zipxDriftGate).value
+          val log     = streams.value.log
+          val root    = (LocalRootProject / baseDirectory).value
+          val file    = root / (LocalRootProject / zipxVersionsFile).value
+          val located =
+            val point =
+              if file.isFile then zipx.syntax.CatalogApply.shipVersionPoint(IO.read(file), row.identity) else None
+            point match
+              case Some(at) => s"${file.getAbsolutePath}:${at.line}:${at.column}: $text"
+              case None     => s"zipx: $text"
+          gate match
+            case DriftGate.Warn => log.warn(located)
+            case DriftGate.Fail =>
+              log.error(located)
+              sys.error(s"zipx: $text")
+      end match
+    end if
+  }
+
+  private def rowDrift(
       root: File,
       graph: ModuleGraph,
       catalog: ShipIndex,
       row: PublishedRow,
       tag: String,
-  ): ReleaseDrift =
+  ): ReleasedDrift =
     GitFiles.changedSince(root, tag) match
-      case Left(err)          => ReleaseDrift.Unreadable(err)
-      case Right(None)        => ReleaseDrift.Untagged(tag)
+      case Left(err)          => ReleasedDrift.Unreadable(err)
+      case Right(None)        => ReleasedDrift.Untagged(tag)
       case Right(Some(files)) =>
         Modver.liftedBumpSet(graph, catalog, Some(files)) match
-          case Left(err) => ReleaseDrift.Unreadable(err)
+          case Left(err) => ReleasedDrift.Unreadable(err)
           case Right(lifted) if lifted.exists(ref => catalog.byIdentity.get(ref).contains(row)) =>
-            ReleaseDrift.Changed(tag)
-          case Right(_) => ReleaseDrift.Unchanged
+            ReleasedDrift.Changed(tag)
+          case Right(_) => ReleasedDrift.Unchanged(tag)
 
   private val SessionCommand = "zipxSession"
 
@@ -2044,34 +2156,62 @@ object ZipxPlugin extends AutoPlugin:
       val log       = streams.value.log
       if ships.isEmpty then log.info("zipx: zipxShips is empty; nothing to bump")
       else
-        val (identity, kindName) = arg.split("\\s+", 2).toList match
-          case id :: rest => (id, rest.headOption.getOrElse("patch"))
-          case Nil        => ("", "patch")
-        if identity.isEmpty then sys.error("zipx: zipxModverBump needs a Ship id or ShipGroup name")
-        else
-          val bump = kindName.toLowerCase match
-            case "patch" => ReleaseBump.Patch
-            case "minor" => ReleaseBump.Minor
-            case "major" => ReleaseBump.Major
-            case other   => sys.error(s"zipx: unknown bump kind '$other' (patch, minor, or major)")
-          val row = ships
-            .find(r => r.identity == identity)
-            .getOrElse(sys.error(s"zipx: no Ship / ShipGroup named '$identity'"))
-          val to   = row.version.bump(bump)
-          val rel  = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
-          val file = (LocalRootProject / baseDirectory).value / rel
-          if !file.exists then sys.error(s"zipx: catalog file ${file.getPath} is missing")
-          val next = orFail(
-            zipx.syntax.CatalogApply
-              .applyShipBumps(IO.read(file), List(ShipBump(row.identity, row.version, to)))
-              .left
-              .map(_.stripPrefix("zipx: "))
-          )
-          IO.write(file, next)
-          log.info(s"zipx: bumped ${Modver.describe(row)} ${row.version} -> $to")
-        end if
+        val tokens  = if arg.isEmpty then Nil else arg.split("\\s+").toList
+        val request = orFail(ShipBumpRequest.parse(tokens, ships.map(_.identity).toSet).left.map(_.message))
+        val chosen  = rowsForBump(state.value, extracted, ships, request)
+        chosen match
+          case Nil =>
+            log.info("zipx: no released row to bump")
+          case rows =>
+            val rel  = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
+            val file = (LocalRootProject / baseDirectory).value / rel
+            if !file.exists then sys.error(s"zipx: catalog file ${file.getPath} is missing")
+            val bumps = rows.map { row =>
+              val to = request.bumpKind.next(row.version)
+              log.info(s"zipx: ${Modver.describe(row)} ${row.version} -> $to")
+              ShipBump(row.identity, row.version, to)
+            }
+            request match
+              case ShipBumpRequest.Released(_) =>
+                ships.filterNot(row => rows.contains(row)).foreach { row =>
+                  log.info(s"zipx: ${Modver.describe(row)} ${row.version} is not released; left at ${row.version}")
+                }
+              case ShipBumpRequest.One(_, _) => ()
+            val next = orFail(
+              zipx.syntax.CatalogApply.applyShipBumps(IO.read(file), bumps).left.map(_.stripPrefix("zipx: "))
+            )
+            IO.write(file, next)
+            log.info(s"zipx: wrote ${file.getPath}")
+        end match
       end if
     }
+
+  /** `Released` asks the release registry. `One` does not, so an explicit bump can run offline. A partial row or an
+    * unreachable registry fails the command: a private registry (GitHub Packages, CodeArtifact) must not be treated as
+    * "not released" when its credentials are missing.
+    */
+  private def rowsForBump(
+      st: State,
+      extracted: Extracted,
+      ships: Seq[PublishedRow],
+      request: ShipBumpRequest,
+  ): List[PublishedRow] =
+    request match
+      case ShipBumpRequest.One(identity, _) =>
+        ships.find(_.identity == identity).toList
+      case ShipBumpRequest.Released(_) =>
+        val (_, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
+        val release    = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
+        val catalog    = orFail(Modver.membership(graph, ships))
+        val binaries   = liveBinaries(extracted, graph, catalog)
+        ships.toList.flatMap { row =>
+          rowStatus(row, graph, catalog, binaries, release) match
+            case Right(RowStatus.Released)         => List(row)
+            case Right(RowStatus.Unreleased)       => Nil
+            case Right(RowStatus.Partial(missing)) =>
+              sys.error(s"zipx: ${ReleaseError.PartiallyReleased(row, missing).message}")
+            case Left(err) => sys.error(s"zipx: ${err.message}")
+        }
 
   private def actionUpdateTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
@@ -2570,7 +2710,7 @@ object ZipxPlugin extends AutoPlugin:
   end writeModverReport
 
   private val NoReleaseWorkflow =
-    "Ship rows release from zipx-release.yml: set zipxReleaseWorkflow := Some(ZipxCentral.releases)"
+    "Ship rows release from zipx-release.yml: set zipxReleaseWorkflow (ZipxCentral.releases, ZipxGitHubPackages.releases, or ZipxMaven.releases)"
 
   private def releaseWorkflow(extracted: Extracted): Either[String, ReleaseWorkflow] =
     readBuildSetting(extracted, zipxReleaseWorkflow, None).toRight(NoReleaseWorkflow)
@@ -2583,47 +2723,69 @@ object ZipxPlugin extends AutoPlugin:
   ): Either[String, ShipIndex] =
     val binaries = liveBinaries(extracted, graph, catalog)
     val registry = release.registry
-    catalog.byIdentity.values.toList
-      .foldLeft[Either[String, List[PublishedRow]]](Right(Nil)) { (acc, row) =>
-        acc.flatMap { found =>
-          row.memberRoots.flatMap(binaries.get).flatten.headOption match
-            case None           => Right(found)
-            case Some((_, gav)) =>
-              val url = registry.metadataUrl(gav.organization, gav.artifact)
-              HttpLookup.get(url, headers = registryHeaders(release)) match
-                case Left(err)                       => Left(s"$url: $err")
-                case Right(res) if res.status == 200 =>
-                  Right(found ++ MavenMetadata.latestRelease(res.body).map(row.at))
-                case Right(res) if res.isMiss => Right(found)
-                case Right(res)               => Left(s"$url: HTTP ${res.status}")
+    registryHeaders(release).flatMap { headers =>
+      catalog.byIdentity.values.toList
+        .foldLeft[Either[String, List[PublishedRow]]](Right(Nil)) { (acc, row) =>
+          acc.flatMap { found =>
+            row.memberRoots.flatMap(binaries.get).flatten.headOption match
+              case None           => Right(found)
+              case Some((_, gav)) =>
+                val url = registry.metadataUrl(gav.organization, gav.artifact)
+                HttpLookup.get(url, headers = headers, followRedirect = true) match
+                  case Left(err)                       => Left(s"$url: $err")
+                  case Right(res) if res.status == 200 =>
+                    Right(found ++ MavenMetadata.latestRelease(res.body).map(row.at))
+                  case Right(res) if res.isMiss => Right(found)
+                  case Right(res)               => Left(s"$url: HTTP ${res.status}")
+          }
         }
-      }
-      .map(ShipIndex.from)
+        .map(ShipIndex.from)
+    }
   end lastReleases
 
-  /** Central's public metadata needs no auth. A private registry sends the credentials the constructor declared. */
-  private def registryHeaders(release: ReleaseWorkflow): Map[String, String] =
-    if release.registry == ArtifactRegistry.MavenCentral then Map.empty
+  /** Central's public repo and a `file:` registry need no auth. Any other registry sends the credentials its workflow
+    * declared. A declared token that is not in the environment is a failure: an anonymous GET must not be read as "not
+    * released", which is what a registry that answers 404 for a bad token would look like.
+    */
+  private def registryHeaders(release: ReleaseWorkflow): Either[String, Map[String, String]] =
+    val public =
+      release.registry == ArtifactRegistry.MavenCentral || release.registry.credentialHost.isEmpty
+    if public then Right(Map.empty)
     else
       release.credentials match
-        case RegistryCredentials.Anonymous     => Map.empty
+        case RegistryCredentials.Anonymous     => Right(Map.empty)
         case RegistryCredentials.Bearer(token) =>
           RegistryCredentials
             .read(token, sys.env)
             .map(value => Map("Authorization" -> s"Bearer $value"))
-            .getOrElse(Map.empty)
+            .toRight(missingCredentials(release))
         case RegistryCredentials.UserPassword(user, pass) =>
           (RegistryCredentials.read(user, sys.env), RegistryCredentials.read(pass, sys.env)) match
             case (Some(u), Some(p)) =>
               val raw = java.util.Base64.getEncoder
                 .encodeToString(s"$u:$p".getBytes(java.nio.charset.StandardCharsets.UTF_8))
-              Map("Authorization" -> s"Basic $raw")
-            case _ => Map.empty
+              Right(Map("Authorization" -> s"Basic $raw"))
+            case _ => Left(missingCredentials(release))
+    end if
+  end registryHeaders
 
+  private def missingCredentials(release: ReleaseWorkflow): String =
+    val host  = release.registry.publishHosts.mkString(", ")
+    val named = release.credentials.described
+    val where = if host.isEmpty then "the release registry" else host
+    if named.isEmpty then s"no credentials for $where"
+    else s"no credentials for $where. Set ${named.mkString(" and ")}."
+
+  /** The release root of [[ArtifactRegistry]]: Central's public repo, a GitHub Packages repo, a `file:` URL, or the
+    * release URL of a split Maven registry (CodeArtifact, Artifactory, Nexus). Never the snapshot repository. A 302 is
+    * followed once, without `Authorization`.
+    */
   private def lookupGav(release: ReleaseWorkflow, gav: Gav): Either[String, RegistryStatus] =
-    HttpLookup.get(release.registry.pomUrl(gav), headers = registryHeaders(release)) match
-      case Left(err)  => Left(err)
-      case Right(res) => Modver.registryStatus(res.status)
+    for
+      headers <- registryHeaders(release)
+      status  <- HttpLookup.get(release.registry.pomUrl(gav), headers = headers, followRedirect = true).map(_.status)
+      found   <- Modver.registryStatus(status)
+    yield found
 
   private def liveBinaries(
       extracted: Extracted,
@@ -2649,13 +2811,20 @@ object ZipxPlugin extends AutoPlugin:
       .groupMap(_._1)(_._2)
   end liveBinaries
 
-  private def versionSchemeOf(extracted: Extracted, id: ModuleId): String =
+  private def versionSchemeOf(extracted: Extracted, id: ModuleId): Either[String, LibraryVersionScheme] =
     val ref = extracted.structure.allProjectRefs.find(_.project == (id: String))
-    ref
+    val raw = ref
       .flatMap(r => extracted.getOpt(r / versionScheme))
       .flatten
       .orElse(extracted.getOpt(ThisBuild / versionScheme).flatten)
-      .getOrElse("early-semver")
+      .getOrElse("")
+    LibraryVersionScheme.parse(raw).left.map(_.message)
+
+  private def requireVersionScheme: Def.Initialize[Task[Unit]] = Def.task {
+    LibraryVersionScheme.parse(versionScheme.value.getOrElse("")) match
+      case Right(_)  => ()
+      case Left(err) => sys.error(s"zipx: ${err.message}")
+  }
 
   private def probeMember(
       extracted: Extracted,
@@ -2696,7 +2865,7 @@ object ZipxPlugin extends AutoPlugin:
     val dest      =
       extracted.get(LocalRootProject / baseDirectory) / "target" / "zipx-mima" / s"${gav.artifact}-$version.jar"
     dest.getParentFile.mkdirs()
-    download(release.registry.jarUrl(gav), registryHeaders(release), dest)
+    registryHeaders(release).flatMap(headers => download(release.registry.jarUrl(gav), headers, dest))
   end releasedJar
 
   /** `Right(None)` when the registry answers that the artifact is not there: a member absent from that release. */
@@ -2735,7 +2904,7 @@ object ZipxPlugin extends AutoPlugin:
         end fetch
         val first    = fetch(url, sendHeaders = true)
         val raw      = first.headers().firstValue("location")
-        val location = if raw.isEmpty then None else Some(raw.get())
+        val location = if raw.isEmpty then None else Some(raw.orElse(""))
         val res      = HttpLookup.redirectTarget(first.statusCode(), location, url) match
           case Some(next) => fetch(next, sendHeaders = false)
           case None       => first

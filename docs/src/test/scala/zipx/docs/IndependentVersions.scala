@@ -98,13 +98,17 @@ flowchart TD
    Packages, `modver-check` and `modver-suggest` also get `packages: read` and `GITHUB_TOKEN`: a `permissions` block
    drops every scope it does not name, and the metadata request sends that token. Packages answers 401 to either
    omission.
-4. You write the number (`zipxModverBump client`, or by hand) and push.
+4. You write the number (`sbt zipxModverBump`, or one row by hand) and push. The bump does not run MiMa.
+   `modver-check` does, against the opened number.
 5. Before merging, prove the change downstream without a release: `sbt zipxSnapshotPublish local` here, pin
    `0.3.1-SNAPSHOT` there (or `sbt zipxSnapshotPublish` for another machine's CI). See **Snapshots and releases**.
 6. Merge. The default branch now builds `0.3.1-SNAPSHOT`. Later PRs in the same cycle pass without another bump
    unless MiMa says their change is bigger than the row already declares.
 7. Release when ready: a GitHub Release tagged `client/v0.3.1`, or Run workflow on **zipx release**. See **Snapshots
    and releases**.
+8. On that commit, `sbt zipxModverBump` opens the next patch of every row the release registry already has. Until
+   that number moves, `<row>-SNAPSHOT` is shadowed and `zipxDriftGate` (default `Fail`) stops the row's compile and
+   fails the snapshot publish. The check reads the registry `zipxReleaseWorkflow` names.
 
 `modver-check` / `modver-suggest` self-compile (`needsCapabilities = Nil`). They do not wait on test topology.
 """,
@@ -215,13 +219,36 @@ keep the first jar. sbt 2's `publishLocal` writes the Ivy local repository, not 
 Bump outbound rows yourself:
 
 ```text
-sbt "zipxModverBump client"         # patch, default
+sbt zipxModverBump                  # every released row, patch
+sbt "zipxModverBump minor"          # every released row, minor
+sbt "zipxModverBump client"         # that row, patch, released or not
 sbt "zipxModverBump libs minor"
 sbt "zipxModverBump client major"
 ```
 
-The PR is that constructor hunk:
+No arguments, or a kind alone, never bumps a row the release registry does not already have: that would skip a planned
+release. Naming the row does. A ship whose name is `patch` is that ship, not the kind. `modver-check` still owns MiMa.
 """,
+      exampleValue {
+        val ids                                                          = Set("client", "libs")
+        def show(tokens: List[String], known: Set[String] = ids): String =
+          ShipBumpRequest.parse(tokens, known).fold(_.message, _.toString)
+        List(
+          show(Nil),
+          show(List("minor")),
+          show(List("client")),
+          show(List("client", "major")),
+          show(List("patch"), Set("patch", "libs")),
+        ).mkString("\n")
+      }.assert(text =>
+        assertTrue(
+          text.contains("Released(Patch)"),
+          text.contains("Released(Minor)"),
+          text.contains("One(client,Patch)"),
+          text.contains("One(client,Major)"),
+          text.contains("One(patch,Patch)"),
+        )
+      ),
       example {
         catalogBumpDiff
       }.assert(_ =>
@@ -477,7 +504,7 @@ These run at `zipxWorkflowGenerate` / `zipxWorkflowCheck`, not at sbt load.
 | When | Error |
 |---|---|
 | `zipxCapabilities` has a `publish` | `Ship rows release from zipx-release.yml (zipxReleaseWorkflow), so ci.yml has no publish job` |
-| `zipxReleaseWorkflow` is `None` | `Ship rows release from zipx-release.yml: set zipxReleaseWorkflow := Some(ZipxCentral.releases)` |
+| `zipxReleaseWorkflow` is `None` | `set zipxReleaseWorkflow (ZipxCentral.releases, ZipxGitHubPackages.releases, or ZipxMaven.releases)` |
 | A publishing module has no row | `published module '…' is not in a Ship or ShipGroup` |
 | The same root is in two rows | `Each publishes=true module must be in exactly one row` |
 | `ShipGroup` with empty members | `has no members` |
@@ -519,8 +546,8 @@ hole. See **Validation**.
 4. `sbt zipxWorkflowGenerate`, commit `ci.yml`, `zipx-release.yml`, and composites, open a PR.
 5. Create the `zipx-release` GitHub Environment. Release with a GitHub Release or Run workflow.
 
-Human still writes the next number. Settings: **Settings** (`zipxShips`, `zipxReleaseWorkflow`, `zipxModverPropagate`,
-`zipxModverBump`, `zipxModverCheck`, `zipxModverSuggest`).
+Human still writes the next number. Settings: **Settings** (`zipxShips`, `zipxReleaseWorkflow`, `zipxDriftGate`,
+`zipxModverPropagate`, `zipxModverBump`, `zipxModverCheck`, `zipxModverSuggest`).
 """
     ),
   )
