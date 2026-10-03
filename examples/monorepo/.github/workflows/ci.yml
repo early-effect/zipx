@@ -326,6 +326,23 @@ jobs:
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    needs:
+      - advisories
+      - fmt
+      - modver-check
+      - modver-suggest
+      - test-L0
+      - test-L1
+      - test-L2
+      - workflow-check
+    if: "!cancelled()"
+    steps:
+      - name: Fail when a Verify job failed or was cancelled
+        if: (needs.advisories.result == 'failure' || needs.advisories.result == 'cancelled') || (needs.fmt.result == 'failure' || needs.fmt.result == 'cancelled') || (needs.modver-check.result == 'failure' || needs.modver-check.result == 'cancelled') || (needs.modver-suggest.result == 'failure' || needs.modver-suggest.result == 'cancelled') || (needs.test-L0.result == 'failure' || needs.test-L0.result == 'cancelled') || (needs.test-L1.result == 'failure' || needs.test-L1.result == 'cancelled') || (needs.test-L2.result == 'failure' || needs.test-L2.result == 'cancelled') || (needs.workflow-check.result == 'failure' || needs.workflow-check.result == 'cancelled')
+        run: exit 1
   docker:
     name: docker
     runs-on: ubuntu-latest
@@ -380,10 +397,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - cache-rehydrate
-      - test-L0
-      - test-L1
-      - test-L2
-    if: (!cancelled() && needs.cache-rehydrate.result != 'failure' && needs.test-L0.result != 'failure' && needs.test-L1.result != 'failure' && needs.test-L2.result != 'failure') && ((((github.event_name == 'push') && ((github.ref == 'refs/heads/main'))) || (github.event_name == 'workflow_dispatch')))
+      - verify
+    if: (!cancelled() && needs.cache-rehydrate.result != 'failure' && needs.verify.result != 'failure') && ((((github.event_name == 'push') && ((github.ref == 'refs/heads/main'))) || (github.event_name == 'workflow_dispatch')))
     env:
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
       SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}

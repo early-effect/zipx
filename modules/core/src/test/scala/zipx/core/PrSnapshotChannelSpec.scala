@@ -32,10 +32,11 @@ object PrSnapshotChannelSpec extends ZIOSpecDefault:
         cond.contains("github.event.pull_request.head.repo.full_name == github.repository"),
       )
     },
-    test("it publishes after the PR's test, from the PR's restored cache, and never saves") {
+    test("it publishes after Verify, from the PR's restored cache, and never saves") {
       assertTrue(
-        job.exists(_.needs.contains("test")),
-        job.flatMap(_.`if`).exists(_.contains("needs.test.result != 'failure'")),
+        job.exists(_.needs.contains("verify")),
+        job.exists(!_.needs.contains("test")),
+        job.flatMap(_.`if`).exists(_.contains("needs.verify.result != 'failure'")),
         job.exists(_.steps.exists(_.`with`.get("cache-mode").contains("restore"))),
         job.exists(_.steps.exists(_.run.exists(_.contains("zipxSnapshotPublish pr")))),
       )

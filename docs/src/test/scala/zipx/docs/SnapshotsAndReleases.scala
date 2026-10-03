@@ -122,8 +122,9 @@ With `ZipxCentral.snapshots`, every push to the default branch publishes each ro
 released yet, at `<row>-SNAPSHOT`. A downstream repo can pin that coordinate in CI before the release exists. A row
 that is already released is skipped: its snapshot would sort before the release.
 
-The `snapshots` job waits on this run's cache owner (`test`, or `cache-rehydrate` on a merge push that skipped
-Verify), restores that save, and never saves one, so it packages and uploads without recompiling. It skips scaladoc,
+The `snapshots` job needs `verify`, so it publishes only after every Verify job has passed or skipped. On a merge
+push that skipped Verify it also needs `cache-rehydrate`, which owns that push's build snapshot. It restores that
+save and never saves one, so it packages and uploads without recompiling. It skips scaladoc,
 which Central checks only on a release, and signs nothing. It needs `SONATYPE_USERNAME` / `SONATYPE_PASSWORD` and
 SNAPSHOTs enabled for the namespace in the Central Portal (Namespaces). Central deletes snapshots after 90 days. It is
 the same `zipxSnapshotPublish` you run from a laptop.
@@ -134,7 +135,9 @@ the same `zipxSnapshotPublish` you run from a laptop.
         assertTrue(
           yml.contains("sbt zipxSnapshotPublish") || yml.contains("sbt 'zipxSnapshotPublish'"),
           yml.contains("github.ref == 'refs/heads/main'"),
-          yml.contains("needs.test.result != 'failure'"),
+          yml.contains("needs.verify.result != 'failure'"),
+          yml.contains("- verify"),
+          !yml.contains("needs.test.result"),
           yml.contains("cache-mode: restore"),
           yml.contains("SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}"),
           !yml.contains("PGP_"),
@@ -149,7 +152,8 @@ before either merges. A fork's PR never runs it: its run has no publishing secre
 
 Only the published coordinate moves. sbt still compiles and packages at `<row>-SNAPSHOT`, exactly what the PR's `test`
 built, so the job restores the PR's cache and recompiles nothing; each POM names in-repo dependencies at their
-`-pr<N>-SNAPSHOT` coordinate. Labeling a PR starts no run by itself; push to publish.
+`-pr<N>-SNAPSHOT` coordinate. It needs `verify`, same as mainline snapshots. Labeling a PR starts no run by itself;
+push to publish.
 
 ```scala
 zipxCapabilities ++= Seq(ZipxCentral.snapshots, ZipxCentral.pullRequestSnapshots("snapshots"))
@@ -162,6 +166,7 @@ zipxCapabilities ++= Seq(ZipxCentral.snapshots, ZipxCentral.pullRequestSnapshots
           yml.contains("zipxSnapshotPublish pr"),
           yml.contains("contains(github.event.pull_request.labels.*.name, 'snapshots')"),
           yml.contains("github.event.pull_request.head.repo.full_name == github.repository"),
+          yml.contains("needs.verify.result != 'failure'"),
           yml.contains("cache-mode: restore"),
         )
       ),

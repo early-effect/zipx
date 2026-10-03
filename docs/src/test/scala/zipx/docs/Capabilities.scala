@@ -46,17 +46,17 @@ deploy**. `Ship` rows publish from `zipx-release.yml`, never from a capability; 
     ),
     section("Phases and replace-by-name")(
       md"""
-Capabilities run **Verify → Publish → Deploy**. A capability can depend on another via `needsCapabilities`.
+Capabilities run **Verify → Publish → Deploy**. When the build has Verify jobs, the planner adds one `verify` job that needs every one of them. It runs no sbt. It fails if any Verify job failed or was cancelled, and it passes when a Verify job skipped (an affected module, `modver-check` off a pull request, Verify skipped after a merged PR). A Publish job whose gate can run where Verify runs (`Always` or `OnDefaultPush`, including `snapshots` and `snapshots-pr`) needs `verify`. A release-tag Publish job (`publish`, `docker`) does not: Verify does not run on a tag. Deploy does not. Require `verify` in the ruleset. That list then stays put when a Verify job is added. `needsCapabilities` is still how one capability waits on another.
 
 ```mermaid
 flowchart TD
-  V[Verify] --> P[Publish]
-  P --> D[Deploy]
+  V[Verify jobs] --> R[verify]
+  R --> P[Publish on a PR or the default branch]
+  Tag[Release-tag Publish] --> D[Deploy]
   V -.-> Aff[Affected · Graph path gate]
-  P -.-> Tag[Release tag or default-branch push]
   D -.-> Env[Environments · never affected]
-  class V,P,D happy
-  class Aff,Tag,Env warn
+  class V,R,P,D happy
+  class Tag,Aff,Env warn
 ```
 
 Path gating reaches **Graph** capabilities only (`zipxAffectedOnPR` / `zipxAffectedOnPush`; fail open): Verify by

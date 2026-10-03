@@ -126,7 +126,8 @@ zipxPinFeeds += PinFeed(
       md"""
 When `zipxPinFeeds` is non-empty, some feed has `advisory != Ignore`, and `zipxPinPrGate != Off`, pin OSV runs inside
 `zipxAdvisoryCheck` (the **advisories** job). Same-name replace still works if you add `Capability.pinCheck` yourself.
-Default is **parallel**: advisories does not `needs` test. To fail-closed even when only `test` is a required check:
+Default is **parallel**: advisories does not `needs` test. Publish still waits on it, because `verify` needs every
+Verify job. Require `verify` rather than `test` alone. To make the `test` job itself red when advisories fails:
 
 ```scala
 zipxCapabilities += Capability.test.copy(needsCapabilities = List(Capability.AdvisoriesName))

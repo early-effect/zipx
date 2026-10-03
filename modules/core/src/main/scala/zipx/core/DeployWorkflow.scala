@@ -247,6 +247,7 @@ object DeployWorkflow:
         usesAffected = true,
         byName,
         usesVerifyGate = false,
+        usesVerifyRollup = false,
         gated,
         Planner.Pipeline.Deploy(imagesEnvironment),
       )

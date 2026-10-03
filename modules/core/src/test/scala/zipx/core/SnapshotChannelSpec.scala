@@ -44,13 +44,14 @@ object SnapshotChannelSpec extends ZIOSpecDefault:
         )
       }
     },
-    test("it waits on test and tolerates it skipping, which Verify does on a merged-PR push and a dispatch") {
+    test("it waits on the Verify roll-up, which fails closed, and tolerates that job's needs skipping") {
       check(gConfig) { config =>
         val cond = snapshotsJob(config).flatMap(_.`if`).getOrElse("")
         assertTrue(
-          snapshotsJob(config).exists(_.needs.contains("test")),
+          snapshotsJob(config).exists(_.needs.contains("verify")),
+          snapshotsJob(config).exists(!_.needs.contains("test")),
           cond.contains("!cancelled() && needs"),
-          cond.contains("needs.test.result != 'failure'"),
+          cond.contains("needs.verify.result != 'failure'"),
         )
       }
     },

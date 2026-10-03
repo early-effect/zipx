@@ -574,18 +574,22 @@ object Capability:
       env = Map(ModverCheck.BaseShaEnv -> EnvValue.typed(Expr.github("event.pull_request.base.sha"))),
     )
 
-  /** Publishes every unreleased row at `<row>-SNAPSHOT` on a default-branch push, once this run's cache owner saved. */
+  /** Publishes every unreleased row at `<row>-SNAPSHOT` on a default-branch push.
+    *
+    * Does not name `test`. The planner needs the Verify roll-up, so a sibling Verify job blocks the publish, and
+    * `cache-rehydrate` when that job owns the merge-push save.
+    */
   def snapshots(command: SbtCommand = SbtCommand.unsafeCommand("zipxSnapshotPublish")): Capability =
     Capability.once(
       name = SnapshotsName,
       command = command,
       phase = Phase.Publish,
       gate = Gate.OnDefaultPush,
-      needsCapabilities = List(TestName),
     )
 
   /** Publishes every unreleased row at `<row>-pr<N>-SNAPSHOT` on each push to a same-repo PR carrying `label`, from the
-    * PR's own build cache. A fork's PR has no publishing secrets, so it never runs there.
+    * PR's own build cache. The planner needs the Verify roll-up, same as [[snapshots]]. A fork's PR has no publishing
+    * secrets, so it never runs there.
     */
   def pullRequestSnapshots(
       label: ExprLiteral,
@@ -596,7 +600,6 @@ object Capability:
       command = command,
       phase = Phase.Publish,
       gate = Gate.Always,
-      needsCapabilities = List(TestName),
       condition = Some(
         JobCondition.eventIs("pull_request") && JobCondition.HasPrLabel(label) && JobCondition.fromSameRepository
       ),

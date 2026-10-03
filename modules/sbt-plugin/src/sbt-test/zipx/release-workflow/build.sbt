@@ -75,7 +75,8 @@ assertSnapshotsJob := {
   val body = yml.linesIterator.dropWhile(_ != "  snapshots:").takeWhile(l => l == "  snapshots:" || !l.matches("  [a-z-]+:")).mkString("\n")
   assert(body.contains("zipxSnapshotPublish"), yml)
   assert(body.contains("cache-mode: restore"), body)
-  assert(body.contains("needs.test.result != 'failure'"), body)
+  assert(body.contains("needs.verify.result != 'failure'"), body)
+  assert(!body.contains("needs.test.result"), body)
 }
 
 val assertSnapshotsPublished = taskKey[Unit]("every unreleased row is published at <row>-SNAPSHOT, without scaladoc")

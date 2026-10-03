@@ -158,6 +158,15 @@ object Planner:
       .cycle(capabilities.map(c => c.name -> c.needsCapabilities).toMap)
       .foreach(involved => sys.error(s"zipx: needsCapabilities cycle among ${involved.mkString(", ")}"))
 
+    // `verify` is the roll-up job id. A capability of that name would emit the same key and GitHub would reject the
+    // workflow, or, worse, the roll-up would replace the capability.
+    capabilities.filter(_.name == CapabilityName("verify")) match
+      case Nil => ()
+      case _   =>
+        sys.error(
+          "zipx: capability name 'verify' is reserved for the Verify roll-up job. Rename the capability. " +
+            "Require that one check in the ruleset; it needs every Verify job."
+        )
     capabilities.foreach(validateWorkflowCall)
     capabilities.foreach(c => validateSharedTargets(c, graph))
     capabilities.foreach(c => validateSatisfiable(c, graph, config))
@@ -393,6 +402,9 @@ object Planner:
   val verifyGateJobId: JobId     = JobId("verify-gate")
   val cacheRehydrateJobId: JobId = JobId("cache-rehydrate")
 
+  /** The required check. Same word as the capability name [[validateCapabilities]] refuses. */
+  val verifyRollupJobId: JobId = JobId("verify")
+
   /** Whether a phase's Graph jobs may be narrowed to the affected modules.
     *
     * [[Phase.Verify]] always may; [[Phase.Publish]] only under [[PlanConfig.affectedPublish]]; [[Phase.Deploy]] only
@@ -439,8 +451,17 @@ object Planner:
 
     val hasVerify          = capabilities.exists(_.phase == Phase.Verify)
     val usesVerifyGate     = config.skipMergedPrPush && hasVerify
-    val usesCacheRehydrate =
-      usesVerifyGate && config.cacheRehydrateOnMerge && config.cache == CacheBackend.LocalDir
+    val usesCacheRehydrate = emitsCacheRehydrate(config, hasVerify)
+
+    // Ids `plan` will actually emit. `allJobIds` also names a capability that has no participants, and a roll-up
+    // `needs` on a job that does not exist is a workflow GitHub rejects.
+    val verifyIds =
+      capabilities
+        .filter(c => c.phase == Phase.Verify && emitsJobs(c, graph))
+        .flatMap(c => allJobIds(c, graph, config))
+        .distinct
+        .sorted
+    val usesVerifyRollup = verifyIds.nonEmpty
 
     val byName = capabilities.map(c => c.name -> c).toMap
 
@@ -460,13 +481,25 @@ object Planner:
         val mode = MatrixCollapse.effective(c, config)
         c.scope match
           case CapabilityScope.Once =>
-            List(onceJob(c, graph, config, byName, usesVerifyGate, usesCacheRehydrate, affectedGatedNames))
+            List(
+              onceJob(c, graph, config, byName, usesVerifyGate, usesVerifyRollup, affectedGatedNames)
+            )
           case CapabilityScope.Aggregate =>
-            aggregateJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames, mode)
+            aggregateJobs(c, graph, config, byName, usesVerifyGate, usesVerifyRollup, affectedGatedNames, mode)
           case CapabilityScope.Layer =>
-            layerJobs(c, graph, config, byName, usesVerifyGate, affectedGatedNames, mode)
+            layerJobs(c, graph, config, byName, usesVerifyGate, usesVerifyRollup, affectedGatedNames, mode)
           case CapabilityScope.Graph =>
-            graphCapabilityJobs(c, graph, config, usesAffected, byName, usesVerifyGate, affectedGatedNames, Pipeline.Ci)
+            graphCapabilityJobs(
+              c,
+              graph,
+              config,
+              usesAffected,
+              byName,
+              usesVerifyGate,
+              usesVerifyRollup,
+              affectedGatedNames,
+              Pipeline.Ci,
+            )
         end match
       }
 
@@ -480,9 +513,17 @@ object Planner:
         ),
       ).flatten
 
+    // After every Verify job, before Publish. `needs` does not require the order. Readers do, and so does the phase
+    // sort this list is standing in for.
+    val rolled =
+      if !usesVerifyRollup then capabilityJobs
+      else
+        val (verifyJobs, laterJobs) = capabilityJobs.partition((id, _) => verifyIds.contains(id))
+        verifyJobs ++ List(verifyRollupJobId -> verifyRollupJob(config, verifyIds)) ++ laterJobs
+
     // Widening the key to `String` is the last responsible moment: `Workflow` is the serialization model, and a
     // `jobs:` key is a YAML scalar. Every id above is a `JobId`, which is what the widening is allowed to forget.
-    val jobs = ListMap.from[String, Job](leading ++ capabilityJobs)
+    val jobs = ListMap.from[String, Job](leading ++ rolled)
 
     Workflow(
       name = config.workflowName,
@@ -647,6 +688,37 @@ object Planner:
     )
   end cacheRehydrateJob
 
+  /** No checkout and no sbt. The job exists so a ruleset can require one check.
+    *
+    * GitHub counts a skipped required check as passing, so this runs under `!cancelled()` even when a need failed, and
+    * the step fails the job on `failure` or `cancelled`. `success` and `skipped` leave the step skipped, and a job
+    * whose only step is skipped succeeds. That is the merged-PR push and an affected module that did not run.
+    */
+  private def verifyRollupJob(config: PlanConfig, needs: List[JobId]): Job =
+    Job(
+      name = Some(verifyRollupJobId),
+      runsOn = List(config.runnerOs),
+      needs = needs,
+      `if` = Some((!Expr.cancelled).unwrapped),
+      steps = List(
+        Step
+          .run(Script(Exec("exit", Word.lit("1"))))
+          .named("Fail when a Verify job failed or was cancelled")
+          .when(verifyRollupFailed(needs))
+          .build
+      ),
+    )
+
+  private def verifyRollupFailed(needs: List[JobId]): Expr =
+    val clause = (id: JobId) =>
+      Expr.group(
+        (Expr.JobResult(id) === Expr.quoted("failure")) || (Expr.JobResult(id) === Expr.quoted("cancelled"))
+      )
+    needs match
+      case head :: tail => tail.foldLeft(clause(head))((acc, id) => acc || clause(id))
+      case Nil          =>
+        sys.error("zipx: verify roll-up has no Verify jobs")
+
   /** Verify never runs on a tag push (a release tag only needs Publish and Deploy) or a `workflow_dispatch` (a manual
     * run is for a docs-only deploy). Non-Verify phases pass through untouched.
     *
@@ -787,20 +859,21 @@ object Planner:
       config: PlanConfig,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
-      usesCacheRehydrate: Boolean,
+      usesVerifyRollup: Boolean,
       affectedGatedNames: Set[CapabilityName],
   ): (JobId, Job) =
     val releaseCond = gateCondition(capability, config)
     val crossNeeds  = crossCapabilityNeeds(capability, graph, byName, config)
     val affectedBy  = affectedByModules(capability, graph, config)
-    val afterVerify = waitsOnVerify(capability)
-    val cacheOwner  = Option.when(afterVerify && usesCacheRehydrate)(cacheRehydrateJobId).toList
+    val phased      = phaseNeeds(capability, config, usesVerifyRollup)
     val rawNeeds    =
-      (crossNeeds ++ cacheOwner ++ (if affectedBy.nonEmpty then List(affectedJobId) else Nil)).distinct.sorted
+      (crossNeeds ++ phased ++ (if affectedBy.nonEmpty then List(affectedJobId) else Nil)).distinct.sorted
     // Same clause order as a Graph job: `!cancelled()`, the affected gate, then each other need's guard.
+    // `phased` can skip (`cache-rehydrate` on a push where Verify ran) and can fail (the roll-up). Both have to be
+    // guarded, or GitHub's implicit `success()` skips the publish when the rehydrate job is skipped.
     val tolerance =
-      if affectedBy.isEmpty && afterVerify then Some(skipTolerantClauses(rawNeeds).mkString(" && "))
-      else if affectedBy.isEmpty then tolerateSkips(capability, rawNeeds, affectedGatedNames)
+      if affectedBy.isEmpty && phased.nonEmpty then Some(skipTolerantClauses(rawNeeds).mkString(" && "))
+      else if affectedBy.isEmpty then tolerateSkips(capability, crossNeeds, affectedGatedNames)
       else
         val gate = Expr
           .group((affectedBy.map(Expr.contains(affectedModulesJson, _)) :+ affectedContainsAll).reduceLeft(_ || _))
@@ -851,11 +924,40 @@ object Planner:
 
   private val syntheticNode = ModuleNode(id = ModuleId("_build"))
 
-  /** A later-phase job that waits on `test` must tolerate it skipping, since Verify skips on a merged-PR push and a
-    * dispatch, and must then wait on `cache-rehydrate`, which owns that push's build snapshot in its place.
+  /** Publish jobs that can run where Verify runs (`Always`, `OnDefaultPush`) need the roll-up. A release-tag Publish
+    * job does not: Verify never runs on a tag. Deploy does not.
+    *
+    * `cache-rehydrate` is a sibling of the roll-up, not a need of it. On a merge push the roll-up passes on skipped
+    * Verify jobs while rehydrate owns the save, and the publish has to wait for that save.
     */
-  private def waitsOnVerify(capability: Capability): Boolean =
-    capability.phase != Phase.Verify && capability.needsCapabilities.contains(Capability.TestName)
+  private def phaseNeeds(capability: Capability, config: PlanConfig, usesVerifyRollup: Boolean): List[JobId] =
+    if !usesVerifyRollup || capability.phase != Phase.Publish then Nil
+    else
+      capability.gate match
+        case Gate.Always | Gate.OnDefaultPush =>
+          val cache =
+            Option
+              .when(emitsCacheRehydrate(config, hasVerify = true) && restoresBuildSnapshot(capability))(
+                cacheRehydrateJobId
+              )
+              .toList
+          verifyRollupJobId :: cache
+        case Gate.OnReleaseTag | Gate.AffectedOnly => Nil
+
+  /** The rehydrate job exists only for a LocalDir build that skips Verify after a merged PR. */
+  private def emitsCacheRehydrate(config: PlanConfig, hasVerify: Boolean): Boolean =
+    config.skipMergedPrPush && hasVerify && config.cacheRehydrateOnMerge && config.cache == CacheBackend.LocalDir
+
+  /** Rehydrate owns the save for a job that would restore it. An action-only job and a reusable-workflow call do not.
+    */
+  private def restoresBuildSnapshot(capability: Capability): Boolean =
+    capability.workflowCall.isEmpty && capability.command.runsSbt && capability.localCache != LocalCacheMode.Off
+
+  /** A Verify capability with no participants emits nothing. Once always emits its one job. */
+  private def emitsJobs(capability: Capability, graph: ModuleGraph): Boolean =
+    capability.scope match
+      case CapabilityScope.Once => true
+      case _                    => participants(capability, graph).nonEmpty
 
   /** The modules a [[Capability.withAffectedBy]] gate lists. Empty when the capability has none, or when affected
     * gating is off, in which case the job runs ungated as it always did.
@@ -873,18 +975,23 @@ object Planner:
       config: PlanConfig,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      usesVerifyRollup: Boolean,
       affectedGatedNames: Set[CapabilityName],
       mode: MatrixCollapse,
   ): List[(JobId, Job)] =
     val nodes = participants(capability, graph)
     if nodes.isEmpty then Nil
     else
-      val crossNeeds             = crossCapabilityNeeds(capability, graph, byName, config)
-      val joined                 = joinCommands(capability, nodes)
-      val cache                  = cacheForCommand(config, joined.isDefined)
-      val runner                 = capability.runsOn.getOrElse(List(config.runnerOs))
-      val releaseCond            = gateCondition(capability, config)
-      val tolerance              = tolerateSkips(capability, crossNeeds, affectedGatedNames)
+      val phased     = phaseNeeds(capability, config, usesVerifyRollup)
+      val crossNeeds =
+        (crossCapabilityNeeds(capability, graph, byName, config) ++ phased).distinct.sorted
+      val joined      = joinCommands(capability, nodes)
+      val cache       = cacheForCommand(config, joined.isDefined)
+      val runner      = capability.runsOn.getOrElse(List(config.runnerOs))
+      val releaseCond = gateCondition(capability, config)
+      val tolerance   =
+        if phased.nonEmpty then Some(skipTolerantClauses(crossNeeds).mkString(" && "))
+        else tolerateSkips(capability, crossNeeds, affectedGatedNames)
       val (baseNeeds, gatedCond) =
         applyVerifyGate(crossNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
       val baseCond = andConditions(gatedCond, JobCondition.renderOpt(capability.condition))
@@ -1024,17 +1131,24 @@ object Planner:
       config: PlanConfig,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      usesVerifyRollup: Boolean,
       affectedGatedNames: Set[CapabilityName],
       mode: MatrixCollapse,
   ): List[(JobId, Job)] =
     val layers = graph.subsetLayers(capability.participates)
     if layers.isEmpty then Nil
     else
-      val crossNeeds  = crossCapabilityNeeds(capability, graph, byName, config)
+      val phased = phaseNeeds(capability, config, usesVerifyRollup)
+      // Later waves need the previous wave, which already needed the roll-up. Putting it on every wave would only
+      // repeat the same edge.
+      val firstWaveNeeds =
+        (crossCapabilityNeeds(capability, graph, byName, config) ++ phased).distinct.sorted
       val runner      = capability.runsOn.getOrElse(List(config.runnerOs))
       val releaseCond = gateCondition(capability, config)
-      val tolerance   = tolerateSkips(capability, crossNeeds, affectedGatedNames)
-      val shared      = capability.targetFanOut match
+      val tolerance   =
+        if phased.nonEmpty then Some(skipTolerantClauses(firstWaveNeeds).mkString(" && "))
+        else tolerateSkips(capability, firstWaveNeeds, affectedGatedNames)
+      val shared = capability.targetFanOut match
         case TargetFanOut.JobPerTarget => Nil
         case TargetFanOut.SharedJob    => distinctTargets(capability, graph)
       val fanned                                             = distinctFannedTargets(capability, graph)
@@ -1066,7 +1180,7 @@ object Planner:
             matrixAxes: Set[String] = Set.empty,
         ): (JobId, Job) =
           val layerNeeds =
-            (prev ++ (if firstWave then crossNeeds else Nil)).distinct.sorted
+            (prev ++ (if firstWave then firstWaveNeeds else Nil)).distinct.sorted
           val (needs, base) =
             if firstWave then
               applyVerifyGate(layerNeeds, andConditions(tolerance, releaseCond), capability.phase, usesVerifyGate)
@@ -1183,6 +1297,7 @@ object Planner:
       usesAffected: Boolean,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      usesVerifyRollup: Boolean,
       affectedGatedNames: Set[CapabilityName],
       pipeline: Pipeline,
   ): List[(JobId, Job)] =
@@ -1199,6 +1314,7 @@ object Planner:
           usesAffected,
           byName,
           usesVerifyGate,
+          usesVerifyRollup,
           affectedGatedNames,
           pipeline,
         )
@@ -1214,6 +1330,7 @@ object Planner:
           usesAffected,
           byName,
           usesVerifyGate,
+          usesVerifyRollup,
           affectedGatedNames,
           collapse,
           pipeline,
@@ -1228,6 +1345,7 @@ object Planner:
       usesAffected: Boolean,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      usesVerifyRollup: Boolean,
       affectedGatedNames: Set[CapabilityName],
       mode: MatrixCollapse,
       pipeline: Pipeline,
@@ -1302,14 +1420,16 @@ object Planner:
           id      <- allJobIds(dep, graph, config)
         yield id
 
+      val phased          = phaseNeeds(capability, config, usesVerifyRollup)
       val selector        = selectionJobId(pipeline)
       val gatedOnAffected = usesAffected && affectedGated(capability, config)
-      val rawNeeds        = (crossNeeds ++ (if gatedOnAffected then List(selector) else Nil)).distinct.sorted
-      val cache           = cacheForCommand(config, commandOverride.isDefined)
-      val guardedNeeds    = rawNeeds.filterNot(id => id == selector || id == verifyGateJobId)
-      val skipTolerant    = gatedOnAffected || dependsOnSkippable(capability, affectedGatedNames)
-      val releaseGate     = gateFor(capability, config, pipeline)
-      val legTarget       = Option.when(targets.nonEmpty)(Expr.matrix("target"))
+      val rawNeeds        =
+        (crossNeeds ++ phased ++ (if gatedOnAffected then List(selector) else Nil)).distinct.sorted
+      val cache        = cacheForCommand(config, commandOverride.isDefined)
+      val guardedNeeds = rawNeeds.filterNot(id => id == selector || id == verifyGateJobId)
+      val skipTolerant = gatedOnAffected || dependsOnSkippable(capability, affectedGatedNames) || phased.nonEmpty
+      val releaseGate  = gateFor(capability, config, pipeline)
+      val legTarget    = Option.when(targets.nonEmpty)(Expr.matrix("target"))
       // Job-level `if` cannot use `matrix.*` (GitHub rejects the workflow). Skip the whole job when
       // nothing is selected; per-leg membership is enforced on each step below.
       val affectedGate =
@@ -1383,6 +1503,7 @@ object Planner:
       usesAffected: Boolean,
       byName: Map[CapabilityName, Capability],
       usesVerifyGate: Boolean,
+      usesVerifyRollup: Boolean,
       affectedGatedNames: Set[CapabilityName],
       pipeline: Pipeline,
   ): List[(JobId, Job)] =
@@ -1412,10 +1533,11 @@ object Planner:
             case _ => allJobIds(dep, graph, config)
       yield id
 
+    val phased          = phaseNeeds(capability, config, usesVerifyRollup)
     val selector        = selectionJobId(pipeline)
     val gatedOnAffected = usesAffected && affectedGated(capability, config)
     val rawNeeds        =
-      (upstreamNeeds ++ crossNeeds ++ (if gatedOnAffected then List(selector) else Nil)).distinct.sorted
+      (upstreamNeeds ++ crossNeeds ++ phased ++ (if gatedOnAffected then List(selector) else Nil)).distinct.sorted
 
     val matrix =
       if capability.matrixed && config.scalaMatrix && node.crossScalaVersions.sizeIs > 1 then
@@ -1427,7 +1549,7 @@ object Planner:
     // `verify-gate` through `applyVerifyGate`. That includes `crossNeeds`, so a failed `fmt` still blocks the tests
     // whose `!cancelled()` would otherwise let them through.
     val guardedNeeds = rawNeeds.filterNot(id => id == selector || id == verifyGateJobId)
-    val skipTolerant = gatedOnAffected || dependsOnSkippable(capability, affectedGatedNames)
+    val skipTolerant = gatedOnAffected || dependsOnSkippable(capability, affectedGatedNames) || phased.nonEmpty
     val needs        = applyVerifyGate(rawNeeds, None, capability.phase, usesVerifyGate)._1
 
     // Per target, because the deploy plan selects modules per target. `affected` ignores the target, so ci.yml's

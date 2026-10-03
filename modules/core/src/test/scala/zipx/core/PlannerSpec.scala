@@ -217,7 +217,7 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs.contains("test-schema"),
         wf.jobs.contains("test-clientA"),
         wf.jobs.contains("test-core"),
-        wf.jobs.size == sampleGraph.ids.size,
+        wf.jobs.keys.count(_.startsWith("test-")) == sampleGraph.ids.size,
       )
     },
     test("test-job `needs` are the direct upstream modules' test jobs") {
@@ -995,8 +995,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val wf  = Planner.plan(sampleGraph, List(Capability.test), config)
       val run = wf.jobs("test").steps.last.run.getOrElse("")
       assertTrue(
-        wf.jobs.size == 1,
-        wf.jobs.contains("test"),
+        wf.jobs.keySet == Set("test", "verify"),
         run.endsWith(" test") || run.contains("'test'"),
         !run.contains("schema/test"),
         !wf.jobs.contains("test-schema"),
@@ -1471,7 +1470,7 @@ object PlannerSpec extends ZIOSpecDefault:
     test("Layer jobs each carry capability condition") {
       val cap = Capability.testLayers.withCondition(JobCondition.varNonEmpty("RUN_LAYERS"))
       val wf  = Planner.plan(sampleGraph, List(cap), config)
-      val ifs = wf.jobs.values.flatMap(_.`if`).toList
+      val ifs = wf.jobs.filter((id, _) => id.startsWith("test-")).values.flatMap(_.`if`).toList
       assertTrue(ifs.nonEmpty, ifs.forall(_.contains("vars.RUN_LAYERS != ''")))
     },
     test("Graph affected Verify ANDs capability condition without dropping affected clauses") {
@@ -1570,8 +1569,7 @@ object PlannerSpec extends ZIOSpecDefault:
       val cap   = Capability.testGraph.copy(scope = CapabilityScope.Once)
       val wf    = Planner.plan(empty, List(cap), config)
       assertTrue(
-        wf.jobs.size == 1,
-        wf.jobs.contains("test"),
+        wf.jobs.keySet == Set("test", "verify")
       )
     },
 

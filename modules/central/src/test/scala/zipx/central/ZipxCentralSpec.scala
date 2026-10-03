@@ -62,6 +62,8 @@ object ZipxCentralSpec extends ZIOSpecDefault:
         job.flatMap(_.env.get("SONATYPE_PASSWORD")).contains("${{ secrets.SONATYPE_PASSWORD }}"),
         job.exists(j => !j.env.keys.exists(_.startsWith("PGP_"))),
         job.exists(!_.steps.exists(_.name.contains("Import signing key"))),
+        job.exists(_.needs.contains("verify")),
+        job.exists(!_.needs.contains("test")),
       )
     },
     test("Once needsCapabilities fans out over allJobIds of the dependency under every collapse mode") {
