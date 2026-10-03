@@ -11,7 +11,7 @@ object RemoteCacheSmokeSpec extends ZIOSpecDefault:
         job.services.contains(RemoteCacheProof.serviceName),
         job.services(RemoteCacheProof.serviceName).image == RemoteCacheProof.image,
         job.env.get(RemoteCacheProof.envUri).contains(RemoteCacheProof.grpcLocalhost),
-        wf.jobs.keySet == Set("test"),
+        wf.jobs.keySet == Set("test", "verify"),
       )
     },
     test("live remote-cache proof is Aggregate test, not a parallel once-job") {

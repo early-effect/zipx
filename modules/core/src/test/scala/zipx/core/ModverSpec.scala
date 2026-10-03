@@ -668,7 +668,7 @@ object ModverSpec extends ZIOSpecDefault:
         val cfg = PlanConfig(skipMergedPrPush = false, verifyCleanLabel = None, affected = AffectedMode.Always)
         val ids = Planner.allJobIds(cap, graph, cfg).map(id => id: String).sorted
         val wf  = Planner.plan(graph, List(cap), cfg)
-        assertTrue(ids == List("modver-check"), wf.jobs.keys.toList.sorted == ids)
+        assertTrue(ids == List("modver-check"), wf.jobs.keySet == ids.toSet + "verify")
       },
       test("planned YAML is pull_request and does not sit on test needs") {
         val cfg   = PlanConfig(skipMergedPrPush = false, verifyCleanLabel = None, affected = AffectedMode.Always)

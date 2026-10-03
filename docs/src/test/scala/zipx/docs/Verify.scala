@@ -110,9 +110,11 @@ That writes `.github/workflows/zipx-coverage.yml`, one job running `coverage; te
 - The job restores the build cache and never saves it, and nothing else runs in that workflow. An instrumented class
   therefore never reaches `test`, an image, or a publish.
 
-The builtin `test` stays the PR's required check and the build cache's owner. Generate refuses a coverage capability
-named `test`, which would make every PR wait on an instrumented build, and a coverage capability that saves the
-cache. Setting `zipxCoverageWorkflow := None` (the default) deletes the file on the next generate.
+The builtin `test` stays the build cache's owner. The check to require on the PR is `verify`: it needs every Verify
+job, so the ruleset does not grow when one is added. A skipped required check counts as passing, so `verify` runs
+unless the workflow was cancelled and fails itself when a Verify job failed or was cancelled. Generate refuses a
+coverage capability named `test`, which would make every PR wait on an instrumented build, and a coverage capability
+that saves the cache. Setting `zipxCoverageWorkflow := None` (the default) deletes the file on the next generate.
 
 To measure in `ci.yml` instead, add a capability:
 

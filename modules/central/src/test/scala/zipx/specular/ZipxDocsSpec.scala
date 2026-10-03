@@ -59,6 +59,13 @@ object ZipxDocsSpec extends ZIOSpecDefault:
       val wf = Planner.plan(GraphFixture(Nil), List(ZipxDocs.pages()), config)
       assertTrue(wf.on.push.exists(_.tags.nonEmpty))
     },
+    test("pages is not a Verify job and does not wait on the roll-up") {
+      val wf = Planner.plan(GraphFixture(Nil), List(Capability.test, ZipxDocs.pages()), config)
+      assertTrue(
+        wf.jobs("verify").needs == List("test"),
+        !wf.jobs("docs").needs.contains("verify"),
+      )
+    },
     test("pages omits PlanConfig.env so GHA accepts the uses: caller job") {
       val job = Planner
         .plan(

@@ -315,7 +315,7 @@ object PinFeedSpec extends ZIOSpecDefault:
         val cap = Capability.pinCheck()
         val ids = Planner.allJobIds(cap, graph, planConfig).map(id => id: String).sorted
         val wf  = Planner.plan(graph, List(cap), planConfig)
-        assertTrue(ids == List("pin-check"), wf.jobs.keys.toList.sorted == ids)
+        assertTrue(ids == List("pin-check"), wf.jobs.keySet == ids.toSet + "verify")
       },
       test("planned YAML is pull_request and does not sit on test needs") {
         val wf    = Planner.plan(graph, List(Capability.pinCheck(), Capability.test), planConfig)
