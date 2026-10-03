@@ -77,9 +77,10 @@ fields cannot be checked at a literal (`needsCapabilities` cycles, `workflowCall
 is checked at `zipxWorkflowGenerate`; see **Validation**.
 
 Job env merge: `zipxEnv` → cache
-backend → capability → target (`zipxCacheRehydrateEnv` overlays `zipxEnv` on rehydrate only). `zipxEnv` is omitted on
-reusable-workflow caller jobs (`workflowCall` / `uses:`). See **Job conditions** for recipes (fork gate, PR-label
-stage ECR, multi-publish, docs on dispatch).
+backend → capability → target (`zipxCacheRehydrateEnv` overlays `zipxEnv` on rehydrate only). Every generated sbt job
+sets `COURSIER_TTL=0s` on that map, and that key wins over `zipxEnv`. `zipxEnv` is omitted on reusable-workflow caller
+jobs (`workflowCall` / `uses:`). See **Job conditions** for recipes (fork gate, PR-label stage ECR, multi-publish, docs
+on dispatch).
 """
     ),
     section("Tasks")(

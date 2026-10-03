@@ -75,7 +75,9 @@ object VersionUpdatesWorkflow:
         "version-updates" -> Job(
           name = Some("Catalog version updates"),
           runsOn = List("ubuntu-latest"),
-          env = ListMap("GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}"),
+          env = EnvValue.renderAll(SnapshotPins.ciEnv(Map.empty)) ++ ListMap(
+            "GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}"
+          ),
           steps =
             CompanionAuth.steps ++ List(checkoutStep, load, setup) ++ preSteps ++ List(apply) ++ extraSteps ++ List(
               openPr

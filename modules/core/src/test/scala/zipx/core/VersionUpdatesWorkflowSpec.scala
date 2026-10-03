@@ -78,6 +78,7 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         yaml.contains("--repository ivy2Local"),
         yaml.contains("--repository central"),
         yaml.contains("Detect GitHub App credentials"),
+        yaml.contains("""COURSIER_TTL: "0s""""),
         yaml.indexOf("Detect GitHub App credentials") < yaml.indexOf("actions/checkout@v7"),
         yaml.contains("steps.zipx-app-token.outputs.token"),
         !yaml.contains("zipxDepUpdate yes"),

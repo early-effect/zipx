@@ -510,7 +510,7 @@ object ZipxSettings:
       SettingName("zipxEnv"),
       Map.empty,
       SettingPurpose(
-        "Build-wide job env for normal generated jobs (default empty). Capability/target env overlay this. Omitted on workflow_call callers."
+        "Build-wide job env for normal generated jobs (default empty). Capability/target env overlay this. Omitted on workflow_call callers. Every generated sbt job also sets COURSIER_TTL=0s, and that key wins over this map."
       ),
       Build,
     )
