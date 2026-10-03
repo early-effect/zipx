@@ -18,6 +18,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+    env:
+      COURSIER_TTL: "0s"
     outputs:
       run: ${{ steps.check.outputs.run }}
     steps:
@@ -58,6 +60,8 @@ jobs:
     needs:
       - verify-gate
     if: needs.verify-gate.result == 'success' && needs.verify-gate.outputs.run == 'false'
+    env:
+      COURSIER_TTL: "0s"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,6 +85,8 @@ jobs:
     needs:
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    env:
+      COURSIER_TTL: "0s"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -110,6 +116,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - test-L0
+    env:
+      COURSIER_TTL: "0s"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -139,6 +147,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - test-L1
+    env:
+      COURSIER_TTL: "0s"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -169,6 +179,8 @@ jobs:
     needs:
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    env:
+      COURSIER_TTL: "0s"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -199,6 +211,8 @@ jobs:
     needs:
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    env:
+      COURSIER_TTL: "0s"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -229,6 +243,8 @@ jobs:
     needs:
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    env:
+      COURSIER_TTL: "0s"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -263,6 +279,7 @@ jobs:
       contents: read
       pull-requests: write
     env:
+      COURSIER_TTL: "0s"
       ZIPX_MODVER_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -299,6 +316,7 @@ jobs:
     permissions:
       contents: read
     env:
+      COURSIER_TTL: "0s"
       ZIPX_MODVER_BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -351,6 +369,7 @@ jobs:
       id-token: write
       contents: read
     env:
+      COURSIER_TTL: "0s"
       ZIPX_EU_AWS_ACCOUNT_ID: "444455556666"
       ZIPX_EU_AWS_ECR_REGISTRY: "444455556666.dkr.ecr.eu-west-1.amazonaws.com"
       ZIPX_EU_AWS_REGION: eu-west-1
@@ -400,6 +419,7 @@ jobs:
       - verify
     if: (!cancelled() && needs.cache-rehydrate.result != 'failure' && needs.verify.result != 'failure') && ((((github.event_name == 'push') && ((github.ref == 'refs/heads/main'))) || (github.event_name == 'workflow_dispatch')))
     env:
+      COURSIER_TTL: "0s"
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
       SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
     steps:
@@ -443,6 +463,7 @@ jobs:
             AWS_ROLE_TO_ASSUME: ${{ secrets.STAGING_DEPLOY_ROLE }}
             TIER: staging
     env:
+      COURSIER_TTL: "0s"
       AWS_REGION: ${{ matrix.AWS_REGION }}
       AWS_ROLE_TO_ASSUME: ${{ matrix.AWS_ROLE_TO_ASSUME }}
       TIER: ${{ matrix.TIER }}

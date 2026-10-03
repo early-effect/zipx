@@ -358,6 +358,7 @@ object PinFeedSpec extends ZIOSpecDefault:
             hasUpdate == yaml.contains("secrets.GITHUB_TOKEN"),
             hasUpdate == yaml.contains("Detect GitHub App credentials"),
             hasUpdate == yaml.contains("actions/create-github-app-token@v3"),
+            yaml.contains("""COURSIER_TTL: "0s""""),
             !hasUpdate || yaml.indexOf("Detect GitHub App credentials") < yaml.indexOf(
               ActionPins.Defaults.checkout.unwrap
             ),
@@ -372,6 +373,7 @@ object PinFeedSpec extends ZIOSpecDefault:
         val sbtAt      = yaml.indexOf("sbt zipxPinSubmit")
         assertTrue(
           yaml.contains("pin-snapshot"),
+          yaml.contains("""COURSIER_TTL: "0s""""),
           yaml.contains("contents: write") || yaml.contains("contents:write"),
           checkoutAt >= 0,
           sbtAt > checkoutAt,

@@ -27,6 +27,7 @@ object PinSnapshotWorkflow:
         "pin-snapshot" -> Job(
           name = Some("Submit pin snapshot"),
           runsOn = List(runnerOs),
+          env = EnvValue.renderAll(SnapshotPins.ciEnv(Map.empty)),
           steps = List(
             Step(uses = Some(pins.checkout)),
             setupJava,

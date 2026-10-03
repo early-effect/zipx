@@ -18,6 +18,15 @@ object SnapshotPinsSpec extends ZIOSpecDefault:
     test("only a -SNAPSHOT row is a pin") {
       assertTrue(SnapshotPins.of(List(pinned, released)) == List(pinned))
     },
+    test("every CI env revalidates changing artifacts, and zipxEnv cannot lengthen the TTL") {
+      val caller = Map("COURSIER_TTL" -> EnvValue.plain("24h"), "OTHER" -> EnvValue.plain("kept"))
+      val env    = SnapshotPins.ciEnv(caller)
+      assertTrue(
+        SnapshotPins.ciEnv(Map.empty) == Map(SnapshotPins.CoursierTtl),
+        env.get("COURSIER_TTL").contains(EnvValue.plain("0s")),
+        env.get("OTHER").contains(EnvValue.plain("kept")),
+      )
+    },
     test("the PR annotation names every pin, and the run still passes") {
       val steps =
         SnapshotPins.annotation(::(pinned, Nil)).map(_(StepContext(ModuleNode(ModuleId("_build")), None, false)))

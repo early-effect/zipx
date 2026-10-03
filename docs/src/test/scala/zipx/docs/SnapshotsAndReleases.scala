@@ -303,13 +303,16 @@ A downstream catalog names the snapshot like any other row:
 val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
 ```
 
+Every generated sbt job sets `COURSIER_TTL: 0s`, whether or not a catalog row is a snapshot. Coursier would otherwise
+trust a changing artifact for 24 hours, and a snapshot coordinate is republished in place. Release coordinates stay
+cached. `zipxEnv` cannot lengthen that TTL.
+
 While any row is a snapshot, zipx:
 
 | Where | What |
 |---|---|
 | `resolvers`, and `project/plugins.sbt` when a `Plugin` is pinned | the publish registry's snapshot repository, plus any `zipxSnapshotRegistries`; Central snapshots when the build has no release workflow; nothing when no ship is pinned |
 | each project that depends on a `-SNAPSHOT` | `forceUpdatePeriod := Some(Duration.Zero)`, so `update` re-resolves every session; other projects keep their cached `update` |
-| every `ci.yml` job | `COURSIER_TTL: 0s`, so Coursier revalidates a changing artifact instead of trusting it for 24 hours; releases stay cached forever |
 | the `test` job | a warning annotation naming the pins, without failing the run |
 | `reload`, `set`, `clean` | forget sbt's in-memory resolutions, so a republish with new dependencies is seen |
 | `zipxRelease` | refuses while a released project depends on a snapshot |

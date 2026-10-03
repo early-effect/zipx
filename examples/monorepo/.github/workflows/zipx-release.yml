@@ -23,6 +23,7 @@ jobs:
     if: github.event_name == 'push' || github.ref_name == github.event.repository.default_branch
     environment: zipx-release
     env:
+      COURSIER_TTL: "0s"
       PGP_KEY_HEX: ${{ secrets.PGP_KEY_HEX }}
       PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}

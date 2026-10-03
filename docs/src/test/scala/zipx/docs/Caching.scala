@@ -160,8 +160,8 @@ run's save and only packages and uploads. A `zipx-release.yml` job restores
 and never saves: its jars carry release numbers, which no PR build would hit.
 
 A pinned snapshot keeps the cache honest without making it cold. Only projects that depend on a `-SNAPSHOT` re-resolve
-each session, and `COURSIER_TTL: 0s` revalidates only changing artifacts, so every other `update` and every
-content-addressed compile still hits. See **Snapshots and releases**.
+each session. Every generated sbt job also sets `COURSIER_TTL: 0s`, which revalidates only changing artifacts, so every
+other `update` and every content-addressed compile still hits. See **Snapshots and releases**.
 
 ```scala
 Capability.test                              // LocalCacheMode.Save: the default owner

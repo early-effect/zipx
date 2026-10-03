@@ -874,7 +874,7 @@ object ZipxPlugin extends AutoPlugin:
       cacheRehydrateTask = read(zipxCacheRehydrateTask, CapabilityTasks.of(Test / compile)),
       cacheRehydrateExtraSteps = read(zipxCacheRehydrateExtraSteps, (_ => Nil)),
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
-      env = read(zipxEnv, Map.empty) ++ Option.when(ciPins(extracted).nonEmpty)(SnapshotPins.CoursierTtl),
+      env = SnapshotPins.ciEnv(read(zipxEnv, Map.empty)),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
       verifyCleanLabel = orFail(typedVerifyCleanLabel(read(zipxVerifyCleanLabel, Some("clean")))),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),

@@ -12,8 +12,14 @@ object SnapshotPins:
 
   val ResolverName: String = "central-snapshots"
 
-  /** Coursier keeps a changing artifact for 24 hours by default; CI must see each republish. */
+  /** Coursier keeps a changing artifact for 24 hours by default. A snapshot coordinate is republished in place, so
+    * every generated sbt job revalidates. A release coordinate is not changing and stays cached.
+    */
   val CoursierTtl: (String, EnvValue) = "COURSIER_TTL" -> EnvValue.plain("0s")
+
+  /** `COURSIER_TTL=0s` on top of a build's env. The zipx value wins, so `zipxEnv` cannot lengthen the TTL. */
+  def ciEnv(env: Map[String, EnvValue]): Map[String, EnvValue] =
+    env + CoursierTtl
 
   def of(coords: Seq[ZipxCoord]): List[ZipxCoord] =
     coords.filter(c => isSnapshot(c.version)).toList

@@ -59,6 +59,7 @@ object PinCheckWorkflow:
         "pin-check" -> Job(
           name = Some("Check pin feeds"),
           runsOn = List(runnerOs),
+          env = EnvValue.renderAll(SnapshotPins.ciEnv(Map.empty)),
           steps = steps,
         )
       ),
