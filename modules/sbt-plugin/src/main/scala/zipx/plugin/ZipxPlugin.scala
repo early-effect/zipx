@@ -2,6 +2,7 @@ package zipx.plugin
 
 import sbt.*
 import sbt.Keys.*
+import sbt.librarymanagement.ScalaModuleInfo
 import zipx.core.*
 import zipx.workflow.Render
 import zipx.workflow.Step
@@ -462,7 +463,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxPluginVersion        = settingKey[Option[String]](ZipxSettings.pluginVersion.description)
     val zipxSelfPlugins          = settingKey[Seq[Plugin]](ZipxSettings.selfPlugins.description)
     private[plugin] val zipxResolvedModule =
-      settingKey[(String, String)]("The organization and artifact name this project resolves as, suffixes included")
+      settingKey[ModuleID]("This project as resolution names it: the crossed, platform-suffixed name, cross disabled")
     val zipxVersionsFile = settingKey[String](ZipxSettings.versionsFile.description)
 
     val zipxGraph            = taskKey[Unit](ZipxSettings.graph.description)
@@ -694,14 +695,15 @@ object ZipxPlugin extends AutoPlugin:
     },
     zipxResolvedModule := {
       val id = projectID.value
-      (id.organization, scalaModuleInfo.value.flatMap(CrossVersion(id, _)).fold(id.name)(_(id.name)))
+      id.withName(scalaModuleInfo.value.flatMap(CrossVersion(id, _)).fold(id.name)(_(id.name)))
+        .withCrossVersion(CrossVersion.disabled)
     },
-    // A released row meets itself again through a library built against it; sbt always keeps the in-repo project.
-    libraryDependencySchemes ++= {
-      val own = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value
-      if zipxShips.value.isEmpty then Nil else own.distinct.map((org, name) => org % name % VersionScheme.Always)
-    },
-    // `update` drops eviction details, so the check reads `updateFull`, which shares its resolution.
+    // lm-coursier forces every in-repo project's version, so a library that asks for another revision of one never
+    // changes what compiles. sbt's eviction check would still judge that revision; stand it down for our own modules.
+    libraryDependencySchemes ++=
+      zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.distinct.map { own =>
+        own.organization % own.name % VersionScheme.Always
+      },
     // The pointer refusal is a dependency, not a line above `update.value`: sbt runs every `.value` before the body.
     libraryDependencies := libraryDependencies.value.map { module =>
       if zipx.core.SnapshotPublishRevision.isImmutablePin(module.revision) then module.withIsChanging(false)
@@ -714,22 +716,7 @@ object ZipxPlugin extends AutoPlugin:
         Def.task[sbt.librarymanagement.UpdateReport] {
           sys.error(s"zipx: ${zipx.core.SnapshotPublishRevision.pointerRefusal(pointers)}")
         }
-      else
-        Def.task {
-          val report = updateFull.value
-          val own    = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.toSet
-          if zipxShips.value.nonEmpty then
-            OwnEvictions.incompatible(report, own, scalaModuleInfo.value) match
-              case Nil      => ()
-              case problems =>
-                val message =
-                  ("zipx: the build's own artifacts conflict with a release:" :: problems).mkString("\n  * ")
-                if (publish / skip).value then
-                  streams.value.log.warn(s"$message\n  (a warning: this project does not publish)")
-                else sys.error(message)
-          report
-        }
-      end if
+      else Def.task(updateFull.value)
     }.value,
     Compile / compile        := (Compile / compile).dependsOn(zipxEnforceDrift).value,
     Test / compile           := (Test / compile).dependsOn(zipxEnforceDrift).value,
@@ -2342,7 +2329,7 @@ object ZipxPlugin extends AutoPlugin:
     )
   }
 
-  private def releaseGates(st: State, extracted: Extracted, own: Set[(String, String)]): List[ShipGate] =
+  private def releaseGates(st: State, extracted: Extracted, own: Set[ModuleID]): List[ShipGate] =
     val ships = readBuildSetting(extracted, zipxShips, Seq.empty).toList
     if ships.isEmpty then Nil
     else
@@ -2355,13 +2342,14 @@ object ZipxPlugin extends AutoPlugin:
           case Right(status) => status
           case Left(err)     => sys.error(s"zipx: ${err.message}")
       val deps = extracted.structure.allProjectRefs.toList.flatMap { ref =>
+        val scalaModule = extracted.getOpt(ref / scalaModuleInfo).flatten
         Modver.rowForProject(ref.project, ships).toList.flatMap { row =>
           extracted
             .getOpt(ref / libraryDependencies)
             .toList
             .flatten
             .filterNot(isIgnoredDeclared)
-            .map(module => row -> module)
+            .map(module => row -> (module, inThisBuild(module, scalaModule, own)))
         }
       }
       ships.flatMap { row =>
@@ -2371,13 +2359,13 @@ object ZipxPlugin extends AutoPlugin:
           case RowStatus.Partial(missing) =>
             sys.error(s"zipx: ${ReleaseError.PartiallyReleased(row, missing).message}")
           case RowStatus.Unreleased =>
-            val modules  = deps.collect { case (`row`, module) => module }
-            val external = modules.filterNot(module => inThisBuild(module, own))
-            val blockers =
-              external.flatMap(module => ReleaseBlocker.classify(module.organization, module.name, module.revision))
-            val rides = modules
-              .filter(module => inThisBuild(module, own))
-              .flatMap(module => shipOf(module, ships, extracted))
+            val modules           = deps.collect { case (`row`, module) => module }
+            val (inBuild, others) = modules.partition((_, inBuild) => inBuild)
+            val blockers          = others.flatMap { (module, _) =>
+              ReleaseBlocker.classify(module.organization, module.name, module.revision)
+            }
+            val rides = inBuild
+              .flatMap((module, _) => shipOf(module, ships, extracted))
               .filter(_ != row.identity)
               .distinct
             List(ShipGate(row.identity, row.version, blockers, rides))
@@ -2385,10 +2373,11 @@ object ZipxPlugin extends AutoPlugin:
     end if
   end releaseGates
 
-  private def inThisBuild(module: ModuleID, own: Set[(String, String)]): Boolean =
-    own.exists { (org, artifact) =>
-      org == module.organization && (artifact == module.name || artifact.startsWith(s"${module.name}_"))
-    }
+  /** Both names come from sbt's own cross function, so a `%%` dependency matches the project it names on any platform.
+    */
+  private def inThisBuild(module: ModuleID, scalaModule: Option[ScalaModuleInfo], own: Set[ModuleID]): Boolean =
+    val resolved = scalaModule.flatMap(CrossVersion(module, _)).fold(module.name)(_(module.name))
+    own.exists(project => project.organization == module.organization && project.name == resolved)
 
   private def shipOf(module: ModuleID, ships: List[PublishedRow], extracted: Extracted): Option[String] =
     extracted.structure.allProjectRefs.iterator

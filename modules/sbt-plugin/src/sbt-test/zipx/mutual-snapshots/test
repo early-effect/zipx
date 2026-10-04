@@ -41,7 +41,8 @@ $ exec git commit -q -m h1
 > zipxSnapshotPublish
 > assertHeddleNamesFacade h1 commit 0.11.0 a1
 
-# 4. Ascent moves on (a2, same 0.11.0 line) and pins heddle h0, built against facade 0.10.0.
+# 4. Ascent moves on (a2, same 0.11.0 line) and pins heddle h0, built against facade 0.10.0. The app and the docs
+# site compile the in-repo facade; what heddle asked for is evicted and fails nothing.
 $ copy-file saved/ascent.sbt build.sbt
 $ copy-file saved/AscentVersions.scala project/ZipxVersions.scala
 $ copy-file changes/Facade.v2.scala dom-facade/src/main/scala/Facade.scala
@@ -52,11 +53,16 @@ $ touch use-heddle
 > reload
 $ exec git add -A
 $ exec git commit -q -m a2
--> mcpAppJS/update
--> docsJS/update
+> mcpAppJS/update
+> docsJS/update
+> assertFacadeInRepo release 0.10.0
+> assertDocsFacadeInRepo release 0.10.0
 
-# 5. Ascent pins heddle h1, built against facade a1: an older commit of the line this build compiles.
+# 5. The #204 case: ascent pins heddle h1, built against facade a1, an older commit of the line this build compiles.
 > pinCommit heddle 0.9.0 h1
 > reload
--> mcpAppJS/update
--> docsJS/update
+> mcpAppJS/update
+> docsJS/update
+> assertFacadeInRepo commit 0.11.0 a1
+> assertDocsFacadeInRepo commit 0.11.0 a1
+> mcpAppJS/compile

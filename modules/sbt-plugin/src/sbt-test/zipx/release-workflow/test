@@ -72,9 +72,9 @@ $ touch ext
 > consumer/update
 > downstream/update
 
-# Once client moves to 0.4.0, a library built against 0.3.0 is incompatible under client's early-semver:
-# a warning where the project does not publish, a failure where it does.
+# Once client moves to 0.4.0, the library still asks for 0.3.0. This build compiles its own client either way, and
+# update does not judge what the library asked for, whether the project publishes or not.
 $ touch client-next
 > reload
 > consumer/update
--> downstream/update
+> downstream/update
