@@ -26,6 +26,31 @@ object SnapshotsAndReleases extends DocSpecSuite:
   private def released(rows: PublishedRow*): PublishedRow => Either[ReleaseError, RowStatus] =
     row => Right(if rows.contains(row) then RowStatus.Released else RowStatus.Unreleased)
 
+  private def threeIds: String =
+    (
+      ReleaseVersion.make("1.4.2"),
+      GitSha.make("1234abcd56780123456789abcdef0123456789ab"),
+      DirtyStamp.from("20140707-1030"),
+    ) match
+      case (Right(line), Right(full), Right(stamp)) =>
+        val commit   = SnapshotRevision.commit(line, full)
+        val dirty    = SnapshotRevision.dirty(line, full, stamp)
+        val noGit    = SnapshotRevision.noGit(stamp)
+        val central  = commit.mavenRevision(ArtifactRegistry.MavenCentral).fold(_.message, identity)
+        val file     = commit.mavenRevision(ArtifactRegistry.Url("file:///tmp/zipx-repo")).fold(_.message, identity)
+        val floating = SnapshotRevision.parse("1.4.2-SNAPSHOT").fold(_ => "floating refused", _ => "floating accepted")
+        List(
+          s"commit ${commit.id}",
+          commit.full.fold("full missing")(sha => s"full $sha"),
+          s"central $central",
+          s"file $file",
+          s"dirty ${dirty.id}",
+          s"nogit ${noGit.id}",
+          floating,
+        ).mkString("\n")
+      case _ =>
+        "example inputs rejected"
+
   private def run(ref: String, status: PublishedRow => Either[ReleaseError, RowStatus]): String =
     ReleaseRequest
       .fromRef(ref)
@@ -59,6 +84,36 @@ zipxReleaseWorkflow := Some(ZipxCentral.releases)
 `-SNAPSHOT` is what sbt overwrites on republish, so a republish after every edit reaches a sibling build. It is also
 the same string on every commit, so cache digests hold (see **Caching**). None of it spends a release.
 """,
+    section("The three ids")(
+      md"""
+A published snapshot names the commit it was built from. The catalog line stays the next release number (`1.4.2`).
+Git supplies the rest. `-SNAPSHOT` is not that id. `isSnapshot` is true because the build is not the release number.
+Central's snapshot repository rejects a version that does not end in `-SNAPSHOT`, so the upload to Central appends it.
+A `file:` registry stores the id as written.
+
+| Tree | Id | Where it goes |
+| --- | --- | --- |
+| clean commit `1234abcd5678` | `1.4.2-1234abcd5678` | the snapshot repository. Central stores `1.4.2-1234abcd5678-SNAPSHOT` |
+| dirty working tree | `1.4.2-1234abcd5678+20140707-1030` | `zipxSnapshotPublish local` only. The `+YYYYMMDD-HHmm` mark is the minute, not a commit |
+| no git | `HEAD+20140707-1030` | local only |
+
+A dirty id is not a pin another machine can resolve. `1.4.2-SNAPSHOT` is not one of these ids: it is the moving
+pointer the status command reads, not a dependency.
+""",
+      exampleValue {
+        threeIds
+      }.assert(text =>
+        assertTrue(
+          text.contains("commit 1.4.2-1234abcd5678"),
+          text.contains("full 1234abcd56780123456789abcdef0123456789ab"),
+          text.contains("central 1.4.2-1234abcd5678-SNAPSHOT"),
+          text.contains("file 1.4.2-1234abcd5678"),
+          text.contains("dirty 1.4.2-1234abcd5678+20140707-1030"),
+          text.contains("nogit HEAD+20140707-1030"),
+          text.contains("floating refused"),
+        )
+      ),
+    ),
     section("Iterate from your machine")(
       md"""
 Proving a change across two libraries needs no PR, no CI, and no release. In the upstream repo:
