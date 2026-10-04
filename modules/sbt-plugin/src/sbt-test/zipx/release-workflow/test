@@ -60,7 +60,8 @@ $ touch dirty-tree
 > assertReleased
 > assertReleaseSession
 > assertDeploymentName
-> ++ 3.8.4!
+# `++` reapplies every setting; the release session survives it.
+> ++ 3.9.0!
 > assertReleaseSession
 
 # Back in development, client compiles 0.3.0-ci; a library built against released client 0.3.0 still resolves.
