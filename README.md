@@ -103,7 +103,7 @@ What's covered:
 - Quick start, **Versions** (`ZipxVersions` catalog), **Extending Versions** (plugins that sit on zipx), and self-checking
 - **Execution modes** (Aggregate / Layer / Graph) and **CI for a busy monorepo** (affected-scoped tests, coverage and deploy workflows, the per-run cache, with lab measurements)
 - Built-in **capabilities**, **custom capabilities**, and **composing sbt commands** (`zipxTasks`, `thenOnce`, `ZipxCentral.release`)
-- Verify knobs (`zipxTestTask`, `zipxVerifyClean`, `zipxTestAffected`, `withAffectedBy`, skip-after-merge) and coverage (`zipx-coverage.yml` on a schedule, dispatch, or PR label)
+- Verify knobs (`zipxTestTask`, `zipxVerifyClean`, `zipxCachePurgeLabel`, `zipxTestAffected`, `withAffectedBy`, skip-after-merge) and coverage (`zipx-coverage.yml` on a schedule, dispatch, or PR label)
 - Caching and **Remote cache for teams** (CI-hydrated digests; live proof in Aggregate Verify via Testcontainers)
 - **Action pins** (catalog `Action` vals, `zipxActionUpdate`, jar defaults)
 - **Dependency updates** (scheduled `zipx-version-updates.yml` opens the catalog PR; local `zipxDepUpdate` / `zipxActionUpdate` / `zipxPinUpdate`) and **Pin feeds**

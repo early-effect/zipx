@@ -90,8 +90,12 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
       )
     },
     test("only a save step writes the cache; restore steps use actions/cache/restore at the same pin") {
-      val steps                    = ZipxComposites.sbtSetup(pins).steps
-      def cacheSteps(mode: String) = steps.filter(_.`if`.exists(_.contains(s"inputs.cache-mode == '$mode'")))
+      val steps = ZipxComposites.sbtSetup(pins).steps
+      // The epoch resolver mentions `cache-mode == 'save'` too. These are the steps that actually call the action.
+      def cacheSteps(mode: String) = steps.filter { step =>
+        step.uses.exists(_.unwrap.startsWith("actions/cache")) &&
+        step.`if`.exists(_.contains(s"inputs.cache-mode == '$mode'"))
+      }
       assertTrue(
         cacheSteps("save").nonEmpty,
         cacheSteps("save").forall(_.uses.contains(pins.cache)),
@@ -101,17 +105,59 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
         !steps.exists(_.`if`.exists(_.contains("inputs.cache-mode == 'off'"))),
       )
     },
+    test("purge saves through actions/cache with no restore-keys, and restore runs only when purge is false") {
+      val steps   = ZipxComposites.sbtSetup(pins).steps
+      val cold    = steps.filter(_.`if`.exists(_.contains("inputs.purge == 'true'")))
+      val restore = steps.filter(_.`if`.exists(_.contains("inputs.cache-mode == 'restore'")))
+      val resolve = steps.find(_.name.contains("Resolve cache epoch")).flatMap(_.`if`)
+      assertTrue(
+        cold.nonEmpty,
+        cold.forall(_.uses.contains(pins.cache)),
+        cold.forall(_.name.contains("Save sbt cache")),
+        cold.forall(!_.`with`.contains("restore-keys")),
+        cold.forall(_.`with`.contains("key")),
+        restore.nonEmpty,
+        restore.forall(_.`if`.exists(_.contains("inputs.purge != 'true'"))),
+        restore.forall(!_.`if`.exists(_.contains("inputs.purge == 'true'"))),
+        resolve.exists(_.contains("inputs.cache-mode == 'save'")),
+        resolve.exists(_.contains("inputs.purge != 'true'")),
+      )
+    },
+    test("sbtSetupStep passes the purge label on save and restore, and omits it when off or disabled") {
+      def step(mode: LocalCacheMode, label: Option[ExprLiteral] = PlanConfig.cachePurgeLabel("purge")) =
+        ZipxComposites.sbtSetupStep(
+          PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.0.0"), cachePurgeLabel = label),
+          JobId("test"),
+          None,
+          cacheMode = mode,
+        )
+      val save     = step(LocalCacheMode.Save)
+      val restore  = step(LocalCacheMode.Restore)
+      val off      = step(LocalCacheMode.Off)
+      val disabled = step(LocalCacheMode.Save, None)
+      assertTrue(
+        save.`with`.get("purge").exists(_.contains("'purge'")),
+        save.`with`.get("purge").exists(_.contains("github.event_name == 'pull_request'")),
+        restore.`with`.get("purge") == save.`with`.get("purge"),
+        !off.`with`.contains("purge"),
+        !disabled.`with`.contains("purge"),
+        save.`with`.get("cache-mode").contains("save"),
+        restore.`with`.get("cache-mode").contains("restore"),
+      )
+    },
     test("every cache key and restore key but the OS+JDK fallback carries the build role") {
       val prefix = "${{ inputs.runner-os }}-jdk${{ inputs.java-version }}-sbt-"
-      val keys   = ZipxComposites
-        .sbtSetup(pins)
-        .steps
-        .filter(_.`with`.contains("key"))
-        .flatMap(s => s.`with`("key") :: s.`with`("restore-keys").linesIterator.toList)
+      val steps  = ZipxComposites.sbtSetup(pins).steps.filter(_.`with`.contains("key"))
+      val keys   = steps.flatMap { step =>
+        step.`with`.get("key").toList ++ step.`with`.get("restore-keys").toList.flatMap(_.linesIterator)
+      }
+      val cold = steps.filter(_.`if`.exists(_.contains("inputs.purge == 'true'")))
       assertTrue(
         keys.nonEmpty,
         keys.filterNot(_ == prefix).forall(_.contains("-build-")),
         keys.contains(prefix),
+        cold.nonEmpty,
+        cold.forall(!_.`with`.contains("restore-keys")),
       )
     },
   )

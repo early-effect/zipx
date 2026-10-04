@@ -432,6 +432,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxDeployPlan               = taskKey[Unit](ZipxSettings.deployPlan.description)
     val zipxVerifyClean              = settingKey[VerifyClean](ZipxSettings.verifyClean.description)
     val zipxVerifyCleanLabel         = settingKey[Option[String]](ZipxSettings.verifyCleanLabel.description)
+    val zipxCachePurgeLabel          = settingKey[Option[String]](ZipxSettings.cachePurgeLabel.description)
     val zipxAffectedOnPR             = settingKey[Boolean](ZipxSettings.affectedOnPR.description)
     val zipxAffectedOnPush           = settingKey[Boolean](ZipxSettings.affectedOnPush.description)
     val zipxAffectedPublish          = settingKey[Boolean](ZipxSettings.affectedPublish.description)
@@ -530,6 +531,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxCheckCommandNames        := true,
     zipxVerifyClean              := VerifyClean.None,
     zipxVerifyCleanLabel         := Some("clean"),
+    zipxCachePurgeLabel          := Some("purge"),
     zipxActions                  := ActionPins.Defaults,
     zipxActionsPath              := ActionPinFile.DefaultPath,
     zipxActionRows               := Seq.empty,
@@ -876,7 +878,8 @@ object ZipxPlugin extends AutoPlugin:
       cacheRehydrateEnv = read(zipxCacheRehydrateEnv, Map.empty),
       env = SnapshotPins.ciEnv(read(zipxEnv, Map.empty)),
       verifyClean = read(zipxVerifyClean, VerifyClean.None),
-      verifyCleanLabel = orFail(typedVerifyCleanLabel(read(zipxVerifyCleanLabel, Some("clean")))),
+      verifyCleanLabel = orFail(typedLabel("zipxVerifyCleanLabel", read(zipxVerifyCleanLabel, Some("clean")))),
+      cachePurgeLabel = orFail(typedLabel("zipxCachePurgeLabel", read(zipxCachePurgeLabel, Some("purge")))),
       cancelSupersededRuns = read(zipxCancelSupersededRuns, true),
       shipEpochHash = Option.when(read(zipxCacheEpoch, CacheEpoch.GitTags()) == CacheEpoch.ShipCatalog)(
         Modver.epochHash(read(zipxShips, Seq.empty))
@@ -943,11 +946,11 @@ object ZipxPlugin extends AutoPlugin:
   private def orFail[A](result: Either[String, A]): A =
     result.fold(error => sys.error(s"zipx: $error"), identity)
 
-  private def typedVerifyCleanLabel(label: Option[String]): Either[String, Option[zipx.workflow.ExprLiteral]] =
+  private def typedLabel(setting: String, label: Option[String]): Either[String, Option[zipx.workflow.ExprLiteral]] =
     label match
       case None        => Right(None)
       case Some(value) =>
-        PlanConfig.verifyCleanLabelMake(value).left.map(error => s"zipxVerifyCleanLabel: $error")
+        zipx.workflow.ExprLiteral.make(value).map(Some(_)).left.map(error => s"$setting: $error")
 
   private def knownCommandNames(st: State, extracted: Extracted): Set[String] =
     val fromState    = st.definedCommands.flatMap(_.nameOption)

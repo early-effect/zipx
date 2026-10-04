@@ -1054,6 +1054,46 @@ object PlannerSpec extends ZIOSpecDefault:
         !static.jobs("test").steps.exists(_.env.contains("ZIPX_VERIFY_CLEAN_FULL")),
       )
     },
+    test(
+      "cachePurgeLabel is on every restoring LocalDir job, and absent when the job is off or the label is disabled"
+    ) {
+      val labeled = config.copy(skipMergedPrPush = true, affected = AffectedMode.AffectedOnPR)
+      val wf      = Planner.plan(
+        sampleGraph,
+        List(Capability.test, Capability.publish, Capability.testGraph.copy(name = CapabilityName("check"))),
+        labeled,
+      )
+      def setup(job: Job): Option[Step]       = job.steps.find(_.uses.contains(ZipxComposites.SbtSetupRef))
+      def purgeOf(id: String): Option[String] =
+        wf.jobs.get(id).flatMap(setup).flatMap(_.`with`.get("purge"))
+      val needle   = "contains(github.event.pull_request.labels.*.name, 'purge')"
+      val checks   = wf.jobs.filter((id, _) => id.startsWith("check-"))
+      val disabled = Planner.plan(
+        sampleGraph,
+        List(Capability.test),
+        config.copy(cachePurgeLabel = None),
+      )
+      val remote = Planner.plan(
+        sampleGraph,
+        List(Capability.test),
+        labeled.copy(cache = RemoteCacheProof.sidecar),
+      )
+      def omitsPurge(planned: Workflow, id: String): Boolean =
+        planned.jobs.get(id).flatMap(setup).exists(!_.`with`.contains("purge"))
+      assertTrue(
+        purgeOf("test").exists(e => e.contains("github.event_name == 'pull_request'") && e.contains(needle)),
+        purgeOf("publish").exists(_.contains(needle)),
+        purgeOf("cache-rehydrate").exists(_.contains(needle)),
+        checks.nonEmpty,
+        checks.forall((_, job) => setup(job).flatMap(_.`with`.get("purge")).exists(_.contains(needle))),
+        wf.jobs.get("affected").flatMap(cacheModeOf).contains("off"),
+        wf.jobs.get("affected").flatMap(setup).exists(!_.`with`.contains("purge")),
+        wf.jobs.get("test").flatMap(cacheModeOf).contains("save"),
+        wf.jobs.get("publish").flatMap(cacheModeOf).contains("restore"),
+        omitsPurge(disabled, "test"),
+        omitsPurge(remote, "test"),
+      )
+    },
     test("verifyCleanLabel None keeps a single sbt line") {
       val wf   = Planner.plan(sampleGraph, List(Capability.test), config.copy(verifyCleanLabel = None))
       val step = wf.jobs("test").steps.find(_.name.contains("test")).get

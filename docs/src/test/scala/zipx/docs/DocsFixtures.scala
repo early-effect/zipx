@@ -10,6 +10,7 @@ object DocsFixtures:
       cacheEpoch = CacheEpoch.Fixed("0.1.0-SNAPSHOT"),
       skipMergedPrPush = false,
       verifyCleanLabel = None,
+      cachePurgeLabel = None,
       // Doc fragments teach job ids and YAML shape; Auto collapse is covered on the Matrix collapse page.
       // Capabilities that call `.withMatrixCollapse(...)` still win over this empty map via their own field.
     )

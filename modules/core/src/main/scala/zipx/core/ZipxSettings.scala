@@ -548,7 +548,19 @@ object ZipxSettings:
       SettingName("zipxVerifyCleanLabel"),
       Some("clean"),
       SettingPurpose(
-        """When zipxVerifyClean is None, prepend cleanFull on PRs that have this label (default Some("clean")). None disables. One-off cache bust."""
+        "When zipxVerifyClean is None, prepend cleanFull on PRs that have this label (default Some(\"clean\")). " +
+          "None disables. Does not skip the LocalDir restore."
+      ),
+      Build,
+    )
+
+  val cachePurgeLabel: SettingDef[Option[String]] =
+    SettingDef.setting(
+      SettingName("zipxCachePurgeLabel"),
+      Some("purge"),
+      SettingPurpose(
+        "On a pull_request payload with this label (default Some(\"purge\")), sbt jobs skip the LocalDir restore " +
+          "and a save owner still saves a fresh snapshot. None disables."
       ),
       Build,
     )
@@ -805,6 +817,7 @@ object ZipxSettings:
     checkCommandNames,
     verifyClean,
     verifyCleanLabel,
+    cachePurgeLabel,
     deployTrigger,
   )
 

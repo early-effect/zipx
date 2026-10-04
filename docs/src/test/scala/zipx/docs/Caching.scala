@@ -188,6 +188,49 @@ about 3 GB, and a single wave of four PRs evicted the default branch's snapshot.
           case _ => assertTrue(false)
       ),
     ),
+    section("Skipping a bad restore")(
+      md"""
+`cleanFull` deletes sbt's output directory and, when a snapshot is pinned, sbt's in-memory resolution cache. It does
+not delete `~/.cache/coursier`, `~/.cache/sbt`, or `~/.sbt`. Those directories are what `actions/cache` restores
+before sbt starts, and they are what the save owner writes back. Rolling `zipxCacheEpoch` does not drop them either:
+a baked epoch's last restore-key is the OS+JDK prefix with no epoch in it, so a miss restores the newest entry under
+that prefix.
+
+A PR labeled **`purge`** skips that restore for the run. The save owner still saves when the job succeeds, and the
+save has no restore-keys: the primary key includes the run id, so the lookup misses, and the cache action's post
+step writes the fresh snapshot. Restore-only jobs in the same run skip the cache step, so they do not pull the old
+entry while that save is in flight. `cache-mode: off` is the wrong tool for this. That run starts empty, and the next
+run restores the same entry, because nothing newer was saved.
+
+```scala
+zipxCachePurgeLabel := Some("purge")  // default
+```
+
+The label is read from the `pull_request` payload, the same way `clean` is. `ci.yml` does not run on `labeled`, and
+a rerun repeats the payload the run started with. A push carries no PR labels, so `cache-rehydrate` on a merge still
+restores. The input is on that job anyway, because it is a save owner. A PR cannot replace the default branch's
+entry. Other branches keep restoring `main` until a main-scoped save writes a newer one. `None` disables the check.
+""",
+      exampleValue {
+        given PlanConfig = config.copy(
+          cachePurgeLabel = PlanConfig.cachePurgeLabel("purge"),
+          skipMergedPrPush = true,
+        )
+        DocsRender.jobs("test", "publish", "cache-rehydrate")(
+          Capability.test,
+          Capability.publish.copy(gate = Gate.Always),
+        )
+      }.assert { yaml =>
+        val needle = "contains(github.event.pull_request.labels.*.name, 'purge')"
+        assertTrue(
+          yaml.contains("github.event_name == 'pull_request'"),
+          yaml.contains("cache-mode: save"),
+          yaml.contains("cache-mode: restore"),
+          yaml.contains("cache-rehydrate:"),
+          yaml.split(java.util.regex.Pattern.quote(needle), -1).length - 1 == 3,
+        )
+      },
+    ),
     section("Action pins")(
       md"""
 Generated workflows use **commit-SHA pins** (not floating `@v4` tags), with `# vX.Y.Z` comments for readability.
