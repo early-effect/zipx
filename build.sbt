@@ -287,7 +287,7 @@ lazy val docs = project
       val marker = (ThisBuild / baseDirectory).value / "target" / "specular-client-js.path"
       IO.write(marker, mainJs.getAbsolutePath)
     },
-    specularDisplayVersion := (_.stripSuffix("-SNAPSHOT")),
+    specularDisplayVersion := (_.stripSuffix("-SNAPSHOT").stripSuffix("-ci")),
     // Rebuild site then (re)start DocsServe; use alias docsPreview for continuous watch.
     specularPreview := Def.uncached {
       specularSite.value

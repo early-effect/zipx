@@ -29,15 +29,23 @@ enum BuildSession:
     case PullRequestSnapshot(pr) => s"pr-$pr"
     case Release                 => "release"
 
-  /** What sbt compiles and packages, so it is the same in every session but a release and cache digests hold. */
+  /** What a development or test session compiles. Stable across commits, so action-cache digests hold. A publish
+    * session's `version` is [[artifactVersion]], the coordinate the repository stores.
+    */
   def versionOf(row: PublishedRow): String = this match
     case Release => row.version
-    case _       => s"${row.version}${Modver.UnreleasedSuffix}"
+    case _       => s"${row.version}${BuildSession.CompileSuffix}"
 
-  /** The coordinate a publish writes, which is also what an in-repo dependency's POM names. */
-  def publishedRevisionOf(row: PublishedRow): String = this match
-    case PullRequestSnapshot(pr) => s"${row.version}-pr$pr${Modver.UnreleasedSuffix}"
-    case _                       => versionOf(row)
+  /** The `version` a session actually sets. Development stays on [[versionOf]]. A snapshot session publishes the git
+    * id. The sbt setting turns a `Left` into `zipx: …`; core keeps the error.
+    */
+  def artifactVersion(
+      row: PublishedRow,
+      registry: ArtifactRegistry,
+      props: collection.Map[String, String],
+  ): Either[SnapshotRevisionError, String] = this match
+    case Release | Development                    => Right(versionOf(row))
+    case SnapshotPublish | PullRequestSnapshot(_) => SnapshotPublishRevision.revision(row, registry, props)
 
   /** Central validates docs on a release only; scaladoc is the slow part of a snapshot publish. */
   def publishesDocs: Boolean = this match
@@ -46,6 +54,9 @@ enum BuildSession:
 end BuildSession
 
 object BuildSession:
+  /** Development and test sessions compile this suffix. It is not published. */
+  val CompileSuffix: String = "-ci"
+
   /** A JVM property, because sbt drops session settings when `++` / `+` switch Scala versions. */
   val Property: String = "zipx.session"
 

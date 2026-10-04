@@ -62,15 +62,16 @@ Aggregate `test` still `zipxWorkflowCheck`s it after `publishLocal`. The version
 `zipxVersionUpdatesExtraSteps` (`ExampleCheck.companionSteps`): nested `.github/workflows/` is not repo-root, so the bot
 can commit that `ci.yml`.
 
-zipx itself is one row, `ShipGroup("zipx", "0.15.0")(...)` over every published module, so every build of it is
-`0.15.0-SNAPSHOT` and a republish overwrites. `plugin/scripted` and the example check always see the tree you are on;
+zipx itself is one row, `ShipGroup("zipx", "0.15.0")(...)` over every published module, so every build of it compiles
+`0.15.0-ci`. `plugin/scripted` and the example check always see the tree you are on;
 there is no release-tag trap.
 
-To try an unmerged zipx on another repo, run `sbt zipxSnapshotPublish local` here, pin
-`Plugin("rocks.earlyeffect", "sbt-zipx", "0.15.0-SNAPSHOT")` in that repo's catalog, and run its
-`zipxWorkflowGenerate` then `reload`. `sbt zipxSnapshotPublish` puts the same bits on Central snapshots, for a
-teammate or that repo's CI. See **Snapshots and releases**. A merge publishes `0.15.0-SNAPSHOT` to Central snapshots, a push to a PR labeled
-`snapshots` publishes `0.15.0-pr<N>-SNAPSHOT`, and a GitHub Release tagged `v0.15.0` (or Run workflow on **zipx
+To try an unmerged zipx on another repo, commit, run `sbt zipxSnapshotPublish local` here, pin
+`Plugin("rocks.earlyeffect", "sbt-zipx", "0.15.0-<sha>")` in that repo's catalog, and run its
+`zipxWorkflowGenerate` then `reload`. `sbt zipxSnapshotPublish` puts that commit's id on Central snapshots (Central
+stores it as `0.15.0-<sha>-SNAPSHOT`), for a teammate or that repo's CI. See **Snapshots and releases**. A merge
+publishes that sha, a push to a PR labeled `snapshots` publishes the PR commit's sha and does not move the pointer,
+and a GitHub Release tagged `v0.15.0` (or Run workflow on **zipx
 release**) releases it. The first PR that changes code after a release moves the row; `modver-check` fails until it
 does. Snapshots, Pages, and releases carry `JobCondition.repositoryIs("early-effect/zipx")` so a fork publishes
 nothing.

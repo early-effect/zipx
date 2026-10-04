@@ -21,10 +21,12 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
     test("zipx-ci.env includes ZIPX_CLI_VERSION only for a release jar") {
       val release = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.7.0")
       val snap    = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.1.0-SNAPSHOT")
+      val ci      = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.17.0-ci")
       val dynver  = ZipxCiParams.render("25", "ubuntu-latest", cliVersion = "0.8.0+3-1a2b3c4d")
       assertTrue(
         release.contains("ZIPX_CLI_VERSION=0.7.0"),
         !snap.contains("ZIPX_CLI_VERSION"),
+        !ci.contains("ZIPX_CLI_VERSION"),
         !dynver.contains("ZIPX_CLI_VERSION"),
       )
     },

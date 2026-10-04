@@ -10,9 +10,7 @@ object ZipxCiParams:
   val RelPath: String = "project/zipx-ci.env"
 
   def isReleaseCli(version: String): Boolean =
-    version.nonEmpty &&
-      !version.endsWith(Modver.UnreleasedSuffix) &&
-      !version.contains('+')
+    ReleaseVersion.make(version).isRight
 
   def render(javaVersion: String, runnerOs: String, cliVersion: String = ""): String =
     val cli =

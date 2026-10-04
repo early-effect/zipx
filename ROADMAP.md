@@ -54,18 +54,18 @@ zipxReleaseWorkflow := Some(ZipxCentral.releases)
 ```
 
 ```text
-any build, laptop or CI        0.15.0-SNAPSHOT            publishLocal overwrites; digests stable across commits
-merge to main                  0.15.0-SNAPSHOT        ->  Central snapshots
-PR labeled for snapshots       0.15.0-pr42-SNAPSHOT   ->  Central snapshots
+any build, laptop or CI        0.15.0-ci                 digests stable across commits
+merge to main                  0.15.0-<sha>           ->  Central snapshots (file name ends in -SNAPSHOT)
+                           and 0.15.0-SNAPSHOT        ->  pointer POM naming that sha
+PR labeled for snapshots       0.15.0-<that sha>      ->  Central snapshots; the pointer stays
 GitHub Release v0.15.0 | Run   0.15.0                 ->  Central (one bundle), tags, docs
 ```
 
 ```scala
 // downstream, before the release exists
-val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
-// resolvers + freshness: automatic while pinned
-// zipxRelease:           refuses while pinned
-// catalog update:        rewrites to 0.15.0 once it is released
+val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678")
+// 0.15.0-SNAPSHOT is the pointer: update refuses it and names zipxSnapshotStatus
+// zipxRelease: refuses while a snapshot is pinned
 ```
 
 ```text

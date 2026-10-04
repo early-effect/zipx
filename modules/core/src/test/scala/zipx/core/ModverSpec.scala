@@ -188,16 +188,12 @@ object ModverSpec extends ZIOSpecDefault:
       },
     ),
     suite("BuildSession")(
-      test("every session but a release builds <row>-SNAPSHOT; a PR snapshot publishes <row>-pr<N>-SNAPSHOT") {
+      test("every session but a release compiles <row>-ci") {
         check(gVersion, Gen.boolean, gSession) { (v, grouped, session) =>
           val row: PublishedRow =
             if grouped then ShipGroup(gname("libs"), v, List(mid("models"))) else Ship(mid("client"), v)
-          val published = session match
-            case BuildSession.PullRequestSnapshot(pr) => s"$v-pr$pr-SNAPSHOT"
-            case _                                    => session.versionOf(row)
           assertTrue(
-            session.versionOf(row) == (if session == BuildSession.Release then (v: String) else s"$v-SNAPSHOT"),
-            session.publishedRevisionOf(row) == published,
+            session.versionOf(row) == (if session == BuildSession.Release then (v: String) else s"$v-ci")
           )
         }
       },

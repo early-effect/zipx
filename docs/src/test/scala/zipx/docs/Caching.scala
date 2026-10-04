@@ -18,7 +18,7 @@ sbt 2 caches task results **across JVM runs**. zipx restores that cache before t
 **commit-stable epoch** (`zipxCacheEpoch`: `CacheEpoch.ShipCatalog` when the catalog has `Ship` / `ShipGroup` rows,
 else `CacheEpoch.GitTags()`). Every push within a PR reuses prior hits; a row bump or a release tag rolls the epoch. Remote backends share the same hits across
 machines, including developer laptops when CI hydrates a shared store (see **Remote cache for teams**).
-Hits need a `version` that is the same from commit to commit, such as `<row>-SNAPSHOT` (see **Independent versions**).
+Hits need a `version` that is the same from commit to commit, such as `<row>-ci` (see **Independent versions**).
 
 ```mermaid
 flowchart TD
@@ -64,7 +64,7 @@ Prefer GitTags so post-tag PRs warm from the release cache without a regenerate 
 
 **ShipCatalog (default with rows):** bakes a SHA-256 of sorted row identity and number as the setup composite
 `cache-epoch` input (same generate-time path as `Fixed`). The epoch rolls exactly when a row number moves, which is
-exactly when `<row>-SNAPSHOT` version strings, and so digests, change. A release does not roll it: the release run
+exactly when `<row>-ci` version strings, and so digests, change. A release does not roll it: the release run
 restores and never saves. `GitTags()` would roll one step late, at the tag, after the bump PR already moved the
 digests.
 """,

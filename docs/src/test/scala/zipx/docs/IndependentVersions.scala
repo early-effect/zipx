@@ -49,7 +49,7 @@ lockstep build (`sbt-dynver-ci`, Aggregate `ZipxCentral.release`, `Gate.OnReleas
 below are the model the org is moving to.
 
 Use `Ship` / `ShipGroup` rows when a monorepo publishes several libraries on different cadences. Presence of any such
-val is the feature flag. A row holds the **next** release number, every build is `<row>-SNAPSHOT`, and a release is a
+val is the feature flag. A row holds the **next** release number, every build compiles `<row>-ci`, and a release is a
 deliberate run of `zipx-release.yml`. The human writes the number in a PR; CI suggests a MiMa-informed edit as a sticky
 comment and **fails closed** when a changed row is still at a released number, or below the MiMa floor. Merges release
 nothing.
@@ -61,7 +61,7 @@ flowchart TD
   Ships -->|no| Dynver[dynver-ci]
   Dynver --> Tag[v* tag]
   Tag --> Agg[ZipxCentral.release]
-  Ships -->|yes| Row[row-SNAPSHOT everywhere]
+  Ships -->|yes| Row[row-ci everywhere]
   Row --> Check[suggest + check on PR]
   Check --> Merge[merge to main]
   Merge --> Release[zipx-release.yml]
@@ -100,15 +100,15 @@ flowchart TD
    omission.
 4. You write the number (`sbt zipxModverBump`, or one row by hand) and push. The bump does not run MiMa.
    `modver-check` does, against the opened number.
-5. Before merging, prove the change downstream without a release: `sbt zipxSnapshotPublish local` here, pin
-   `0.3.1-SNAPSHOT` there (or `sbt zipxSnapshotPublish` for another machine's CI). See **Snapshots and releases**.
-6. Merge. The default branch now builds `0.3.1-SNAPSHOT`. Later PRs in the same cycle pass without another bump
-   unless MiMa says their change is bigger than the row already declares.
+5. Before merging, prove the change downstream without a release: commit, `sbt zipxSnapshotPublish local` here, and
+   pin `<row>-<sha>` there (or `sbt zipxSnapshotPublish` for another machine's CI). See **Snapshots and releases**.
+6. Merge. The default branch still compiles `<row>-ci` and publishes that commit's `<row>-<sha>`. Later PRs in the
+   same cycle pass without another bump unless MiMa says their change is bigger than the row already declares.
 7. Release when ready: a GitHub Release tagged `client/v0.3.1`, or Run workflow on **zipx release**. See **Snapshots
    and releases**.
 8. On that commit, `sbt zipxModverBump` opens the next patch of every row the release registry already has. Until
-   that number moves, `<row>-SNAPSHOT` is shadowed and `zipxDriftGate` (default `Fail`) stops the row's compile and
-   fails the snapshot publish. The check reads the registry `zipxReleaseWorkflow` names.
+   that number moves, a snapshot of the released line is shadowed and `zipxDriftGate` (default `Fail`) stops the
+   row's compile and fails the snapshot publish. The check reads the registry `zipxReleaseWorkflow` names.
 
 `modver-check` / `modver-suggest` self-compile (`needsCapabilities = Nil`). They do not wait on test topology.
 """,
@@ -200,20 +200,21 @@ group of one is legal and pointless (it is just `Ship`). Empty members are refus
     ),
     section("Catalog rows")(
       md"""
-Drop the repo-wide `version := "…"`. A member's `version` is a pure function of its row: `<row>-SNAPSHOT` in every
+Drop the repo-wide `version := "…"`. A member's `version` is a pure function of its row: `<row>-ci` in every
 build, on a laptop and in CI alike, and the catalog number only inside a `zipxRelease` session. Aggregators and
 unpublished apps keep sbt's default version.
 
 | Where | Number | Why |
 |---|---|---|
 | Catalog constructor | release number only (`1.4.2`, never `1.4.2-SNAPSHOT`) | the human writes the next release |
-| Any build: PR, merge, `zipxSnapshotPublish local` | `<row>-SNAPSHOT` (`1.4.2-SNAPSHOT`) | the same from commit to commit, so caches hold; and `publishLocal` overwrites it |
+| Any build: PR, merge, a snapshot publish | `<row>-ci` (`1.4.2-ci`) | the same from commit to commit, so caches hold |
+| `sbt zipxSnapshotPublish` of a clean commit | `<row>-<sha>` in the repository | the pin another build resolves. Central stores that id plus `-SNAPSHOT` |
 | A `zipxRelease` session | catalog number, for every row member | its POMs name in-repo dependencies at release numbers |
 
-A cache needs only a version that does not change between commits; `-SNAPSHOT` is as stable as any fixed suffix. What
-breaks a cache is a per-commit version, such as dynver's hash. What `-SNAPSHOT` adds is that sbt 2 overwrites it: a
-release-shaped version is published once, then skipped with "already exists, skipping (overwrite=false)", and consumers
-keep the first jar. sbt 2's `publishLocal` writes the Ivy local repository, not Maven local.
+A cache needs a version that does not change between commits. `<row>-ci` is that version. A per-commit version, such
+as dynver's hash, changes jar names on the classpath and busts the digest. The published snapshot is a different
+string, the commit id, and the test job does not compile it. `publishLocal` of `<row>-ci` is not how another build
+tries the change: that command is `sbt zipxSnapshotPublish local`, and its revision is the sha or the dirty id.
 
 `zipxDepUpdate` / `catalog update` rewrite `Lib` / `Plugin` / `Action` only. They never touch `Ship` / `ShipGroup`.
 Bump outbound rows yourself:
@@ -440,7 +441,7 @@ flowchart TD
   class Local,Remote happy
 ```
 
-One row bump rolls the **repo-wide** LocalDir namespace in the same PR that moves the `<row>-SNAPSHOT` strings. A
+One row bump rolls the **repo-wide** LocalDir namespace in the same PR that moves the `<row>-ci` strings. A
 release rolls nothing: the release run restores the cache and never saves. Remote `cacheVersion` stays JDK/OS only; a
 bump already changes that module's `version`, so only that module's remote entries miss. Full guide: **Caching**.
 """,

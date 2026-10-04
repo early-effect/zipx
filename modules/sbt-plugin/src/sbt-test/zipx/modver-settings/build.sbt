@@ -22,18 +22,19 @@ lazy val root = (project in file("."))
   .aggregate(models, coreLib, client, service)
   .settings(publish / skip := true)
 
-val assertModverSettings = taskKey[Unit]("Ship-backed version is row-SNAPSHOT; aggregators keep sbt default")
+val assertModverSettings = taskKey[Unit]("Ship-backed version is row-ci; aggregators keep sbt default")
 assertModverSettings := Def.uncached {
   val modelsV  = (models / version).value
   val coreV    = (coreLib / version).value
   val clientV  = (client / version).value
   val serviceV = (service / version).value
   val rootV    = (root / version).value
-  assert(modelsV == "1.4.2-SNAPSHOT", s"models version, got $modelsV")
-  assert(coreV == "1.4.2-SNAPSHOT", s"coreLib version, got $coreV")
-  assert(clientV == "0.3.0-SNAPSHOT", s"client version, got $clientV")
+  assert(modelsV == "1.4.2-ci", s"models version, got $modelsV")
+  assert(coreV == "1.4.2-ci", s"coreLib version, got $coreV")
+  assert(clientV == "0.3.0-ci", s"client version, got $clientV")
   assert(serviceV == "0.1.0-SNAPSHOT", s"unpublished service must not take a Ship version, got $serviceV")
   assert(rootV == "0.0.0", s"a root in no row is 0.0.0, which sonaRelease accepts, got $rootV")
+  assert((models / isSnapshot).value, "a development ship is a snapshot")
   assert(zipxCacheEpoch.value == CacheEpoch.ShipCatalog, s"Ship rows key the cache epoch, got ${zipxCacheEpoch.value}")
 }
 
@@ -41,8 +42,8 @@ val assertLocalPom = taskKey[Unit]("An unreleased POM names what it built, as it
 assertLocalPom := {
   val pom = (client / makePom).value
   val xml = IO.read(fileConverter.value.toPath(pom).toFile)
-  assert(xml.contains("<version>1.4.2-SNAPSHOT</version>"), s"client POM should name coreLib as built, got $xml")
-  assert(xml.contains("<version>0.3.0-SNAPSHOT</version>"), s"client POM should name itself as built, got $xml")
+  assert(xml.contains("<version>1.4.2-ci</version>"), s"client POM should name coreLib as built, got $xml")
+  assert(xml.contains("<version>0.3.0-ci</version>"), s"client POM should name itself as built, got $xml")
 }
 
 /** Where sbt 2's publishLocal writes this fixture's organization. It ignores `ivyPaths`, so this is the machine's. */

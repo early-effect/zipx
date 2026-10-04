@@ -574,7 +574,7 @@ object Capability:
       env = Map(ModverCheck.BaseShaEnv -> EnvValue.typed(Expr.github("event.pull_request.base.sha"))),
     )
 
-  /** Publishes every unreleased row at `<row>-SNAPSHOT` on a default-branch push.
+  /** Publishes every unreleased row at `<row>-<sha>` on a default-branch push, then the `<row>-SNAPSHOT` pointer.
     *
     * Does not name `test`. The planner needs the Verify roll-up, so a sibling Verify job blocks the publish, and
     * `cache-rehydrate` when that job owns the merge-push save.
@@ -587,9 +587,9 @@ object Capability:
       gate = Gate.OnDefaultPush,
     )
 
-  /** Publishes every unreleased row at `<row>-pr<N>-SNAPSHOT` on each push to a same-repo PR carrying `label`, from the
-    * PR's own build cache. The planner needs the Verify roll-up, same as [[snapshots]]. A fork's PR has no publishing
-    * secrets, so it never runs there.
+  /** Publishes every unreleased row at that commit's `<row>-<sha>` on each push to a same-repo PR carrying `label`,
+    * from the PR's own build cache. The planner needs the Verify roll-up, same as [[snapshots]]. A fork's PR has no
+    * publishing secrets, so it never runs there.
     */
   def pullRequestSnapshots(
       label: ExprLiteral,

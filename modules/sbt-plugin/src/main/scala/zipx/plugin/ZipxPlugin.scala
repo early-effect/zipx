@@ -228,7 +228,7 @@ object ZipxPlugin extends AutoPlugin:
       def snapshots: Capability =
         Capability.snapshots(CapabilityTasks.of(snapshotPublishCommand)).withEnv(zipx.central.ZipxCentral.snapshotEnv)
 
-      /** On each push to a same-repo PR labeled `label`: unreleased rows at `<row>-pr<N>-SNAPSHOT`. */
+      /** On each push to a same-repo PR labeled `label`: unreleased rows at that commit's `<row>-<sha>`. */
       inline def pullRequestSnapshots(inline label: String): Capability =
         zipx.central.ZipxCentral.pullRequestSnapshots(label)
     end ZipxCentral
@@ -608,6 +608,7 @@ object ZipxPlugin extends AutoPlugin:
     commands += testAffectedCommand,
     commands += releaseCommand,
     commands += snapshotPublishCommand,
+    commands += snapshotPointerCommand,
     commands += snapshotRefuseCommand,
     commands += sessionCommand,
     // `Def.uncached` because a file write is not a valid cached-task output.
@@ -687,7 +688,14 @@ object ZipxPlugin extends AutoPlugin:
       if zipxShips.value.isEmpty then Nil else own.distinct.map((org, name) => org % name % VersionScheme.Always)
     },
     // `update` drops eviction details, so the check reads `updateFull`, which shares its resolution.
+    libraryDependencies := libraryDependencies.value.map { module =>
+      if zipx.core.SnapshotPublishRevision.isImmutablePin(module.revision) then module.withIsChanging(false)
+      else module
+    },
     update := Def.uncached {
+      val pointers =
+        libraryDependencies.value.map(_.revision).filter(zipx.core.SnapshotPublishRevision.isPointer).distinct
+      if pointers.nonEmpty then sys.error(s"zipx: ${zipx.core.SnapshotPublishRevision.pointerRefusal(pointers)}")
       val report = update.value
       val full   = updateFull.value
       val own    = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.toSet
@@ -708,9 +716,12 @@ object ZipxPlugin extends AutoPlugin:
     publishConfiguration     := publishConfiguration.dependsOn(zipxRequireVersionScheme).value,
     zipxRequireVersionScheme := Def.uncached { requireVersionScheme.value },
     forceUpdatePeriod        := {
-      if libraryDependencies.value.exists(m => SnapshotPins.isSnapshot(m.revision)) then
-        Some(scala.concurrent.duration.Duration.Zero)
-      else forceUpdatePeriod.value
+      val changing = libraryDependencies.value.exists { module =>
+        SnapshotPins.isSnapshot(module.revision) &&
+        !zipx.core.SnapshotPublishRevision.isImmutablePin(module.revision) &&
+        !zipx.core.SnapshotPublishRevision.isPointer(module.revision)
+      }
+      if changing then Some(scala.concurrent.duration.Duration.Zero) else forceUpdatePeriod.value
     },
   )
 
@@ -1421,28 +1432,90 @@ object ZipxPlugin extends AutoPlugin:
         case Right(plan) =>
           val verdict = publishVerdict(extracted, graph, catalog, binaries, release)
           reportVerdict(next, verdict)
+          val root  = extracted.get(LocalRootProject / baseDirectory)
+          val tree  = SnapshotGit.describe(root).fold(err => sys.error(s"zipx: ${err.message}"), identity)
+          val local = target == SnapshotTarget.Local
+          tree match
+            case SnapshotGit.Tree.Clean(_) => ()
+            case _ if local                => ()
+            case other                     =>
+              val id = plan.entries.headOption
+                .map(e => snapshotId(e.row, other))
+                .getOrElse("this tree")
+              val changed = SnapshotGit.porcelain(root)
+              val extra   = if changed.isEmpty then "" else s"\n$changed"
+              sys.error(
+                s"zipx: $id is a local build. Commit the tree, or publish it with zipxSnapshotPublish local.$extra"
+              )
+          end match
+          installSnapshotProps(tree, local)
           val (task, destination) = target match
             case SnapshotTarget.Local    => (publishLocal, "the local ivy repository")
             case SnapshotTarget.Registry =>
               requireCredentials(extracted, next, release)
               (publish, release.registry.snapshotRepository)
-          plan.entries.foreach(e =>
-            next.log.info(
-              s"zipx: publishing ${Modver.describe(e.row)} ${session.publishedRevisionOf(e.row)} to $destination"
-            )
-          )
+          plan.entries.foreach { e =>
+            val shown = session
+              .artifactVersion(e.row, release.registry, sys.props)
+              .fold(err => sys.error(s"zipx: ${err.message}"), identity)
+            next.log.info(s"zipx: publishing ${Modver.describe(e.row)} $shown to $destination")
+          }
           val restore = BuildSession.of(sys.props).getOrElse(BuildSession.Development)
           sys.props(BuildSession.Property) = session.id
           val publishes =
             plan.projects(graph, catalog).flatMap(graph.get).map(SbtCommand.crossModule(_, CapabilityTasks.of(task)))
+          val pointer =
+            if local || session != BuildSession.SnapshotPublish then Nil
+            else
+              "zipxSnapshotPointer" :: "reload" :: publishes.map(c =>
+                c.text: String
+              ) ::: "zipxSnapshotPointer clear" :: Nil
           val restoreCommands =
-            val back = List(s"$SessionCommand ${restore.id}", "reload")
+            val back = List("zipxSnapshotPointer clear", s"$SessionCommand ${restore.id}", "reload")
             if verdict.refuses then
               sys.props(RefuseProperty) = verdict.refusals.mkString("\n")
               back :+ "zipxSnapshotRefuse"
             else back
-          ("reload" :: publishes.map(c => c.text: String) ::: restoreCommands).foldRight(next)(_ :: _)
+          ("reload" :: publishes.map(c => c.text: String) ::: pointer ::: restoreCommands).foldRight(next)(_ :: _)
       end match
+    }
+
+  private def snapshotId(row: PublishedRow, tree: SnapshotGit.Tree): String =
+    tree match
+      case SnapshotGit.Tree.Clean(full)     => SnapshotRevision.commit(row.version, full).id
+      case SnapshotGit.Tree.Dirty(full, at) => SnapshotRevision.dirty(row.version, full, at).id
+      case SnapshotGit.Tree.Missing(at)     => SnapshotRevision.noGit(at).id
+
+  private def installSnapshotProps(tree: SnapshotGit.Tree, local: Boolean): Unit =
+    clearSnapshotProps()
+    if local then sys.props(SnapshotPublishRevision.LocalProperty) = "true"
+    tree match
+      case SnapshotGit.Tree.Clean(full) =>
+        sys.props(SnapshotPublishRevision.ShaProperty) = full
+      case SnapshotGit.Tree.Dirty(full, at) =>
+        sys.props(SnapshotPublishRevision.ShaProperty) = full
+        sys.props(SnapshotPublishRevision.DirtyProperty) = at.value
+      case SnapshotGit.Tree.Missing(at) =>
+        sys.props(SnapshotPublishRevision.DirtyProperty) = at.value
+  end installSnapshotProps
+
+  private def clearSnapshotProps(): Unit =
+    sys.props -= SnapshotPublishRevision.PointerProperty
+    sys.props -= SnapshotPublishRevision.ShaProperty
+    sys.props -= SnapshotPublishRevision.DirtyProperty
+    sys.props -= SnapshotPublishRevision.LocalProperty
+
+  private val snapshotPointerCommand: Command =
+    Command.args("zipxSnapshotPointer", "[clear]") { (st, args) =>
+      args.toList match
+        case "clear" :: Nil =>
+          clearSnapshotProps()
+          st
+        case Nil =>
+          sys.props(SnapshotPublishRevision.PointerProperty) = "true"
+          st
+        case other =>
+          sys.error(s"zipx: zipxSnapshotPointer takes nothing or 'clear'; got '${other.mkString(" ")}'")
     }
 
   private val RefuseProperty = "zipx.snapshot.refuse"
