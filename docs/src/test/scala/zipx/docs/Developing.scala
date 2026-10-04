@@ -88,10 +88,10 @@ Docs are Specular DocSpecs under `docs/src/test/scala`:
 ```
 sbt docs/testFull        # Specular DocSpecs (same gate as CI; plain docs/test can skip on sbt 2)
 sbt docs/specularSite
-sbt docsDev              # watch: ~docs/specularPreview (rebuild + restart DocsServe)
+sbt docs/specularPreview  # rebuild, serve, and watch. Do not prefix ~
 ```
 
-Open http://127.0.0.1:8765/ while `docsDev` is running. Pages deploy on `v*` tags **or** manual
+Open http://127.0.0.1:8765/ while that is running. `docsDev` is the same task. Pages deploy on `v*` tags **or** manual
 `workflow_dispatch` (`zipxWorkflowDispatch := true`) via `ZipxDocs.pages` in the generated workflow. Verify is skipped
 on dispatch so a docs-only refresh does not re-run the full test suite. Install / chrome versions use
 `specularDisplayVersion` (the last tag when the build is a `-SNAPSHOT`) so docs-only deploys do not advertise

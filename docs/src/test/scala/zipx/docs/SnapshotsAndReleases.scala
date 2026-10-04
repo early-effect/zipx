@@ -64,16 +64,17 @@ alike, so the version string does not change between commits and cache digests h
 is true because the build is not the release number. A release is a deliberate run that publishes catalog numbers.
 
 Three strings show up. Only one of them is what you pin, and only one of them is a release.
-
-```mermaid
-flowchart TD
-  Ci["1.4.2-ci · every compile"] --> Sha["1.4.2-sha · the pin"]
-  Sha --> Rel["1.4.2 · the release"]
-  Sha -.-> Ptr["1.4.2-SNAPSHOT · pointer, not a pin"]
-  class Ci,Sha,Ptr warn
-  class Rel happy
-```
-
+""",
+    illustration {
+      ReleaseDiagram.strings
+    }.assert(ui =>
+      assertTrue(
+        ReleaseDiagram.prose(ui).contains("1.4.2-ci · every compile"),
+        ReleaseDiagram.prose(ui).contains("1.4.2 · the release"),
+        ReleaseDiagram.prose(ui).contains("1.4.2-SNAPSHOT · the pointer"),
+      )
+    ),
+    md"""
 | String | What it is | Who resolves it |
 |---|---|---|
 | `1.4.2-ci` | the compile version. Stable across commits, so caches hold | this build, and only this build |
@@ -109,26 +110,18 @@ The sha is the 12-character abbreviation of the commit. The three ids are next. 
       md"""
 One line, from the first snapshot to the next number. Nothing here moves the catalog except advance, pin-release,
 and the bump. Nothing here spends a release except the release job.
-
-```mermaid
-flowchart TD
-  Dev["compile 1.4.2-ci"] --> Pub["zipxSnapshotPublish"]
-  Pub --> Pin["downstream pins 1.4.2-sha"]
-  Pub --> Ptr["pointer 1.4.2-SNAPSHOT"]
-  Ptr --> Stat["zipxSnapshotStatus"]
-  Stat -->|newer sha| Adv["zipxSnapshotAdvance then reload"]
-  Adv --> Pin
-  Pin --> Plan["zipxReleasePlan"]
-  Plan -->|a sha pin blocks a ship| Wait["release that line upstream"]
-  Wait --> Rew["zipxPinRelease"]
-  Rew --> Plan
-  Plan -->|Ready| Rel["zipx release · one deployment"]
-  Rel --> Bump["bump pull request · next line 1.4.3"]
-  Bump --> Next["compile 1.4.3-ci"]
-  class Dev,Pub,Pin,Ptr,Stat,Adv,Plan,Wait,Rew warn
-  class Rel,Bump,Next happy
-```
-
+""",
+      illustration {
+        ReleaseDiagram.cycle
+      }.assert(ui =>
+        assertTrue(
+          ReleaseDiagram.prose(ui).contains("zipxSnapshotPublish"),
+          ReleaseDiagram.prose(ui).contains("zipxSnapshotAdvance, then reload"),
+          ReleaseDiagram.prose(ui).contains("zipxPinRelease"),
+          ReleaseDiagram.prose(ui).contains("compile 1.4.3-ci"),
+        )
+      ),
+      md"""
 | You want | Command | Rewrites the catalog | Uploads |
 |---|---|---|---|
 | keep compiling | nothing | no | no |
@@ -144,7 +137,7 @@ flowchart TD
 
 A feature pull request stays on the sha it committed. The weekly version-updates job may open a pull request that
 runs advance. It does not commit from a test run.
-"""
+""",
     ),
     section("The three ids")(
       md"""
@@ -505,18 +498,16 @@ deletes a snapshot after 90 days. Status says so and names advance.
 `sbt zipxReleasePlan` uploads nothing. It reads the catalog, the graph, and the release repository. A ship that
 depends on a commit pin is not ready: a release POM cannot depend on a snapshot build. `all` refuses when any
 included ship is blocked. An in-repo unreleased upstream is not a pin. It rides along in the same deployment.
-
-```mermaid
-flowchart TD
-  Pub["widgets publishes 1.4.2-sha"] --> Pin["client pins that sha"]
-  Pin --> Blocked["zipxReleasePlan · Not ready"]
-  Blocked --> Rel["widgets releases 1.4.2"]
-  Rel --> Rew["client runs zipxPinRelease widgets"]
-  Rew --> Ready["zipxReleasePlan · Ready"]
-  class Pub,Pin,Blocked,Rel,Rew warn
-  class Ready happy
-```
-
+""",
+      illustration {
+        ReleaseDiagram.shipReady
+      }.assert(ui =>
+        assertTrue(
+          ReleaseDiagram.prose(ui).contains("zipxReleasePlan · Not ready"),
+          ReleaseDiagram.prose(ui).contains("zipxReleasePlan · Ready"),
+        )
+      ),
+      md"""
 `zipxPinRelease` does not look up a newer line. If `1.4.3` is also published, the pin still becomes `1.4.2`.
 
 `sbt 'zipxPinRelease widgets'` checks the release repository for that line, then rewrites the pin from the sha to the
@@ -562,15 +553,16 @@ project keeps version `0.0.0` when it is in no ship, because `sonaRelease` refus
       md"""
 A row stays at its released number until someone moves it. The next build still compiles `<row>-ci`. Publishing that
 line again writes a snapshot the release sorts ahead of, so those commits publish nothing a consumer can select.
-
-```mermaid
-flowchart TD
-  Tag["tag libs/v1.4.2 stays put"] --> Hide["1.4.2 hides later snapshots of that line"]
-  Tag --> Pr["pull request opens 1.4.3"]
-  Pr --> Next["main compiles 1.4.3-ci"]
-  class Tag,Hide warn
-  class Pr,Next happy
-```
+""",
+      illustration {
+        ReleaseDiagram.afterRelease
+      }.assert(ui =>
+        assertTrue(
+          ReleaseDiagram.prose(ui).contains("tag libs/v1.4.2 stays put"),
+          ReleaseDiagram.prose(ui).contains("main compiles 1.4.3-ci"),
+        )
+      ),
+      md"""
 The registry is whatever `zipxReleaseWorkflow` names (Central, GitHub Packages,
 CodeArtifact, Artifactory, Nexus, or any other Maven release URL), read at its release root, not its snapshot
 repository. A pre-signed 302 on the POM counts as published. A 401, a missing token, or a registry that cannot be
