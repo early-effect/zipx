@@ -700,28 +700,35 @@ object ZipxPlugin extends AutoPlugin:
       if zipxShips.value.isEmpty then Nil else own.distinct.map((org, name) => org % name % VersionScheme.Always)
     },
     // `update` drops eviction details, so the check reads `updateFull`, which shares its resolution.
+    // The pointer refusal is a dependency, not a line above `update.value`: sbt runs every `.value` before the body.
     libraryDependencies := libraryDependencies.value.map { module =>
       if zipx.core.SnapshotPublishRevision.isImmutablePin(module.revision) then module.withIsChanging(false)
       else module
     },
-    update := Def.uncached {
+    update := Def.taskDyn {
       val pointers =
         libraryDependencies.value.map(_.revision).filter(zipx.core.SnapshotPublishRevision.isPointer).distinct
-      if pointers.nonEmpty then sys.error(s"zipx: ${zipx.core.SnapshotPublishRevision.pointerRefusal(pointers)}")
-      val report = update.value
-      val full   = updateFull.value
-      val own    = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.toSet
-      if zipxShips.value.nonEmpty then
-        OwnEvictions.incompatible(full, own, scalaModuleInfo.value) match
-          case Nil      => ()
-          case problems =>
-            val message = ("zipx: the build's own artifacts conflict with a release:" :: problems).mkString("\n  * ")
-            // A project that publishes would ship the mix in its POM; one that does not is proven by its own build.
-            if (publish / skip).value then
-              streams.value.log.warn(s"$message\n  (a warning: this project does not publish)")
-            else sys.error(message)
-      report
-    },
+      if pointers.nonEmpty then
+        Def.task[sbt.librarymanagement.UpdateReport] {
+          sys.error(s"zipx: ${zipx.core.SnapshotPublishRevision.pointerRefusal(pointers)}")
+        }
+      else
+        Def.task {
+          val report = updateFull.value
+          val own    = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.toSet
+          if zipxShips.value.nonEmpty then
+            OwnEvictions.incompatible(report, own, scalaModuleInfo.value) match
+              case Nil      => ()
+              case problems =>
+                val message =
+                  ("zipx: the build's own artifacts conflict with a release:" :: problems).mkString("\n  * ")
+                if (publish / skip).value then
+                  streams.value.log.warn(s"$message\n  (a warning: this project does not publish)")
+                else sys.error(message)
+          report
+        }
+      end if
+    }.value,
     Compile / compile        := (Compile / compile).dependsOn(zipxEnforceDrift).value,
     Test / compile           := (Test / compile).dependsOn(zipxEnforceDrift).value,
     zipxEnforceDrift         := Def.uncached { enforceDriftTask.value },
@@ -2196,7 +2203,16 @@ object ZipxPlugin extends AutoPlugin:
     Def.inputTask {
       val arg = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
       val ctx = snapshotContext.value
-      SnapshotCommands.status(arg, ctx.coords, ctx.registry, ctx.scalaBin, ctx.scalaVer, ctx.cache, ctx.log)
+      SnapshotCommands.status(
+        arg,
+        ctx.coords,
+        ctx.registry,
+        ctx.scalaBin,
+        ctx.scalaVer,
+        ctx.cache,
+        ctx.headers,
+        ctx.log,
+      )
     }
 
   private def snapshotAdvanceTask: Def.Initialize[InputTask[Unit]] =
@@ -2211,6 +2227,7 @@ object ZipxPlugin extends AutoPlugin:
         ctx.scalaBin,
         ctx.scalaVer,
         ctx.cache,
+        ctx.headers,
         ctx.log,
       )
       if next != IO.read(ctx.file) then
@@ -2226,9 +2243,9 @@ object ZipxPlugin extends AutoPlugin:
         arg,
         ctx.coords,
         IO.read(ctx.file),
-        ctx.registry,
         ctx.scalaBin,
         ctx.scalaVer,
+        ctx.released,
         ctx.log,
       )
       if next != IO.read(ctx.file) then
@@ -2267,6 +2284,8 @@ object ZipxPlugin extends AutoPlugin:
       scalaVer: String,
       cache: File,
       file: File,
+      headers: Map[String, String],
+      released: (String, String, String) => Boolean,
       log: Logger,
   )
 
@@ -2276,14 +2295,22 @@ object ZipxPlugin extends AutoPlugin:
     val rel       = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
     val file      = root / rel
     if !file.exists then sys.error(s"zipx: catalog file ${file.getPath} is missing")
-    val registry = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), _.registry)
+    val release  = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
+    val headers  = registryHeaders(release).fold(err => sys.error(s"zipx: $err"), identity)
+    val released = (org: String, artifact: String, line: String) =>
+      lookupGav(release, Gav(org, artifact, line)) match
+        case Right(RegistryStatus.Published) => true
+        case Right(_)                        => false
+        case Left(err)                       => sys.error(s"zipx: $err")
     SnapshotCtx(
       readBuildSetting(extracted, zipxVersions, Seq.empty),
-      registry,
+      release.registry,
       (LocalRootProject / scalaBinaryVersion).value,
       (LocalRootProject / scalaVersion).value,
       (LocalRootProject / target).value / "zipx-snapshot-pointer",
       file,
+      headers,
+      released,
       streams.value.log,
     )
   }

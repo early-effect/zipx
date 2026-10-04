@@ -26,6 +26,7 @@ object SnapshotCommands:
       scalaBin: String,
       scalaVer: String,
       cache: File,
+      headers: Map[String, String],
       log: Logger,
   ): Unit =
     select(arg, coords, "zipxSnapshotStatus").foreach { lib =>
@@ -34,8 +35,8 @@ object SnapshotCommands:
         case Some(SnapshotHold.Local(_)) =>
           SnapshotStatus.report(lib.artifact, lib.version, None, artifactPresent = false)
         case _ =>
-          val pointer = pointerSha(registry, lib.group, artifact, lineOf(lib.version), cache)
-          val present = artifactPresent(registry, lib.group, artifact, lib.version, cache)
+          val pointer = pointerSha(registry, lib.group, artifact, lineOf(lib.version), cache, headers)
+          val present = artifactPresent(registry, lib.group, artifact, lib.version, cache, headers)
           SnapshotStatus.report(lib.artifact, lib.version, pointer, present)
       log.info(report.fold(err => sys.error(s"zipx: $err"), SnapshotStatus.render))
     }
@@ -49,6 +50,7 @@ object SnapshotCommands:
       scalaBin: String,
       scalaVer: String,
       cache: File,
+      headers: Map[String, String],
       log: Logger,
   ): String =
     val named = arg.trim.nonEmpty
@@ -62,8 +64,9 @@ object SnapshotCommands:
           log.info(s"zipx: ${lib.artifact} ${lib.version} is the snapshot pointer, not a pin.")
           src
         case _ =>
-          val sha = pointerSha(registry, lib.group, mavenName(lib, scalaBin, scalaVer), lineOf(lib.version), cache)
-            .getOrElse(sys.error(s"zipx: the pointer for ${lib.artifact} has no ${SnapshotPointer.ShaElement}"))
+          val sha =
+            pointerSha(registry, lib.group, mavenName(lib, scalaBin, scalaVer), lineOf(lib.version), cache, headers)
+              .getOrElse(sys.error(s"zipx: the pointer for ${lib.artifact} has no ${SnapshotPointer.ShaElement}"))
           PinRewrite.advance(lib.version, sha) match
             case Left(err) =>
               sys.error(s"zipx: $err")
@@ -85,16 +88,16 @@ object SnapshotCommands:
       arg: String,
       coords: Seq[ZipxCoord],
       source: String,
-      registry: ArtifactRegistry,
       scalaBin: String,
       scalaVer: String,
+      released: (String, String, String) => Boolean,
       log: Logger,
   ): String =
     if arg.trim.isEmpty then sys.error("zipx: zipxPinRelease takes the artifact name, or group:artifact")
     select(arg, coords, "zipxPinRelease").foldLeft(source) { (src, lib) =>
       val artifact = mavenName(lib, scalaBin, scalaVer)
       val line     = lineOf(lib.version)
-      val onRepo   = line.exists(v => exists(registry.pomUrl(Gav(lib.group, artifact, v))))
+      val onRepo   = line.exists(v => released(lib.group, artifact, v))
       PinRewrite.pinRelease(lib.version, onRepo) match
         case Left(err)                                    => sys.error(s"zipx: $err")
         case Right(next) if next == (lib.version: String) =>
@@ -153,6 +156,7 @@ object SnapshotCommands:
       artifact: String,
       line: Option[String],
       cache: File,
+      headers: Map[String, String],
   ): Option[GitSha] =
     line match
       case None      => None
@@ -160,16 +164,27 @@ object SnapshotCommands:
         ReleaseVersion.make(raw).toOption.flatMap { parsed =>
           val version = SnapshotPointer.pointerVersion(parsed)
           val pom     =
-            fetch(registry.snapshotRepository, SnapshotPointer.pomRelative(organization, artifact, version), cache)
+            fetch(
+              registry.snapshotRepository,
+              SnapshotPointer.pomRelative(organization, artifact, version),
+              cache,
+              headers,
+            )
           val xml = pom.orElse {
             val metadata =
               fetch(
                 registry.snapshotRepository,
                 SnapshotPointer.metadataRelative(organization, artifact, version),
                 cache,
+                headers,
               )
             metadata.flatMap(body => SnapshotPointer.timestampedVersion(raw, body)).flatMap { stamped =>
-              fetch(registry.snapshotRepository, SnapshotPointer.pomRelative(organization, artifact, stamped), cache)
+              fetch(
+                registry.snapshotRepository,
+                SnapshotPointer.uniquePomRelative(organization, artifact, version, stamped),
+                cache,
+                headers,
+              )
             }
           }
           xml.map(body => SnapshotPointer.shaFromPom(body).fold(err => sys.error(s"zipx: $err"), identity))
@@ -181,12 +196,18 @@ object SnapshotCommands:
       artifact: String,
       revision: String,
       cache: File,
+      headers: Map[String, String],
   ): Boolean =
     val id = SnapshotRevision.parse(revision) match
       case Right(pin: SnapshotRevision.Commit) => pin.id
       case _                                   => revision
     val stored = SnapshotPointer.storedRevision(id, registry)
-    fetch(registry.snapshotRepository, SnapshotPointer.pomRelative(organization, artifact, stored), cache).isDefined
+    fetch(
+      registry.snapshotRepository,
+      SnapshotPointer.pomRelative(organization, artifact, stored),
+      cache,
+      headers,
+    ).isDefined
   end artifactPresent
 
   private def mavenName(lib: Lib, scalaBin: String, scalaVer: String): String =
@@ -195,21 +216,18 @@ object SnapshotCommands:
       case Cross.Full   => s"${lib.artifact}_$scalaVer"
       case Cross.Binary => s"${lib.artifact}_$scalaBin"
 
-  private def fetch(root: String, relative: String, cache: File): Option[String] =
+  private def fetch(root: String, relative: String, cache: File, headers: Map[String, String]): Option[String] =
     val url = s"${root.stripSuffix("/")}/$relative"
-    if url.startsWith("file:") then read(url).fold(err => sys.error(s"zipx: $err"), identity)
-    else locked(cache)(read(url)).fold(err => sys.error(s"zipx: $err"), identity)
+    if url.startsWith("file:") then read(url, Map.empty).fold(err => sys.error(s"zipx: $err"), identity)
+    else locked(cache)(read(url, headers)).fold(err => sys.error(s"zipx: $err"), identity)
 
-  private def exists(url: String): Boolean =
-    read(url).fold(err => sys.error(s"zipx: $err"), _.isDefined)
-
-  private def read(url: String): Either[String, Option[String]] =
+  private def read(url: String, headers: Map[String, String]): Either[String, Option[String]] =
     if url.startsWith("file:") then
       val file = new File(URI.create(url))
       if file.isFile then Right(Some(IO.read(file))) else Right(None)
     else
       def once: Either[String, Option[String]] =
-        HttpLookup.get(url, timeout = Duration.ofSeconds(15)) match
+        HttpLookup.get(url, headers = headers, timeout = Duration.ofSeconds(15)) match
           case Left(err)                                            => Left(s"lookup $url: $err")
           case Right(res) if res.status == 200                      => Right(Some(res.body))
           case Right(res) if res.status == 404 || res.status == 410 => Right(None)
