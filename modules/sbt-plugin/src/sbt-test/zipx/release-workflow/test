@@ -60,6 +60,7 @@ $ touch dirty-tree
 > assertReleased
 > assertReleaseSession
 > assertDeploymentName
+# `++` reapplies every setting; the release session survives it.
 > ++ 3.9.0!
 > assertReleaseSession
 

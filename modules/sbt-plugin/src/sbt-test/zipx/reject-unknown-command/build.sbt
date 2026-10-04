@@ -1,5 +1,5 @@
 // Declaring a command name that is not registered in this build must fail at generate time.
-scalaVersion := "3.8.4"
+scalaVersion := "3.9.0"
 version      := "1.0.0-SNAPSHOT"
 
 lazy val root = (project in file("."))

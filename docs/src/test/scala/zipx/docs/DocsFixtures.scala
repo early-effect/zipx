@@ -17,12 +17,12 @@ object DocsFixtures:
 
   val libGraph: ModuleGraph = GraphFixture(
     List(
-      ModuleNode(ModuleId("schema"), publishes = true, crossScalaVersions = List("3.8.4"), baseDir = "schema"),
+      ModuleNode(ModuleId("schema"), publishes = true, crossScalaVersions = List("3.9.0"), baseDir = "schema"),
       ModuleNode(
         ModuleId("api"),
         dependsOn = List("schema"),
         publishes = true,
-        crossScalaVersions = List("3.8.4"),
+        crossScalaVersions = List("3.9.0"),
         baseDir = "api",
       ),
       ModuleNode(
@@ -30,7 +30,7 @@ object DocsFixtures:
         dependsOn = List("api"),
         docker = true,
         publishes = false,
-        crossScalaVersions = List("3.8.4"),
+        crossScalaVersions = List("3.9.0"),
         baseDir = "service",
       ),
     )

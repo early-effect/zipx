@@ -4,7 +4,7 @@
 // rather than at `shared/`. So the only thing that can map `shared/src/main/scala/Foo.scala` back to a
 // module is `unmanagedSourceDirectories`, which is what `ModuleNode.sourcePaths` records. Asserted through
 // `target/zipx-affected.json`, the handoff CI actually reads, never by capturing sbt stdout.
-scalaVersion   := "3.8.4"
+scalaVersion   := "3.9.0"
 version        := "1.0.0-SNAPSHOT"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
@@ -13,12 +13,12 @@ zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture 
 zipxCheckDeps := true
 
 lazy val shared = (projectMatrix in file("shared"))
-  .jvmPlatform(scalaVersions = Seq("3.8.4"))
-  .jsPlatform(scalaVersions = Seq("3.8.4"))
+  .jvmPlatform(scalaVersions = Seq("3.9.0"))
+  .jsPlatform(scalaVersions = Seq("3.9.0"))
 
 // Depends on the JVM row only, so a JS-only change must not reach it.
 lazy val consumer = project
-  .dependsOn(shared.jvm("3.8.4"))
+  .dependsOn(shared.jvm("3.9.0"))
 
 lazy val root = (project in file("."))
   .aggregate((shared.projectRefs ++ Seq[ProjectReference](consumer)) *)

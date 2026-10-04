@@ -1,4 +1,4 @@
-scalaVersion   := "3.8.4"
+scalaVersion   := "3.9.0"
 version        := "1.0.0-SNAPSHOT"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 

@@ -11,19 +11,19 @@ object IndependentVersions extends DocSpecSuite:
 
   private val graph = GraphFixture(
     List(
-      ModuleNode(ModuleId("models"), publishes = true, crossScalaVersions = List("3.8.4"), baseDir = "models"),
+      ModuleNode(ModuleId("models"), publishes = true, crossScalaVersions = List("3.9.0"), baseDir = "models"),
       ModuleNode(
         ModuleId("coreLib"),
         dependsOn = List("models"),
         publishes = true,
-        crossScalaVersions = List("3.8.4"),
+        crossScalaVersions = List("3.9.0"),
         baseDir = "core-lib",
       ),
       ModuleNode(
         ModuleId("client"),
         dependsOn = List("coreLib"),
         publishes = true,
-        crossScalaVersions = List("3.8.4"),
+        crossScalaVersions = List("3.9.0"),
         baseDir = "client",
       ),
       ModuleNode(
@@ -31,7 +31,7 @@ object IndependentVersions extends DocSpecSuite:
         dependsOn = List("coreLib"),
         docker = true,
         publishes = false,
-        crossScalaVersions = List("3.8.4"),
+        crossScalaVersions = List("3.9.0"),
         baseDir = "service",
       ),
     )
