@@ -76,6 +76,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: cache-rehydrate
         run: sbt 'Test/compile'
@@ -101,6 +102,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: test
         run: |
@@ -132,6 +134,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: test
         run: |
@@ -163,6 +166,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: test
         run: |
@@ -195,6 +199,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: fmt
         run: |
@@ -227,6 +232,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: workflow-check
         run: |
@@ -259,6 +265,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: advisories
         run: |
@@ -295,6 +302,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
@@ -332,6 +340,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
@@ -392,6 +401,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: zipx AWS login (eu)
         uses: ./.github/actions/zipx-aws-login
@@ -436,6 +446,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: snapshots
         run: sbt 'zipxSnapshotPublish'
@@ -481,6 +492,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
       - name: zipx AWS login
         uses: ./.github/actions/zipx-aws-login
