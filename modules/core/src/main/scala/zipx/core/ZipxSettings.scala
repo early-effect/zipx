@@ -211,6 +211,16 @@ object ZipxSettings:
       Build,
     )
 
+  val shellWorkflows: SettingDef[Seq[ShellWorkflow]] =
+    SettingDef.setting(
+      SettingName("zipxShellWorkflows"),
+      Seq.empty,
+      SettingPurpose(
+        "Extra workflow_dispatch workflows. Each job checks the repo out and runs zipx-sbt-setup from this build, then the steps the build supplies. There is no sbt command unless a step runs sbt. Paths under .github/workflows that zipx already owns (ci.yml, the companions) are refused."
+      ),
+      Build,
+    )
+
   val coverageWorkflow: SettingDef[Option[CoverageWorkflow]] =
     SettingDef.setting(
       SettingName("zipxCoverageWorkflow"),
@@ -813,6 +823,7 @@ object ZipxSettings:
     versionUpdatesExtraSteps,
     releaseWorkflow,
     snapshotRegistries,
+    shellWorkflows,
     coverageWorkflow,
     pinFeeds,
     pinPrGate,
