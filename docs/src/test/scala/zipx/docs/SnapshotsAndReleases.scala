@@ -507,17 +507,14 @@ depends on a commit pin is not ready: a release POM cannot depend on a snapshot 
 included ship is blocked. An in-repo unreleased upstream is not a pin. It rides along in the same deployment.
 
 ```mermaid
-sequenceDiagram
-  participant Up as widgets
-  participant Snap as snapshot repo
-  participant Down as client
-  participant Rel as release repo
-  Up->>Snap: publish 1.4.2-1234abcd5678
-  Down->>Snap: pin that sha
-  Down->>Down: zipxReleasePlan · Not ready
-  Up->>Rel: release widgets 1.4.2
-  Down->>Down: zipxPinRelease widgets
-  Down->>Rel: zipxReleasePlan · Ready
+flowchart TD
+  Pub["widgets publishes 1.4.2-sha"] --> Pin["client pins that sha"]
+  Pin --> Blocked["zipxReleasePlan · Not ready"]
+  Blocked --> Rel["widgets releases 1.4.2"]
+  Rel --> Rew["client runs zipxPinRelease widgets"]
+  Rew --> Ready["zipxReleasePlan · Ready"]
+  class Pub,Pin,Blocked,Rel,Rew warn
+  class Ready happy
 ```
 
 `zipxPinRelease` does not look up a newer line. If `1.4.3` is also published, the pin still becomes `1.4.2`.
