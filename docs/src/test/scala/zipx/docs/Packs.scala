@@ -71,7 +71,7 @@ run chooses ships, and why one run is one deployment: **Snapshots and releases**
 
 ```scala
 zipxReleaseWorkflow := Some(ZipxCentral.releases)
-zipxCapabilities += ZipxCentral.snapshots   // each merge: unreleased rows at <row>-SNAPSHOT, unsigned
+zipxCapabilities += ZipxCentral.snapshots   // each merge: unreleased rows at <row>-<sha>, unsigned
 
 zipxReleaseWorkflow := Some(
   ZipxGitHubPackages.releases("iterable", "maven-packages", token = secret"GH_PACKAGES_TOKEN")

@@ -5,8 +5,8 @@
 //   models ──▶ core-lib ──▶ client   (publish; ShipGroup libs 1.4.2 + Ship client 0.3.0)
 //     └───────────────────▶ service  (non-publishing app; depends on core-lib)
 //
-// Every build is `<row>-SNAPSHOT`, and each merge publishes unreleased rows to Central
-// snapshots. Libraries release from zipx-release.yml, on a GitHub Release tag or a
+// Every build compiles `<row>-ci`, and each merge publishes unreleased rows at `<row>-<sha>`
+// to Central snapshots. Libraries release from zipx-release.yml, on a GitHub Release tag or a
 // dispatch. Image and deploy wait on a human v* tag in ci.yml.
 //
 // zipx derives everything (module set, needs edges, publish order, matrix) from this.

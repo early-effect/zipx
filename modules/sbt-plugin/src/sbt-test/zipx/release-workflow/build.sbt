@@ -18,7 +18,7 @@ lazy val client = project.dependsOn(coreLib).settings(toFixtureRepo)
 ThisBuild / versionScheme := Some("early-semver")
 
 // Built against the released client, as a library from another repo would be. early-semver compares 0.y.0 and x.0.0
-// exactly, -SNAPSHOT included, so sbt alone rejects the in-repo 0.3.0-SNAPSHOT against it.
+// exactly, so sbt alone rejects the in-repo 0.3.0-ci against it. zipx compares the release line.
 def usesClient = Seq(
   libraryDependencies += "com.example.ext" %% "uses-client" % "1.0.0",
   resolvers += "fixture" at released.toURI.toString,
@@ -33,6 +33,33 @@ lazy val consumer = project
 lazy val downstream = project.dependsOn(client).settings(if (file("ext").exists) usesClient else Nil)
 
 lazy val root = (project in file(".")).aggregate(models, coreLib, client).settings(publish / skip := true)
+
+// Depends on the Central form of the models sha (`<line>-<sha>-SNAPSHOT`). Not aggregated: its update is the proof.
+lazy val pinned = project.settings(
+  publish / skip := true,
+  libraryDependencies ++= commitPins((LocalRootProject / baseDirectory).value),
+  resolvers += "fixture" at released.toURI.toString,
+)
+
+// The pointer coordinate, added once `want-pointer` exists so workflow generate does not see an uncatalogued dep.
+lazy val badpin = project.settings(
+  publish / skip := true,
+  libraryDependencies ++= {
+    if file("want-pointer").exists then Seq("com.example.zipx.release" %% "models" % "1.4.2-SNAPSHOT") else Nil
+  },
+  resolvers += "fixture" at released.toURI.toString,
+)
+
+def commitPins(root: File): Seq[ModuleID] =
+  val out  = new StringBuilder
+  val code = scala.sys.process
+    .Process(Seq("git", "rev-parse", "HEAD"), root)
+    .!(scala.sys.process.ProcessLogger(out ++= _, _ => ()))
+  if code != 0 then Nil
+  else
+    val full = out.toString.trim.toLowerCase
+    if full.length != 40 then Nil
+    else Seq("com.example.zipx.release" %% "models" % s"1.4.2-${full.take(12)}-SNAPSHOT")
 
 val writeExternalLib = taskKey[Unit]("An external library in the registry, built against client 0.3.0")
 writeExternalLib := Def.uncached {
@@ -79,45 +106,196 @@ assertSnapshotsJob := {
   assert(!body.contains("needs.test.result"), body)
 }
 
-val assertSnapshotsPublished = taskKey[Unit]("every unreleased row is published at <row>-SNAPSHOT, without scaladoc")
+def headSha(root: File): String =
+  scala.sys.process.Process(Seq("git", "rev-parse", "HEAD"), root).!!.trim.toLowerCase
+
+val assertSnapshotsPublished = taskKey[Unit]("a clean commit publishes <line>-<sha> and a pointer POM, without scaladoc")
 assertSnapshotsPublished := {
-  val base = released / "com" / "example" / "zipx" / "release"
+  val root   = (LocalRootProject / baseDirectory).value
+  val base   = released / "com" / "example" / "zipx" / "release"
+  val full   = headSha(root)
+  val abbrev = full.take(12)
   for (artifact, version) <- List("models_3" -> "1.4.2", "corelib_3" -> "1.4.2", "client_3" -> "0.3.0") do
-    val dir = base / artifact / s"$version-SNAPSHOT"
-    assert((dir / s"$artifact-$version-SNAPSHOT.jar").exists, s"$dir has no jar: ${Option(dir.list).map(_.toList)}")
-    assert((dir / s"$artifact-$version-SNAPSHOT-sources.jar").exists, s"$dir has no sources jar")
-    assert(!(dir / s"$artifact-$version-SNAPSHOT-javadoc.jar").exists, s"$dir has a scaladoc jar")
+    val id  = s"$version-$abbrev"
+    val dir = base / artifact / id
+    assert((dir / s"$artifact-$id.jar").exists, s"$dir has no jar: ${Option(dir.list).map(_.toList)}")
+    assert((dir / s"$artifact-$id-sources.jar").exists, s"$dir has no sources jar")
+    assert(!(dir / s"$artifact-$id-javadoc.jar").exists, s"$dir has a scaladoc jar")
+    val pointer = IO.read(base / artifact / s"$version-SNAPSHOT" / s"$artifact-$version-SNAPSHOT.pom")
+    assert(pointer.contains(full), pointer)
 }
 
-val assertPrSnapshotsPublished = taskKey[Unit]("a PR snapshot publishes <row>-pr<N>-SNAPSHOT, and builds what it tested")
+val assertPrSnapshotsPublished = taskKey[Unit]("a PR publishes its own sha and leaves the pointer on the first commit")
 assertPrSnapshotsPublished := Def.uncached {
-  val base = released / "com" / "example" / "zipx" / "release"
-  val pom  = IO.read(base / "client_3" / "0.3.0-pr42-SNAPSHOT" / "client_3-0.3.0-pr42-SNAPSHOT.pom")
-  assert(pom.contains("<version>1.4.2-pr42-SNAPSHOT</version>"), pom)
-  assert((base / "models_3" / "1.4.2-pr42-SNAPSHOT" / "models_3-1.4.2-pr42-SNAPSHOT.jar").exists, "models has no PR jar")
-  assert((client / version).value == "0.3.0-SNAPSHOT", (client / version).value)
+  val root    = (LocalRootProject / baseDirectory).value
+  val base    = released / "com" / "example" / "zipx" / "release"
+  val pointer = IO.read(base / "client_3" / "0.3.0-SNAPSHOT" / "client_3-0.3.0-SNAPSHOT.pom")
+  val full    = headSha(root)
+  val first   = scala.sys.process
+    .Process(Seq("git", "rev-parse", "HEAD~1"), root)
+    .!!.trim
+    .toLowerCase
+  assert(pointer.contains(first), pointer)
+  assert(!pointer.contains(full), pointer)
+  val id = s"0.3.0-${full.take(12)}"
+  assert((base / "client_3" / id / s"client_3-$id.jar").exists, s"client has no jar at $id")
+  assert((client / version).value == "0.3.0-ci", (client / version).value)
   val yml = IO.read((LocalRootProject / baseDirectory).value / ".github/workflows/ci.yml")
   assert(yml.contains("  snapshots-pr:") && yml.contains("zipxSnapshotPublish pr"), yml)
 }
 
 def ivyLocalRepo: File = file(sys.props("user.home")) / ".ivy2" / "local" / "com.example.zipx.release"
 
+def git(root: File, args: String*): Unit =
+  val err  = new StringBuilder
+  val code = scala.sys.process.Process("git" +: args, root).!(scala.sys.process.ProcessLogger(_ => (), line => err ++= line))
+  if code != 0 then sys.error(s"git ${args.mkString(" ")} exited $code: $err")
+
+val initGit = taskKey[Unit]("Commit the fixture so a snapshot publish has a sha")
+initGit / aggregate := false
+initGit := Def.uncached {
+  val root = (LocalRootProject / baseDirectory).value
+  IO.write(root / ".gitignore", "target/\nreleased/\nsha-digest\n.bsp/\n.bloop/\nglobal/\n")
+  git(root, "init")
+  git(root, "config", "user.email", "zipx@example.com")
+  git(root, "config", "user.name", "zipx")
+  git(root, "add", ".")
+  git(root, "commit", "-m", "init")
+}
+
+val commitAll = taskKey[Unit]("Commit the dirty tree as a second sha")
+commitAll / aggregate := false
+commitAll := Def.uncached {
+  val root = (LocalRootProject / baseDirectory).value
+  git(root, "add", ".")
+  git(root, "commit", "-m", "second")
+}
+
 val forgetIvyLocal = taskKey[Unit]("Remove this fixture's organization from the machine's ivy repository")
 forgetIvyLocal := Def.uncached(IO.delete(ivyLocalRepo))
 
-val assertLocalSnapshots = taskKey[Unit]("zipxSnapshotPublish local publishes unreleased rows to ivy-local, and the shell is a development session again")
+val assertLocalSnapshots = taskKey[Unit]("zipxSnapshotPublish local publishes the commit id to ivy-local, and the shell is a development session again")
 assertLocalSnapshots := Def.uncached {
-  val models = ivyLocalRepo / "models_3" / "1.4.2-SNAPSHOT"
+  val models = ivyLocalRepo / "models_3" / s"1.4.2-${headSha((LocalRootProject / baseDirectory).value).take(12)}"
   assert((models / "jars" / "models_3.jar").exists, s"no local models jar under $models")
+  assert(!(ivyLocalRepo / "models_3" / "1.4.2-SNAPSHOT").exists, "local publish must not occupy the pointer")
   assert(!(models / "docs").exists, "a local snapshot publish carries no scaladoc")
   assert(!sys.props.contains("zipx.session"), s"session left at ${sys.props.get("zipx.session")}")
   assert((client / Compile / packageDoc / publishArtifact).value, "a development session publishes docs again")
 }
 
-val assertSnapshotVersions = taskKey[Unit]("outside a release every row member is <row>-SNAPSHOT")
+val assertSnapshotVersions = taskKey[Unit]("outside a release every row member compiles at <row>-ci")
 assertSnapshotVersions := {
-  assert((models / version).value == "1.4.2-SNAPSHOT", (models / version).value)
-  assert((client / version).value == "0.3.0-SNAPSHOT", (client / version).value)
+  assert((models / version).value == "1.4.2-ci", (models / version).value)
+  assert((client / version).value == "0.3.0-ci", (client / version).value)
+  assert((models / isSnapshot).value, "a development ship is a snapshot")
+}
+
+def versionDirs(artifact: String): List[String] =
+  val dir = released / "com" / "example" / "zipx" / "release" / artifact
+  Option(dir.listFiles()).toList.flatten.filter(_.isDirectory).map(_.getName).sorted
+
+val assertOnlyShaAndPointer = taskKey[Unit]("republishing the commit overwrites that sha and the pointer")
+assertOnlyShaAndPointer / aggregate := false
+assertOnlyShaAndPointer := Def.uncached {
+  val root   = (LocalRootProject / baseDirectory).value
+  val full   = headSha(root)
+  val abbrev = full.take(12)
+  for (artifact, version) <- List("models_3" -> "1.4.2", "corelib_3" -> "1.4.2", "client_3" -> "0.3.0") do
+    val names = versionDirs(artifact)
+    assert(names == List(s"$version-$abbrev", s"$version-SNAPSHOT").sorted, s"$artifact versions: $names")
+    val pointer = IO.read(
+      released / "com" / "example" / "zipx" / "release" / artifact / s"$version-SNAPSHOT" / s"$artifact-$version-SNAPSHOT.pom"
+    )
+    assert(pointer.contains(full), pointer)
+    assert(pointer.contains("<zipx.snapshot.sha>"), pointer)
+}
+
+val assertDirtyLocal = taskKey[Unit]("a dirty local publish writes +YYYYMMDD-HHmm and does not occupy the sha, -ci, or the registry")
+assertDirtyLocal / aggregate := false
+assertDirtyLocal := Def.uncached {
+  val abbrev    = headSha((LocalRootProject / baseDirectory).value).take(12)
+  val modelsDir = ivyLocalRepo / "models_3"
+  val names     = Option(modelsDir.list()).map(_.toList).getOrElse(Nil)
+  val dirty = names.filter(_.startsWith(s"1.4.2-$abbrev+"))
+  val stamp = dirty match
+    case one :: Nil => one.stripPrefix(s"1.4.2-$abbrev+")
+    case other      => sys.error(s"expected one dirty id under $modelsDir, got $other")
+  assert(stamp.matches("""\d{8}-\d{4}"""), stamp)
+  assert(!names.contains(s"1.4.2-$abbrev"), names.toString)
+  assert(!names.contains("1.4.2-ci"), names.toString)
+  assert(!names.contains("1.4.2-SNAPSHOT"), names.toString)
+  assert((modelsDir / s"1.4.2-$abbrev+$stamp" / "jars" / "models_3.jar").exists, dirty.toString)
+  assert(!versionDirs("models_3").exists(_.contains("+")), versionDirs("models_3").toString)
+}
+
+/** Copy the published bare id to the Central file name so a `-SNAPSHOT` pin resolves from this file repo. */
+def installCentralForm(root: File): Unit =
+  val abbrev = headSha(root).take(12)
+  val id     = s"1.4.2-$abbrev"
+  val snap   = s"$id-SNAPSHOT"
+  val from   = released / "com" / "example" / "zipx" / "release" / "models_3" / id
+  val to     = released / "com" / "example" / "zipx" / "release" / "models_3" / snap
+  assert(from.isDirectory, s"missing $from")
+  IO.delete(to)
+  IO.copyDirectory(from, to)
+  Option(to.listFiles()).foreach(_.foreach { file =>
+    val renamed = new File(to, file.getName.replace(id, snap))
+    if file != renamed then IO.move(file, renamed)
+  })
+  val pom = to / s"models_3-$snap.pom"
+  IO.write(pom, IO.read(pom).replace(s"<version>$id</version>", s"<version>$snap</version>"))
+  Option(to.listFiles()).foreach(_.foreach { copied =>
+    val name = copied.getName
+    if name.endsWith(".sha1") || name.endsWith(".md5") || name.endsWith(".asc") || name.startsWith("maven-metadata") then
+      IO.delete(copied)
+  })
+
+def deleteMavenMetadata(dir: File): Unit =
+  Option(dir.listFiles()).foreach(_.foreach { file =>
+    if file.getName.startsWith("maven-metadata.xml") then IO.delete(file)
+  })
+
+val prepareCentralForm = taskKey[Unit]("Copy the published sha to the Central file name, <sha>-SNAPSHOT")
+prepareCentralForm / aggregate := false
+prepareCentralForm := Def.uncached {
+  installCentralForm((LocalRootProject / baseDirectory).value)
+}
+
+val assertImmutableResolve = taskKey[Unit]("the Central-form sha pin is not changing, resolves from the file repo, and ignores ivy -ci")
+assertImmutableResolve / aggregate := false
+assertImmutableResolve := Def.uncached {
+  val root = (LocalRootProject / baseDirectory).value
+  val rev = s"1.4.2-${headSha(root).take(12)}-SNAPSHOT"
+  val mod = (pinned / libraryDependencies).value
+    .find(_.revision == rev)
+    .getOrElse(sys.error(s"no pin $rev in ${(pinned / libraryDependencies).value}"))
+  assert(!mod.isChanging, mod.toString)
+  assert((pinned / forceUpdatePeriod).value.isEmpty, (pinned / forceUpdatePeriod).value.toString)
+  val jars = (pinned / updateFull).value.allFiles.filter(_.getName.startsWith("models_3")).toList
+  val jar = jars match
+    case one :: _ => one
+    case Nil      => sys.error("no models jar")
+  assert(jar.getAbsolutePath.contains("/released/"), jar.toString)
+  assert(!jar.getAbsolutePath.contains(".ivy2"), jar.toString)
+  IO.write((LocalRootProject / baseDirectory).value / "sha-digest", Hash.toHex(Hash(jar)))
+  val artifact = released / "com" / "example" / "zipx" / "release" / "models_3"
+  deleteMavenMetadata(artifact)
+  deleteMavenMetadata(artifact / rev)
+  deleteMavenMetadata(artifact / rev.stripSuffix("-SNAPSHOT"))
+  lmcoursier.internal.SbtCoursierCache.default.clear()
+}
+
+val assertShaDigest = taskKey[Unit]("the sha pin resolves again after maven-metadata.xml is gone")
+assertShaDigest / aggregate := false
+assertShaDigest := Def.uncached {
+  val expected = IO.read((LocalRootProject / baseDirectory).value / "sha-digest")
+  val jars = (pinned / updateFull).value.allFiles.filter(_.getName.startsWith("models_3")).toList
+  val jar = jars match
+    case one :: _ => one
+    case Nil      => sys.error("second resolve found no models jar")
+  assert(Hash.toHex(Hash(jar)) == expected, jar.toString)
+  assert(!(released / "com" / "example" / "zipx" / "release" / "models_3" / "maven-metadata.xml").exists)
 }
 
 val assertReleased = taskKey[Unit]("client and its unreleased upstream row published at their catalog numbers")

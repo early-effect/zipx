@@ -5,8 +5,9 @@ $ exists .github/workflows/zipx-release.yml
 > assertSnapshotsJob
 > zipxWorkflowCheck
 
-# A merge publishes every unreleased row at <row>-SNAPSHOT.
-# A laptop publishes the same rows to the local ivy repository, then the shell is back to a development session.
+# A clean commit publishes <line>-<sha>. A laptop publish of that commit goes to ivy, then the shell is development again.
+> initGit
+> reload
 > forgetIvyLocal
 > zipxSnapshotPublish local
 > assertLocalSnapshots
@@ -14,8 +15,33 @@ $ exists .github/workflows/zipx-release.yml
 
 > zipxSnapshotPublish
 > assertSnapshotsPublished
+> zipxSnapshotPublish
+> assertOnlyShaAndPointer
 
-# A labeled PR publishes the same rows at <row>-pr<N>-SNAPSHOT, compiled at <row>-SNAPSHOT like its tests.
+# ivy has the compile version. The sha pin still resolves from the file repo, including after metadata is deleted.
+> models/publishLocal
+> prepareCentralForm
+> assertImmutableResolve
+> pinned/clean
+> pinned/update
+> assertShaDigest
+
+# The pointer is not a dependency, even though its jars are in the repository.
+$ touch want-pointer
+> reload
+-> badpin/update
+
+# A dirty tree is refused by a registry publish. Local publish writes the timestamped id only.
+$ touch dirty-tree
+-> zipxSnapshotPublish
+> forgetIvyLocal
+> zipxSnapshotPublish local
+> assertDirtyLocal
+> forgetIvyLocal
+
+# A labeled PR publishes its own commit and does not move the pointer.
+> commitAll
+> reload
 > zipxSnapshotPublish pr 42
 > assertPrSnapshotsPublished
 
@@ -37,7 +63,7 @@ $ exists .github/workflows/zipx-release.yml
 > ++ 3.9.0!
 > assertReleaseSession
 
-# Back in development, client builds 0.3.0-SNAPSHOT; a library built against released client 0.3.0 still resolves.
+# Back in development, client compiles 0.3.0-ci; a library built against released client 0.3.0 still resolves.
 > zipxSession development
 $ touch ext
 > reload

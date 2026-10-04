@@ -1,6 +1,7 @@
 MyVersions.settings
 organization := "com.example.zipx.pins"
-version      := "1.0.0-SNAPSHOT"
+// A qualifier snapshot stays changing. `<line>-SNAPSHOT` is the pointer, and update refuses it.
+version      := "1.0.0-RC1-SNAPSHOT"
 zipxVerify   := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 
 lazy val helper   = project
@@ -34,6 +35,6 @@ assertCiPins := Def.uncached {
   val yml = IO.read((LocalRootProject / baseDirectory).value / ".github" / "workflows" / "ci.yml")
   assert(yml.contains("COURSIER_TTL: \"0s\""), yml)
   val note = yml.linesIterator.find(_.contains("::warning title=zipx snapshots::pinned snapshots (")).getOrElse("")
-  assert(note.contains("com.example.zipx.pins:upstream:1.0.0-SNAPSHOT"), yml)
-  assert(note.contains("com.example.zipx.pins:helper:1.0.0-SNAPSHOT"), yml)
+  assert(note.contains("com.example.zipx.pins:upstream:1.0.0-RC1-SNAPSHOT"), yml)
+  assert(note.contains("com.example.zipx.pins:helper:1.0.0-RC1-SNAPSHOT"), yml)
 }

@@ -59,8 +59,9 @@ object SnapshotsAndReleases extends DocSpecSuite:
 
   def doc = page("Snapshots and releases")(
     md"""
-A row's catalog number is the **next** release. Every build until then is `<row>-SNAPSHOT`, on a laptop and in CI
-alike. A release is a deliberate run that publishes catalog numbers.
+A row's catalog number is the **next** release. Every build until then compiles `<row>-ci`, on a laptop and in CI
+alike, so the version string does not change between commits and cache digests hold (see **Caching**). `isSnapshot`
+is true because the build is not the release number. A release is a deliberate run that publishes catalog numbers.
 
 ```scala
 // project/ZipxVersions.scala
@@ -72,17 +73,17 @@ zipxCapabilities += ZipxCentral.snapshots
 zipxReleaseWorkflow := Some(ZipxCentral.releases)
 ```
 
-| Build | `models` | `client` | Published to |
-|---|---|---|---|
-| any build | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | nowhere until you publish |
-| `sbt zipxSnapshotPublish local`, on a laptop | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | `~/.ivy2/local` |
-| `sbt zipxSnapshotPublish`, on a laptop | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | Central snapshots |
-| a merge to the default branch | `1.4.2-SNAPSHOT` | `0.3.0-SNAPSHOT` | Central snapshots |
-| a push to PR #42 labeled `snapshots` | `1.4.2-pr42-SNAPSHOT` | `0.3.0-pr42-SNAPSHOT` | Central snapshots |
-| a `zipxRelease` session | `1.4.2` | `0.3.0` | Central |
+| Build | Compiles | What a publish stores |
+|---|---|---|
+| any build | `1.4.2-ci`, `0.3.0-ci` | nowhere until you publish |
+| `sbt zipxSnapshotPublish local`, clean commit | those `-ci` versions | `1.4.2-<sha>` and `0.3.0-<sha>` in `~/.ivy2/local` |
+| `sbt zipxSnapshotPublish`, clean commit | those `-ci` versions | those ids in the snapshot repository. Central appends `-SNAPSHOT` to the file name |
+| a merge to the default branch | those `-ci` versions | the same ids, plus a `<row>-SNAPSHOT` pointer POM that names the full sha |
+| a push to PR #42 labeled `snapshots` | those `-ci` versions | that PR commit's `<row>-<sha>`. The pointer stays where the default branch left it |
+| a dirty tree, `sbt zipxSnapshotPublish local` | those `-ci` versions | `<row>-<sha>+YYYYMMDD-HHmm` in ivy only |
+| a `zipxRelease` session | `1.4.2`, `0.3.0` | the release repository, at the catalog numbers |
 
-`-SNAPSHOT` is what sbt overwrites on republish, so a republish after every edit reaches a sibling build. It is also
-the same string on every commit, so cache digests hold (see **Caching**). None of it spends a release.
+The sha is the 12-character abbreviation of the commit. The three ids are next. None of this spends a release.
 """,
     section("The three ids")(
       md"""
@@ -116,26 +117,31 @@ pointer the status command reads, not a dependency.
     ),
     section("Iterate from your machine")(
       md"""
-Proving a change across two libraries needs no PR, no CI, and no release. In the upstream repo:
+Proving a change across two libraries needs no PR, no CI, and no release. Commit the upstream, then:
 
 ```text
-sbt zipxSnapshotPublish local     # every unreleased row to ~/.ivy2/local, which sbt and cs resolve
+sbt zipxSnapshotPublish local     # every unreleased row's <row>-<sha> to ~/.ivy2/local
 ```
 
-In the downstream repo, pin the coordinate like any other row, then `reload` a running shell:
+That does not write `<row>-ci`, and it does not write the pointer. Pin the id downstream, then `reload`:
 
 ```scala
-val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
+val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678")
 ```
 
-Edit upstream, publish again, compile downstream: a `-SNAPSHOT` overwrites, and a project that depends on one
-re-resolves every session. When the upstream change adds or changes a dependency, `reload` the downstream shell;
-zipx forgets sbt's in-memory resolutions on `reload` and `clean` while a snapshot is pinned.
+On Central the same commit is stored as `0.15.0-1234abcd5678-SNAPSHOT`. The pin is not a changing module: `update`
+does not re-read `maven-metadata.xml`. `<row>-SNAPSHOT` with nothing after the line is the pointer, not a build.
+Depending on it fails `update` and the message names `zipxSnapshotStatus`.
+
+A dirty working tree is refused by a registry publish. The message names the id and `zipxSnapshotPublish local`.
+That local publish writes `<row>-<sha>+YYYYMMDD-HHmm` on this machine only. Another clone cannot resolve it.
+
+Publishing the same commit again overwrites that coordinate and no other. A new commit is a new id.
 
 To share the same bits with a teammate, or with a downstream PR's CI, publish them to the registry instead:
 
 ```text
-sbt zipxSnapshotPublish           # the same rows to the registry's snapshot repository
+sbt zipxSnapshotPublish           # the same commit ids, to the registry's snapshot repository
 ```
 
 Both forms publish exactly the rows a merge would (every row whose number is not released yet), skip scaladoc, and
@@ -174,8 +180,9 @@ rehearses snapshots and releases entirely on one machine.
     section("Mainline snapshots")(
       md"""
 With `ZipxCentral.snapshots`, every push to the default branch publishes each row whose catalog number is not
-released yet, at `<row>-SNAPSHOT`. A downstream repo can pin that coordinate in CI before the release exists. A row
-that is already released is skipped: its snapshot would sort before the release.
+released yet, at `<row>-<sha>` of that commit, and a pointer module at `<row>-SNAPSHOT` whose POM records the full
+sha. A downstream repo pins the sha, not the pointer. A row that is already released is skipped: a snapshot of that
+line sorts before the release.
 
 The `snapshots` job needs `verify`, so it publishes only after every Verify job has passed or skipped. On a merge
 push that skipped Verify it also needs `cache-rehydrate`, which owns that push's build snapshot. It restores that
@@ -202,12 +209,12 @@ the same `zipxSnapshotPublish` you run from a laptop.
     section("PR snapshots")(
       md"""
 `ZipxCentral.pullRequestSnapshots("snapshots")` publishes the same rows from a pull request, on each push once the PR
-carries the label, at `<row>-pr<N>-SNAPSHOT`. A downstream PR can pin `0.3.0-pr42-SNAPSHOT` and prove the pair works
-before either merges. A fork's PR never runs it: its run has no publishing secrets.
+carries the label, at that commit's `<row>-<sha>`. It does not move the pointer. There is no `<row>-pr<N>-SNAPSHOT`:
+the sha is the id, so two pull requests cannot overwrite each other. A downstream PR pins that sha while the pull
+request is open. A fork's PR never runs it: its run has no publishing secrets.
 
-Only the published coordinate moves. sbt still compiles and packages at `<row>-SNAPSHOT`, exactly what the PR's `test`
-built, so the job restores the PR's cache and recompiles nothing; each POM names in-repo dependencies at their
-`-pr<N>-SNAPSHOT` coordinate. It needs `verify`, same as mainline snapshots. Labeling a PR starts no run by itself;
+sbt still compiles and packages at `<row>-ci`, exactly what the PR's `test` built, so the job restores the PR's cache.
+The published POM names the sha. It needs `verify`, same as mainline snapshots. Labeling a PR starts no run by itself;
 push to publish.
 
 ```scala
@@ -352,31 +359,30 @@ Nothing uploads until the plan is sound. Each refusal says what to do next.
     ),
     section("Pin a snapshot downstream")(
       md"""
-A downstream catalog names the snapshot like any other row:
+A downstream catalog pins the commit, not the pointer:
 
 ```scala
-val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
+val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678")
 ```
 
-Every generated sbt job sets `COURSIER_TTL: 0s`, whether or not a catalog row is a snapshot. Coursier would otherwise
-trust a changing artifact for 24 hours, and a snapshot coordinate is republished in place. Release coordinates stay
-cached. `zipxEnv` cannot lengthen that TTL.
+On Central that file is `0.15.0-1234abcd5678-SNAPSHOT`. The module is not changing: `update` does not re-read
+`maven-metadata.xml`, and `forceUpdatePeriod` stays unset. `<line>-SNAPSHOT` fails `update` and names
+`zipxSnapshotStatus`.
 
-While any row is a snapshot, zipx:
+Every generated sbt job sets `COURSIER_TTL: 0s`. `zipxEnv` cannot lengthen that TTL. A commit pin does not need the
+revalidation; a qualifier snapshot still does.
 
 | Where | What |
 |---|---|
-| `resolvers`, and `project/plugins.sbt` when a `Plugin` is pinned | the publish registry's snapshot repository, plus any `zipxSnapshotRegistries`; Central snapshots when the build has no release workflow; nothing when no ship is pinned |
-| each project that depends on a `-SNAPSHOT` | `forceUpdatePeriod := Some(Duration.Zero)`, so `update` re-resolves every session; other projects keep their cached `update` |
-| the `test` job | a warning annotation naming the pins, without failing the run |
-| `reload`, `set`, `clean` | forget sbt's in-memory resolutions, so a republish with new dependencies is seen |
+| `resolvers`, and `project/plugins.sbt` when a `Plugin` version ends in `-SNAPSHOT` | the publish registry's snapshot repository, plus any `zipxSnapshotRegistries`; Central snapshots when the build has no release workflow |
+| a dependency that ends in `-SNAPSHOT` and is not a commit pin | `forceUpdatePeriod := Some(Duration.Zero)`, so `update` re-resolves every session |
+| the `test` job | a warning annotation naming those `-SNAPSHOT` pins, without failing the run |
+| `reload`, `set`, `clean`, while a `-SNAPSHOT` pin is in the catalog | forget sbt's in-memory resolutions |
 | `zipxRelease` | refuses while a released project depends on a snapshot |
-| catalog update | rewrites the pin to the latest release once one reaches it |
+| catalog update | rewrites a `<line>-SNAPSHOT` pin to the latest release once one reaches it |
 
-On a laptop, `publishLocal` of the upstream wins over Central snapshots until you delete it from `~/.ivy2/local`. A
-long-lived sbt shell keeps every resolution in memory (sbt/sbt#6512), so while a snapshot is pinned zipx forgets them
-on `reload`, `set`, and `clean` (which `cleanFull` runs): after a republished snapshot adds or changes a dependency, run
-`reload`. New code in the same jar is seen at once. Run sbt with `COURSIER_TTL=0s` to revalidate remote snapshots locally too. Central deletes snapshots after 90 days, which promotion normally beats.
+An ivy copy of `<line>-ci` is a different revision from the sha pin, so it is not selected for that pin. Central
+deletes snapshots after 90 days.
 """,
       exampleValue {
         val pin = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
@@ -419,9 +425,9 @@ project keeps version `0.0.0` when it is in no ship, because `sonaRelease` refus
     ),
     section("After a release")(
       md"""
-A row stays at its released number until someone moves it, so the next build is `<row>-SNAPSHOT` of a number the
-release registry already has. Maven sorts `1.0.0-SNAPSHOT` before `1.0.0`, so that snapshot is shadowed: the commits
-publish nothing a consumer can select. The registry is whatever `zipxReleaseWorkflow` names (Central, GitHub Packages,
+A row stays at its released number until someone moves it. The next build still compiles `<row>-ci`. Publishing that
+line again writes a snapshot the release sorts ahead of, so those commits publish nothing a consumer can select.
+The registry is whatever `zipxReleaseWorkflow` names (Central, GitHub Packages,
 CodeArtifact, Artifactory, Nexus, or any other Maven release URL), read at its release root, not its snapshot
 repository. A pre-signed 302 on the POM counts as published. A 401, a missing token, or a registry that cannot be
 reached fails the publish. It is not read as "not released".
@@ -448,12 +454,11 @@ released row. A ship id rewrites that one row even when it is not released. The 
 `--generate-notes`.
 
 - **A library built against the release meets the in-repo copy.** sbt always uses the in-repo project, and its
-  eviction check reads `0.10.0-SNAPSHOT` against `0.10.0` literally; early-semver compares `0.y.0` and `x.0.0`
-  exactly, tag included. zipx exempts the build's own artifacts from that check and checks them itself after `update`:
-  the row's next number against the release the library needs, under the module's own `versionScheme`. zipx sets that
-  key to `early-semver`. A module opts into `semver-spec`, `pvp`, `strict`, or `always` by setting it. An empty value
-  fails the publish, and `semver` is rejected as ambiguous. `0.10.0-SNAPSHOT`
-  over `0.10.0` resolves; `0.11.0-SNAPSHOT` over `0.10.0` is a conflict, naming both.
+  eviction check reads `0.10.0-ci` against `0.10.0` literally. zipx exempts the build's own artifacts from that check
+  and checks them itself after `update`: the row's next number, with `-ci` stripped, against the release the library
+  needs, under the module's own `versionScheme`. zipx sets that key to `early-semver`. A module opts into
+  `semver-spec`, `pvp`, `strict`, or `always` by setting it. An empty value fails the publish, and `semver` is
+  rejected as ambiguous. `0.10.0-ci` over `0.10.0` resolves; `0.11.0-ci` over `0.10.0` is a conflict, naming both.
 """,
       exampleValue {
         val libs = ShipGroup("libs", "1.0.0")("models")
@@ -461,7 +466,7 @@ released row. A ship id rewrites that one row even when it is not released. The 
       }.assert(text =>
         assertTrue(
           text ==
-            """ShipGroup("libs") 1.0.0 is released and has changes since v1.0.0, so 1.0.0-SNAPSHOT is shadowed and these commits publish nothing. sbt zipxModverBump"""
+            """ShipGroup("libs") 1.0.0 is released and has changes since v1.0.0, so a snapshot of 1.0.0 is shadowed by that release and these commits publish nothing. sbt zipxModverBump"""
         )
       ),
     ),
@@ -476,12 +481,12 @@ When zipx finds that conflict, what it does depends on whether the project publi
 
 That is what lets a repo release its libraries on their own schedule, even when its docs depend on something built
 against those libraries. Say the docs site uses a docs framework, and the framework's released version was built
-against `client` 0.3.0. When this repo moves `client` to 0.4.0, the docs project meets the in-repo `0.4.0-SNAPSHOT`
+against `client` 0.3.0. When this repo moves `client` to 0.4.0, the docs project meets the in-repo `0.4.0-ci`
 against a library that needs 0.3.0:
 
 ```text
 [warn] zipx: the build's own artifacts conflict with a release:
-  * com.example:client_3:0.4.0-SNAPSHOT (early-semver) is selected over 0.3.0: 0.4.0 is not early-semver-compatible with it
+  * com.example:client_3:0.4.0-ci (early-semver) is selected over 0.3.0: 0.4.0 is not early-semver-compatible with it
   (a warning: this project does not publish)
 ```
 

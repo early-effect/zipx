@@ -23,13 +23,13 @@ object SnapshotGuard:
   val BumpCommand: String = "sbt zipxModverBump"
 
   def shadowed(row: PublishedRow, tag: String): String =
-    s"${Modver.describe(row)} ${row.version} is released and has changes since $tag, so ${row.version}-SNAPSHOT is shadowed and these commits publish nothing. $BumpCommand"
+    s"${Modver.describe(row)} ${row.version} is released and has changes since $tag, so a snapshot of ${row.version} is shadowed by that release and these commits publish nothing. $BumpCommand"
 
   def untagged(row: PublishedRow, tag: String): String =
-    s"${Modver.describe(row)} ${row.version} is released but tag $tag is not in this clone, so zipx cannot prove ${row.version}-SNAPSHOT is not shadowed. Fetch tags, or $BumpCommand"
+    s"${Modver.describe(row)} ${row.version} is released but tag $tag is not in this clone, so zipx cannot prove a snapshot of ${row.version} is not shadowed. Fetch tags, or $BumpCommand"
 
   def unreadable(row: PublishedRow, detail: String): String =
-    s"${Modver.describe(row)} ${row.version} is released but zipx could not read changes since its release ($detail), so it will not publish ${row.version}-SNAPSHOT. $BumpCommand"
+    s"${Modver.describe(row)} ${row.version} is released but zipx could not read changes since its release ($detail), so it will not publish a snapshot of ${row.version}. $BumpCommand"
 
   def hint(row: PublishedRow, tag: String): String =
     s"${Modver.describe(row)} ${row.version} is released and unchanged since $tag. Open the next snapshot with $BumpCommand"

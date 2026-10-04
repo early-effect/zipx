@@ -1,5 +1,6 @@
 package zipx
 
+import scala.xml.{Elem, Node}
 import sbt.{/, Compile, Def, LocalRootProject, ModuleID, Setting, Test}
 import sbt.librarymanagement.syntax.*
 import sbt.Keys.{
@@ -7,8 +8,10 @@ import sbt.Keys.{
   crossScalaVersions,
   libraryDependencies,
   organization,
+  isSnapshot,
   localStaging,
   packageDoc,
+  pomPostProcess,
   projectID,
   publishArtifact,
   publishTo,
@@ -86,17 +89,40 @@ object ZipxVersions:
       else
         def session =
           zipx.core.BuildSession.of(sys.props).fold(err => sys.error(s"zipx: ${err.message}"), identity)
+        def registryOf(workflow: Option[zipx.core.ReleaseWorkflow]): zipx.core.ArtifactRegistry =
+          workflow.map(_.registry).getOrElse(zipx.core.ArtifactRegistry.Url("file:///tmp/zipx-none"))
+        def artifact(row: zipx.core.PublishedRow, registry: zipx.core.ArtifactRegistry) =
+          session
+            .artifactVersion(row, registry, sys.props)
+            .fold(err => sys.error(s"zipx: ${err.message}"), identity)
         Seq(
           // sonaRelease refuses while the root's version is a snapshot, and a root in no row has sbt's default.
-          version := zipx.core.Modver
+          // `.value` stays in this block: a local def hides it from the setting macro.
+          version := {
+            val registry = registryOf((LocalRootProject / zipxReleaseWorkflow).value)
+            zipx.core.Modver
+              .rowForProject(thisProject.value.id, zipxShips.value)
+              .fold(if baseDirectory.value == (LocalRootProject / baseDirectory).value then "0.0.0"
+              else "0.1.0-SNAPSHOT")(row => artifact(row, registry))
+          },
+          isSnapshot := zipx.core.Modver
             .rowForProject(thisProject.value.id, zipxShips.value)
-            .fold(if baseDirectory.value == (LocalRootProject / baseDirectory).value then "0.0.0"
-            else "0.1.0-SNAPSHOT")(
-              session.versionOf
-            ),
-          projectID := zipx.core.Modver
-            .rowForProject(thisProject.value.id, zipxShips.value)
-            .fold(projectID.value)(row => projectID.value.withRevision(session.publishedRevisionOf(row))),
+            .fold(isSnapshot.value)(_ => session != zipx.core.BuildSession.Release),
+          projectID := {
+            val registry = registryOf((LocalRootProject / zipxReleaseWorkflow).value)
+            zipx.core.Modver
+              .rowForProject(thisProject.value.id, zipxShips.value)
+              .fold(projectID.value)(row => projectID.value.withRevision(artifact(row, registry)))
+          },
+          pomPostProcess := {
+            val previous = pomPostProcess.value
+            node =>
+              val base = previous(node)
+              sys.props.get(zipx.core.SnapshotPublishRevision.ShaProperty) match
+                case Some(sha) if sys.props.get(zipx.core.SnapshotPublishRevision.PointerProperty).contains("true") =>
+                  ZipxVersions.withSnapshotSha(base, sha)
+                case _ => base
+          },
           // Test resolves packageDoc-scoped keys through Compile before its own publishArtifact, so it is pinned too.
           Compile / packageDoc / publishArtifact := session.publishesDocs && (Compile / publishArtifact).value,
           Test / packageDoc / publishArtifact    := session.publishesDocs && (Test / publishArtifact).value,
@@ -118,4 +144,19 @@ object ZipxVersions:
         )
     catalog ++ versions
   end applySettings
+
+  /** The pointer POM records the full sha beside the `<line>-SNAPSHOT` coordinate. One `<properties>` element. */
+  private[zipx] def withSnapshotSha(node: Node, sha: String): Node =
+    node match
+      case project: Elem if project.label == "project" =>
+        val shaElem          = <zipx.snapshot.sha>{sha}</zipx.snapshot.sha>
+        val (seen, children) = project.child.foldLeft((false, Seq.empty[Node])) {
+          case ((seen, acc), elem: Elem) if elem.label == "properties" && !seen =>
+            (true, acc :+ elem.copy(child = elem.child ++ shaElem))
+          case ((seen, acc), child) =>
+            (seen, acc :+ child)
+        }
+        val withSha = if seen then children else children :+ <properties>{shaElem}</properties>
+        project.copy(child = withSha)
+      case other => other
 end ZipxVersions

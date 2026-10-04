@@ -74,7 +74,7 @@ lazy val lib     = project.settings(MyVersions.libraries)
 lazy val service = project.settings(MyVersions.service)
 ```
 
-A `Ship` or `ShipGroup` number is the next release. Everyday builds are `<row>-SNAPSHOT`. Once that number is on the
+A `Ship` or `ShipGroup` number is the next release. Everyday builds compile `<row>-ci`. Once that number is on the
 release registry (Central, GitHub Packages, CodeArtifact, or any other Maven release URL), further snapshots of it
 publish nothing. `zipxDriftGate` defaults to `Fail`: that row stops compiling, and `zipxSnapshotPublish` fails.
 `sbt zipxModverBump` opens every released row at the next patch. `modver-check` still owns MiMa. CI never commits the
