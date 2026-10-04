@@ -8,6 +8,10 @@ object SnapshotPointer:
   def pomRelative(organization: String, artifact: String, version: String): String =
     s"${dir(organization, artifact, version)}/$artifact-$version.pom"
 
+  /** sbt's unique snapshot keeps the `<line>-SNAPSHOT` directory and timestamps the file name. */
+  def uniquePomRelative(organization: String, artifact: String, pointerVersion: String, stamped: String): String =
+    s"${dir(organization, artifact, pointerVersion)}/$artifact-$stamped.pom"
+
   def metadataRelative(organization: String, artifact: String, version: String): String =
     s"${dir(organization, artifact, version)}/maven-metadata.xml"
 
