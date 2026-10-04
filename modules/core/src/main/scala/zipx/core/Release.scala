@@ -174,7 +174,7 @@ object ReleasePlan:
 
   /** `dependencies` are `group:artifact:revision` of what the released projects declare. */
   def refuseSnapshots(dependencies: List[String]): Either[ReleaseError, Unit] =
-    dependencies.filter(SnapshotPins.isSnapshot).distinct.sorted match
+    dependencies.filter(SnapshotPinAdvice.blocksRelease).distinct.sorted match
       case head :: tail => Left(ReleaseError.SnapshotPinned(::(head, tail)))
       case Nil          => Right(())
 

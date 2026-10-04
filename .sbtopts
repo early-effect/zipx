@@ -10,3 +10,7 @@
 -J--add-opens=java.base/sun.misc=ALL-UNNAMED
 -J--sun-misc-unsafe-memory-access=allow
 -J--enable-native-access=ALL-UNNAMED
+-J-Xms512m
+-J-Xmx5G
+-J-XX:ReservedCodeCacheSize=512m
+-J-XX:+UseG1GC

@@ -69,12 +69,16 @@ object SnapshotPinsSpec extends ZIOSpecDefault:
         ReleaseError.SnapshotPinned(::("c:d:2.0.0-SNAPSHOT", Nil)).message.contains("c:d:2.0.0-SNAPSHOT"),
       )
     },
-    test("catalog update promotes a pin to the latest release once it reaches the pin, and never below it") {
+    test("catalog update does not promote a line-SNAPSHOT pin onto a newer release") {
       val gPin = gRelease.map(v => DepVersion.make(s"$v-SNAPSHOT").map(v -> _)).collect { case Right(pin) => pin }
       check(gPin, gRelease) { case ((next, version), latest) =>
-        val bumps    = ZipxCatalog.outdated(List(pinned.copy(version = version)), _ => Right(Some(latest)))
-        val promoted = ReleaseVersion.ordering.gteq(latest, next)
-        assertTrue(bumps.map(_.map(_.to)) == Right(if promoted then List(latest: String) else Nil))
+        val bumps  = ZipxCatalog.outdated(List(pinned.copy(version = version)), _ => Right(Some(latest: String)))
+        val onRepo = ReleaseVersion.ordering.gteq(latest, next)
+        val advice = SnapshotPinAdvice.message(pinned.artifact, version, Some(latest: String))
+        assertTrue(
+          bumps == Right(Nil),
+          advice.exists(_.contains("zipxPinRelease")) == onRepo,
+        )
       }
     },
   )

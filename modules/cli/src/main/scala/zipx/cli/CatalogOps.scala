@@ -12,6 +12,7 @@ object CatalogOps:
   final case class UpdatePlan(
       depBumps: List[DepBump],
       actionBumps: List[ActionBump],
+      holds: List[String],
       nextSource: String,
       nextPlugins: String,
       nextProps: Option[String],
@@ -27,6 +28,7 @@ object CatalogOps:
     val source = read(versionsFile)
     for
       parsed <- CatalogSource.parse(source, versionsFile.getFileName.toString)
+      holds  <- snapshotHolds(parsed.coords, lookupCoord)
       deps   <- ZipxCatalog.outdated(parsed.coords, lookupCoord, preRelease = preRelease)
       acts   <- ZipxCatalog.outdatedActions(parsed.actions, lookupAction)
       next   <- CatalogApply.applyBumps(source, deps)
@@ -36,7 +38,7 @@ object CatalogOps:
       merged   = ZipxCatalog.mergePlugins(after.plugins, plugins)
       rendered = ZipxCatalog.renderPlugins(merged)
       props    = after.sbt.map(ZipxCatalog.renderBuildProperties)
-    yield UpdatePlan(deps, acts, next2, rendered, props)
+    yield UpdatePlan(deps, acts, holds, next2, rendered, props)
     end for
   end planUpdate
 
@@ -70,9 +72,21 @@ object CatalogOps:
   end check
 
   def formatPlan(plan: UpdatePlan): String =
-    val deps = ZipxCatalog.formatBumps(plan.depBumps)
-    val acts = ZipxCatalog.formatActionBumps(plan.actionBumps)
-    s"$deps\n$acts"
+    val deps  = ZipxCatalog.formatBumps(plan.depBumps)
+    val acts  = ZipxCatalog.formatActionBumps(plan.actionBumps)
+    val holds = if plan.holds.isEmpty then "" else plan.holds.mkString("", "\n", "\n")
+    s"$holds$deps\n$acts"
+
+  private def snapshotHolds(
+      coords: Seq[ZipxCoord],
+      lookup: ZipxCoord => Either[String, Option[String]],
+  ): Either[String, List[String]] =
+    coords.foldLeft[Either[String, List[String]]](Right(Nil)) { (acc, coord) =>
+      acc.flatMap { msgs =>
+        if SnapshotPinAdvice.hold(coord.version).isEmpty then Right(msgs)
+        else lookup(coord).map(latest => msgs ++ SnapshotPinAdvice.message(coord.artifact, coord.version, latest))
+      }
+    }
 
   def nothingToDo(plan: UpdatePlan): Boolean =
     plan.depBumps.isEmpty && plan.actionBumps.isEmpty

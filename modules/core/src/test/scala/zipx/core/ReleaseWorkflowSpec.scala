@@ -109,6 +109,10 @@ object ReleaseWorkflowSpec extends ZIOSpecDefault:
         body.contains("target/zipx-release-tags.txt"),
         body.contains("sbt zipxModverBump"),
         notes.flatMap(_.run).exists(!_.contains("zipxModverBump")),
+        releaseJob().toList.flatMap(_.steps).exists { step =>
+          step.name.contains("Open the bump pull request") &&
+          step.run.exists(script => script.contains("sbt zipxModverBump") && script.contains("zipx/modver-bump-"))
+        },
       )
     },
     test("docs deploy after every release ci.yml cannot see: a dispatch, or any <row>/v* tag") {

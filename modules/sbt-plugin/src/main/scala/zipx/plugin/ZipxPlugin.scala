@@ -481,6 +481,10 @@ object ZipxPlugin extends AutoPlugin:
     val zipxDepUpdate        = inputKey[Unit](ZipxSettings.depUpdate.description)
     val zipxActionUpdate     = inputKey[Unit](ZipxSettings.actionUpdate.description)
     val zipxModverBump       = inputKey[Unit](ZipxSettings.modverBump.description)
+    val zipxSnapshotStatus   = inputKey[Unit](ZipxSettings.snapshotStatus.description)
+    val zipxSnapshotAdvance  = inputKey[Unit](ZipxSettings.snapshotAdvance.description)
+    val zipxReleasePlan      = inputKey[Unit](ZipxSettings.releasePlan.description)
+    val zipxPinRelease       = inputKey[Unit](ZipxSettings.pinRelease.description)
     val zipxDriftGate        = settingKey[DriftGate](ZipxSettings.driftGate.description)
     val zipxModverCompat     = taskKey[Unit](ZipxSettings.modverCompat.description)
     val zipxModverCheck      = taskKey[Unit](ZipxSettings.modverCheck.description)
@@ -628,27 +632,35 @@ object ZipxPlugin extends AutoPlugin:
         )
         .value
     },
-    zipxWorkflowCheck            := checkTask.value,
-    zipxAdvisoryCheck            := Def.uncached { advisoryCheckTask.value },
-    zipxAffectedModules          := affectedModulesTask.evaluated,
-    zipxDeployPlan               := Def.uncached { deployPlanTask.value },
-    zipxPinCheck                 := Def.uncached { pinCheckTask.value },
-    zipxPinCheckPr               := Def.uncached { pinCheckPrTask.value },
-    zipxPinSubmit                := Def.uncached { pinSubmitTask.value },
-    zipxPinInventory             := Def.uncached { pinInventoryTask.value },
-    zipxPinUpdate                := pinUpdateTask.evaluated,
-    zipxDepUpdate                := depUpdateTask.evaluated,
-    zipxActionUpdate             := actionUpdateTask.evaluated,
-    zipxModverBump               := modverBumpTask.evaluated,
-    zipxModverCompat             := Def.uncached { modverCompatTask.value },
-    zipxModverCheck              := Def.uncached { modverCheckTask.value },
-    zipxReleaseDrift             := Def.uncached { releaseDriftTask.value },
-    zipxGitDrift                 := Def.uncached { gitDriftTask.value },
-    zipxModverSuggest            := Def.uncached { modverSuggestTask.value },
-    zipxDepUpdate / aggregate    := false,
-    zipxActionUpdate / aggregate := false,
-    zipxPinUpdate / aggregate    := false,
-    zipxModverBump / aggregate   := false,
+    zipxWorkflowCheck               := checkTask.value,
+    zipxAdvisoryCheck               := Def.uncached { advisoryCheckTask.value },
+    zipxAffectedModules             := affectedModulesTask.evaluated,
+    zipxDeployPlan                  := Def.uncached { deployPlanTask.value },
+    zipxPinCheck                    := Def.uncached { pinCheckTask.value },
+    zipxPinCheckPr                  := Def.uncached { pinCheckPrTask.value },
+    zipxPinSubmit                   := Def.uncached { pinSubmitTask.value },
+    zipxPinInventory                := Def.uncached { pinInventoryTask.value },
+    zipxPinUpdate                   := pinUpdateTask.evaluated,
+    zipxDepUpdate                   := depUpdateTask.evaluated,
+    zipxActionUpdate                := actionUpdateTask.evaluated,
+    zipxModverBump                  := modverBumpTask.evaluated,
+    zipxSnapshotStatus              := snapshotStatusTask.evaluated,
+    zipxSnapshotAdvance             := snapshotAdvanceTask.evaluated,
+    zipxReleasePlan                 := releasePlanTask.evaluated,
+    zipxPinRelease                  := pinReleaseTask.evaluated,
+    zipxModverCompat                := Def.uncached { modverCompatTask.value },
+    zipxModverCheck                 := Def.uncached { modverCheckTask.value },
+    zipxReleaseDrift                := Def.uncached { releaseDriftTask.value },
+    zipxGitDrift                    := Def.uncached { gitDriftTask.value },
+    zipxModverSuggest               := Def.uncached { modverSuggestTask.value },
+    zipxDepUpdate / aggregate       := false,
+    zipxActionUpdate / aggregate    := false,
+    zipxPinUpdate / aggregate       := false,
+    zipxModverBump / aggregate      := false,
+    zipxSnapshotStatus / aggregate  := false,
+    zipxSnapshotAdvance / aggregate := false,
+    zipxReleasePlan / aggregate     := false,
+    zipxPinRelease / aggregate      := false,
   )
 
   /** An aggregator is a container rather than a testable module, so it is CI-irrelevant by default. Plain settings, so
@@ -2180,6 +2192,159 @@ object ZipxPlugin extends AutoPlugin:
         case b: sbt.librarymanagement.Binary => b.prefix.startsWith("sbt")
         case _                               => false)
 
+  private def snapshotStatusTask: Def.Initialize[InputTask[Unit]] =
+    Def.inputTask {
+      val arg = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+      val ctx = snapshotContext.value
+      SnapshotCommands.status(arg, ctx.coords, ctx.registry, ctx.scalaBin, ctx.scalaVer, ctx.cache, ctx.log)
+    }
+
+  private def snapshotAdvanceTask: Def.Initialize[InputTask[Unit]] =
+    Def.inputTask {
+      val arg  = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+      val ctx  = snapshotContext.value
+      val next = SnapshotCommands.advance(
+        arg,
+        ctx.coords,
+        IO.read(ctx.file),
+        ctx.registry,
+        ctx.scalaBin,
+        ctx.scalaVer,
+        ctx.cache,
+        ctx.log,
+      )
+      if next != IO.read(ctx.file) then
+        IO.write(ctx.file, next)
+        ctx.log.info(s"zipx: wrote ${ctx.file.getPath}")
+    }
+
+  private def pinReleaseTask: Def.Initialize[InputTask[Unit]] =
+    Def.inputTask {
+      val arg  = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+      val ctx  = snapshotContext.value
+      val next = SnapshotCommands.pinRelease(
+        arg,
+        ctx.coords,
+        IO.read(ctx.file),
+        ctx.registry,
+        ctx.scalaBin,
+        ctx.scalaVer,
+        ctx.log,
+      )
+      if next != IO.read(ctx.file) then
+        IO.write(ctx.file, next)
+        ctx.log.info(s"zipx: wrote ${ctx.file.getPath}")
+    }
+
+  private def releasePlanTask: Def.Initialize[InputTask[Unit]] =
+    Def.inputTask {
+      val arg       = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
+      val extracted = Project.extract(state.value)
+      val log       = streams.value.log
+      val root      = (LocalRootProject / baseDirectory).value
+      if arg == "shadow" then
+        val tags = IO.readLines(root / ReleaseWorkflow.TagsFile).flatMap(ReleaseReadiness.versionOfTag)
+        log.info(ReleaseReadiness.shadowSentences(tags))
+      else
+        val own   = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.toSet
+        val gates = releaseGates(state.value, extracted, own)
+        val names = arg.trim match
+          case "" | "all" => None
+          case other      =>
+            val wanted = other.split("[,\\s]+").toList.filter(_.nonEmpty)
+            val known  = readBuildSetting(extracted, zipxShips, Seq.empty).map(_.identity).toSet
+            wanted.filterNot(known.contains) match
+              case head :: _ => sys.error(s"zipx: ${ReleaseError.UnknownShip(head, known.toList.sorted).message}")
+              case Nil       => Some(wanted)
+        log.info(ReleaseReadiness.render(gates, SnapshotCommands.defaultBranch(root), names))
+      end if
+    }
+
+  private final case class SnapshotCtx(
+      coords: Seq[ZipxCoord],
+      registry: ArtifactRegistry,
+      scalaBin: String,
+      scalaVer: String,
+      cache: File,
+      file: File,
+      log: Logger,
+  )
+
+  private def snapshotContext: Def.Initialize[Task[SnapshotCtx]] = Def.task {
+    val extracted = Project.extract(state.value)
+    val root      = (LocalRootProject / baseDirectory).value
+    val rel       = readBuildSetting(extracted, zipxVersionsFile, ZipxCatalog.DefaultVersionsFile)
+    val file      = root / rel
+    if !file.exists then sys.error(s"zipx: catalog file ${file.getPath} is missing")
+    val registry = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), _.registry)
+    SnapshotCtx(
+      readBuildSetting(extracted, zipxVersions, Seq.empty),
+      registry,
+      (LocalRootProject / scalaBinaryVersion).value,
+      (LocalRootProject / scalaVersion).value,
+      (LocalRootProject / target).value / "zipx-snapshot-pointer",
+      file,
+      streams.value.log,
+    )
+  }
+
+  private def releaseGates(st: State, extracted: Extracted, own: Set[(String, String)]): List[ShipGate] =
+    val ships = readBuildSetting(extracted, zipxShips, Seq.empty).toList
+    if ships.isEmpty then Nil
+    else
+      val (_, graph) = extracted.runTask(ThisBuild / zipxModuleGraph, st)
+      val release    = releaseWorkflow(extracted).fold(err => sys.error(s"zipx: $err"), identity)
+      val catalog    = orFail(Modver.membership(graph, ships))
+      val binaries   = liveBinaries(extracted, graph, catalog)
+      def statusOf(row: PublishedRow): RowStatus =
+        rowStatus(row, graph, catalog, binaries, release) match
+          case Right(status) => status
+          case Left(err)     => sys.error(s"zipx: ${err.message}")
+      val deps = extracted.structure.allProjectRefs.toList.flatMap { ref =>
+        Modver.rowForProject(ref.project, ships).toList.flatMap { row =>
+          extracted
+            .getOpt(ref / libraryDependencies)
+            .toList
+            .flatten
+            .filterNot(isIgnoredDeclared)
+            .map(module => row -> module)
+        }
+      }
+      ships.flatMap { row =>
+        statusOf(row) match
+          case RowStatus.Released =>
+            Nil
+          case RowStatus.Partial(missing) =>
+            sys.error(s"zipx: ${ReleaseError.PartiallyReleased(row, missing).message}")
+          case RowStatus.Unreleased =>
+            val modules  = deps.collect { case (`row`, module) => module }
+            val external = modules.filterNot(module => inThisBuild(module, own))
+            val blockers =
+              external.flatMap(module => ReleaseBlocker.classify(module.organization, module.name, module.revision))
+            val rides = modules
+              .filter(module => inThisBuild(module, own))
+              .flatMap(module => shipOf(module, ships, extracted))
+              .filter(_ != row.identity)
+              .distinct
+            List(ShipGate(row.identity, row.version, blockers, rides))
+      }
+    end if
+  end releaseGates
+
+  private def inThisBuild(module: ModuleID, own: Set[(String, String)]): Boolean =
+    own.exists { (org, artifact) =>
+      org == module.organization && (artifact == module.name || artifact.startsWith(s"${module.name}_"))
+    }
+
+  private def shipOf(module: ModuleID, ships: List[PublishedRow], extracted: Extracted): Option[String] =
+    extracted.structure.allProjectRefs.iterator
+      .flatMap { ref =>
+        val sameOrg  = extracted.getOpt(ref / organization).contains(module.organization)
+        val sameName = extracted.getOpt(ref / name).contains(module.name)
+        if sameOrg && sameName then Modver.rowForProject(ref.project, ships).map(_.identity) else None
+      }
+      .nextOption()
+
   private def depUpdateTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
       val arg       = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
@@ -2188,12 +2353,17 @@ object ZipxPlugin extends AutoPlugin:
       val log       = streams.value.log
       if coords.isEmpty then log.info("zipx: zipxVersions is empty; nothing to update")
       else
-        val scalaBin   = (LocalRootProject / scalaBinaryVersion).value
-        val sbtBin     = sbtBinaryVersion.value
-        val preRelease = readBuildSetting(extracted, zipxPreRelease, PreRelease.Skip)
-        val bumps      = orFail(
+        val scalaBin     = (LocalRootProject / scalaBinaryVersion).value
+        val sbtBin       = sbtBinaryVersion.value
+        val preRelease   = readBuildSetting(extracted, zipxPreRelease, PreRelease.Skip)
+        val (held, rest) = coords.partition(coord => SnapshotPinAdvice.hold(coord.version).isDefined)
+        held.foreach { coord =>
+          val latest = orFail(MavenMetadata.latest(coord, scalaBin, sbtBin, preRelease))
+          SnapshotPinAdvice.message(coord.artifact, coord.version, latest).foreach(msg => log.info(msg))
+        }
+        val bumps = orFail(
           ZipxCatalog.outdated(
-            coords,
+            rest,
             c => MavenMetadata.latest(c, scalaBin, sbtBin, preRelease),
             preRelease = preRelease,
           )

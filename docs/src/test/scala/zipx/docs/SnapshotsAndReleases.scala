@@ -378,16 +378,26 @@ revalidation; a qualifier snapshot still does.
 | a dependency that ends in `-SNAPSHOT` and is not a commit pin | `forceUpdatePeriod := Some(Duration.Zero)`, so `update` re-resolves every session |
 | the `test` job | a warning annotation naming those `-SNAPSHOT` pins, without failing the run |
 | `reload`, `set`, `clean`, while a `-SNAPSHOT` pin is in the catalog | forget sbt's in-memory resolutions |
-| `zipxRelease` | refuses while a released project depends on a snapshot |
-| catalog update | rewrites a `<line>-SNAPSHOT` pin to the latest release once one reaches it |
+| `zipxRelease` | refuses while a released project depends on a snapshot, including a commit pin |
+| `zipxSnapshotStatus` | reads the pointer and reports a newer sha, a deleted build, or a local pin. It does not rewrite |
+| `zipxSnapshotAdvance` | rewrites the pin to the pointer's sha. A feature pull request does not run it |
+| `zipxPinRelease` | rewrites a commit pin to that same line after the release exists. It does not take a newer line |
+| catalog update | leaves a commit pin and a `<line>-SNAPSHOT` pointer alone, and names `zipxPinRelease` when that line is released |
 
 An ivy copy of `<line>-ci` is a different revision from the sha pin, so it is not selected for that pin. Central
 deletes snapshots after 90 days.
 """,
       exampleValue {
-        val pin = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-SNAPSHOT")
-        ZipxCatalog.outdated(List(pin), _ => Right(Some("0.15.1"))).map(_.map(b => s"${b.from} -> ${b.to}"))
-      }.assert(promoted => assertTrue(promoted == Right(List("0.15.0-SNAPSHOT -> 0.15.1")))),
+        val pin   = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678")
+        val bumps = ZipxCatalog.outdated(List(pin), _ => Right(Some("0.15.1"))).map(_.map(b => s"${b.from} -> ${b.to}"))
+        val advice = SnapshotPinAdvice.message("zipx-core", pin.version, Some("0.15.1")).getOrElse("")
+        s"$bumps\n$advice"
+      }.assert(text =>
+        assertTrue(
+          text.contains("Right(List())"),
+          text.contains("Run sbt 'zipxPinRelease zipx-core'"),
+        )
+      ),
       exampleValue {
         val packages = ArtifactRegistry.GitHubPackages("iterable", "maven-packages")
         List(
@@ -404,6 +414,57 @@ deletes snapshots after 90 days.
           ),
         )
       ),
+    ),
+    section("Is there a newer snapshot")(
+      md"""
+`sbt zipxSnapshotStatus` reads the `<line>-SNAPSHOT` pointer once and prints what it found. It does not change the
+pin. `reload` does not either. A feature pull request stays on the sha it committed. The weekly version-updates job
+may open a pull request that runs `zipxSnapshotAdvance`. That command rewrites the pin. Reload so the new sha is what the session resolves. It does not commit.
+
+A dirty pin is a local build. Advance refuses it: commit the tree and publish the sha, or drop the pin. Central
+deletes a snapshot after 90 days. Status says so and names advance.
+""",
+      exampleValue {
+        SnapshotStatus
+          .report("widgets", "1.4.2-1234abcd5678", Some(GitSha("9876fedcba09876543210fedcba9876543210abc")), true)
+          .map(SnapshotStatus.render)
+          .fold(identity, identity)
+      }.assert(text =>
+        assertTrue(
+          text ==
+            """widgets 1.4.2-1234abcd5678
+              |  commit 1234abcd5678
+              |  latest snapshot of 1.4.2 is 1.4.2-9876fedcba09
+              |  run: sbt 'zipxSnapshotAdvance widgets'""".stripMargin
+        )
+      ),
+    ),
+    section("When a ship can release")(
+      md"""
+`sbt zipxReleasePlan` uploads nothing. It reads the catalog, the graph, and the release repository. A ship that
+depends on a commit pin is not ready: a release POM cannot depend on a snapshot build. `all` refuses when any
+included ship is blocked. An in-repo unreleased upstream is not a pin. It rides along in the same deployment.
+
+`sbt 'zipxPinRelease widgets'` checks the release repository for that line, then rewrites the pin from the sha to the
+line. Same number. It refuses a missing release, a dirty pin, and a pin that is already a release. It does not jump
+to a newer line. After the pin is the release number, run `zipxReleasePlan` again.
+""",
+      exampleValue {
+        val pin = SnapshotRevision.commit(ReleaseVersion("1.4.2"), GitSha("1234abcd56780123456789abcdef0123456789ab"))
+        ReleaseReadiness.render(
+          List(
+            ShipGate(
+              "client",
+              ReleaseVersion("0.3.0"),
+              List(ReleaseBlocker.CommitPin("com.example", "widgets", pin)),
+              Nil,
+            ),
+            ShipGate("libs", ReleaseVersion("1.4.2"), Nil, Nil),
+          ),
+          "main",
+          None,
+        )
+      }.assert(text => assertTrue(text.contains("all refuses, because client is included."))),
     ),
     section("Setup")(
       md"""
@@ -449,9 +510,9 @@ reached fails the publish. It is not read as "not released".
 
 `sbt zipxModverBump` rewrites every released row to the next patch. A kind word (`minor`, `major`) does that for every
 released row. A ship id rewrites that one row even when it is not released. The command does not run MiMa.
-`modver-check` still floors the PR. The release job does not commit the catalog. Its last step appends the tags in
-`target/zipx-release-tags.txt` and `sbt zipxModverBump` to the Actions step summary. The GitHub Release body stays
-`--generate-notes`.
+`modver-check` still floors the PR. The release job does not commit the bump onto the tagged SHA. It opens a pull
+request from `zipx/modver-bump-${'$'}GITHUB_RUN_ID` whose commit is `sbt zipxModverBump`. The step summary names that
+command and appends `target/zipx-release-tags.txt`. The GitHub Release body stays `--generate-notes`.
 
 - **A library built against the release meets the in-repo copy.** sbt always uses the in-repo project, and its
   eviction check reads `0.10.0-ci` against `0.10.0` literally. zipx exempts the build's own artifacts from that check

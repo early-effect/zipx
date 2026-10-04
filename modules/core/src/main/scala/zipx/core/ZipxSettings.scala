@@ -301,6 +301,38 @@ object ZipxSettings:
       Project,
     )
 
+  val snapshotStatus: SettingDef[Unit] =
+    SettingDef.input(
+      SettingName("zipxSnapshotStatus"),
+      SettingPurpose(
+        "Read the <line>-SNAPSHOT pointer and say whether a catalog pin is current, newer, deleted (snapshots are kept 90 days), or a local build. One artifact name, group:artifact, or no arguments for every snapshot pin. Does not rewrite the pin."
+      ),
+    )
+
+  val snapshotAdvance: SettingDef[Unit] =
+    SettingDef.input(
+      SettingName("zipxSnapshotAdvance"),
+      SettingPurpose(
+        "Rewrite a commit pin to the sha in the pointer. One artifact name, group:artifact, or no arguments for every commit pin. A dirty pin is refused. Does not run during update, and does not commit."
+      ),
+    )
+
+  val releasePlan: SettingDef[Unit] =
+    SettingDef.input(
+      SettingName("zipxReleasePlan"),
+      SettingPurpose(
+        "Print which ships can release and which snapshot pins block them. Uploads nothing. No arguments, or all, is every unreleased ship: all refuses when any of them is blocked. A ship name limits the report. shadow prints the post-release paragraph from target/zipx-release-tags.txt."
+      ),
+    )
+
+  val pinRelease: SettingDef[Unit] =
+    SettingDef.input(
+      SettingName("zipxPinRelease"),
+      SettingPurpose(
+        "Rewrite a commit pin to its own release line after that line is on the release repository. Refuses a missing release, a dirty pin, and a pin that is already a release. Does not jump to a newer line."
+      ),
+    )
+
   val modverBump: SettingDef[Unit] =
     SettingDef.input(
       SettingName("zipxModverBump"),
@@ -758,7 +790,7 @@ object ZipxSettings:
     SettingDef.input(
       SettingName("zipxDepUpdate"),
       SettingPurpose(
-        "Local catalog bumps with approval: Coursier/Maven lookup of zipxVersions, rewrite of zipxVersionsFile after yes (or an interactive y). dry-run lists only. The scheduled companion runs this with yes."
+        "Local catalog bumps with approval: Coursier/Maven lookup of zipxVersions, rewrite of zipxVersionsFile after yes (or an interactive y). dry-run lists only. A commit pin or <line>-SNAPSHOT pointer is not moved to a newer release; the log names zipxPinRelease when that line is on the registry. The scheduled companion runs this with yes."
       ),
     )
 
@@ -849,6 +881,10 @@ object ZipxSettings:
     pinUpdate,
     depUpdate,
     actionUpdate,
+    snapshotStatus,
+    snapshotAdvance,
+    releasePlan,
+    pinRelease,
     modverBump,
     modverCompat,
     modverCheck,

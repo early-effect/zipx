@@ -1,0 +1,15 @@
+> seedPointer
+> zipxSnapshotStatus widgets
+> zipxSnapshotStatus localpin
+-> zipxSnapshotAdvance localpin
+> zipxSnapshotAdvance widgets
+> assertAdvanced
+> reload
+> zipxSnapshotStatus widgets
+> zipxReleasePlan
+-> zipxPinRelease widgets
+> seedRelease
+> zipxPinRelease widgets
+> assertPinned
+> reload
+> zipxReleasePlan
