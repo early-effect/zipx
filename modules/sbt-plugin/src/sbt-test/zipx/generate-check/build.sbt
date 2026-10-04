@@ -1,5 +1,5 @@
 // Bare settings (sbt 2.0 common settings): apply to every module, overridable per module. No `ThisBuild /` needed.
-scalaVersion := "3.8.4"
+scalaVersion := "3.9.0"
 version      := "1.0.0-SNAPSHOT"
 // Keep Fixed so scripted asserts stay on a literal epoch (default is now GitTags at runtime).
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
@@ -19,16 +19,16 @@ zipxTestTask := zipxTasks.of(testFull)
 // A small cross-published monorepo: a models lib, an api that depends on it, and a client
 // that depends on api, plus a non-publishing service.
 lazy val schema = project
-  .settings(crossScalaVersions := Seq("2.13.16", "3.8.4"))
+  .settings(crossScalaVersions := Seq("2.13.16", "3.9.0"))
 
 lazy val api = project
   .dependsOn(schema)
-  .settings(crossScalaVersions := Seq("2.13.16", "3.8.4"))
+  .settings(crossScalaVersions := Seq("2.13.16", "3.9.0"))
 
 lazy val client = project
   .dependsOn(api)
   .settings(
-    crossScalaVersions := Seq("2.13.16", "3.8.4"),
+    crossScalaVersions := Seq("2.13.16", "3.9.0"),
     zipxTestTask       := zipxTasks.of(test), // overrides the build-wide `testFull`
   )
 

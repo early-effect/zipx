@@ -2,7 +2,7 @@ import zipx.*
 
 object MyVersions extends ZipxVersions:
   val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
-  val scala: ScalaVersion = ScalaVersion("3.8.4")
+  val scala: ScalaVersion = ScalaVersion("3.9.0")
   val libs                = ShipGroup("libs", "1.4.2")("models", "coreLib")
   val downstream          = Ship("downstream", "0.1.0")
   val client: Ship        =

@@ -75,7 +75,7 @@ lazy val root = (project in file("."))
 ```
 """,
       exampleValue {
-        val g = GraphFixture(List(ModuleNode(ModuleId("lib"), publishes = true, crossScalaVersions = List("3.8.4"))))
+        val g = GraphFixture(List(ModuleNode(ModuleId("lib"), publishes = true, crossScalaVersions = List("3.9.0"))))
         DocsRender.jobs("test", "fmt", "workflow-check", "advisories", "publish")(
           Capability.testAffected(onPush = false),
           Capability.once(Capability.FmtName, SbtCommand.unsafeCommand("scalafmtCheckAll")),
