@@ -105,10 +105,10 @@ flowchart TD
 6. Merge. The default branch still compiles `<row>-ci` and publishes that commit's `<row>-<sha>`. Later PRs in the
    same cycle pass without another bump unless MiMa says their change is bigger than the row already declares.
 7. Release when ready: a GitHub Release tagged `client/v0.3.1`, or Run workflow on **zipx release**. See **Snapshots
-   and releases**.
-8. On that commit, `sbt zipxModverBump` opens the next patch of every row the release registry already has. Until
-   that number moves, a snapshot of the released line is shadowed and `zipxDriftGate` (default `Fail`) stops the
-   row's compile and fails the snapshot publish. The check reads the registry `zipxReleaseWorkflow` names.
+   and releases** for the picture: status, advance, release plan, pin-release, then the release.
+8. The release job opens a pull request that runs `sbt zipxModverBump`. That commit is not the tagged SHA. Until the
+   number moves, a snapshot of the released line is shadowed and `zipxDriftGate` (default `Fail`) stops the row's
+   compile and fails the snapshot publish. The check reads the registry `zipxReleaseWorkflow` names.
 
 `modver-check` / `modver-suggest` self-compile (`needsCapabilities = Nil`). They do not wait on test topology.
 """,
