@@ -63,6 +63,27 @@ A row's catalog number is the **next** release. Every build until then compiles 
 alike, so the version string does not change between commits and cache digests hold (see **Caching**). `isSnapshot`
 is true because the build is not the release number. A release is a deliberate run that publishes catalog numbers.
 
+Three strings show up. Only one of them is what you pin, and only one of them is a release.
+""",
+    illustration {
+      ReleaseDiagram.strings
+    }.assert(ui =>
+      assertTrue(
+        ReleaseDiagram.prose(ui).contains("1.4.2-ci · every compile"),
+        ReleaseDiagram.prose(ui).contains("1.4.2 · the release"),
+        ReleaseDiagram.prose(ui).contains("1.4.2-SNAPSHOT · the pointer"),
+      )
+    ),
+    md"""
+| String | What it is | Who resolves it |
+|---|---|---|
+| `1.4.2-ci` | the compile version. Stable across commits, so caches hold | this build, and only this build |
+| `1.4.2-1234abcd5678` | one clean commit. The pin | a downstream catalog |
+| `1.4.2-1234abcd5678-SNAPSHOT` | the same pin, as Central stores the file | Central only. The catalog still writes the id without the suffix |
+| `1.4.2-1234abcd5678+20140707-1030` | a dirty tree. This machine, this minute | nobody else. Ivy only |
+| `1.4.2-SNAPSHOT` | the pointer. Its POM names the latest full sha | `zipxSnapshotStatus`. `update` refuses it |
+| `1.4.2` | the release number | everyone, after you release it |
+
 ```scala
 // project/ZipxVersions.scala
 val libs   = ShipGroup("libs", "1.4.2")("models", "coreLib")
@@ -85,6 +106,39 @@ zipxReleaseWorkflow := Some(ZipxCentral.releases)
 
 The sha is the 12-character abbreviation of the commit. The three ids are next. None of this spends a release.
 """,
+    section("The cycle")(
+      md"""
+One line, from the first snapshot to the next number. Nothing here moves the catalog except advance, pin-release,
+and the bump. Nothing here spends a release except the release job.
+""",
+      illustration {
+        ReleaseDiagram.cycle
+      }.assert(ui =>
+        assertTrue(
+          ReleaseDiagram.prose(ui).contains("zipxSnapshotPublish"),
+          ReleaseDiagram.prose(ui).contains("zipxSnapshotAdvance, then reload"),
+          ReleaseDiagram.prose(ui).contains("zipxPinRelease"),
+          ReleaseDiagram.prose(ui).contains("compile 1.4.3-ci"),
+        )
+      ),
+      md"""
+| You want | Command | Rewrites the catalog | Uploads |
+|---|---|---|---|
+| keep compiling | nothing | no | no |
+| try this commit on this machine | `sbt zipxSnapshotPublish local` | no | ivy. A dirty tree gets `+YYYYMMDD-HHmm` |
+| share this commit | `sbt zipxSnapshotPublish` | no | the snapshot repository, and the pointer on the default branch |
+| publish a pull request | label `snapshots`, then push | no | that commit's sha. The pointer does not move |
+| ask if a newer snapshot exists | `sbt zipxSnapshotStatus` | no | no |
+| take that newer sha | `sbt 'zipxSnapshotAdvance widgets'` then `reload` | the pin, same line | no |
+| ask if a ship can release | `sbt zipxReleasePlan` | no | no |
+| pin a release that already exists | `sbt 'zipxPinRelease widgets'` | the pin, to that same line | no |
+| release | **zipx release**, or a GitHub Release tag | no. The tag stays on the release commit | one deployment |
+| open the next line | the release job's bump pull request | the next patch, on a new commit | no |
+
+A feature pull request stays on the sha it committed. The weekly version-updates job may open a pull request that
+runs advance. It does not commit from a test run.
+""",
+    ),
     section("The three ids")(
       md"""
 A published snapshot names the commit it was built from. The catalog line stays the next release number (`1.4.2`).
@@ -444,6 +498,17 @@ deletes a snapshot after 90 days. Status says so and names advance.
 `sbt zipxReleasePlan` uploads nothing. It reads the catalog, the graph, and the release repository. A ship that
 depends on a commit pin is not ready: a release POM cannot depend on a snapshot build. `all` refuses when any
 included ship is blocked. An in-repo unreleased upstream is not a pin. It rides along in the same deployment.
+""",
+      illustration {
+        ReleaseDiagram.shipReady
+      }.assert(ui =>
+        assertTrue(
+          ReleaseDiagram.prose(ui).contains("zipxReleasePlan · Not ready"),
+          ReleaseDiagram.prose(ui).contains("zipxReleasePlan · Ready"),
+        )
+      ),
+      md"""
+`zipxPinRelease` does not look up a newer line. If `1.4.3` is also published, the pin still becomes `1.4.2`.
 
 `sbt 'zipxPinRelease widgets'` checks the release repository for that line, then rewrites the pin from the sha to the
 line. Same number. It refuses a missing release, a dirty pin, and a pin that is already a release. It does not jump
@@ -488,6 +553,16 @@ project keeps version `0.0.0` when it is in no ship, because `sonaRelease` refus
       md"""
 A row stays at its released number until someone moves it. The next build still compiles `<row>-ci`. Publishing that
 line again writes a snapshot the release sorts ahead of, so those commits publish nothing a consumer can select.
+""",
+      illustration {
+        ReleaseDiagram.afterRelease
+      }.assert(ui =>
+        assertTrue(
+          ReleaseDiagram.prose(ui).contains("tag libs/v1.4.2 stays put"),
+          ReleaseDiagram.prose(ui).contains("main compiles 1.4.3-ci"),
+        )
+      ),
+      md"""
 The registry is whatever `zipxReleaseWorkflow` names (Central, GitHub Packages,
 CodeArtifact, Artifactory, Nexus, or any other Maven release URL), read at its release root, not its snapshot
 repository. A pre-signed 302 on the POM counts as published. A 401, a missing token, or a registry that cannot be

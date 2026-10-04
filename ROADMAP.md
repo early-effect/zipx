@@ -130,7 +130,7 @@ zipxAffected <capability>
 ```text
 sbt "scalafmtAll; cleanFull; testFull"     # every PR
 sbt plugin/scripted zipxWorkflowCheck       # emission or .github/** changed; feature branch, unique version
-sbt docsDev                                 # ~docs/specularPreview
+sbt docs/specularPreview                   # watches; do not prefix ~
 ```
 
 Real-repo behavior (cache eviction, approvals, what a PR runs) is proven in

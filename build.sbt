@@ -215,10 +215,9 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
   )
 
 // Docs-as-tests site (Specular + early-effect theme). Deployed via ZipxDocs.pages in generated CI.
-lazy val specularPreview =
-  taskKey[Unit]("Build specularSite then serve with sbt-reload (prefer alias: docsDev)")
+// Preview is the plugin's docs/specularPreview (ascent preview). Do not prefix it with ~.
 
-/** Scala.js docs client: remounts `.interactive` ascent / mermoid examples after SSR. */
+/** Scala.js docs client: remounts `.interactive` ascent examples after SSR. */
 lazy val docsJS = project
   .in(file("docs-js"))
   .enablePlugins(ScalaJSPlugin)
@@ -257,25 +256,12 @@ lazy val docs = project
       V.specularTheme,
     ) ++ V.zioDeps,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
-    Test / mainClass       := Some("specular.site.DocsServe"),
-    Test / run / mainClass := (Test / mainClass).value,
-    Test / runReloadArgs   := Seq(specularPort.value.toString),
-    // runReload forks with the docs project as cwd, so relative target/site would miss the
-    // repo-root site written by specularSite. Point DocsServe at specularSiteDirectory.
-    Test / run / javaOptions ++= {
-      val dir = specularSiteDirectory.value.getAbsolutePath
-      Seq(
-        "--sun-misc-unsafe-memory-access=allow",
-        "--enable-native-access=ALL-UNNAMED",
-        s"-Dspecular.site.dir=$dir",
-        s"-Dspecular.site.port=${specularPort.value}",
-      )
-    },
-    specularBuildMain     := "zipx.docs.BuildSite",
-    specularMetaProject   := Some(LocalProject("plugin")),
-    specularArtifactKind  := "plugin",
-    specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
-    specularJsLink        := Def.uncached {
+    specularBuildMain      := "zipx.docs.BuildSite",
+    specularMetaProject    := Some(LocalProject("plugin")),
+    specularArtifactKind   := "plugin",
+    specularSiteDirectory  := (ThisBuild / baseDirectory).value / "target" / "site",
+    specularJsProject      := Some(LocalProject("docsJS")),
+    specularJsLink         := Def.uncached {
       (docsJS / Compile / fastLinkJS).value
       val outDir = (docsJS / Compile / fastLinkJSOutput).value
       val mainJs = outDir / "main.js"
@@ -287,13 +273,10 @@ lazy val docs = project
       val marker = (ThisBuild / baseDirectory).value / "target" / "specular-client-js.path"
       IO.write(marker, mainJs.getAbsolutePath)
     },
+    specularJsLinkDev      := specularJsLink.value,
     specularDisplayVersion := (_.stripSuffix("-SNAPSHOT").stripSuffix("-ci")),
-    // Rebuild site then (re)start DocsServe; use alias docsPreview for continuous watch.
-    specularPreview := Def.uncached {
-      specularSite.value
-      (Test / runReload).value
-    },
   )
 
-addCommandAlias("docsPreview", "~docs/specularPreview")
-addCommandAlias("docsDev", "docsPreview")
+// Plugin task. It watches on its own. Do not prefix ~.
+addCommandAlias("docsDev", "docs/specularPreview")
+addCommandAlias("docsPreview", "docs/specularPreview")

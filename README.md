@@ -74,11 +74,14 @@ lazy val lib     = project.settings(MyVersions.libraries)
 lazy val service = project.settings(MyVersions.service)
 ```
 
-A `Ship` or `ShipGroup` number is the next release. Everyday builds compile `<row>-ci`. Once that number is on the
-release registry (Central, GitHub Packages, CodeArtifact, or any other Maven release URL), further snapshots of it
-publish nothing. `zipxDriftGate` defaults to `Fail`: that row stops compiling, and `zipxSnapshotPublish` fails.
-`sbt zipxModverBump` opens every released row at the next patch. `modver-check` still owns MiMa. CI never commits the
-catalog.
+A `Ship` or `ShipGroup` number is the next release. Everyday builds compile `<row>-ci`. A snapshot publish stores
+`<row>-<sha>` and, on the default branch, a `<row>-SNAPSHOT` pointer that is not a dependency. `zipxSnapshotStatus`
+reads that pointer. `zipxSnapshotAdvance` rewrites the pin. `zipxReleasePlan` says whether a ship can release.
+`zipxPinRelease` rewrites a sha pin to that same line after the release exists. Once the number is on the release
+registry, further snapshots of it publish nothing. `zipxDriftGate` defaults to `Fail`: that row stops compiling, and
+`zipxSnapshotPublish` fails. The release job opens a pull request that runs `sbt zipxModverBump` on a new commit.
+`modver-check` still owns MiMa. CI never commits the catalog on the tagged SHA. The picture is **Snapshots and
+releases** on the docs site.
 
 Bump locally, then open a PR:
 

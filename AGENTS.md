@@ -35,10 +35,10 @@ Pack specs and Specular examples are **different suites**. Updating `ZipxAwsSpec
 ## Docs preview
 
 ```
-sbt docsDev    # ~docs/specularPreview on http://127.0.0.1:8765/
+sbt docs/specularPreview    # http://127.0.0.1:8765/ ; the task watches. Do not prefix ~
 ```
 
-Killing the sbt server kills `docsDev`. Restart deliberately; do not assume the preview still serves.
+Killing the sbt server kills the preview. Restart deliberately; do not assume it still serves.
 
 ## Format and PRs
 
