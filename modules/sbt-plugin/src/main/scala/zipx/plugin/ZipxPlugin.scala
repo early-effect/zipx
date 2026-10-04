@@ -418,6 +418,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxVersionUpdatesPreSteps   = settingKey[Seq[Step]](ZipxSettings.versionUpdatesPreSteps.description)
     val zipxVersionUpdatesExtraSteps = settingKey[Seq[Step]](ZipxSettings.versionUpdatesExtraSteps.description)
     val zipxCoverageWorkflow         = settingKey[Option[CoverageWorkflow]](ZipxSettings.coverageWorkflow.description)
+    val zipxShellWorkflows           = settingKey[Seq[ShellWorkflow]](ZipxSettings.shellWorkflows.description)
     val zipxReleaseWorkflow          = settingKey[Option[ReleaseWorkflow]](ZipxSettings.releaseWorkflow.description)
     val zipxSnapshotRegistries       = settingKey[Seq[ArtifactRegistry]](ZipxSettings.snapshotRegistries.description)
     val zipxWorkflowDispatch         = settingKey[Boolean](ZipxSettings.workflowDispatch.description)
@@ -546,6 +547,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxVersionUpdatesPreSteps   := Seq.empty,
     zipxVersionUpdatesExtraSteps := Seq.empty,
     zipxCoverageWorkflow         := None,
+    zipxShellWorkflows           := Seq.empty,
     zipxReleaseWorkflow          := None,
     zipxSnapshotRegistries       := Seq.empty,
     zipxDeployTrigger            := DeployTrigger.OnMerge,
@@ -1138,6 +1140,7 @@ object ZipxPlugin extends AutoPlugin:
     writePinWorkflowsIfEnabled.value
     writeVersionUpdatesIfEnabled.value
     writeCoverageWorkflow.value
+    writeShellWorkflows.value
     writeDeployWorkflow.value
     writeReleaseWorkflow.value
   }
@@ -1295,6 +1298,29 @@ object ZipxPlugin extends AutoPlugin:
       case None if (root / rel).exists =>
         sys.error(s"zipx: $rel is leftover. Set zipxCoverageWorkflow or delete $rel, then sbt zipxWorkflowGenerate.")
       case None => ()
+
+  private def writeShellWorkflows: Def.Initialize[Task[Unit]] = Def.task {
+    val root  = (LocalRootProject / baseDirectory).value
+    val log   = streams.value.log
+    val cfg   = planConfig.value
+    val specs = readBuildSetting(Project.extract(state.value), zipxShellWorkflows, Seq.empty)
+    specs.foreach { spec =>
+      val body = orFail(ShellWorkflow.render(spec, cfg))
+      writeCompanion(root, spec.path, body, log)
+    }
+  }
+
+  private def checkShellWorkflows(root: File, cfg: PlanConfig, st: State, log: Logger): Unit =
+    val specs = readBuildSetting(Project.extract(st), zipxShellWorkflows, Seq.empty)
+    val paths = specs.map(_.path)
+    paths.groupBy(identity).collect { case (path, many) if many.sizeIs > 1 => path }.foreach { path =>
+      sys.error(s"zipx: $path is declared more than once in zipxShellWorkflows")
+    }
+    specs.foreach { spec =>
+      val expected = orFail(ShellWorkflow.render(spec, cfg))
+      checkCompanion(root, spec.path, expected, log)
+    }
+  end checkShellWorkflows
 
   private def deployYaml(st: State, graph: ModuleGraph, cfg: PlanConfig): Option[String] =
     val extracted = Project.extract(st)
@@ -2010,6 +2036,7 @@ object ZipxPlugin extends AutoPlugin:
     checkPinWorkflows(root, cfg, extracted, streams.value.log)
     checkVersionUpdates(root, cfg, extracted, streams.value.log)
     checkCoverageWorkflow(root, cfg, state.value, streams.value.log)
+    checkShellWorkflows(root, cfg, state.value, streams.value.log)
     checkDeployWorkflow(root, buildGraph.value, cfg, state.value, streams.value.log)
     checkReleaseWorkflow(root, buildGraph.value, cfg, state.value, streams.value.log)
     validateCatalog(extracted, buildGraph.value, streams.value.log)
