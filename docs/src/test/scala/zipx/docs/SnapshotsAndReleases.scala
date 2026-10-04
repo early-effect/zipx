@@ -66,7 +66,7 @@ is true because the build is not the release number. A release is a deliberate r
 Three strings show up. Only one of them is what you pin, and only one of them is a release.
 
 ```mermaid
-flowchart LR
+flowchart TD
   Ci["1.4.2-ci · every compile"] --> Sha["1.4.2-sha · the pin"]
   Sha --> Rel["1.4.2 · the release"]
   Sha -.-> Ptr["1.4.2-SNAPSHOT · pointer, not a pin"]
@@ -564,7 +564,7 @@ A row stays at its released number until someone moves it. The next build still 
 line again writes a snapshot the release sorts ahead of, so those commits publish nothing a consumer can select.
 
 ```mermaid
-flowchart LR
+flowchart TD
   Tag["tag libs/v1.4.2 stays put"] --> Hide["1.4.2 hides later snapshots of that line"]
   Tag --> Pr["pull request opens 1.4.3"]
   Pr --> Next["main compiles 1.4.3-ci"]
