@@ -81,21 +81,32 @@ object ZipxComposites:
 
     // Only `build` snapshots are ever saved, so a restore can never pick up another job's partial one. Save and restore
     // share keys: an earlier Layer wave's save warms the next wave through the same-run key.
-    def cacheStep(mode: LocalCacheMode, resolved: Boolean): Step =
+    //
+    // `purge` is the cold path. The primary key already includes the run id, so a save with no restore-keys misses
+    // and the action's post step still writes the fresh snapshot. A restore job does not run its cache step at all,
+    // so it cannot pull the old entry while that save is in flight.
+    def cacheStep(mode: LocalCacheMode, resolved: Boolean, purge: Boolean): Step =
       val epoch = if resolved then epochOut else fixedEpoch
       val build = s"$prefix$epoch-build-"
       // A Fixed epoch is baked at generate time, so there is no runtime release output to fall back to.
-      val older = if resolved then List(s"$prefix$releaseOut-build-", prefix) else List(prefix)
+      val older     = if resolved then List(s"$prefix$releaseOut-build-", prefix) else List(prefix)
+      val whenPurge = if purge then "inputs.purge == 'true'" else "inputs.purge != 'true'"
+      val epochOp   = if resolved then "==" else "!="
+      val cached    = ListMap(
+        "path" -> cachePaths,
+        "key"  -> s"$build$runId-$keySuffix",
+      )
       Step(
-        name = Some(if mode == LocalCacheMode.Save then "Cache sbt" else "Restore sbt cache"),
-        `if` =
-          Some(s"inputs.cache-mode == '${mode.input}' && inputs.cache-epoch ${if resolved then "==" else "!="} ''"),
-        uses = Some(if mode == LocalCacheMode.Save then pins.cache else pins.cacheRestore),
-        `with` = ListMap(
-          "path"         -> cachePaths,
-          "key"          -> s"$build$runId-$keySuffix",
-          "restore-keys" -> (s"$build$runId-" :: build :: older).mkString("\n"),
+        name = Some(
+          if mode == LocalCacheMode.Save && purge then "Save sbt cache"
+          else if mode == LocalCacheMode.Save then "Cache sbt"
+          else "Restore sbt cache"
         ),
+        `if` = Some(s"inputs.cache-mode == '${mode.input}' && $whenPurge && inputs.cache-epoch $epochOp ''"),
+        uses = Some(if mode == LocalCacheMode.Save then pins.cache else pins.cacheRestore),
+        `with` =
+          if purge then cached
+          else cached + ("restore-keys" -> (s"$build$runId-" :: build :: older).mkString("\n")),
       )
     end cacheStep
 
@@ -127,14 +138,20 @@ object ZipxComposites:
       Step(
         id = Some(resolveId),
         name = Some("Resolve cache epoch"),
-        `if` = Some("inputs.cache-mode != 'off' && inputs.cache-epoch == ''"),
+        // A purged restore has nothing to key. A purged save still needs the epoch in its primary key.
+        `if` = Some(
+          "inputs.cache-epoch == '' && inputs.cache-mode != 'off' && " +
+            "(inputs.cache-mode == 'save' || inputs.purge != 'true')"
+        ),
         run = Some(resolveScript),
         shell = Some("bash"),
       ),
-      cacheStep(LocalCacheMode.Save, resolved = true),
-      cacheStep(LocalCacheMode.Save, resolved = false),
-      cacheStep(LocalCacheMode.Restore, resolved = true),
-      cacheStep(LocalCacheMode.Restore, resolved = false),
+      cacheStep(LocalCacheMode.Save, resolved = true, purge = false),
+      cacheStep(LocalCacheMode.Save, resolved = false, purge = false),
+      cacheStep(LocalCacheMode.Save, resolved = true, purge = true),
+      cacheStep(LocalCacheMode.Save, resolved = false, purge = true),
+      cacheStep(LocalCacheMode.Restore, resolved = true, purge = false),
+      cacheStep(LocalCacheMode.Restore, resolved = false, purge = false),
     )
 
     CompositeAction(
@@ -153,6 +170,10 @@ object ZipxComposites:
         "cache-mode"     -> CompositeInput(
           "LocalDir sbt cache: save (restore, then save this job's build snapshot), restore (restore only), or off",
           default = Some(LocalCacheMode.Restore.input),
+        ),
+        "purge" -> CompositeInput(
+          "When true, skip LocalDir restore. A save owner still saves a fresh snapshot; a restore job does nothing",
+          default = Some("false"),
         ),
         "cache-epoch" -> CompositeInput(
           "Fixed cache epoch; when non-empty skips git-tag resolve and keys the cache with this value",
@@ -229,6 +250,7 @@ object ZipxComposites:
     val diskCache =
       if config.cache == CacheBackend.LocalDir then "false"
       else "true"
+    val purge = cachePurgeInput(config, cacheMode)
     Step
       .usesRef(SbtSetupRef)
       .named("zipx sbt setup")
@@ -240,11 +262,20 @@ object ZipxComposites:
           "node-version"     -> nodeVersion.getOrElse(""),
           "sbt-disk-cache"   -> diskCache,
           "cache-mode"       -> cacheMode.input,
-          "cache-epoch"      -> fixedEpoch,
+        ) ++ purge.fold(ListMap.empty[String, String])(value => ListMap("purge" -> value)) ++ ListMap(
+          "cache-epoch" -> fixedEpoch
         )
       )
       .build
   end sbtSetupStep
+
+  /** The workflow-level `purge` input. Omitted when this job has no LocalDir restore to skip. */
+  private def cachePurgeInput(config: PlanConfig, cacheMode: LocalCacheMode): Option[String] =
+    config.cachePurgeLabel match
+      case Some(label) if config.cache == CacheBackend.LocalDir && cacheMode != LocalCacheMode.Off =>
+        Some(PlanConfig.pullRequestHasLabel(label).render)
+      case _ =>
+        None
 
   /** One workflow step that invokes [[AwsLoginRef]]. */
   def awsLoginStep(

@@ -1,7 +1,7 @@
 package zipx.core
 
 import neotype.Subtype
-import zipx.workflow.{ExprLiteral, Step}
+import zipx.workflow.{Expr, ExprLiteral, Step}
 
 enum AffectedMode:
   case Always, AffectedOnPR
@@ -126,10 +126,14 @@ end PlanText
   *   overlaid in turn by capability and target env. Not applied to reusable-workflow caller jobs
   *   ([[Capability.workflowCall]]), since GHA forbids job-level `env` alongside `uses:`.
   * @param verifyCleanLabel
-  *   prepends `cleanFull` at workflow runtime when the PR carries this label, a one-off cache bust that needs no
-  *   permanent [[verifyClean]] setting. Ignored when [[verifyClean]] is already set; `None` disables the check. An
-  *   [[zipx.workflow.ExprLiteral]] because the label is emitted between `'…'` inside `contains(…)`, where GitHub offers
-  *   no escaping, so a label containing a quote must be unrepresentable rather than reported at generate time.
+  *   prepends `cleanFull` at workflow runtime when the PR carries this label. That is sbt's output directory, not the
+  *   LocalDir restore: see [[cachePurgeLabel]]. Ignored when [[verifyClean]] is already set; `None` disables the check.
+  *   An [[zipx.workflow.ExprLiteral]] because the label is emitted between `'…'` inside `contains(…)`, where GitHub
+  *   offers no escaping, so a label containing a quote must be unrepresentable rather than reported at generate time.
+  * @param cachePurgeLabel
+  *   when the `pull_request` payload carries this label, every LocalDir sbt job skips restore. A save owner still
+  *   saves, with no restore-keys, so the new entry does not fall back onto the one being dropped. `None` disables. Same
+  *   payload rule as [[verifyCleanLabel]].
   * @param cancelSupersededRuns
   *   emits workflow-level `concurrency` keyed on ref, so pushing again to a PR cancels the running build. Release-tag
   *   runs are never cancelled: the group folds in the ref, and a half-cancelled publish is worse than a wasted runner.
@@ -161,6 +165,7 @@ final case class PlanConfig(
     env: Map[String, EnvValue] = Map.empty,
     verifyClean: VerifyClean = VerifyClean.None,
     verifyCleanLabel: Option[ExprLiteral] = Some(PlanConfig.DefaultVerifyCleanLabel),
+    cachePurgeLabel: Option[ExprLiteral] = Some(PlanConfig.DefaultCachePurgeLabel),
     cancelSupersededRuns: Boolean = true,
     matrixCollapse: Map[CapabilityName, MatrixCollapse] = Map.empty,
     defaultMatrixCollapse: MatrixCollapse = MatrixCollapse.Auto,
@@ -175,6 +180,16 @@ object PlanConfig:
   val DefaultRunnerOs: RunnerOs         = RunnerOs("ubuntu-latest")
 
   val DefaultVerifyCleanLabel: ExprLiteral = ExprLiteral("clean")
+  val DefaultCachePurgeLabel: ExprLiteral  = ExprLiteral("purge")
+
+  /** `github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, '<label>')`.
+    *
+    * The label is whatever that event's payload holds. `ci.yml` does not run on `labeled`, and a rerun repeats the
+    * payload the run started with.
+    */
+  def pullRequestHasLabel(label: ExprLiteral): Expr =
+    (Expr.github("event_name") === Expr.quoted("pull_request")) &&
+      Expr.contains(Expr.github("event.pull_request.labels.*.name"), Expr.Quoted(label))
 
   /** Wire-form placeholder for planner unit tests; the sbt plugin always overwrites from zipxTasks.of. Not an sbt API
     * surface.
@@ -184,6 +199,11 @@ object PlanConfig:
   inline def verifyCleanLabel(inline label: String): Option[ExprLiteral] = Some(ExprLiteral(label))
 
   def verifyCleanLabelMake(label: String): Either[String, Option[ExprLiteral]] =
+    ExprLiteral.make(label).map(Some(_))
+
+  inline def cachePurgeLabel(inline label: String): Option[ExprLiteral] = Some(ExprLiteral(label))
+
+  def cachePurgeLabelMake(label: String): Either[String, Option[ExprLiteral]] =
     ExprLiteral.make(label).map(Some(_))
 
 end PlanConfig

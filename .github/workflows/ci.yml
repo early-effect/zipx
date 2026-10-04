@@ -77,6 +77,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: cache-rehydrate
         run: sbt 'Test/compile'
@@ -102,6 +103,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: save
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: Pre-pull remote-cache IT images
         run: |
@@ -174,6 +176,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: fmt
         run: |
@@ -206,6 +209,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: workflow-check
         run: |
@@ -238,6 +242,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: advisories
         run: |
@@ -274,6 +279,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
@@ -311,6 +317,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
@@ -345,6 +352,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: scripted
         run: |
@@ -396,6 +404,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: snapshots
         run: sbt 'zipxSnapshotPublish'
@@ -424,6 +433,7 @@ jobs:
           node-version: ""
           sbt-disk-cache: "false"
           cache-mode: restore
+          purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: ce14e73e533928a2
       - name: snapshots-pr
         run: sbt 'zipxSnapshotPublish pr'

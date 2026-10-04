@@ -133,6 +133,10 @@ assertGraph := {
     content.split("cache-mode: save", -1).length - 1 == 1,
     "with Graph test replacing the builtin test, cache-rehydrate must be the only job that saves",
   )
+  assert(
+    content.contains("contains(github.event.pull_request.labels.*.name, 'purge')"),
+    "the purge label should gate LocalDir restore",
+  )
   assert(content.contains("sbt-disk-cache: \"false\""), "LocalDir must disable setup-sbt hashFiles disk-cache")
   assert(!content.contains("cache: sbt"), "LocalDir must not enable setup-java cache:sbt")
   val setup =
@@ -144,6 +148,9 @@ assertGraph := {
     "composite cache key should embed epoch + build role + run_id + job suffix",
   )
   assert(setup.contains("target"), "cache path should include target/ for compile + sona-staging reuse")
+  assert(setup.contains("inputs.purge == 'true'"), "a purged save must be its own cache step")
+  assert(setup.contains("inputs.purge != 'true'"), "an ordinary restore stays when purge is false")
+  assert(setup.contains("name: Save sbt cache"), "the cold save step must exist")
   val awsLogin = (LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-aws-login"
   assert(!awsLogin.exists, "non-AWS consumer must not get zipx-aws-login")
   // M3: affected-only setup job + gating on verify jobs (default AffectedOnPR).

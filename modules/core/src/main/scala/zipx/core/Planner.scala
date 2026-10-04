@@ -1954,11 +1954,7 @@ object Planner:
           case Some(label) =>
             // Left wrapped, unlike a job `if:`: an `env:` entry is a plain field, so the runner substitutes the
             // expression to the string the script below compares against.
-            val labelled =
-              onEvent("pull_request") && Expr.contains(
-                Expr.github("event.pull_request.labels.*.name"),
-                Expr.Quoted(label),
-              )
+            val labelled = PlanConfig.pullRequestHasLabel(label)
             Step
               .run(
                 Script(

@@ -148,6 +148,8 @@ object ScriptRenderSpec extends ZIOSpecDefault:
         bad.isLeft,
         PlanConfig.verifyCleanLabelMake("it's clean").isLeft,
         PlanConfig.verifyCleanLabelMake("clean").isRight,
+        PlanConfig.cachePurgeLabelMake("it's").isLeft,
+        PlanConfig.cachePurgeLabelMake("purge").isRight,
       )
     },
     test("the cache key and restore-keys, assembled from Expr rather than interpolated") {
