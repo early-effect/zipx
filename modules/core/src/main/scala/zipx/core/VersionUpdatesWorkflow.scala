@@ -140,6 +140,7 @@ object VersionUpdatesWorkflow:
         ),
         Exec("sbt", Word.quoted("zipxPinUpdate yes")),
         Exec("sbt", Word.lit("zipxCatalogGenerate")),
+        Exec("sbt", Word.lit("zipxSnapshotAdvance")),
       )
       .withTrailingNewline(true)
 

@@ -109,8 +109,9 @@ object ZipxCatalog:
   ): Either[String, List[DepBump]] =
     coords
       .filter {
-        case l: Lib if l.isAligned => false
-        case _                     => true
+        case l: Lib if l.isAligned                                    => false
+        case coord if SnapshotPinAdvice.hold(coord.version).isDefined => false
+        case _                                                        => true
       }
       .foldLeft[Either[String, List[DepBump]]](Right(Nil)) { (accE, coord) =>
         accE.flatMap { acc =>

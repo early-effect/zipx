@@ -43,6 +43,7 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
       val csAt       = yaml.indexOf("cs launch")
       val pinAt      = yaml.indexOf("zipxPinUpdate yes")
       val genAt      = yaml.indexOf("zipxCatalogGenerate", pinAt)
+      val advanceAt  = yaml.indexOf("zipxSnapshotAdvance", genAt)
       val applyAt    = yaml.indexOf("Apply catalog updates")
       val openAt     = yaml.indexOf("Open update PR")
       val addAt      = yaml.indexOf(":!.github/workflows")
@@ -57,13 +58,14 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         !yaml.contains("git add -A"),
         yaml.contains("git add --all"),
         yaml.contains("sbt zipxCatalogGenerate"),
+        advanceAt > genAt,
         yaml.contains("--body-file"),
         yaml.contains("git fetch origin zipx/version-updates-${GITHUB_RUN_ID}"),
         yaml.contains("git checkout zipx/version-updates-${GITHUB_RUN_ID}"),
         yaml.contains("git add .github/workflows"),
         yaml.contains("git push origin zipx/version-updates-${GITHUB_RUN_ID}"),
-        // Apply runs catalog generate only. The workflow-generate string after Open update PR is the PR-body hint
-        // (the generated-file header is the other mention), never a companion apply step.
+        // Apply runs catalog generate and snapshot advance. The workflow-generate string after Open update PR is the
+        // PR-body hint (the generated-file header is the other mention), never a companion apply step.
         hintAt > openAt,
         !yaml.contains(ActionPins.Defaults.checkout.unwrap),
         yaml.contains("zipx/version-updates-${GITHUB_RUN_ID}"),

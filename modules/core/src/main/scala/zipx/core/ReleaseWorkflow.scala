@@ -51,7 +51,7 @@ object ReleaseWorkflow:
       steps = Planner.checkoutThenSbtSetup(config, jobId, nodeVersion = None, cacheMode) ++
         List(onDefaultBranchStep) ++
         release.steps(buildContext.copy(actions = config.actions)) ++
-        List(bindRefStep, releaseStep, githubReleasesStep, openCycleStep),
+        List(bindRefStep, releaseStep, githubReleasesStep, openCycleStep, bumpPrStep),
     )
     val packages = if release.registry.usesGithubToken then ListMap("packages" -> "write") else ListMap.empty
     Workflow(
@@ -60,7 +60,7 @@ object ReleaseWorkflow:
         push = Some(BranchFilter(tags = List(tags.pattern))),
         workflowDispatch = Some(shipsDispatch),
       ),
-      permissions = ListMap("contents" -> "write") ++ packages,
+      permissions = ListMap("contents" -> "write", "pull-requests" -> "write") ++ packages,
       concurrency = Some(Concurrency(group = "zipx-release", cancelInProgress = CancelInProgress.Never)),
       jobs = ListMap[String, Job](jobId -> job) ++ docs.flatMap(docsJob(_, tags)),
     )
@@ -177,14 +177,36 @@ object ReleaseWorkflow:
       .run(
         Script.strict(
           line("## Open the next snapshot"),
-          line("These rows are released. Further snapshots of them publish nothing until the catalog moves."),
+          line(
+            "After the deployment, that line hides further snapshots of it. Run sbt zipxModverBump and merge it so the next line opens."
+          ),
           Exec("cat", Word.lit("target/zipx-release-tags.txt")).appendTo(summary),
-          line("On this commit: sbt zipxModverBump"),
         )
       )
       .named("Open the next snapshot")
       .build
   end openCycleStep
+
+  /** The bump is a new commit on a pull-request branch. The tag stays on the release commit. */
+  private val bumpPrStep: Step =
+    val opened = CompanionPr.open(
+      branchPrefix = "zipx/modver-bump",
+      commitMessage = "Open the next snapshot line.",
+      prTitle = "Open the next snapshot line",
+      prBody =
+        "The release tag stays on the release commit. This branch opens the next catalog line with sbt zipxModverBump.",
+      emptyMessage = "No released row to bump.",
+    )
+    Step
+      .run(
+        Script
+          .strict((Exec("sbt", Word.lit("zipxModverBump")) :: opened.commands)*)
+          .withTrailingNewline(true)
+      )
+      .named("Open the bump pull request")
+      .withEnv("GH_TOKEN", Expr.github("token"))
+      .build
+  end bumpPrStep
 
   private def docsJob(docs: Capability, tags: TagScheme): Option[(String, Job)] =
     val unseenByCi = tags match
