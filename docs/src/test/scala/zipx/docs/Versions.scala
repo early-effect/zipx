@@ -181,6 +181,9 @@ Coursier's order. A module this build compiles itself is never judged (**Snapsho
 
 sbt's update report leaves out what a library asked of a forced module. zipx reads it from Coursier's conflict graph,
 over the cache `update` just filled, so the check fetches nothing.
+
+A commit pin a project compiles against is also kept out of every other library in its published POM, so a consumer
+resolves the same commit (**Snapshots and releases**, "What a consumer resolves").
 """,
       exampleValue {
         val zioHttp = ResolvedModule("dev.zio", "zio-http_3")

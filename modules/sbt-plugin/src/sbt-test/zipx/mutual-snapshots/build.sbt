@@ -50,6 +50,9 @@ Fixture.inRepoWins(assertDocsFacadeInRepo, LocalProject("docsJS"), LocalProject(
 val assertDocsSelects = inputKey[Unit]("the docs site resolves <artifact> at a release or a recorded commit")
 Fixture.selects(assertDocsSelects, LocalProject("docsJS"))
 
+val assertAppExcludes = inputKey[Unit]("the app's POM at a recorded commit keeps heddle-mcp-apps from <excluded>...")
+Fixture.pomExcludes(assertAppExcludes, "ascent-mcp-app_sjs1_3", "0.10.0", "heddle-mcp-apps_sjs1_3")
+
 val assertZipxResolver = taskKey[Unit]("a commit pin in the catalog brings the registry's snapshot repository")
 assertZipxResolver / aggregate := false
 assertZipxResolver := Def.uncached {

@@ -464,6 +464,10 @@ object ZipxPlugin extends AutoPlugin:
     val zipxSelfPlugins          = settingKey[Seq[Plugin]](ZipxSettings.selfPlugins.description)
     private[plugin] val zipxResolvedModule =
       settingKey[ModuleID]("This project as resolution names it: the crossed, platform-suffixed name, cross disabled")
+    private[plugin] val zipxPomEdges =
+      taskKey[(ResolvedModule, List[PomEdge])]("This project, and its dependencies on other projects of the build")
+    private[plugin] val zipxPomExclusions =
+      taskKey[List[ResolvedModule]]("Modules this project's POM states itself, so no library of it brings them")
     val zipxVersionsFile = settingKey[String](ZipxSettings.versionsFile.description)
 
     val zipxGraph            = taskKey[Unit](ZipxSettings.graph.description)
@@ -712,6 +716,28 @@ object ZipxPlugin extends AutoPlugin:
     },
     // The catalog states these modules for this build, so no transitive revision of one changes what compiles.
     dependencyOverrides ++= CatalogResolution.overrides(catalogForced.value),
+    zipxPomEdges := Def.uncached {
+      CatalogResolution.of(zipxResolvedModule.value) -> PomAuthority.edges(projectDependencies.value, crossing.value)
+    },
+    zipxPomExclusions := Def.uncached {
+      PomExclusions.of(
+        CatalogResolution.of(zipxResolvedModule.value),
+        zipxPomEdges.all(ScopeFilter(inAnyProject)).value.toMap,
+        PomAuthority.declared(libraryDependencies.value, crossing.value),
+      )
+    },
+    // A consumer meets this POM and every library's at once. Each library is kept from bringing what this project
+    // states itself, so the consumer resolves the revision this project was built with. Resolution here, the POM, and
+    // ivy.xml all read this one list.
+    allDependencies := Def.uncached {
+      val excluded = zipxPomExclusions.value
+      val declared = libraryDependencies.value.toSet
+      val info     = scalaModuleInfo.value
+      allDependencies.value.map { module =>
+        if declared.contains(module) && !AutoPlatform.ignore(module) then PomAuthority.excluding(module, excluded, info)
+        else module
+      }
+    },
     // The refusals are a dependency, not a line above `update.value`: sbt runs every `.value` before the body.
     update := Def.taskDyn {
       PinRefusal.of((libraryDependencies.value ++ dependencyOverrides.value).map(_.revision)) match
@@ -746,11 +772,16 @@ object ZipxPlugin extends AutoPlugin:
       .filterNot((module, _) => inRepo.contains(module))
   }
 
+  private def crossing: Def.Initialize[PomAuthority.Crossing] = Def.setting {
+    PomAuthority.Crossing.of(scalaVersion.value, scalaBinaryVersion.value, scalaModuleInfo.value)
+  }
+
   /** `updateFull`, refused when the catalog is behind what a dependency needs or two commits of a module meet. */
   private def catalogChecked: Def.Initialize[Task[sbt.librarymanagement.UpdateReport]] = Def.task {
     val report = updateFull.value
     val inRepo = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.map(CatalogResolution.of).toSet
-    CatalogResolution.conflicts(report, catalogForced.value, inRepo, csrConfiguration.value, streams.value.log) match
+    val seen   = CatalogResolution.Seen(report, inRepo, zipxPomExclusions.value.toSet)
+    CatalogResolution.conflicts(seen, catalogForced.value, csrConfiguration.value, streams.value.log) match
       case Nil       => report
       case conflicts => sys.error(conflicts.map(conflict => s"zipx: ${conflict.message}").mkString("\n"))
   }

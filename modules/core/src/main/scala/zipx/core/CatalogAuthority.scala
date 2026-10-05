@@ -1,9 +1,5 @@
 package zipx.core
 
-/** A module as resolution names it: the group and the crossed artifact (`heddle-mcp-apps_sjs1_3`). */
-final case class ResolvedModule(group: String, name: String):
-  def render: String = s"$group:$name"
-
 /** The order of two revisions zipx has no line for, such as milestones. The plugin supplies Coursier's. */
 trait RevisionOrder:
   def compare(a: String, b: String): Int
