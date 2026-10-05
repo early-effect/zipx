@@ -114,8 +114,6 @@ object StepBuilderSpec extends ZIOSpecDefault:
         )
       },
       test("an already-typed ref goes through usesRef, with no Either to unwrap") {
-        // The reason `usesRef` exists: an `ActionRef` in hand has nothing left to validate, so a caller holding one
-        // (an `ActionPins` field, say) should not have to handle a failure that cannot occur.
         val ref = ActionRef("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
         assertTrue(
           Step.usesRef(ref).build.uses.contains(ref),

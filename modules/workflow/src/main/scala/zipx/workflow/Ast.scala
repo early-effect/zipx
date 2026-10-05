@@ -4,14 +4,11 @@ import neotype.unwrap
 import zio.blocks.schema.*
 import scala.collection.immutable.ListMap
 
-/** A GitHub Actions workflow as an algebraic data type.
+/** Sub-types render through zio-blocks' YAML deriver, which kebab-cases field names as GitHub wants (`runs-on`).
+  * [[Render]] hand-writes the `on:` block, whose event keys (`pull_request`) kebab-casing would mangle.
   *
-  * The sub-types `derive Schema` and render through zio-blocks' YAML deriver, which kebab-cases every field name: what
-  * GitHub wants for job and step keys (`runs-on`, `fail-fast`). [[Render]] hand-writes the `on:` block, the one place
-  * derivation cannot reach, since event keys like `pull_request` use underscores kebab-casing would mangle.
-  *
-  * Map fields are typed as plain `Map` because zio-blocks derives `Schema[Map]` but not `Schema[ListMap]`. Populate
-  * them with a `ListMap` for deterministic order; the derived codec preserves insertion order.
+  * Map fields are plain `Map` because zio-blocks derives no `Schema[ListMap]`. Populate them with a `ListMap`: the
+  * derived codec preserves insertion order.
   */
 final case class Workflow(
     name: String,
@@ -22,7 +19,6 @@ final case class Workflow(
     env: Map[String, String] = ListMap.empty,
 )
 
-/** See [[Render.triggersYaml]] for why this one block is rendered by hand. */
 final case class Triggers(
     push: Option[BranchFilter] = None,
     pullRequest: Option[PullRequestTrigger] = None,
@@ -31,7 +27,7 @@ final case class Triggers(
     schedule: List[Cron] = Nil,
 )
 
-/** Actions → Run workflow. Inputs render in insertion order, which is the order GitHub shows them in. */
+/** Inputs render in insertion order, which is the order GitHub's Run workflow form shows them in. */
 final case class WorkflowDispatch(inputs: ListMap[InputName, DispatchInput] = ListMap.empty)
 
 enum DispatchInput(val description: String):
@@ -39,8 +35,6 @@ enum DispatchInput(val description: String):
   /** A required dropdown whose first option is the default. GitHub renders one choice, so a set is [[Text]]. */
   case Choice(override val description: String, options: ::[String]) extends DispatchInput(description)
 
-  /** Free text. Optional and without a default unless the caller says otherwise. A default fills the Run workflow form.
-    */
   case Text(
       override val description: String,
       default: Option[String] = None,
@@ -56,7 +50,6 @@ final case class PullRequestTrigger(
     types: List[PullRequestActivity] = Nil,
 )
 
-/** `wire` is GitHub's spelling. */
 enum PullRequestActivity(val wire: String):
   case Opened      extends PullRequestActivity("opened")
   case Synchronize extends PullRequestActivity("synchronize")
@@ -69,14 +62,8 @@ enum DayOfWeek:
 
   def cronValue: Int = ordinal
 
-/** Five-field UTC cron for `on.schedule`: `minute hour day-of-month month day-of-week`.
-  *
-  * Ranges live in the field types ([[CronHour]], [[CronMinute]]) rather than in a render-time check, so
-  * `Cron.daily(hour = 24)` is a compile error at the call site and [[render]] is total. [[Cron.Raw]] is the escape
-  * hatch for the step-value and range forms the variants cannot express.
-  *
-  * Each `inline` constructor checks a literal while the consumer's build compiles; its `*Make` sibling takes runtime
-  * data and returns an `Either`.
+/** Ranges live in [[CronHour]] / [[CronMinute]] rather than a render-time check, so `Cron.daily(hour = 24)` is a
+  * compile error and [[render]] is total. [[Cron.Raw]] covers the step-value and range forms the variants cannot say.
   */
 enum Cron:
   case Weekly(day: DayOfWeek, hour: CronHour = CronHour.Midnight, minute: CronMinute = CronMinute.Zero)
@@ -137,7 +124,7 @@ final case class Job(
     needs: List[String] = Nil,
     `if`: Option[String] = None,
     environment: Option[JobEnvironment] = None,
-    /** The job's own concurrency group. GitHub's default for a job-level group is never to cancel in progress. */
+    /** GitHub's default for a job-level group is never to cancel in progress. */
     concurrency: Option[String] = None,
     permissions: Map[String, String] = ListMap.empty,
     strategy: Option[Strategy] = None,
@@ -151,10 +138,7 @@ final case class Job(
     `with`: Map[String, String] = ListMap.empty,
 ) derives Schema
 
-/** A job's `environment:`. GitHub records a deployment for every job that binds one, and shows `url` on it.
-  *
-  * Renders as the bare name when there is no `url`, which is how every workflow wrote it before `url` existed.
-  */
+/** GitHub records a deployment for every job that binds one. Renders as the bare name when there is no `url`. */
 final case class JobEnvironment(name: String, url: Option[String] = None) derives Schema
 
 final case class JobService(
@@ -166,26 +150,15 @@ final case class JobService(
 final case class Strategy(
     failFast: Boolean = false,
     matrix: Map[String, List[String]] = ListMap.empty,
-    /** Rows for `strategy.matrix.include` when axes are not a cartesian product (environment ≠ target name, etc.).
-      *
-      * Derived codecs place this next to `matrix:`; [[Render]] nests it under `matrix.include` before printing.
-      */
+    /** Derived next to `matrix:`; [[Render]] nests it under `matrix.include` before printing. */
     include: List[Map[String, String]] = Nil,
 ) derives Schema
 
-/** One flat case class with all-optional fields rather than a `uses`-vs-`run` sum type, because that is the on-disk
-  * shape and a sum type would make the deriver emit variant discriminator wrappers.
+/** Flat rather than a `uses`/`run` sum type, because that is the on-disk shape and a sum would make the deriver emit
+  * discriminator wrappers. So `Step()` compiles and renders YAML GitHub rejects: prefer [[Step.run]] / [[Step.uses]];
+  * [[Render]] checks every step with [[Step.problem]].
   *
-  * The cost is that `Step()` and `Step(uses = …, run = …)` both compile and both render YAML GitHub rejects. Prefer the
-  * builders [[Step.run]] / [[Step.uses]], which cannot express either; [[Step.validate]] catches what is hand-built,
-  * and [[Render]] calls it on every step it encodes.
-  *
-  * `uses` is an [[ActionRef]], not a `String`: the *shape* of an action ref is the field's own business, so a step
-  * cannot be built around an unpinned or malformed one even by hand-construction. zio-blocks derives a `Schema` for a
-  * neotype as its underlying primitive, so this renders as the same YAML scalar a `String` did.
-  *
-  * `shell` is required on `run:` steps inside a composite action; workflow jobs inherit the runner default and leave it
-  * empty.
+  * `shell` is required on `run:` steps inside a composite action; workflow jobs inherit the runner default.
   */
 final case class Step(
     name: Option[String] = None,
@@ -201,26 +174,20 @@ final case class Step(
 
 object Step:
 
-  /** `Step.run(script).named("Test").build`. See [[StepBuilder.run]]. */
   def run(script: zipx.shell.Script): StepBuilder.Run = StepBuilder.run(script)
 
   /** **Escape hatch.** See [[StepBuilder.runRaw]].
     */
   def runRaw(text: String): StepBuilder.Run = StepBuilder.runRaw(text)
 
-  /** See [[StepBuilder.uses]]. */
   inline def uses(inline action: String): StepBuilder.Uses = StepBuilder.uses(action)
 
-  /** See [[StepBuilder.usesRef]]. */
   def usesRef(action: ActionRef): StepBuilder.Uses = StepBuilder.usesRef(action)
 
-  /** See [[StepBuilder.usesMake]]. */
   def usesMake(action: String): Either[String, StepBuilder.Uses] = StepBuilder.usesMake(action)
 
-  /** The two structural rules a flat case class cannot encode: exactly one of `uses` and `run`, and `with:` only on a
-    * `uses:` step (GitHub silently ignores it on a `run:` step). [[StepBuilder]] makes both unreachable, so this exists
-    * for the other two ways a `Step` comes into being: hand-construction and codec decoding. Checking at render time
-    * rather than on construction is what lets a codec fill a value in field by field.
+  /** For hand-built and decoded steps; [[StepBuilder]] cannot produce these problems. Checked at render time rather
+    * than on construction so a codec can fill a value in field by field.
     */
   def problem(step: Step): Option[String] =
     val where = step.name.orElse(step.id).map(n => s" '$n'").getOrElse("")
@@ -248,12 +215,8 @@ final case class Concurrency(
     cancelInProgress: CancelInProgress = CancelInProgress.Never,
 )
 
-/** `concurrency.cancel-in-progress`. GitHub rejects the constants as strings, so they render as YAML booleans. */
+/** GitHub rejects the constants as strings, so they render as YAML booleans. */
 enum CancelInProgress:
   case Never
   case Always
-
-  /** The useful policies need an expression: "cancel superseded runs, but never a release publish" is
-    * `!startsWith(github.ref, 'refs/tags/')`.
-    */
   case When(condition: Expr)

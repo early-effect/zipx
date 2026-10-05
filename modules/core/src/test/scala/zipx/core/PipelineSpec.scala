@@ -29,10 +29,7 @@ object PipelineSpec extends ZIOSpecDefault:
         "DEPLOY_ROLE" -> secret"PROD_ROLE",
         "TIER"        -> EnvValue.plain("prod"),
       ),
-      // Not `refIs("refs/heads/main")`, which this fixture used to carry and which the planner now rejects: deploy is
-      // gated `OnReleaseTag`, so requiring a branch ref too made the job's `if:` never true. That contradiction shipped
-      // in examples/monorepo for exactly as long as nothing checked it (#66). `varNonEmpty` is the realistic extra
-      // filter, and it is in the undecidable set, so it still exercises the ANDing without being a contradiction.
+      // Not a branch ref: deploy is gated `OnReleaseTag`, and the planner refuses a branch-ref condition on top.
       condition = Some(JobCondition.varNonEmpty("DEPLOY_PROD_ENABLED")),
     ),
   )
@@ -85,7 +82,7 @@ object PipelineSpec extends ZIOSpecDefault:
       val auto = Planner.plan(
         graph,
         List(
-          Capability.dockerGraph, // Auto default
+          Capability.dockerGraph,
           deploy.copy(matrixCollapse = None),
         ),
         config,

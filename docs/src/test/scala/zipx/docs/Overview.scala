@@ -9,7 +9,6 @@ import zio.test.*
 
 import scala.collection.immutable.ListMap
 
-/** What zipx is, in the order a newcomer needs it. */
 object Overview extends DocSpecSuite:
 
   def doc = page("Overview")(

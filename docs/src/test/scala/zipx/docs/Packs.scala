@@ -14,7 +14,6 @@ import zipx.maven.ZipxMaven
 import zipx.specular.ZipxDocs
 import zio.test.*
 
-/** Early-effect paved paths as capabilities. */
 object Packs extends DocSpecSuite:
 
   private val registry = EcrRegistry(AwsAccountId("111122223333"), AwsRegion("us-east-1"))

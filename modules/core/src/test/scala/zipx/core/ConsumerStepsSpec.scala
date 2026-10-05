@@ -6,7 +6,7 @@ import zipx.workflow.{ActionRef, Expr, Step}
 
 import scala.collection.immutable.ListMap
 
-/** Expected values are the `run:` bodies `early-effect/chekhov`'s `build.sbt` emits today. */
+/** Expected values are the `run:` bodies `early-effect/chekhov`'s `build.sbt` emits. */
 object ConsumerStepsSpec extends ZIOSpecDefault:
 
   private val aptMirrorPath: Word =
@@ -96,8 +96,6 @@ object ConsumerStepsSpec extends ZIOSpecDefault:
 
   private def browserSetup(pins: ActionPins): Steps =
     Steps.built("browsers")(
-      // `usesRef`, not `usesMake`: an `ActionPins` field is already an `ActionRef`, so there is no failure here for a
-      // consumer to fake a handler for. This used to need a `throw` on an unreachable branch.
       Step
         .usesRef(pins.cache)
         .named("Cache Playwright apt packages")

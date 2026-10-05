@@ -6,7 +6,6 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zio.test.*
 
-/** Migrating from Bazel: different strategy that fits sbt better. */
 object FromBazel extends DocSpecSuite:
 
   def doc = page("From Bazel")(
@@ -63,7 +62,7 @@ meant updating more than one world.
           !yaml.contains("test-api:"),
           !yaml.contains("test-service:"),
           yaml.contains("publish:"),
-          yaml.contains("schema") && yaml.contains("api"), // publish joins publishing modules
+          yaml.contains("schema") && yaml.contains("api"),
         )
       ),
     ),

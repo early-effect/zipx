@@ -91,7 +91,7 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
     },
     test("only a save step writes the cache; restore steps use actions/cache/restore at the same pin") {
       val steps = ZipxComposites.sbtSetup(pins).steps
-      // The epoch resolver mentions `cache-mode == 'save'` too. These are the steps that actually call the action.
+      // The epoch resolver also tests `cache-mode == 'save'`, so keep only the steps that call the action.
       def cacheSteps(mode: String) = steps.filter { step =>
         step.uses.exists(_.unwrap.startsWith("actions/cache")) &&
         step.`if`.exists(_.contains(s"inputs.cache-mode == '$mode'"))

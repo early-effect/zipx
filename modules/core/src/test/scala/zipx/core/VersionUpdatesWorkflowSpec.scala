@@ -64,8 +64,7 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         yaml.contains("git checkout zipx/version-updates-${GITHUB_RUN_ID}"),
         yaml.contains("git add .github/workflows"),
         yaml.contains("git push origin zipx/version-updates-${GITHUB_RUN_ID}"),
-        // Apply runs catalog generate and snapshot advance. The workflow-generate string after Open update PR is the
-        // PR-body hint (the generated-file header is the other mention), never a companion apply step.
+        // After Open update PR, `sbt zipxWorkflowGenerate` is the PR-body hint, never a companion apply step.
         hintAt > openAt,
         !yaml.contains(ActionPins.Defaults.checkout.unwrap),
         yaml.contains("zipx/version-updates-${GITHUB_RUN_ID}"),

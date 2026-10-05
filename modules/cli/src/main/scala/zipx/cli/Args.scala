@@ -1,6 +1,5 @@
 package zipx.cli
 
-/** Argv for `zipx catalog …`. No third-party parser. */
 enum CatalogCommand:
   case Update(yes: Boolean, dryRun: Boolean, verifyLoad: Boolean, file: String)
   case Generate(file: String)

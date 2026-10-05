@@ -1,5 +1,5 @@
-// A third repo that depends only on ascent's app, the way todo-mcp-demo does. Its catalog states the app and nothing
-// the app is built from, so what it resolves for those is what the published POMs say.
+// The catalog states only ascent's app, so what the demo resolves for the app's dependencies is what the published
+// POMs say.
 MyVersions.settings
 Fixture.settings
 organization := "com.example.demo"

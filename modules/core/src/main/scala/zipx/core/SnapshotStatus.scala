@@ -6,10 +6,9 @@ import scala.annotation.tailrec
 enum PointerRead:
   case Names(sha: GitSha)
 
-  /** The snapshot repository has no pointer for the line. */
   case Absent
 
-  /** A pointer POM that names no commit: it was published without `zipx.snapshot.sha`, by a plain publish. */
+  /** A plain publish wrote the pointer POM without `zipx.snapshot.sha`. */
   case Unnamed
 
 object PointerRead:

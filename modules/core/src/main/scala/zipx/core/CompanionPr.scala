@@ -4,16 +4,12 @@ import zipx.shell.*
 
 /** Shared `git commit` plus `gh pr create` for scheduled companions that apply catalog rewrites.
   *
-  * `GITHUB_TOKEN` can push `project/` and `.github/actions/` (composites). It cannot create or update
-  * `.github/workflows/` files: GitHub App tokens need a `workflows` git permission that `permissions:` cannot grant.
-  * Scala Steward hits the same reject if an update rewrites a workflow file. Stage everything except
-  * `.github/workflows`; a human generate already committed the companion YAML.
+  * Stages everything except `.github/workflows`: the token cannot write there (`permissions:` cannot grant
+  * `workflows`), and a human generate already committed the companion YAML. The branch is `$prefix-$GITHUB_RUN_ID` so a
+  * second dispatch cannot force-push an open PR. The [[PlanConfig.DefaultVerifyCleanLabel]] label makes Verify run
+  * `cleanFull`.
   *
-  * The branch is `$prefix-$GITHUB_RUN_ID` so a second dispatch cannot force-push an open PR. The PR is labeled
-  * [[PlanConfig.DefaultVerifyCleanLabel]] so Verify runs `cleanFull`.
-  *
-  * Version-updates PRs set [[open]] `workflowRegenHint`: the body names this run's branch and the exact `sbt` / `git`
-  * commands to regenerate `ci.yml` onto that branch. The companion never runs `zipxWorkflowGenerate` itself.
+  * `workflowRegenHint` puts the commands that regenerate `ci.yml` onto this run's branch in the PR body.
   */
 object CompanionPr:
 
@@ -95,9 +91,7 @@ object CompanionPr:
     )
   end open
 
-  /** Copy-paste recipe for a reviewer or agent. Unquoted heredoc expands `GITHUB_RUN_ID` so the PR body names this
-    * run's branch. No backticks: those would run as command substitution when the companion writes the file.
-    */
+  /** The heredoc is unquoted so `GITHUB_RUN_ID` expands. No backticks: they would run as command substitution. */
   private inline def workflowRegenLines(inline prefix: String): List[ScriptLine] =
     List(
       ScriptLine.empty,

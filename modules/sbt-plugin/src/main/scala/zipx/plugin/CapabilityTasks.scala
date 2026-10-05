@@ -21,33 +21,23 @@ import zipx.workflow.JobService
 import zipx.workflow.Step
 import scala.quoted.*
 
-/** Typed, IDE-friendly ways to specify a capability's sbt command from a real `TaskKey`/`InputKey` instead of a string.
+/** Capability commands from real `TaskKey`/`InputKey`s instead of strings, for completion and compile checking.
   *
-  * A capability command is ultimately text typed at the sbt shell in CI (`sbt '<command>'`), which the pure `zipx-core`
-  * model keeps as an [[zipx.core.SbtCommand]]: validated as *text that cannot corrupt the generated file*, not parsed
-  * as sbt syntax, which is what lets the planner stay sbt-free while still expressing what a single key cannot (cross
-  * `+`, aliases, compound `a; b`). These helpers live in the plugin (which has sbt on the classpath) and render a key
-  * into that form, giving code-completion and compile-time checking for the common "one task" case. They compose with
-  * every `Capability` constructor via the `command` argument.
-  *
-  * A key renders to `<moduleId>/<label>` (the same shape the built-ins produce), or just `<label>` for a build-wide
-  * (`Once`) command. Scoping beyond the project axis (args, `+`, compound commands) goes through the `cmd"…"`
-  * interpolator or [[zipx.core.SbtCommand]]'s own combinators.
+  * [[zipx.core.SbtCommand]] stays text (validated not to corrupt the generated file, never parsed as sbt syntax) so
+  * core stays sbt-free and still expresses cross `+`, aliases, and compound `a; b`. A key renders to
+  * `<moduleId>/<label>`, or `<label>` for a build-wide (`Once`) command; anything beyond the project axis goes through
+  * `cmd"…"`.
   */
 object CapabilityTasks:
 
-  /** The sbt CLI label of a key (its attribute-key name), e.g. `scalafmtCheckAll`, `publish`, `test`. */
   private def label(key: Scoped): String = key.key.label
 
-  /** The config-axis prefix of a key, if any, rendered for the sbt CLI: `Docker / publish` → `"Docker/"`,
-    * `Compile / test` → `"Compile/"`, an unscoped key → `""`. sbt's slash syntax capitalizes the config name.
-    */
+  /** sbt's slash syntax capitalizes the config name: `Docker / publish` renders `Docker/`. */
   private def configPrefix(key: Scoped): String =
     key.scope.config match
       case sbt.Select(configKey) => configKey.name.capitalize + "/"
-      case _                     => "" // This / Zero, no explicit config axis
+      case _                     => ""
 
-  /** The CLI suffix for a key on a module, as text: `<label>` or `<Config>/<label>` (no project axis). */
   private def scopedLabelText(key: Scoped): String = s"${configPrefix(key)}${label(key)}"
 
   /** Honour the project axis: an explicit `core / publish` stays scoped to `core`, not re-prefixed by zipx. */
@@ -75,7 +65,6 @@ object CapabilityTasks:
       case axis =>
         sys.error(s"zipx: unsupported project ScopeAxis ${axis.getClass.getSimpleName} on '${scopedLabelText(key)}'")
 
-  /** Key as an unscoped-or-explicitly-scoped Task step (config axis in the label). */
   private def scopedLabel(key: Scoped): SbtCommand =
     SbtCommand.fromSteps(
       List(
@@ -87,7 +76,7 @@ object CapabilityTasks:
       )
     )
 
-  /** A per-module command from a task key: `<moduleId>/[<Config>/]<label>` (e.g. `service/Docker/publish`). */
+  /** Renders `<moduleId>/[<Config>/]<label>`, e.g. `service/Docker/publish`. */
   def moduleCommand(key: Scoped): ModuleNode => SbtCommand = n => SbtCommand.module(n, scopedLabel(key))
 
   /** A per-module command that cross-publishes when the module is cross-built (a single `+<id>/…` leg). */
@@ -97,7 +86,6 @@ object CapabilityTasks:
   type RunnableKey = TaskKey[?] | InputKey[?]
   type SessionPart = RunnableKey | sbt.Command | SbtCommand | Seq[SbtCommand]
 
-  /** Render a runnable key to an [[zipx.core.SbtCommand]] (honours project + config axes). */
   def of(key: RunnableKey): SbtCommand = key match
     case k: Scoped => scopedLabel(k)
 
@@ -128,7 +116,6 @@ object CapabilityTasks:
       SbtCommand.module(ModuleNode(id = id), of(task))
     }
 
-  /** Same task for each project. */
   def each(projects: Seq[Project], task: RunnableKey): List[SbtCommand] =
     projects.toList.map { p =>
       val id = ModuleId.make(p.id).fold(e => sys.error(s"zipx: $e"), identity)
@@ -154,7 +141,6 @@ object CapabilityTasks:
     case _                 =>
       sys.error(s"zipx: only/except need a named project reference; got ${ref.getClass.getSimpleName}")
 
-  /** Capability helpers that take real keys. */
   extension (cap: Capability)
     def running(key: RunnableKey): Capability          = cap.running(of(key))
     def runningEach(key: RunnableKey): Capability      = cap.runningEach(of(key))
@@ -162,27 +148,14 @@ object CapabilityTasks:
     def thenOnce(key: RunnableKey): Capability         = cap.thenOnce(of(key))
     def thenOnce(command: sbt.Command): Capability     = cap.thenOnce(of(command))
 
-  /** Render one splice for the `cmd"…"` interpolator against a module. A `Scoped` (task/input key) renders
-    * module-scoped and config-aware (`<id>/[<Config>/]<label>`); a `String` passes through verbatim (so you can splice
-    * a computed version, path, etc.). Called by the [[cmd]] macro with statically-checked argument types.
-    */
   def renderSplice(x: Any, n: ModuleNode): String = x match
     case k: Scoped => s"${n.id}/${scopedLabelText(k)}"
     case s: String => s
     case other     => other.toString // unreachable: the macro rejects other types at compile time
 
-  /** The `cmd"…"` interpolator's runtime half: validate everything the caller wrote, then return a *total* function.
-    *
-    * Validation happens here rather than per module because it can: a splice is a key or a plain `String`, neither of
-    * which depends on the `ModuleNode`, so every character of the result except the module id is known now. The id is a
-    * [[zipx.core.ModuleId]] and a key label is an sbt `AttributeKey` label, so both are already safe.
-    *
-    * `ShText` is the per-piece rule: no newline, no carriage return, no control characters, which is exactly what an
-    * [[zipx.core.SbtCommand]] forbids, minus the non-emptiness that applies to the whole and not to a part. Non-empty
-    * is therefore checked separately, and a key splice satisfies it by rendering `<id>/<label>`.
-    *
-    * `sys.error` is the sbt boundary's way of reporting, and this runs while a `build.sbt` setting is being evaluated,
-    * so the build fails naming the offending text rather than generating a workflow around it.
+  /** The `cmd"…"` interpolator's runtime half. No splice depends on the module, so all text but the module id is
+    * validated once here. Each piece must be `ShText` (the `SbtCommand` rule minus non-emptiness, which is checked on
+    * the whole). This runs while a `build.sbt` setting evaluates, so `sys.error` fails the build naming the bad text.
     */
   def commandFrom(parts: List[String], splices: List[Any]): ModuleNode => SbtCommand =
     val literalPieces = parts ++ splices.collect { case s: String => s }
@@ -191,8 +164,7 @@ object CapabilityTasks:
     }
     if literalPieces.forall(_.isEmpty) && !splices.exists(_.isInstanceOf[Scoped]) then
       sys.error("""zipx: cmd"…" produced an empty sbt command""")
-    // Total: every piece above is ShText, a module id and a key label add only safe characters, and the check above
-    // established that the result is non-empty.
+    // Safe: every literal piece is ShText, ids and key labels add only safe characters, and the result is non-empty.
     n => SbtCommand.unsafeBuilt(interleave(parts, splices.map(renderSplice(_, n))))
   end commandFrom
 
@@ -205,17 +177,11 @@ object CapabilityTasks:
     }
     sb.toString
 
-  /** The `cmd"…"` interpolator: write command *syntax* as literal text and splice typed keys (or strings) with `$`.
+  /** Command syntax as literal text, with typed keys or strings spliced via `$`.
     *
-    * Literal parts are emitted verbatim (so you carry `+`, `++<ver>`, compound `;`, and args). Each `${…}` splice is
-    * dispatched by its **static type**:
-    *   - a `TaskKey`/`InputKey` (`Scoped`) is compile-checked, config-aware, and rendered **module-scoped** as
-    *     `<moduleId>/[<Config>/]<label>`, exactly like the built-ins;
-    *   - a `String` is spliced verbatim (a computed version, path, secret ref, …).
-    *
-    * A macro enforces that every splice is one of those two types (any other is a compile error) and dispatches
-    * statically, so a renamed/removed key fails to compile. The result is a `ModuleNode => SbtCommand` for a capability
-    * `command`, validated once when the setting is evaluated rather than per module; see [[commandFrom]]:
+    * Literal parts are emitted verbatim (`+`, `++<ver>`, `;`, args). A key splice is compile-checked and renders
+    * module-scoped as `<moduleId>/[<Config>/]<label>`; a `String` splice is verbatim. Any other splice type is a
+    * compile error, so a renamed key fails to compile.
     *
     * {{{
     * cmd"+ \${testFull}"                          // n => s"+\${n.id}/testFull"
@@ -223,7 +189,7 @@ object CapabilityTasks:
     * cmd"\${Docker / publish}"                     // config axis preserved → <id>/Docker/publish
     * }}}
     *
-    * Splices are always module-scoped; for an explicitly cross-*project* command, use a plain string/lambda.
+    * Splices are always module-scoped; for an explicitly cross-project command, use a plain string or lambda.
     */
   extension (inline sc: StringContext)
     inline def cmd(inline args: Any*): ModuleNode => SbtCommand =
@@ -234,7 +200,6 @@ object CapabilityTasks:
     val spliceExprs: Seq[Expr[Any]] = args match
       case Varargs(es) => es
       case _           => report.errorAndAbort("cmd\"…\" requires literal splices", args)
-    // Validate each splice's static type is Scoped or String; keep the checked Expr for code-gen.
     spliceExprs.foreach { e =>
       val tpe = e.asTerm.tpe.widen
       if !(tpe <:< TypeRepr.of[Scoped] || tpe <:< TypeRepr.of[String]) then
@@ -243,12 +208,9 @@ object CapabilityTasks:
           e,
         )
     }
-    // Validation and interleaving both live in `commandFrom`, so this generates only the hand-off. That keeps the
-    // checking in ordinary Scala where it can be read and tested, rather than in generated code.
+    // Checking lives in `commandFrom`, plain Scala that can be tested; the macro only hands off.
     '{ CapabilityTasks.commandFrom(${ sc }.parts.toList, ${ Varargs(spliceExprs) }.toList) }
   end cmdMacro
-
-  // ---- Typed constructors mirroring Capability.{deploy,custom,once} but taking a key for the command ----
 
   /** [[zipx.core.Capability.deploy]] (Aggregate-by-target) with the deploy command given as a task key. */
   def deploy(
@@ -339,9 +301,7 @@ object CapabilityTasks:
       condition = condition,
     )
 
-  /** [[zipx.core.Capability.once]] with the single build-wide command given as a task key (rendered as its bare
-    * `<label>`).
-    */
+  /** [[zipx.core.Capability.once]] with its build-wide command given as a task key, rendered as the bare `<label>`. */
   def once(
       name: CapabilityName,
       command: Scoped,

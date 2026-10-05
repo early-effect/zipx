@@ -6,7 +6,6 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zio.test.*
 
-/** Cache backends and action pins. */
 object Caching extends DocSpecSuite:
 
   def doc = page("Caching")(
@@ -139,7 +138,7 @@ LocalDir passes `save` or `restore`, so the composite runs epoch-keyed `actions/
             case local :: sidecar :: managed :: Nil =>
               local.contains("cache-mode: save") &&
               !local.contains("actions/cache") &&
-              // Quoted, since a bare `off` is a YAML 1.1 boolean.
+              // Quoted, since a bare `off` can parse as a YAML boolean.
               sidecar.contains("cache-mode: \"off\"") &&
               managed.contains("cache-mode: \"off\"") &&
               !sidecar.contains("actions/cache") &&

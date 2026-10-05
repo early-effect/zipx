@@ -6,11 +6,8 @@ import zipx.workflow.{Expr, ExprLiteral, Step}
 enum AffectedMode:
   case Always, AffectedOnPR
 
-/** The workflow's `name:`, which is also the first segment of its `concurrency` group so sibling workflows never
-  * contend.
-  *
-  * Single-line and control-character-free, because both of those positions are YAML scalars zipx emits without quoting.
-  * Nothing narrower: a workflow name is display text, so spaces and punctuation are the point.
+/** The workflow's `name:`, also the first segment of its `concurrency` group so sibling workflows never contend.
+  * Single-line and control-character-free because zipx emits both positions unquoted; spaces and punctuation are fine.
   */
 type WorkflowName = WorkflowName.Type
 object WorkflowName extends Subtype[String]:
@@ -21,12 +18,7 @@ object WorkflowName extends Subtype[String]:
       "a workflow name must not contain control characters"
     else true
 
-/** A `runs-on` label, as in `ubuntu-latest`, `macos-14` or a self-hosted label.
-  *
-  * Constrained to [[PlanText.KeySegment]] rather than merely to printable text because the same value is the leading
-  * segment of every `actions/cache` key: a comma there would split one key into two, and whitespace would make the
-  * restore-keys list ambiguous. GitHub's own labels satisfy this, and so does every conventional self-hosted one.
-  */
+/** A `runs-on` label. Constrained to [[PlanText.KeySegment]] because it also leads every `actions/cache` key. */
 type RunnerOs = RunnerOs.Type
 object RunnerOs extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -34,13 +26,9 @@ object RunnerOs extends Subtype[String]:
     else if input.matches(PlanText.KeySegment) then true
     else s"invalid runner label '$input': allowed characters are letters, digits and . _ -"
 
-/** A `setup-java` `java-version` value: `21`, `21.0.2`, `17.0.11+9`, `21-ea`.
+/** A `setup-java` `java-version`, build number and `temurin@` forms included. Also a cache-key segment.
   *
-  * Also a cache-key segment, so [[PlanText.VersionSegment]] is [[PlanText.KeySegment]] plus the `+` a build number uses
-  * and the `@` of setup-java's `temurin@21` form.
-  *
-  * Named `JdkVersion` and not `JavaVersion` because sbt 2.0 has a `sbt.JavaVersion` of its own, and the plugin
-  * re-exports this one into `build.sbt`'s scope: two `JavaVersion`s there is an ambiguous reference, not a shadow.
+  * Not `JavaVersion`: the plugin re-exports this into `build.sbt`, where `sbt.JavaVersion` would make it ambiguous.
   */
 type JdkVersion = JdkVersion.Type
 object JdkVersion extends Subtype[String]:
@@ -49,11 +37,7 @@ object JdkVersion extends Subtype[String]:
     else if input.matches(PlanText.VersionSegment) then true
     else s"invalid java version '$input': allowed characters are letters, digits and . _ - + @"
 
-/** A `setup-node` `node-version` value: `22`, `22.11.0`, `latest`, or an `lts` alias.
-  *
-  * The same character set as [[JdkVersion]] plus the slash and star an `lts` alias needs. Unlike a JDK version this
-  * never reaches a cache key, so the segment rules do not apply.
-  */
+/** A `setup-node` `node-version`, `latest` and `lts` aliases included. Never part of a cache key. */
 type NodeVersion = NodeVersion.Type
 object NodeVersion extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -61,9 +45,7 @@ object NodeVersion extends Subtype[String]:
     else if input.matches(PlanText.NodeVersionSegment) then true
     else s"invalid node version '$input': allowed characters are letters, digits and . _ - + @ / *"
 
-/** Patterns as `inline val` Strings so `validate` can evaluate them while a consumer's build compiles, the same
-  * arrangement as `zipx.workflow.Names`.
-  */
+/** `inline val` patterns so `validate` can evaluate them while a consumer's build compiles. */
 object PlanText:
 
   /** One segment of an `actions/cache` key: no whitespace (the restore-keys list is newline-separated) and no comma
@@ -71,76 +53,55 @@ object PlanText:
     */
   inline val KeySegment = "[A-Za-z0-9._-]+"
 
-  /** [[KeySegment]] plus `+` and `@`, which version strings use. */
   inline val VersionSegment = "[A-Za-z0-9._+@-]+"
 
-  /** [[VersionSegment]] plus the slash and star of setup-node's `lts` aliases. */
   inline val NodeVersionSegment = "[A-Za-z0-9._+@*/-]+"
 end PlanText
 
-/** What the planner needs that the module graph cannot supply: triggers, matrix axes, cache choice, action pins. Module
-  * identity and edges are always derived from the build.
+/** What the planner needs that the module graph cannot supply: triggers, matrix axes, cache choice, action pins.
   *
   * @param affectedOnPush
-  *   restricts pushes as well as PRs to affected modules, by diffing against the push `before` sha. Off by default,
-  *   because a bad `before` (a force-push, a branch's first push) would silently under-build. Tags always build all.
+  *   gates pushes on affected modules by diffing against `before`. Off by default: a force-push or a branch's first
+  *   push has a bad `before` and would silently under-build. Tags always build all.
   * @param affectedPublish
-  *   extends affected-gating to [[Phase.Publish]] jobs under [[CapabilityScope.Graph]], so one changed module does not
-  *   rebuild and push every image. A separate knob from [[affected]] rather than a widening of it, because the two
-  *   phases carry opposite risks: **under-verifying is silently unsafe** (a green PR whose code was never tested),
-  *   while **under-publishing is loudly broken** (the deploy that wants the missing artifact fails immediately). One
-  *   switch for both would price Publish's narrowing at Verify's risk. Off by default. Fail-open carries over
-  *   unchanged, and a release tag always publishes everything.
+  *   affected-gates [[Phase.Publish]] Graph jobs. Separate from [[affected]] because under-verifying is silently unsafe
+  *   while under-publishing fails loudly. A release tag always publishes everything.
   * @param affectedDeploy
-  *   extends affected-gating to [[Phase.Deploy]] jobs under [[CapabilityScope.Graph]], so a deploy skips exactly when
-  *   the publish it consumes skipped. Its own knob rather than a widening of [[affectedPublish]], because narrowing
-  *   image pushes while still reconciling every destination on every run is a legitimate combination, and one switch
-  *   would take it away. Off by default: a deploy that does not run leaves a destination on its previous version, which
-  *   is correct only when that module's artifacts really are unchanged.
+  *   affected-gates [[Phase.Deploy]] Graph jobs, so a deploy skips when its publish skipped. Separate from
+  *   [[affectedPublish]] so narrowed pushes can still reconcile every destination on every run.
   *
-  * An [[CapabilityScope.Aggregate]] or [[CapabilityScope.Layer]] deploy is never gated by this and cannot be: its one
-  * job spans every participating module, so there is no per-module decision available. Such a deploy paired with an
-  * affected-gated Graph publish is therefore rejected outright rather than gated (see `Planner.validateCapabilities`),
-  * because it would run alongside a skipped publish and reference an artifact nobody built.
+  * An Aggregate or Layer deploy spans every module, so it cannot be gated; pairing one with an affected-gated Graph
+  * publish is rejected (`Planner.validateCapabilities`) because it would deploy an artifact nobody built.
   * @param cacheEpoch
-  *   how [[CacheBackend.LocalDir]] picks its commit-stable cache namespace: mid-PR commits share hits and a release tag
-  *   rolls the namespace. Prefer the runtime-tag default so keys stay fresh without regenerating the workflow.
+  *   how [[CacheBackend.LocalDir]] picks its namespace: mid-PR commits share hits, a release tag rolls it.
   * @param actions
-  *   catalog [[Action]] rows overlay [[ActionPins.Defaults]]; set this only for a one-off hatch. YAML is jar/generate
-  *   output, not an input.
+  *   catalog [[Action]] rows overlay [[ActionPins.Defaults]]; set this only for a one-off hatch.
   * @param skipMergedPrPush
-  *   skips Verify on a branch push whose commit already belongs to a PR merged into that branch, so tests do not run
-  *   twice after a merge. Direct pushes still run, as do PRs, tags and `workflow_dispatch`.
+  *   skips Verify on a branch push whose commit belongs to a PR already merged into that branch.
   * @param cacheRehydrateOnMerge
-  *   emits a minimal `cache-rehydrate` job that runs exactly when [[skipMergedPrPush]] skips Verify, recreating a
-  *   default-branch `actions/cache` save so the next PR can restore from main. GitHub does not share PR-scoped caches
-  *   across refs. Inert for remote backends and when skip-on-merge is off.
+  *   when [[skipMergedPrPush]] skips Verify, a minimal job re-saves the default-branch `actions/cache` entry, since
+  *   GitHub does not share PR-scoped caches across refs. Inert for remote backends.
   * @param cacheRehydrateTask
   *   not a full Verify: no `zipxTestTask` and no [[verifyClean]].
   * @param cacheRehydrateExtraSteps
-  *   runs after the LocalDir restore and before [[cacheRehydrateTask]]. Deliberately *not* copied from Verify
-  *   capabilities; naming the same [[Steps]] bundle in both places is how you get parity without duplicating a lambda.
+  *   runs after the LocalDir restore. Not copied from Verify; name the same [[Steps]] bundle in both for parity.
   * @param cacheRehydrateEnv
   *   overlays [[env]] and wins on a key clash.
   * @param env
-  *   overlaid in turn by capability and target env. Not applied to reusable-workflow caller jobs
-  *   ([[Capability.workflowCall]]), since GHA forbids job-level `env` alongside `uses:`.
+  *   overlaid by capability and target env. Not applied to [[Capability.workflowCall]] jobs: GHA forbids job-level
+  *   `env` alongside `uses:`.
   * @param verifyCleanLabel
-  *   prepends `cleanFull` at workflow runtime when the PR carries this label. That is sbt's output directory, not the
-  *   LocalDir restore: see [[cachePurgeLabel]]. Ignored when [[verifyClean]] is already set; `None` disables the check.
-  *   An [[zipx.workflow.ExprLiteral]] because the label is emitted between `'…'` inside `contains(…)`, where GitHub
-  *   offers no escaping, so a label containing a quote must be unrepresentable rather than reported at generate time.
+  *   a PR with this label prepends `cleanFull` (sbt outputs, not the LocalDir restore). Ignored when [[verifyClean]] is
+  *   set. An [[zipx.workflow.ExprLiteral]] because GitHub cannot escape a quote inside `contains('…')`.
   * @param cachePurgeLabel
-  *   when the `pull_request` payload carries this label, every LocalDir sbt job skips restore. A save owner still
-  *   saves, with no restore-keys, so the new entry does not fall back onto the one being dropped. `None` disables. Same
-  *   payload rule as [[verifyCleanLabel]].
+  *   a PR with this label skips every LocalDir restore; the save owner saves without restore-keys so the new entry does
+  *   not fall back onto the dropped one.
   * @param cancelSupersededRuns
-  *   emits workflow-level `concurrency` keyed on ref, so pushing again to a PR cancels the running build. Release-tag
-  *   runs are never cancelled: the group folds in the ref, and a half-cancelled publish is worse than a wasted runner.
+  *   ref-keyed workflow `concurrency`, so a new push cancels the running build. Release-tag runs are never cancelled.
   * @param matrixCollapse
-  *   per-capability defaults for [[MatrixCollapse]]; capability [[Capability.matrixCollapse]] overrides these.
+  *   per-capability defaults; [[Capability.matrixCollapse]] overrides these.
   * @param defaultMatrixCollapse
-  *   used when neither the capability nor [[matrixCollapse]] names a mode. [[MatrixCollapse.Auto]] by default.
+  *   used when neither the capability nor [[matrixCollapse]] names a mode.
   */
 final case class PlanConfig(
     workflowName: WorkflowName = PlanConfig.DefaultWorkflowName,
@@ -182,18 +143,12 @@ object PlanConfig:
   val DefaultVerifyCleanLabel: ExprLiteral = ExprLiteral("clean")
   val DefaultCachePurgeLabel: ExprLiteral  = ExprLiteral("purge")
 
-  /** `github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, '<label>')`.
-    *
-    * The label is whatever that event's payload holds. `ci.yml` does not run on `labeled`, and a rerun repeats the
-    * payload the run started with.
-    */
+  /** Reads the event payload: `ci.yml` does not run on `labeled`, and a rerun repeats the payload it started with. */
   def pullRequestHasLabel(label: ExprLiteral): Expr =
     (Expr.github("event_name") === Expr.quoted("pull_request")) &&
       Expr.contains(Expr.github("event.pull_request.labels.*.name"), Expr.Quoted(label))
 
-  /** Wire-form placeholder for planner unit tests; the sbt plugin always overwrites from zipxTasks.of. Not an sbt API
-    * surface.
-    */
+  /** Placeholder for planner unit tests; the plugin always overwrites it from `zipxTasks`. */
   val DefaultCacheRehydrateTask: SbtCommand = SbtCommand.unsafeTask("Test/compile")
 
   inline def verifyCleanLabel(inline label: String): Option[ExprLiteral] = Some(ExprLiteral(label))

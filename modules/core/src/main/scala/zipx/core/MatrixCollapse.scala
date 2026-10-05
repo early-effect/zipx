@@ -13,22 +13,19 @@ import scala.collection.immutable.ListMap
   *   - [[MatrixCollapse.Coarse]]: collapse even when that drops Graph same-capability `needs` (GHA cannot express
   *     per-leg needs); still errors on non-isomorphic templates.
   *
-  * Resolution is cascading: [[Capability.matrixCollapse]] wins over [[PlanConfig.matrixCollapse]], else
-  * [[MatrixCollapse.Auto]].
+  * Resolution: [[Capability.matrixCollapse]], then [[PlanConfig.matrixCollapse]], else
+  * [[PlanConfig.defaultMatrixCollapse]].
   */
 enum MatrixCollapse:
   case Off, Auto, Strict, Coarse
 
 object MatrixCollapse:
 
-  /** Capability override, then plan allowlist, else [[PlanConfig.defaultMatrixCollapse]] ([[MatrixCollapse.Auto]]). */
   def effective(capability: Capability, config: PlanConfig): MatrixCollapse =
     capability.matrixCollapse
       .orElse(config.matrixCollapse.get(capability.name))
       .getOrElse(config.defaultMatrixCollapse)
 
-  /** Generate-time notes for [[MatrixCollapse.Coarse]] Graph collapses that drop same-capability inter-module `needs`.
-    */
   def warnings(capabilities: List[Capability], graph: ModuleGraph, config: PlanConfig): List[String] =
     capabilities.flatMap { c =>
       effective(c, config) match
@@ -41,7 +38,6 @@ object MatrixCollapse:
         case _ => None
     }
 
-  /** True when any participating module would `needs` another participant's same-capability job. */
   def hasSameCapInterModuleNeeds(capability: Capability, nodes: List[ModuleNode], graph: ModuleGraph): Boolean =
     nodes.exists { node =>
       val upstream = capability.ordering match
@@ -53,8 +49,7 @@ object MatrixCollapse:
       upstream.nonEmpty
     }
 
-  /** Soft feasibility for [[Auto]]: collapse Graph only when needs would not be dropped and templates are isomorphic.
-    */
+  /** Soft feasibility for [[Auto]]: no dropped `needs` and isomorphic templates. */
   def graphCollapseFeasible(capability: Capability, graph: ModuleGraph): Boolean =
     val nodes = graph.nodes.filter(capability.participates)
     if nodes.isEmpty then false
@@ -87,7 +82,6 @@ object MatrixCollapse:
     go(List(node.id), Nil, Set.empty)
   end nearestParticipatingAncestors
 
-  /** Rewrite module-scoped [[SbtStep.Task]]s to [[TaskScope.MatrixModule]]. */
   def underMatrixModule(node: ModuleNode, command: SbtCommand): Either[String, SbtCommand] =
     val id      = node.id
     var matched = false
@@ -119,7 +113,6 @@ object MatrixCollapse:
             )
       }
 
-  /** How target fan-out should be encoded once collapse is chosen. */
   enum TargetMatrix:
     case Simple
     case Include
@@ -132,8 +125,8 @@ object MatrixCollapse:
         case Right(_) => Right(TargetMatrix.Simple)
         case Left(_)  => targetsAllowIncludeMatrix(targets).map(_ => TargetMatrix.Include)
 
-  /** Targets are simple-matrix-safe when environment is absent or equals the target name (so
-    * `environment: $${{ matrix.target }}` works without `matrix.include`).
+  /** Safe when every environment is absent or equals the target name, so `environment: ${{ matrix.target }}` works
+    * without `matrix.include`.
     */
   def targetsAllowSimpleMatrix(targets: List[Target]): Either[String, Unit] =
     val badEnv = targets.filter(t => t.environment.exists(_ != (t.name: String)))

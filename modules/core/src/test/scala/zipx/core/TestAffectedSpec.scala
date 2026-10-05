@@ -8,7 +8,6 @@ object TestAffectedSpec extends ZIOSpecDefault:
 
   private val full = SbtCommand.unsafeTask("testFull")
 
-  /** The sample graph plus the root aggregator a real build has, which the plugin marks CI-irrelevant. */
   private val graph = GraphFixture(
     ModuleNode(ModuleId("root"), ciRelevant = false) :: sampleGraph.nodes
   )
@@ -21,7 +20,6 @@ object TestAffectedSpec extends ZIOSpecDefault:
   private def plan(aggregated: Set[String], affected: List[String]): TestAffected.Run =
     TestAffected.plan(full, graph, aggregated.map(ModuleId.unsafeMake), affected)
 
-  /** The session text and modules a narrowed run tests; `None` when it tested everything. */
   private def narrowed(run: TestAffected.Run): Option[(String, List[String])] = run match
     case TestAffected.Run.Everything(_)             => None
     case TestAffected.Run.Nothing                   => Some("" -> Nil)

@@ -3,11 +3,7 @@ package zipx.core
 import zipx.workflow.{Expr, ExprLiteral}
 import zio.test.*
 
-/** Publish waits on every Verify job through one roll-up, not on `test` alone.
-  *
-  * The heddle shape this closes: `test`, `test-js`, `test-native`, and `fmt` are siblings, and `snapshots` used to need
-  * only `test`.
-  */
+/** Publish waits on every Verify job through one roll-up, not on `test` alone. */
 object VerifyRollupSpec extends ZIOSpecDefault:
   import Fixtures.sampleGraph
 

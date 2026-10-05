@@ -5,7 +5,6 @@ import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zio.test.*
 
-/** GitHub Action SHA pins as catalog rows. YAML is generate/jar output, never an input. */
 object ActionPinsDoc extends DocSpecSuite:
 
   def doc = page("Action pins")(

@@ -1,6 +1,4 @@
-// The catalog states a module's revision for the whole build. The app depends only on libraries; the module they bring
-// is the catalog's, on the JVM and on Scala.js. The registry is static POMs, so update needs no jars and no network.
-// Each scenario swaps the catalog for one that gains or loses rows; build.sbt never changes and never goes stale.
+// The registry is static POMs, so update needs no jars and no network. Scenarios swap only the catalog.
 MyVersions.settings
 zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 ThisBuild / resolvers += "catalog-wins" at file("registry").getAbsoluteFile.toURI.toString

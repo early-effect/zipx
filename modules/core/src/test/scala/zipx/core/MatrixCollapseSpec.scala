@@ -4,7 +4,6 @@ import zipx.core.Rendered.yaml
 import zipx.workflow.Render
 import zio.test.*
 
-/** Every [[MatrixCollapse]] mode against Graph / Aggregate / Layer, including Auto soft-fail and include matrices. */
 object MatrixCollapseSpec extends ZIOSpecDefault:
   import Fixtures.*
 
@@ -95,12 +94,10 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
   private val gTargetName: Gen[Any, TargetName] =
     Gen.elements(TargetName("prod"), TargetName("staging"), TargetName("eu"), TargetName("us"))
 
-  /** Simple-matrix-safe: environment equals name (or absent). */
   private val gSimpleTargets: Gen[Any, List[Target]] =
     for names <- Gen.listOfBounded(2, 4)(gTargetName).map(_.distinctBy(n => n: String)).filter(_.sizeIs >= 2)
     yield names.map(name => Target(name, environment = Some(name)))
 
-  /** Include-matrix-safe: environment differs from name; shared env keys and no conditions. */
   private val gIncludeTargets: Gen[Any, List[Target]] =
     for names <- Gen.listOfBounded(2, 4)(gTargetName).map(_.distinctBy(n => n: String)).filter(_.sizeIs >= 2)
     yield names.zipWithIndex.map { (name, i) =>
@@ -111,7 +108,6 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
       )
     }
 
-  /** Collapse-refused: same env keys but differing conditions. */
   private val gIncompatibleTargets: Gen[Any, List[Target]] =
     for names <- Gen.listOfBounded(2, 3)(gTargetName).map(_.distinctBy(n => n: String)).filter(_.sizeIs >= 2)
     yield names.zipWithIndex.map { (name, i) =>
@@ -447,8 +443,7 @@ object MatrixCollapseSpec extends ZIOSpecDefault:
         )
       },
       test("collapsed Graph Publish cannot fromJson a skipped affected job") {
-        // Production shape: job-level `modules != '[]'`, step-level `contains(fromJson(...), matrix.module)`.
-        // GitHub's skipped-job output is `""`, not `'[]'`, so `!= '[]'` does not protect a step `fromJson`.
+        // A skipped job's outputs read `""`, not `'[]'`, so a job-level `!= '[]'` does not protect a step's `fromJson`.
         val cfg = baseConfig.copy(
           affected = AffectedMode.AffectedOnPR,
           affectedPublish = true,

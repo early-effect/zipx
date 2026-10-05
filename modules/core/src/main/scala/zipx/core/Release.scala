@@ -29,16 +29,12 @@ enum BuildSession:
     case PullRequestSnapshot(pr) => s"pr-$pr"
     case Release                 => "release"
 
-  /** What a development or test session compiles. Stable across commits, so action-cache digests hold. A publish
-    * session's `version` is [[artifactVersion]], the coordinate the repository stores.
-    */
+  /** Stable across commits, so action-cache digests hold. A publish session's `version` is [[artifactVersion]]. */
   def versionOf(row: PublishedRow): String = this match
     case Release => row.version
     case _       => s"${row.version}${BuildSession.CompileSuffix}"
 
-  /** The `version` a session actually sets. Development stays on [[versionOf]]. A snapshot session publishes the git
-    * id. The sbt setting turns a `Left` into `zipx: …`; core keeps the error.
-    */
+  /** The `version` a session sets; a snapshot session publishes the git id. */
   def artifactVersion(row: PublishedRow, props: collection.Map[String, String]): Either[SnapshotRevisionError, String] =
     this match
       case Release | Development                    => Right(versionOf(row))
@@ -51,7 +47,7 @@ enum BuildSession:
 end BuildSession
 
 object BuildSession:
-  /** Development and test sessions compile this suffix. It is not published. */
+  /** Compiled by development and test sessions; never published. */
   val CompileSuffix: String = "-ci"
 
   /** A JVM property, because sbt drops session settings when `++` / `+` switch Scala versions. */
@@ -230,7 +226,6 @@ object ReleasePlan:
       case RowStatus.Released         => Left(ReleaseError.AlreadyReleased(row))
       case RowStatus.Partial(missing) => Left(ReleaseError.PartiallyReleased(row, missing))
 
-  /** Named ships only. A name the catalog does not have, or a named ship already released, fails before upload. */
   private def selected(
       names: ::[String],
       rows: List[PublishedRow],

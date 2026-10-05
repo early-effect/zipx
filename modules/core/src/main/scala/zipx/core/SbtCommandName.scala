@@ -2,10 +2,8 @@ package zipx.core
 
 import neotype.Subtype
 
-/** A single sbt command name the build defines (built-in, plugin `commands +=`, or `addCommandAlias`).
-  *
-  * Narrower than sbt's own `Command.validID` (which allows operator names): identifier-shaped only so generate-time
-  * checks stay a set membership test. Operator commands go through [[SbtStep.Built]].
+/** Narrower than sbt's `Command.validID` so generate-time checks stay a set membership test; operator commands go
+  * through [[SbtStep.Built]].
   */
 type SbtCommandName = SbtCommandName.Type
 object SbtCommandName extends Subtype[String]:

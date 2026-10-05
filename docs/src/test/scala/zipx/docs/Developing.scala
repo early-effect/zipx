@@ -3,7 +3,6 @@ package zipx.docs
 import specular.*
 import specular.ziotest.DocSpecSuite
 
-/** Contributing to zipx itself. */
 object Developing extends DocSpecSuite:
 
   def doc = page("Developing")(

@@ -36,7 +36,6 @@ enum ArtifactRegistry:
   /** The host a snapshot publish authenticates to. A `file:` registry has none. */
   def credentialHost: Option[String] = ArtifactRegistry.httpHost(snapshotRepository)
 
-  /** Every HTTP host a publish to this registry authenticates to. Snapshot and release hosts both, when they differ. */
   def publishHosts: List[String] =
     (credentialHost.toList ++ releaseRepository.toList.flatMap(ArtifactRegistry.httpHost)).distinct
 

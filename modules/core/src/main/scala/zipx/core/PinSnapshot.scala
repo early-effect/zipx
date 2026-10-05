@@ -55,7 +55,6 @@ object PinSnapshot:
     ).toJson
   end render
 
-  /** POST the snapshot to GitHub's Dependency Submission API. Tests never call this. */
   def submit(
       token: String,
       repository: String,

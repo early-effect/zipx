@@ -7,20 +7,20 @@ import zipx.shell.SquoteText
 import zipx.shell.Word
 import zipx.workflow.Expr
 
-/** Where a task command runs. [[TaskScope.MatrixModule]] exists because a collapsed matrix leg addresses its module
-  * through an expression, which is not a [[ModuleId]].
+/** [[TaskScope.MatrixModule]] exists because a collapsed matrix leg addresses its module through an expression, not a
+  * [[ModuleId]].
   */
 enum TaskScope:
   case Unscoped
   case Module(id: ModuleId)
   case MatrixModule
 
-/** One element of an sbt session: what sits between two `;`. Provenance is per step. */
+/** What sits between two `;` of an sbt session. */
 enum SbtStep:
   /** A task/key label zipx scopes itself: renders `[+][<scope>/]<label>`. */
   case Task(label: SbtCommandText, scope: TaskScope, cross: Boolean)
 
-  /** A command sbt (a plugin, or `addCommandAlias`) defines by name — checkable at generate time. */
+  /** A command sbt (a plugin, or `addCommandAlias`) defines by name, checkable at generate time. */
   case Named(name: SbtCommandName)
 
   /** Text zipx composed but does not model (a `++<ver>` switch, a `cmd"…"` result). Safe, unparsed, not warned. */
@@ -41,14 +41,8 @@ enum SbtStep:
     case SbtStep.Raw(text)   => text: String
 end SbtStep
 
-/** An sbt command a job runs: a non-empty list of [[SbtStep]]s joined by `; `.
-  *
-  * Provenance is per step so a typed task next to a raw fragment reports exactly one raw fragment, and
-  * [[SbtCommand.module]] scopes only unscoped [[SbtStep.Task]] steps (so `core/a; b` is unrepresentable).
-  *
-  * Core does not publicly encode sbt command/task name strings: sbt owns its API. Wire-form helpers (`unsafeTask`,
-  * `unsafeCommand`, `unsafeBuilt`, `fromSteps`) are `private[zipx]` for the plugin, packs, and tests. Authors use
-  * `zipxTasks.of` / `session` in the plugin.
+/** Steps joined by `; `. Provenance is per step, so a typed task next to a raw fragment reports exactly one raw
+  * fragment. sbt owns its names, so the wire-form helpers are `private[zipx]`; authors use `zipxTasks.of` / `session`.
   */
 final case class SbtCommand private (steps: List[SbtStep]):
   def text: SbtCommandText =
@@ -76,7 +70,7 @@ object SbtCommand:
   def raw(text: String): Either[String, SbtCommand] =
     SbtCommandText.make(text).map(t => fromSteps(List(SbtStep.Raw(t))))
 
-  /** `a; b; c` in one session. Head + varargs, so it is total where [[join]] must be `Option`. */
+  /** Head plus varargs, so it is total where [[join]] must be `Option`. */
   def session(first: SbtCommand, rest: SbtCommand*): SbtCommand =
     rest.foldLeft(first)((acc, next) => acc.andThen(next))
 
@@ -85,7 +79,6 @@ object SbtCommand:
       case Nil          => None
       case head :: tail => Some(session(head, tail*))
 
-  /** A module-scoped task: scopes only unscoped [[SbtStep.Task]] steps; leaves Named/Raw/Built/already-scoped alone. */
   def module(node: ModuleNode, task: SbtCommand): SbtCommand =
     fromSteps(task.steps.map {
       case SbtStep.Task(label, TaskScope.Unscoped, cross) =>
@@ -93,7 +86,6 @@ object SbtCommand:
       case other => other
     })
 
-  /** [[module]] plus `cross = true` on the steps it scoped when the module is cross-built. */
   def crossModule(node: ModuleNode, task: SbtCommand): SbtCommand =
     val scoped = module(node, task)
     if node.crossScalaVersions.sizeIs > 1 then
@@ -104,7 +96,7 @@ object SbtCommand:
       })
     else scoped
 
-  /** A cross-version switch ahead of a command: `++X; a; b` so a compound session is unambiguous. */
+  /** `++X; a; b`: the switch is its own step, so a compound session stays unambiguous. */
   def underScalaVersion(version: Expr, command: SbtCommand): SbtCommand =
     val switch = SbtStep.Built(SbtCommandText.unsafeMake(s"++${version.render}"))
     fromSteps(switch :: command.steps)

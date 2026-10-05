@@ -5,10 +5,8 @@ import java.time.Duration
 /** Versions from Maven-style `maven-metadata.xml`: Maven Central, then the sbt plugin repo for [[Plugin]] rows. */
 object MavenMetadata:
 
-  /** Read over HTTP. */
   val releases: ReleaseLookup = lookup(fetchVersions)
 
-  /** The lookup with its fetch supplied. */
   private[core] def lookup(fetch: String => Either[String, Option[List[String]]]): ReleaseLookup =
     (coord, artifact) => firstHit(metadataUrls(coord, artifact), fetch)
 
@@ -37,7 +35,6 @@ object MavenMetadata:
         Right(None)
       case Right(res) => Left(s"lookup $url: HTTP ${res.status}")
 
-  /** Every version the metadata lists, in its order. */
   def versionsIn(xml: String): List[String] =
     raw"<version>([^<]+)</version>".r.findAllMatchIn(xml).map(_.group(1).trim).toList
 

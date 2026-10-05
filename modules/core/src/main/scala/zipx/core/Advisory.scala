@@ -22,7 +22,6 @@ final case class Advisory(id: String, severity: AdvisorySeverity, summary: Strin
 trait AdvisorySource:
   def advisories(purl: Purl, version: String): Either[String, List[Advisory]]
 
-/** OSV HTTP client. Tests inject a fake [[AdvisorySource]] and never construct this. */
 final class OsvAdvisorySource(
     endpoint: URI = URI.create("https://api.osv.dev/v1/query")
 ) extends AdvisorySource:
@@ -52,8 +51,6 @@ object OsvAdvisorySource:
   private[core] def queryBody(purl: Purl, version: String): String =
     Query(Pkg(purl), version).toJson
 
-  /** Pulls `id`, `summary`, and a severity token out of an OSV query response. Empty or missing `vulns` is no finding.
-    */
   private[core] def parseResponse(json: String): Either[String, List[Advisory]] =
     json.fromJson[Response] match
       case Left(err)  => Left(s"osv: $err")

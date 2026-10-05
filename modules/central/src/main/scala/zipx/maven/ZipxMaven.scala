@@ -2,23 +2,10 @@ package zipx.maven
 
 import zipx.core.*
 
-/** A Maven repository with its own snapshot URL and release URL: Artifactory, CodeArtifact, Nexus, or any other layout
-  * that splits them. Unsigned `publish`. Signing stays on [[zipx.central.ZipxCentral.releases]] unless a build adds it.
+/** Any registry that splits snapshot and release URLs (Artifactory, CodeArtifact, Nexus). Publishes unsigned.
   *
-  * Minting a CodeArtifact token is a workflow step the build adds, the same way Central imports a signing key. This
-  * registry does not learn AWS. A registry that wants a fixed username (`aws`) uses the username/password constructor
-  * with `username = EnvValue.plain("aws")`.
-  *
-  * {{{
-  * zipxReleaseWorkflow := Some(
-  *   ZipxMaven.releases(
-  *     snapshots = "https://acme.artifactory.example/maven-snapshots",
-  *     releases  = "https://acme.artifactory.example/maven-releases",
-  *     username  = secret"MAVEN_USERNAME",
-  *     password  = secret"MAVEN_PASSWORD",
-  *   )
-  * )
-  * }}}
+  * A CodeArtifact token is minted by a workflow step the build adds; this registry does not learn AWS. A fixed username
+  * such as `aws` goes through `username = EnvValue.plain("aws")`.
   */
 object ZipxMaven:
 

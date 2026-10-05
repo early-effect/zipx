@@ -7,21 +7,19 @@ import scala.collection.immutable.ListMap
 
 /** Opt-in GitHub App installation token so companion PRs are not authored by `github-actions[bot]`.
   *
-  * Unset [[AppId]] / [[AppKey]]: checkout and `gh` keep `GITHUB_TOKEN` (GitHub holds `pull_request` CI for approval).
-  * Both set: mint before checkout; the PR author is the App, a write collaborator. Exactly one set: the detect step
-  * fails with a `zipx:` error rather than falling through.
+  * Neither [[AppId]] nor [[AppKey]] set keeps `GITHUB_TOKEN` (GitHub then holds `pull_request` CI for approval). Both
+  * set mints before checkout and the App authors the PR. Exactly one set fails the detect step.
   *
-  * Not a local `zipx-*` composite. Mint must run before checkout, and GitHub resolves `./.github/actions/…` from the
-  * workspace. The action is a major tag, like companion checkout, because the bot cannot push repo-root workflow SHA
-  * edits. `secrets.*` cannot be used in `if:`; detect copies the secrets into step env and writes a non-secret output.
+  * Not a local `zipx-*` composite: mint runs before checkout, and `./.github/actions/…` resolves from the workspace.
+  * The action is a major tag because the bot cannot push repo-root workflow SHA edits. `secrets.*` cannot appear in
+  * `if:`, so detect copies the secrets into step env and writes a non-secret output.
   *
-  * Job-level `env.GITHUB_TOKEN` is evaluated before steps, so it cannot see the mint output. Export writes
-  * `GITHUB_TOKEN` / `GH_TOKEN` to `GITHUB_ENV` for `gh pr create`. `EnvName` rejects the `GITHUB_` prefix, so that
-  * write is a `run:` script, not `Step.withEnv`.
+  * Job-level `env` is evaluated before steps and cannot see the mint output, so export writes `GITHUB_TOKEN` /
+  * `GH_TOKEN` to `GITHUB_ENV` from a `run:` script (`EnvName` rejects the `GITHUB_` prefix).
   */
 object CompanionAuth:
 
-  /** Org secret plus the step-env copy of the same name. [[AppSecret.named]] inlines the literal into each newtype. */
+  /** Org secret plus the step-env copy of the same name. */
   final case class AppSecret(name: SecretName, env: EnvName, expr: Expr, quoted: Word.Dquote)
 
   object AppSecret:

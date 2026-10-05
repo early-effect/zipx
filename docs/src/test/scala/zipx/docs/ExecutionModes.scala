@@ -5,7 +5,6 @@ import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zio.test.*
 
-/** Aggregate, Layer, and Graph: stay on Aggregate until you have a reason not to. */
 object ExecutionModes extends DocSpecSuite:
 
   def doc = page("Execution modes")(

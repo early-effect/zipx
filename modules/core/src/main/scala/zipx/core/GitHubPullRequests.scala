@@ -20,7 +20,6 @@ object GitHubPullRequests:
         Right(Request(q, Variables(owner, name, sha)).toJson)
       case _ => Left(s"zipx: GITHUB_REPOSITORY '$repository' is not owner/name")
 
-  /** [[query]], sent to GitHub's GraphQL endpoint, then [[parse]]. */
   def mergedLabels(
       repository: String,
       token: String,

@@ -3,9 +3,8 @@ package zipx.plugin
 import sbt.State
 import zipx.core.{SnapshotPins, ZipxCoord}
 
-/** sbt keeps every dependency resolution for the life of the JVM (sbt/sbt#6512), so in a long-lived shell a republished
-  * snapshot's new dependencies stay invisible even with a forced `update`. While a snapshot is pinned, `reload` and
-  * `clean` forget them.
+/** sbt caches every resolution for the JVM's life (sbt/sbt#6512), so a republished snapshot's new dependencies stay
+  * invisible even to a forced `update`. While a snapshot is pinned, `reload` and `clean` clear that cache.
   */
 private[plugin] object ResolutionCache:
 

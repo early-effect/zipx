@@ -7,7 +7,6 @@ import zipx.docs.DocsFixtures.*
 import zipx.workflow.Cron
 import zio.test.*
 
-/** The four ways a monorepo's CI goes wrong at scale, and the one configuration that fixes them together. */
 object BusyMonorepo extends DocSpecSuite:
 
   private val targets = List(
@@ -15,7 +14,6 @@ object BusyMonorepo extends DocSpecSuite:
     Target(TargetName("prod"), environment = Some("production")),
   )
 
-  /** The page's running example: the builtin test, an image, a deploy, and an integration test over the image. */
   private val capabilities = List(
     Capability.testAffected(onPush = false),
     Capability.dockerGraph.copy(gate = Gate.Always),

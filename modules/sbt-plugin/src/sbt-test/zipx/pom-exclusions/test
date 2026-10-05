@@ -1,6 +1,5 @@
-# c inherits b and, through it, a. Its tests use t, and p is provided: a consumer of c inherits neither, so no library
-# is kept from bringing them. The commit pin c compiles against is kept out of every other library; the release row and
-# the test-only pin are not.
+# c inherits b and a; a consumer inherits neither its test-only t nor provided p, so no library is kept from those.
+# The commit pin c compiles against is kept out of every other library; the release row and the test-only pin are not.
 > c/update
 > assertExcludes lib_3 a_3 b_3 pin_3
 > assertExcludes pin_3 a_3 b_3

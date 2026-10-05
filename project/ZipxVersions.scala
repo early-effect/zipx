@@ -1,10 +1,8 @@
 import sbt.ModuleID
 import zipx.*
 
-/** Typed catalog: every library and sbt plugin this build may use. `zipxDepUpdate` rewrites version literals here.
-  *
-  * Shared with the main `build.sbt` (not the meta-build). Dogfood ModuleIDs stay in `project/Dependencies.scala`; keep
-  * those version literals in sync when a catalog row used by `project/dogfood.sbt` moves.
+/** Every library and sbt plugin this build may use; `zipxDepUpdate` rewrites the literals. Main build only: keep
+  * `project/Dependencies.scala` in sync when a row `project/dogfood.sbt` uses moves.
   */
 object ZipxVersions extends zipx.ZipxVersions:
 

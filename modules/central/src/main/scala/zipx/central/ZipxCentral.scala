@@ -5,8 +5,7 @@ import zipx.core.EnvValue.secret
 import zipx.shell.{Exec, Script, Word}
 import zipx.workflow.{Expr, Step}
 
-/** Early-effect / Maven Central paved path for zipx. Secrets are referenced by name only; the values live in the
-  * `early-effect` GitHub org.
+/** Secrets are referenced by name only; the values live in the `early-effect` GitHub org.
   *
   * {{{
   * zipxCapabilities += ZipxCentral.release
@@ -29,8 +28,6 @@ object ZipxCentral:
 
   private val gnupgHome: Word = Word.lit("~/.gnupg")
 
-  /** Imports the CI signing key from the base64-encoded `PGP_SECRET` secret, the same recipe as the peer release.yml.
-    */
   val gpgImportSteps: Steps = Steps.built("gpg-import")(
     Step
       .run(
@@ -50,10 +47,8 @@ object ZipxCentral:
       .withEnv("PGP_SECRET", Expr.secret("PGP_SECRET"))
   )
 
-  /** Named `publish`, so it replaces the built-in capability rather than adding a second one.
-    *
-    * Aggregate: every publishing module's `publishSigned` (dependency order), then `sonaRelease` once. Wire-form for
-    * unit tests and docs; the sbt plugin's `ZipxCentral.release` rebuilds the same shape from real keys.
+  /** Named `publish`, so it replaces the built-in capability rather than adding a second one. Wire-form for tests and
+    * docs; the sbt plugin's `ZipxCentral.release` rebuilds the same shape from real keys.
     */
   val release: Capability =
     Capability.publish
@@ -62,8 +57,8 @@ object ZipxCentral:
       .withEnv(signingEnv)
       .withExtraSteps(gpgImportSteps)
 
-  /** Root Once form: `publishSigned; sonaRelease` as one fixed command. Use when the root `.aggregate` is exactly the
-    * publish set; prefer [[release]] for projectMatrix / skipped rows. Plugin rebuilds from real keys.
+  /** Use when the root `.aggregate` is exactly the publish set; prefer [[release]] for projectMatrix or skipped rows.
+    * The sbt plugin rebuilds this from real keys.
     */
   val releaseRoot: Capability =
     Capability.once(

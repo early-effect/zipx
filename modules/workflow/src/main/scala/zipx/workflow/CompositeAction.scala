@@ -2,10 +2,8 @@ package zipx.workflow
 
 import scala.collection.immutable.ListMap
 
-/** A generated GitHub Actions composite action (`action.yml`).
-  *
-  * Same contract as a generated workflow: zipx owns the bytes, `zipxWorkflowCheck` diffs them, and consumers do not
-  * hand-edit. Nested third-party `uses:` stay SHA-pinned via the consumer's action-pins file.
+/** Like a generated workflow, zipx owns the bytes and `zipxWorkflowCheck` diffs them. Nested third-party `uses:` stay
+  * SHA-pinned via the consumer's action-pins file.
   */
 final case class CompositeAction(
     name: String,

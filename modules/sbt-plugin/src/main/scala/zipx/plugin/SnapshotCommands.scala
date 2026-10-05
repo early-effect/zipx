@@ -128,7 +128,7 @@ object SnapshotCommands:
     log.info(s"zipx: ${family.literal} ${family.version} -> $next")
     rewritten
 
-  /** What the first of the family's artifacts with a pointer for `line` says. One commit publishes them all. */
+  /** The first family artifact with a pointer for `line` speaks for all of them: one commit publishes them all. */
   private def familyPointer(
       registry: ArtifactRegistry,
       family: Family,
@@ -190,7 +190,7 @@ object SnapshotCommands:
   /** One `Lib(...)` literal in the catalog source, and every row that shares its version through `.mod`. */
   private final case class Family(group: GroupId, literal: ArtifactId, version: DepVersion, members: ::[Lib])
 
-  /** The families the selected rows belong to, each once. A `.mod` row is rewritten through its family's literal. */
+  /** A `.mod` row is rewritten through its family's literal. */
   private def families(selected: List[Lib], coords: Seq[ZipxCoord]): List[Family] =
     val libs                            = coords.collect { case lib: Lib => lib }.toList
     def literalOf(lib: Lib): ArtifactId = lib.family.getOrElse(lib.artifact)
@@ -233,7 +233,7 @@ object SnapshotCommands:
           case several =>
             several
 
-  /** The line a commit pin or the pointer is on. A local build has none: no registry holds it. */
+  /** A local build has no line: no registry holds it. */
   private def lineOf(version: String): Option[ReleaseVersion] =
     SnapshotPinAdvice.hold(version).flatMap {
       case SnapshotHold.Commit(line)  => Some(line)
@@ -241,7 +241,7 @@ object SnapshotCommands:
       case SnapshotHold.Local(_)      => None
     }
 
-  /** What the first of the row's artifacts with a pointer for `line` says. Every platform publishes from one commit. */
+  /** The first artifact with a pointer for `line` speaks for the row: every platform publishes from one commit. */
   private def rowPointer(
       registry: ArtifactRegistry,
       lib: Lib,
@@ -318,7 +318,6 @@ object SnapshotCommands:
           case Right(res)                                           => Left(s"lookup $url: HTTP ${res.status}")
       once
 
-  /** Delete a metadata file whose checksum sidecar does not match, then fetch. One retry. */
   private def locked(cache: File)(read: => Either[String, Option[String]]): Either[String, Option[String]] =
     IO.createDirectory(cache)
     val channel = FileChannel.open(new File(cache, ".lock").toPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE)

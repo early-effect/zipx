@@ -11,7 +11,7 @@ import zipx.core.*
   */
 private[plugin] object PomAuthority:
 
-  /** Scala version, binary version, and platform: what `FromSbt` crosses a dependency with. */
+  /** What `FromSbt` crosses a dependency with. */
   final case class Crossing(scala: String, binary: String, platform: Option[String])
 
   object Crossing:
@@ -34,13 +34,11 @@ private[plugin] object PomAuthority:
       FromSbt.dependencies(module, crossing.scala, crossing.binary, optionalCrossVer = true, crossing.platform)
     }
 
-  /** This project's dependencies on other projects of the build. */
   def edges(projectDependencies: Seq[ModuleID], crossing: Crossing): List[PomEdge] =
     parsed(projectDependencies, crossing).map { (config, dependency) =>
       PomEdge(scopeOf(config), ResolvedModule(dependency.module.organization.value, dependency.module.name.value))
     }
 
-  /** The libraries this project declares, toolchain jars aside. */
   def declared(libraryDependencies: Seq[ModuleID], crossing: Crossing): List[PomDependency] =
     parsed(libraryDependencies.filterNot(AutoPlatform.ignore), crossing).map { (config, dependency) =>
       PomDependency(

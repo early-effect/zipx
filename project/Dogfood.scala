@@ -1,10 +1,7 @@
 import sbt.*
 import sbt.Keys.*
 
-/** Helpers for the meta-build source mirror (projects live in dogfood.sbt).
-  *
-  * Visible to project/ .sbt files via unmanagedSources in project/project/build.sbt (same pattern as Dependencies).
-  */
+/** Helpers for the meta-build source mirror; the projects live in dogfood.sbt. */
 object Dogfood:
 
   /** Point Compile sources at a main-build module; keep a separate `target/` under `project/meta-*`. */

@@ -2,31 +2,20 @@ package zipx.core
 
 import neotype.unwrap
 
-/** Whether a job's `if:` can ever be true, over the subset of [[JobCondition]] where that question is decidable.
+/** Whether a job's `if:` can ever be true, over the decidable subset of [[JobCondition]]. The gate, capability
+  * condition and target condition are written in different places, so nobody sees their conjunction.
   *
-  * The planner ANDs a [[Gate]] with [[Capability.condition]] and with [[Target.condition]], and each of those is
-  * written in a different place: a pack supplies the gate, a build supplies the condition, and `project/Deploy.scala`
-  * supplies the target. Nobody looking at one of them sees the conjunction, which is how `examples/monorepo` shipped a
-  * `deploy-prod` job carrying `startsWith(github.ref, 'refs/tags/v') && github.ref == 'refs/heads/main'`: a job that
-  * looked deliberate, passed every check, and could not run.
-  *
-  * **This is not a SAT solver, and deliberately not.** It reasons about single-valued contexts (`github.ref`,
-  * `github.event_name`, `github.repository`) inside a *conjunction*, and says nothing about anything else. An unsound
-  * rejection is far worse than a missed one: a missed contradiction is the status quo, a wrong rejection is a build
-  * that cannot generate its own CI and no way for the author to argue. So every case it does not understand
-  * ([[JobCondition.Any]], [[JobCondition.Raw]], `vars.*`, PR labels) is treated as satisfiable and passed over in
-  * silence.
+  * Deliberately not a SAT solver: it reasons only about single-valued contexts (`github.ref`, `github.event_name`,
+  * `github.repository`) in a conjunction. A wrong rejection is worse than a missed one, so anything else
+  * ([[JobCondition.Any]], [[JobCondition.Raw]], `vars.*`, PR labels) counts as satisfiable.
   */
 private[core] object Satisfiable:
 
-  /** One clause of the conjunction, with where it came from, so an error can name the two places to look. */
+  /** `source` lets the error name both places to look. */
   final case class Clause(source: String, condition: JobCondition)
 
-  /** Finds a pair of conjuncts that cannot both hold. `None` when nothing decidable is wrong.
-    *
-    * The message quotes the GHA expression each side renders to, since that is the text the author will see in the
-    * generated file. Earliest pair in clause order, not every pair: generate fail-fasts on the first, and extra pairs
-    * on the same context are the same bug restated.
+  /** The earliest pair of conjuncts that cannot both hold, quoting each side's rendered GHA expression. Later pairs on
+    * the same context would restate the same bug.
     */
   def findContradiction(clauses: List[Clause]): Option[String] =
     val atoms = clauses.flatMap(c => conjunctsOf(c.condition).flatMap(atomOf(c.source, _)))
@@ -35,10 +24,8 @@ private[core] object Satisfiable:
         s"${explain(a, b)}. The two are ANDed, so this job's `if:` is never true and it would silently never run."
     }
 
-  /** A clause reduced to a claim about one single-valued context, or nothing.
-    *
-    * `positive` false means the clause *excludes* the claim, which is a much weaker fact: exactly one value satisfies
-    * an equality, but every other value satisfies its negation.
+  /** `positive` false means the clause excludes the claim, a much weaker fact: exactly one value satisfies an equality,
+    * but every other value satisfies its negation.
     */
   private final case class Atom(source: String, rendered: String, claim: Claim, positive: Boolean)
 
@@ -49,8 +36,7 @@ private[core] object Satisfiable:
     /** `startsWith(github.ref, '<prefix>')`. */
     case RefPrefix(prefix: String)
 
-  /** Flattens the conjunctive structure. [[JobCondition.All]] is a conjunction by definition, and `!(a || b)` is one by
-    * De Morgan; `!(a && b)` is a *disjunction*, so it stops here and contributes nothing rather than being read as one.
+  /** `!(a || b)` is a conjunction by De Morgan; `!(a && b)` is a disjunction, so it stops here and contributes nothing.
     */
   private def conjunctsOf(condition: JobCondition): List[JobCondition] = condition match
     case JobCondition.All(first, rest)                   => (first :: rest).flatMap(conjunctsOf)
@@ -81,9 +67,7 @@ private[core] object Satisfiable:
     end match
   end atomOf
 
-  /** The first pair that cannot hold together, in clause order, so the message names the earliest-written pair rather
-    * than an arbitrary one. Quadratic, over at most a handful of clauses.
-    */
+  /** Quadratic, over at most a handful of clauses. */
   private def firstConflict(atoms: List[Atom]): Option[(Atom, Atom)] =
     atoms.tails.toList
       .collect { case head :: tail => head -> tail }

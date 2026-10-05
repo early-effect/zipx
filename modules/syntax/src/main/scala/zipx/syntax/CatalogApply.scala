@@ -17,7 +17,6 @@ object CatalogPoint:
     val column  = if newline < 0 then bounded + 1 else bounded - newline
     CatalogPoint(line, column)
 
-/** Rewrite catalog constructors at tree spans. No `String.replace` of the whole file. */
 object CatalogApply:
 
   def applyBumps(source: String, bumps: List[DepBump]): Either[String, String] =
@@ -55,7 +54,6 @@ object CatalogApply:
   def applyPinBumps(source: String, bumps: List[PinBump]): Either[String, String] =
     ZipxCatalog.applyPinBumps(source, bumps)
 
-  /** 1-based line and column of the version literal on `Ship` / `ShipGroup` for `identity`. */
   def shipVersionPoint(source: String, identity: String): Option[CatalogPoint] =
     given Context = ScalaParse.freshContext()
     ScalaParse.untyped(source, "ZipxVersions.scala").toOption.flatMap { tree =>
@@ -65,7 +63,7 @@ object CatalogApply:
       }
     }
 
-  /** Rewrite the version literal of `Ship(` / `ShipGroup(` by tree span. Missing constructor is Left. */
+  /** A missing `Ship` / `ShipGroup` constructor is a `Left`. */
   def applyShipBumps(source: String, bumps: List[ShipBump]): Either[String, String] =
     bumps.foldLeft[Either[String, String]](Right(source)) { (accE, bump) =>
       accE.flatMap(src => applyOneShipBump(src, bump))

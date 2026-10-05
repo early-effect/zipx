@@ -6,7 +6,6 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zio.test.*
 
-/** Positioning: one sbt graph, generated Actions, no second YAML copy. */
 object WhyZipx extends DocSpecSuite:
 
   def doc = page("Why zipx")(

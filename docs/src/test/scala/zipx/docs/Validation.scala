@@ -7,7 +7,6 @@ import zipx.core.*
 import zipx.workflow.{ActionRef, SecretName}
 import zio.test.*
 
-/** When each rule fires: at the literal, at `zipxWorkflowGenerate`, or on the runner. */
 object Validation extends DocSpecSuite:
 
   def doc = page("Validation")(

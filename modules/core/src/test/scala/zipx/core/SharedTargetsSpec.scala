@@ -3,13 +3,6 @@ package zipx.core
 import neotype.unwrap
 import zio.test.*
 
-/** `TargetFanOut.SharedJob`: several destinations served by one job (#71).
-  *
-  * A suite of its own because the property under test is arithmetic, not shape: `targets` multiplying jobs is correct
-  * for deploy environments and wrong for registries, and the whole point of the mode is the job *count*. The numbers in
-  * the issue are 6 registries × 8 images = 48 jobs each rebuilding the same image, versus 8. Anything that quietly
-  * reintroduces per-target fan-out here restores that multiplication, and only a counting assertion catches it.
-  */
 object SharedTargetsSpec extends ZIOSpecDefault:
   import Fixtures.*
   import EnvValue.secret
@@ -21,18 +14,12 @@ object SharedTargetsSpec extends ZIOSpecDefault:
     verifyCleanLabel = None,
   )
 
-  /** `docker = true` on the four services, so a docker capability has something to fan out over. */
   private val dockerGraph = sampleGraph.mapNodes {
     case n if n.id.startsWith("service") => n.copy(docker = true)
     case n                               => n
   }
 
-  /** The issue's own count: six registries for one image.
-    *
-    * Names spelled as literals rather than mapped over a `List[String]`, because `TargetName.apply` validates at
-    * compile time and so refuses a value it cannot fold. That is the point of the type, and a test is not the place to
-    * reach for `unsafeMake`.
-    */
+  /** Literal names: `TargetName.apply` validates at compile time, so it refuses a value it cannot fold. */
   private val sixRegistries: List[Target] =
     List(
       TargetName("us"),
@@ -57,7 +44,7 @@ object SharedTargetsSpec extends ZIOSpecDefault:
       case _                     => Capability.docker
     val shaped =
       if shared then base.withSharedTargets(targets) else base.withTargets(_ => targets)
-    // Expansion arithmetic is the load-bearing property here; Auto collapse is covered in MatrixCollapseSpec.
+    // Off: these tests count expanded jobs; Auto collapse is covered in MatrixCollapseSpec.
     shaped.withMatrixCollapse(MatrixCollapse.Off)
 
   private def plan(capability: Capability) = Planner.plan(dockerGraph, List(capability), config)
@@ -120,15 +107,12 @@ object SharedTargetsSpec extends ZIOSpecDefault:
       },
     ),
     suite("every destination's env reaches the one job, under its own prefix")(
-      // Merging unprefixed would keep whichever `++` saw last, and the job would push twice to one account while
-      // silently skipping five. The prefix is what makes six roles coexist.
       test("all six roles and regions are present, none overwriting another") {
         val job     = plan(dockerWith(sixRegistries, CapabilityScope.Graph, shared = true)).jobs("docker-serviceA")
         val regions = sixRegistries.map(t => job.env.get(t.envKey("AWS_REGION")))
         assertTrue(
           regions == List(0, 1, 2, 3, 4, 5).map(i => Some(s"region-$i")),
           sixRegistries.forall(t => job.env.contains(t.envKey("AWS_ROLE_TO_ASSUME"))),
-          // The unprefixed key is *absent*: a step reading it would silently get one arbitrary destination.
           !job.env.contains("AWS_REGION"),
         )
       },
@@ -185,8 +169,6 @@ object SharedTargetsSpec extends ZIOSpecDefault:
       },
     ),
     suite("a per-destination field one job cannot honor is rejected, not dropped")(
-      // Dropping a target condition would push to a registry the author said to skip; applying it to the whole job
-      // would skip the five that were fine. Both are silent wrong answers.
       test("a target condition is refused, naming the field and the alternative") {
         val docker = dockerWith(
           List(Target(TargetName("us"), condition = Some(JobCondition.varNonEmpty("US_ENABLED")))),

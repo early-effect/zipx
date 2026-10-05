@@ -1,5 +1,5 @@
-# A cross-built module's ownership (#73). Two `projectMatrix` rows share `shared/`, but sbt bases each row at a
-# synthetic `.sbt/matrix/<id>`, so `baseDir` alone maps a change under `shared/` to no module at all.
+# Two `projectMatrix` rows share `shared/`, but sbt bases each row at a synthetic `.sbt/matrix/<id>`, so `baseDir`
+# alone would map a change under `shared/` to no module at all.
 > zipxWorkflowGenerate
 $ exists .github/workflows/ci.yml
 $ exists .github/workflows/zipx-version-updates.yml
@@ -13,8 +13,7 @@ $ exec git config user.name scripted
 $ exec git config commit.gpgsign false
 $ exec git add .
 $ exec git commit -q -m fixture
-# A shared source belongs to BOTH rows. Under the old Option-returning owningModule this was one row or the
-# other, so half a cross-built module went untested behind a green check.
+# A shared source belongs to both rows.
 $ touch shared/src/main/scala/More.scala
 $ exec git add .
 $ exec git commit -q -m shared-change

@@ -3,22 +3,8 @@ package zipx.workflow
 import neotype.unwrap
 import zipx.shell.Script
 
-/** A [[Step]] under construction, with typed fields.
-  *
-  * {{{
-  * Step
-  *   .run(Script.strict(Exec("sbt", Word.squote("test"))))
-  *   .named("Test")
-  *   .withId("test")
-  *   .when(Expr.github("event_name"))
-  *   .withEnv("TIER", Expr.env("TIER"))
-  *   .build
-  * }}}
-  *
-  * This is the good end of [[Step]]'s validity: a builder starts from either [[Step.run]] or [[Step.uses]], so the
-  * mutually-exclusive pair is a *type* rather than a check, [[build]] has no failure case, and `withInput` exists only
-  * on [[StepBuilder.Uses]]. [[Step.validate]] is the other end, for a step that was hand-built or decoded around the
-  * builder.
+/** Starting from [[Step.run]] or [[Step.uses]] makes the `uses`/`run` exclusivity a type rather than a check, so
+  * [[build]] cannot fail and `withInput` exists only on [[StepBuilder.Uses]].
   */
 sealed trait StepBuilder:
 
@@ -30,7 +16,7 @@ sealed trait StepBuilder:
   /** Not public: the point of the type is that the only way out is [[build]]. */
   protected def step: Step
 
-  /** Escape-hatch text in this step's script, for the generate-time warning. [[Step]] has no field to carry it. */
+  /** Escape-hatch text for the generate-time warning, carried here because [[Step]] has no field for it. */
   def rawFragments: List[String]
 
   protected def withStep(updated: Step): This
@@ -74,7 +60,6 @@ object StepBuilder:
 
     def withInput(name: String, value: Expr): Uses = withInput(name, value.render)
 
-    /** For the many action inputs that are plain data: `fetch-depth`, a path. */
     def withInput(name: String, value: String): Uses = withStep(step.copy(`with` = step.`with` + (name -> value)))
 
     /** Pass a `ListMap` to fix the rendered order. */
@@ -84,25 +69,20 @@ object StepBuilder:
   def run(script: Script): Run =
     Run(Step(run = Some(script.render)), script.rawFragments)
 
-  /** **Escape hatch.** A `run:` step from verbatim text, for shell a build cannot yet express through [[run]]. Reported
-    * as a raw fragment, so `zipxWorkflowGenerate` warns and names the step.
+  /** **Escape hatch.** Reported as a raw fragment, so `zipxWorkflowGenerate` warns and names the step.
     */
   def runRaw(text: String): Run =
     Run(Step(run = Some(text)), List(text))
 
-  /** `Step.uses("actions/checkout")` is a compile error naming the missing `@ref`. That is the form a build writes,
-    * which is why it gets the short name.
-    */
+  /** `Step.uses("actions/checkout")` is a compile error naming the missing `@ref`. */
   inline def uses(inline action: String): Uses = usesRef(ActionRef(action))
 
-  /** For a ref that is genuinely untrusted text: read from a workflow file, or typed into a setting. An `ActionPins`
-    * field is *not* one of those, since a pin is validated where the pin file is parsed; use [[usesRef]] there and
-    * carry no `Either` a consumer would have to fake a failure for.
+  /** For genuinely untrusted text (a workflow file, a setting). An `ActionPins` field is already validated where the
+    * pin file is parsed, so use [[usesRef]] there.
     */
   def usesMake(action: String): Either[String, Uses] =
     ActionRef.make(action).map(usesRef)
 
-  /** The normal case inside zipx: the ref is already an [[ActionRef]], so there is nothing left to check. */
   def usesRef(action: ActionRef): Uses = Uses(Step(uses = Some(action)))
 
 end StepBuilder

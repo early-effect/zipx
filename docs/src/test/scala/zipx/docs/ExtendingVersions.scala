@@ -6,7 +6,6 @@ import zipx.core.*
 import zipx.docs.DocsRender.yaml
 import zio.test.*
 
-/** For sbt plugins that sit on zipx: emit the plugin line, then optionally contribute catalog rows. */
 object ExtendingVersions extends DocSpecSuite:
 
   private final case class AcmeBundle(runtime: Lib, plugin: Plugin)

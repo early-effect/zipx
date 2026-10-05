@@ -2,20 +2,7 @@ package zipx.core
 
 import zio.test.*
 
-/** Affected-gating for [[Phase.Publish]] (#70).
-  *
-  * Tested at this length because the change is not "one more predicate returns true". Narrowing a Publish job means a
-  * job can now *skip* in a phase where nothing skipped before, and GitHub's implicit `success()` turns a skipped need
-  * into a skipped dependent. `Capability.deploy` needs `docker` by default, so getting that wrong would silently skip
-  * the deploy that wanted the other modules' images: the exact class of failure this feature is supposed to save money
-  * on, not create.
-  *
-  * The four properties each suite below pins down:
-  *   1. off by default, and off means byte-identical output;
-  *   2. on narrows Graph Publish and nothing else;
-  *   3. a release tag still publishes everything;
-  *   4. a dependent tolerates a *skipped* need without tolerating a *failed* one.
-  */
+/** A narrowed Publish job can skip, and GitHub's implicit `success()` turns a skipped need into a skipped dependent. */
 object AffectedPublishSpec extends ZIOSpecDefault:
   import Fixtures.*
 
@@ -29,7 +16,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
   private val on  = base.copy(affectedPublish = true)
   private val off = base
 
-  /** `docker = true` on the four services, so `dockerExpanded` has something to fan out over. */
   private val dockerGraphFixture = sampleGraph.mapNodes {
     case n if n.id.startsWith("service") => n.copy(docker = true)
     case n                               => n
@@ -48,8 +34,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
 
   def spec = suite("affected-gating for Publish")(
     suite("off by default, because under-publishing is loudly broken")(
-      // The default matters more than usual here: every existing consumer's committed ci.yml has to stay byte-identical
-      // or `zipxWorkflowCheck` fails on upgrade, for a feature they did not ask for.
+      // Off keeps every consumer's committed ci.yml byte-identical, so `zipxWorkflowCheck` still passes on upgrade.
       test("the default is off") {
         assertTrue(!PlanConfig().affectedPublish)
       },
@@ -64,7 +49,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
       test("with it off, a Graph Publish alongside a Graph Verify leaves Publish alone") {
         val wf = plan(List(testExpanded, publishExpanded), off)
         assertTrue(
-          // The affected job exists, for Verify's sake, and Publish simply does not read it.
           wf.jobs.contains("affected"),
           cond(wf, "test-schema").contains("needs.affected.outputs.modules"),
           !cond(wf, "publish-schema").contains("needs.affected"),
@@ -80,8 +64,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("with AffectedMode.Always, affectedPublish alone gates nothing") {
-        // `affected` is the mode; `affectedPublish` only says which phases the mode reaches. Without the mode there is
-        // no `affected` job to read, so this combination has to be inert rather than half-wired.
         val wf = plan(List(publishExpanded), on.copy(affected = AffectedMode.Always))
         assertTrue(
           !wf.jobs.contains("affected"),
@@ -100,7 +82,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("the release gate survives the narrowing: both clauses are present") {
-        // Losing the tag gate here would publish snapshots off every PR, which is worse than publishing too much.
         val wf = plan(List(publishExpanded), on)
         assertTrue(
           cond(wf, "publish-schema").contains("startsWith(github.ref, 'refs/tags/v')"),
@@ -128,7 +109,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         assertTrue(
           !cond(wf, "publish").contains("needs.affected"),
           !wf.jobs("publish").needs.contains("affected"),
-          // And with no Graph capability at all, there is no affected job to emit.
           !wf.jobs.contains("affected"),
         )
       },
@@ -140,8 +120,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("Deploy is not narrowed by this knob: affectedDeploy is its own switch") {
-        // The two are deliberately separate (see AffectedDeploySpec): narrowing image pushes while still reconciling
-        // every destination on every run is a legitimate combination, and one switch would take it away.
         val deploy = Capability
           .deployGraph(
             participates = _.id == "serviceA",
@@ -158,8 +136,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
       },
     ),
     suite("a release tag still publishes everything")(
-      // The subtle case the issue raises: "affected relative to what base?" for a tag after a series of merges. The
-      // answer is that there is no base and no diff at all, so the question does not arise.
       test("the affected script emits the 'all' sentinel for anything that is not a PR or a tracked push") {
         val wf     = plan(List(publishExpanded), on)
         val script = wf.jobs("affected").steps.find(_.id.contains("compute")).flatMap(_.run).getOrElse("")
@@ -170,8 +146,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("the affected job runs on a tag push once Publish reads it") {
-        // Without this the whole release is skipped: `affected` would carry Verify's tag exclusion, skip on the tag, and
-        // every Publish job's membership test would read an empty output.
         val wf = plan(List(publishExpanded), on)
         assertTrue(!cond(wf, "affected").contains("!startsWith(github.ref, 'refs/tags/')"))
       },
@@ -184,13 +158,10 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         assertTrue(
           wf.jobs.keys.count(_ == "affected") == 1,
           !cond(wf, "affected").contains("!startsWith(github.ref, 'refs/tags/')"),
-          // Verify's own jobs still carry the exclusion; it belongs to them, not to the setup job.
           cond(wf, "test-schema").contains("!startsWith(github.ref, 'refs/tags/')"),
         )
       },
       test("the affected job runs on a merged-PR push once Publish reads it") {
-        // Without this the whole publish is skipped: `affected` would carry Verify's merged-PR skip, skip after
-        // merge, and every Publish job's membership test would `fromJson` an empty output.
         val wf = plan(List(testExpanded, publishExpanded), on.copy(skipMergedPrPush = true))
         assertTrue(
           !cond(wf, "affected").contains("needs.verify-gate.outputs.run == 'true'"),
@@ -219,15 +190,11 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         assertTrue(
           consumers.nonEmpty,
           consumers.forall((_, job) => job.needs.contains("affected")),
-          // affected's skip condition is a subset of the consumers': the merged-PR skip is not on affected, so
-          // it cannot skip while a consumer's if: is still true.
           !cond(wf, "affected").contains(mergedPrSkip),
           consumers.exists((_, job) => job.`if`.exists(_.contains("needs.affected.outputs.modules"))),
         )
       },
       test("fail-open is unchanged: an unusable diff publishes everything") {
-        // The planner side of this is the `|| 'all'` clause above; this is the other half, and it is what makes a broken
-        // base ref cost CI minutes rather than a missing release artifact.
         assertTrue(
           Affected.outputModules(sampleGraph, None) == Affected.AllSentinel,
           cond(plan(List(publishExpanded), on), "publish-schema").contains("'all')"),
@@ -246,23 +213,17 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         val wf = plan(List(dockerExpanded, deploy), on, dockerGraphFixture)
         val c  = cond(wf, "deploy-serviceA-prod")
         assertTrue(
-          // Without `!cancelled()` GitHub's implicit success() skips this the moment any docker job skips.
           c.contains("!cancelled()"),
           c.contains("needs.docker-serviceA.result != 'failure'"),
-          // Tolerating skips must not tolerate failures, so the guard is `!= 'failure'` on each need rather than absent.
           !c.contains("== 'success'"),
         )
       },
       test("an Aggregate consumer of a narrowed Verify capability is skip-tolerant") {
-        // The Aggregate-consumer-of-a-narrowed-*Publish* case is no longer generated at all: it is refused, because it
-        // would run against an artifact nobody built (see AffectedDeploySpec). Verify is the scope where an Aggregate
-        // consumer of something skippable is still legitimate, since it consumes no artifact.
         val pub = Capability.publish.copy(needsCapabilities = List(Capability.TestName))
         val wf  = plan(List(testExpanded, pub), on)
         val c   = cond(wf, "publish")
         assertTrue(
           c.contains("!cancelled()"),
-          // Every test job it waits on, since an Aggregate consumer needs all of them.
           c.contains("needs.test-schema.result != 'failure'"),
           c.contains("needs.test-api.result != 'failure'"),
         )
@@ -284,15 +245,12 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("a Layer dependent gates only L0, since later waves wait on L0's own decision") {
-        // Layer consuming a narrowed *Verify*: the Publish-producer spelling of this is refused outright now, for the
-        // same reason as the Aggregate one above.
         val pubLayers = Capability.publishLayers.copy(needsCapabilities = List(Capability.TestName))
         val wf        = plan(List(testExpanded, pubLayers), on)
         val later     = wf.jobs.keys.filter(id => id.startsWith("publish-L") && id != "publish-L0").toList
         assertTrue(
           cond(wf, "publish-L0").contains("!cancelled()"),
           cond(wf, "publish-L0").contains("needs.test-schema.result != 'failure'"),
-          // Two more waves exist, so this is a real exclusion rather than a vacuous forall.
           later.size >= 2,
           later.forall(id => !cond(wf, id).contains("!cancelled()")),
         )
@@ -323,7 +281,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
       },
       test("a narrowed Publish job guards its upstream publishes, so a failed dependency still blocks it") {
         val wf = plan(List(publishExpanded), on)
-        // publishGraph is DependencyOrdered, so `publish-api` waits on `publish-schema`, which can now skip.
         assertTrue(
           wf.jobs("publish-api").needs.contains("publish-schema"),
           cond(wf, "publish-api").contains("needs.publish-schema.result != 'failure'"),
@@ -331,8 +288,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("a cross-capability need is guarded as well, so a failed gate is not let through by !cancelled()") {
-        // The trap: `!cancelled()` overrides the implicit success() for *every* need, not only the skippable ones. A
-        // failed `fmt` would otherwise stop blocking the publish it gates.
+        // `!cancelled()` drops the implicit `success()` for every need, not only the skippable ones.
         val fmt =
           Capability.once(CapabilityName("fmt"), SbtCommand.unsafeTask("scalafmtCheckAll"), phase = Phase.Publish)
         val pub = publishExpanded.copy(needsCapabilities = List(fmt.name))
@@ -343,8 +299,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("the two jobs with clauses of their own are not double-guarded") {
-        // `affected` is read through its outputs and `verify-gate` through its own fail-open clause; a `result` guard on
-        // either would be redundant at best and, for verify-gate, wrong (a skipped gate means "run").
+        // A `result` guard on `verify-gate` would be wrong, not just redundant: a skipped gate means "run".
         val wf = plan(List(testExpanded, publishExpanded), on.copy(skipMergedPrPush = true))
         val c  = cond(wf, "publish-schema")
         assertTrue(
@@ -366,7 +321,6 @@ object AffectedPublishSpec extends ZIOSpecDefault:
             "!cancelled() && startsWith(github.ref, 'refs/tags/v') && " +
             "(contains(fromJson(needs.affected.outputs.modules), 'schema') || " +
             "contains(fromJson(needs.affected.outputs.modules), 'all'))",
-          // And with an upstream that can skip, its guard is appended after the affected clause.
           cond(wf, "publish-api") ==
             "!cancelled() && startsWith(github.ref, 'refs/tags/v') && " +
             "(contains(fromJson(needs.affected.outputs.modules), 'api') || " +
@@ -386,7 +340,7 @@ object AffectedPublishSpec extends ZIOSpecDefault:
         )
       },
       test("the plan renders, so none of these conditions is a workflow GitHub would reject") {
-        // Graph deploy, because an Aggregate one needing a narrowed docker is now refused outright.
+        // Graph: an Aggregate deploy needing a narrowed docker is refused.
         val deploy = Capability
           .deployGraph(
             participates = _.id == "serviceA",

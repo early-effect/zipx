@@ -1,41 +1,21 @@
 package zipx.core
 
-/** How a capability obtains the sbt command a job types at the shell.
-  *
-  * Exactly three shapes. Construct via [[Capability.running]], [[Capability.runningEach]],
-  * [[Capability.runningEachCross]], [[Capability.runningPerModule]], or [[Capability.runningNothing]] (and the built-in
-  * / `once` / `steps` factories). Do not invent a fourth encoding with `Option` inside a lambda.
-  *
-  *   - [[CommandSource.ActionsOnly]]: no sbt session
-  *   - [[CommandSource.Fixed]]: one command for the job
-  *   - [[CommandSource.PerModule]]: one command per participating module
-  */
+/** How a capability obtains the sbt command a job runs, built by the [[Capability]] `running*` methods. */
 enum CommandSource:
 
-  /** No sbt. JDK / sbt / cache toolchain omitted; checkout + [[Capability.extraSteps]] / [[Capability.postSteps]] only.
-    * From [[Capability.steps]] / [[Capability.runningNothing]].
-    */
+  /** No JDK / sbt / cache toolchain: checkout plus [[Capability.extraSteps]] / [[Capability.postSteps]] only. */
   case ActionsOnly
 
-  /** One command for the job. From [[Capability.once]] / [[Capability.running]]. */
+  /** One command for the whole job. */
   case Fixed(command: SbtCommand)
 
-  /** Per participating [[ModuleNode]]. From [[Capability.runningEach]], [[Capability.runningEachCross]],
-    * [[Capability.runningPerModule]], and built-in per-module factories.
-    */
   case PerModule(build: ModuleNode => SbtCommand)
 
-  /** True for [[CommandSource.Fixed]] and [[CommandSource.PerModule]]; false for [[CommandSource.ActionsOnly]]. */
   def runsSbt: Boolean = this match
     case CommandSource.ActionsOnly                           => false
     case CommandSource.Fixed(_) | CommandSource.PerModule(_) => true
 
-  /** The command for `node`. Valid only when [[runsSbt]] is true; [[CommandSource.ActionsOnly]] is a programmer error
-    * here.
-    *
-    * Callers that must handle actions-only jobs match on this enum (or branch on [[runsSbt]]) instead of probing
-    * `Option`.
-    */
+  /** Fails on [[CommandSource.ActionsOnly]]: match the enum or branch on [[runsSbt]] first. */
   def commandFor(node: ModuleNode): SbtCommand = this match
     case CommandSource.ActionsOnly =>
       sys.error("CommandSource.ActionsOnly has no sbt command; branch on runsSbt or match the enum first")

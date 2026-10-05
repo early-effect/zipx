@@ -6,15 +6,13 @@ import zipx.core.*
 import zipx.docs.DocsRender.yaml
 import zio.test.*
 
-/** Typed versions catalog: extend ZipxVersions, drop settings, bump locally. */
 object Versions extends DocSpecSuite:
 
   private val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
   private val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
   private val zio      = Lib("dev.zio", "zio", "2.1.26")
 
-  /** The plugin supplies Coursier's order. Only revisions with no zipx line consult it, and these examples have none.
-    */
+  /** Stands in for the plugin's Coursier order, which no revision in these examples consults. */
   private given RevisionOrder = (a, b) => a.compareTo(b)
 
   def doc = page("Versions")(

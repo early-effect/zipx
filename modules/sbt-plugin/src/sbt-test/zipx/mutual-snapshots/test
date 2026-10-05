@@ -59,7 +59,7 @@ $ exec git commit -q -m a2
 > assertFacadeInRepo release 0.10.0
 > assertDocsFacadeInRepo release 0.10.0
 
-# 5. The #204 case: ascent pins heddle h1, built against facade a1, an older commit of the line this build compiles.
+# 5. Ascent pins heddle h1, built against facade a1, an older commit of the line this build compiles.
 > pinCommit heddle 0.9.0 h1
 > reload
 > mcpAppJS/update

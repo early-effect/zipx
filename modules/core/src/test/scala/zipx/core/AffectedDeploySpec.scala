@@ -2,22 +2,7 @@ package zipx.core
 
 import zio.test.*
 
-/** Affected-gating for [[Phase.Deploy]], and the rejection that makes it safe to turn on.
-  *
-  * Why this is not simply "one more predicate returns true", and why it is tested at this length:
-  *
-  * [[Capability.deploy]] needs [[Capability.DockerName]] by default and is [[CapabilityScope.Aggregate]] by default, so
-  * before this change turning on [[PlanConfig.affectedPublish]] alone produced a latent 404 on main. `tolerateSkips`
-  * gave the deploy `!cancelled() && needs.docker-<m>.result != 'failure'`, so an affected-*skipped* `docker-stoWorker`
-  * left the deploy **running**, pulling an image tag that run never pushed. The tolerance is not the bug: it is right
-  * for an Aggregate job spanning several modules. So the fix is two-sided, and both sides are pinned below:
-  *
-  *   1. a Graph deploy can be gated, putting it in lockstep with its own module's publish (suites 2 and 3);
-  *   2. the shape that cannot be gated is **refused** rather than generated (suite 4).
-  *
-  * Plus the two properties that make any of this safe: off by default and byte-identical when off (suite 1), and a
-  * release tag deploys everything (suite 3).
-  */
+/** A skip-tolerant Aggregate deploy over an affected-skipped docker job would pull an image that run never pushed. */
 object AffectedDeploySpec extends ZIOSpecDefault:
   import Fixtures.*
 
@@ -28,13 +13,9 @@ object AffectedDeploySpec extends ZIOSpecDefault:
     verifyCleanLabel = None,
   )
 
-  /** Both knobs on, which is the combination the migration this was built for actually uses: narrow the image push, and
-    * narrow the deploy that consumes it, so the two skip together.
-    */
   private val on  = base.copy(affectedPublish = true, affectedDeploy = true)
   private val off = base
 
-  /** `docker = true` on the four services, so a Graph docker capability has something to fan out over. */
   private val dockerGraphFixture = sampleGraph.mapNodes {
     case n if n.id.startsWith("service") => n.copy(docker = true)
     case n                               => n
@@ -48,9 +29,7 @@ object AffectedDeploySpec extends ZIOSpecDefault:
   private def failure(caps: List[Capability], cfg: PlanConfig, graph: ModuleGraph = dockerGraphFixture): String =
     scala.util.Try(plan(caps, cfg, graph)).failed.get.getMessage
 
-  /** A deploy over the docker'd services, `Gate.Always` + a main condition: the real shape, since a repo that pushes
-    * images on main pushes rather than on tags is what motivates gating a deploy at all.
-    */
+  /** `Gate.Always` plus a main condition: a repo that deploys on main pushes, not tags, is one that gates deploys. */
   private def deployGraph(
       needs: List[CapabilityName] = List(Capability.DockerName),
       gate: Gate = Gate.Always,
@@ -91,8 +70,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("affectedPublish alone does not gate a deploy, so the two knobs are genuinely independent") {
-        // The whole point of a second flag: narrowing image pushes while still reconciling every destination on every
-        // run is a legitimate combination, and one switch would take it away.
         val wf = plan(List(dockerExpanded, deployGraph()), base.copy(affectedPublish = true))
         assertTrue(
           cond(wf, "docker-serviceA").contains("needs.affected.outputs.modules"),
@@ -100,7 +77,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("affectedDeploy alone gates the deploy and leaves the publish unnarrowed") {
-        // And the other direction, which is the odder-looking but still coherent combination.
         val wf = plan(List(dockerExpanded, deployGraph()), base.copy(affectedDeploy = true))
         assertTrue(
           !cond(wf, "docker-serviceA").contains("needs.affected"),
@@ -122,8 +98,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("with AffectedMode.Always, affectedDeploy alone gates nothing") {
-        // `affected` is the mode; the phase flags only say which phases the mode reaches. Without the mode there is no
-        // `affected` job to read, so this has to be inert rather than half-wired.
         val wf = plan(List(dockerExpanded, deployGraph()), on.copy(affected = AffectedMode.Always))
         assertTrue(
           !wf.jobs.contains("affected"),
@@ -131,7 +105,7 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("Aggregate and Layer deploys are untouched by the knob, since only Graph can be narrowed") {
-        // Needing nothing gated, so the rejection in the last suite does not apply and this is purely about scope.
+        // `needs = Nil`, so the refusal in the last suite does not apply.
         val aggregate = deployAggregate(needs = Nil)
         val layers    = deployAggregate(needs = Nil).copy(scope = CapabilityScope.Layer)
         val wfA       = plan(List(aggregate), on)
@@ -154,8 +128,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("the deploy's clause is the same expression as its own docker job's, which is what lockstep means") {
-        // Not merely "both mention affected": the *same* module id on both sides is the property that makes
-        // deploy-serviceA-prod run exactly when docker-serviceA did.
         val wf     = plan(List(dockerExpanded, deployGraph()), on)
         val clause = "(contains(fromJson(needs.affected.outputs.modules), 'serviceA') || " +
           "contains(fromJson(needs.affected.outputs.modules), 'all'))"
@@ -173,8 +145,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("the main condition and the GitHub Environment survive the narrowing") {
-        // Losing either would be the migration's worst failure: an unapproved or off-branch production deploy. The
-        // Environment is not a condition at all, so it has to be checked on the job rather than in the if:.
         val wf = plan(List(dockerExpanded, deployGraph()), on)
         assertTrue(
           cond(wf, "deploy-serviceA-prod").contains("github.ref == 'refs/heads/main'"),
@@ -235,8 +205,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("the whole if: byte for byte, since this is the string a consumer diffs in their committed ci.yml") {
-        // Note the shape: the capability's own condition is ANDed on *last*, parenthesized, by `andConditions`. The
-        // affected clause sits inside the first group, between `!cancelled()` and the need guard.
         val wf = plan(List(dockerExpanded, deployGraph()), on)
         assertTrue(
           cond(wf, "deploy-serviceA-prod") ==
@@ -254,9 +222,7 @@ object AffectedDeploySpec extends ZIOSpecDefault:
       },
     ),
     suite("a release tag still deploys everything")(
-      // The reason part 2 of this change exists at all: `affectedOnTags` was derived from Publish alone, so a
-      // tag-gated Graph deploy would have carried `needs: affected` and read its output on a ref where the affected
-      // job does not run. Every deploy job would then have tested an empty string: a release that deploys nothing.
+      // A tag-gated deploy reads `affected`'s output, so `affected` must run on tags or every deploy tests "".
       test("a tag-gated Graph deploy forces the affected job onto tag pushes") {
         val wf = plan(List(deployGraph(needs = Nil, gate = Gate.OnReleaseTag)), on)
         assertTrue(
@@ -265,8 +231,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("with only affectedDeploy on and no Publish capability at all, the tag exclusion is still dropped") {
-        // Isolates part 2 from affectedPublish: nothing in this plan is a Publish capability, so the old derivation
-        // would have left the exclusion on and broken the release.
         val wf = plan(List(deployGraph(needs = Nil, gate = Gate.OnReleaseTag)), base.copy(affectedDeploy = true))
         assertTrue(!cond(wf, "affected").contains("!startsWith(github.ref, 'refs/tags/')"))
       },
@@ -318,8 +282,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
       },
     ),
     suite("the shape that cannot be gated is refused, not generated")(
-      // This is the highest-value part of the change: it turns "we found this by reading Planner line by line" into a
-      // build-load error for the next consumer.
       test("an Aggregate deploy needing an affected-gated Graph docker is rejected") {
         val err = failure(List(dockerExpanded, deployAggregate()), on)
         assertTrue(
@@ -338,8 +300,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("the flag named is the producer's own, so turning off the one it names actually fixes it") {
-        // A deploy needing a gated *deploy* is a different flag from a deploy needing a gated *publish*, and naming the
-        // wrong one sends the reader to a setting that changes nothing.
         val gatedDeploy = deployGraph(needs = Nil).copy(name = CapabilityName("promote"))
         val consumer    = deployAggregate(needs = List(CapabilityName("promote")))
         val err         = failure(List(gatedDeploy, consumer), on)
@@ -362,13 +322,10 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         assertTrue(wf.jobs.contains("deploy-prod"))
       },
       test("with only affectedDeploy on, an Aggregate deploy needing an ungated docker is fine") {
-        // The check keys on whether the *producer* is gated, not on whether any flag is set anywhere.
         val wf = plan(List(dockerExpanded, deployAggregate()), base.copy(affectedDeploy = true))
         assertTrue(wf.jobs.contains("deploy-prod"), !cond(wf, "deploy-prod").contains("needs.affected"))
       },
       test("an Aggregate capability needing a narrowed Verify is NOT rejected, since it consumes no artifact") {
-        // Verify is always gated, so refusing this would refuse nearly every build that has an Aggregate publish
-        // needing `test`. It stays skip-tolerant instead, which is the pre-existing behavior.
         val pub = Capability.publish.copy(needsCapabilities = List(Capability.TestName))
         val wf  = plan(List(Capability.testGraph.withMatrixCollapse(MatrixCollapse.Off), pub), on)
         assertTrue(
@@ -377,7 +334,6 @@ object AffectedDeploySpec extends ZIOSpecDefault:
         )
       },
       test("a Once consumer is not rejected: a fixed build-wide command names no module") {
-        // An `announce` that needs `publish` is not broken by one module not publishing, so it keeps the tolerance.
         val announce = Capability.once(
           CapabilityName("announce"),
           SbtCommand.unsafeTask("announce"),

@@ -3,21 +3,20 @@ package zipx.core
 import zipx.shell.{Exec, Script, Word}
 import zipx.workflow.Step
 
-/** Catalog rows resolved from a snapshot repository: a commit pin, the pointer, or a changing `-SNAPSHOT`. While any is
-  * pinned, the build resolves the publish registry's snapshot repository, plus any registry added beside it. A pin
-  * names no registry of its own. With no publish registry, the resolver is Central snapshots.
+/** While any snapshot-resolved row is pinned, the build resolves the publish registry's snapshot repository plus extras
+  * (Central snapshots without one). A pin names no registry of its own.
   */
 object SnapshotPins:
   val CentralSnapshots: String = ArtifactRegistry.MavenCentral.snapshotRepository
 
   val ResolverName: String = "central-snapshots"
 
-  /** Coursier keeps a changing artifact for 24 hours by default. A snapshot coordinate is republished in place, so
-    * every generated sbt job revalidates. A release coordinate is not changing and stays cached.
+  /** Coursier caches a changing artifact for 24 hours by default, and a snapshot is republished in place. Releases are
+    * not changing, so they stay cached.
     */
   val CoursierTtl: (String, EnvValue) = "COURSIER_TTL" -> EnvValue.plain("0s")
 
-  /** `COURSIER_TTL=0s` on top of a build's env. The zipx value wins, so `zipxEnv` cannot lengthen the TTL. */
+  /** The zipx value wins, so `zipxEnv` cannot lengthen the TTL. */
   def ciEnv(env: Map[String, EnvValue]): Map[String, EnvValue] =
     env + CoursierTtl
 
@@ -26,9 +25,7 @@ object SnapshotPins:
 
   def describe(coord: ZipxCoord): String = s"${coord.group}:${coord.artifact}:${coord.version}"
 
-  /** The publish registry first, then extras. No publish registry means Central, which is what a build with no release
-    * workflow already resolved.
-    */
+  /** No publish registry means Central, which a build without a release workflow already resolves. */
   def registries(publish: Option[ArtifactRegistry], extra: Seq[ArtifactRegistry]): List[ArtifactRegistry] =
     val primary = publish.toList match
       case Nil  => List(ArtifactRegistry.MavenCentral)

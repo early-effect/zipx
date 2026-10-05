@@ -8,7 +8,6 @@ import zipx.docs.DocsRender.yaml
 import zipx.docs.DocDiff.Kind
 import zio.test.*
 
-/** Pin feeds: topology and policy in zipx, inventory as catalog Pin vals. */
 object PinFeeds extends DocSpecSuite:
 
   private val fakePin = Pin("cdn", "lib-a", "1.2.3", sha256 = "abc", purl = "pkg:npm/lib-a@1.2.3")

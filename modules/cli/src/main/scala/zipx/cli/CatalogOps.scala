@@ -6,7 +6,7 @@ import zipx.syntax.{CatalogApply, CatalogConstructors, CatalogSource, PluginsSbt
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 
-/** Catalog apply / generate / check above the target sbt. ZIO-free so tests can drive it. */
+/** ZIO-free so tests can drive it. */
 object CatalogOps:
 
   final case class UpdatePlan(
@@ -44,7 +44,6 @@ object CatalogOps:
     end for
   end planUpdate
 
-  /** The catalog states the Scala and sbt versions it crosses its rows with. */
   private def crossingOf(parsed: CatalogConstructors): Either[String, CatalogCrossing] =
     (parsed.scala, parsed.sbt) match
       case (Some(scala), Some(sbt)) => Right(CatalogCrossing.of(scala, sbt))

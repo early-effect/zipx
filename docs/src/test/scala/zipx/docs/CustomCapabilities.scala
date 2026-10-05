@@ -7,7 +7,6 @@ import zipx.core.EnvValue.secret
 import zipx.workflow.{Expr, JobService, Step}
 import zio.test.*
 
-/** How to invent pipeline stages beyond the built-ins. */
 object CustomCapabilities extends DocSpecSuite:
 
   def doc = page("Custom capabilities")(

@@ -111,10 +111,8 @@ object CompileTimeSpec extends ZIOSpecDefault:
       )
     },
     test("sh\"…\" validates its literal parts while the interpolation compiles") {
-      // Spelled as the desugared call rather than as `sh"…"`, because interpolator parts arrive *raw*: a `\n` written
-      // in `sh"a\nb"` stays the two-character escape, exactly as it does in `s"…"`. A part is genuinely two lines only
-      // when the literal spans lines or, as here, when the `StringContext` is built by hand. That is the last thing
-      // left to reject, since every splice is already a `Word`.
+      // Desugared because interpolator parts arrive raw: `sh"a\nb"` keeps the two-character escape, so only a
+      // hand-built `StringContext` (or a literal that spans lines) carries a real newline.
       for
         multiLine <- typeCheck("""StringContext("first\nsecond ", "").sh(Word.vq("TAG"))""")
         oneLine   <- typeCheck("""StringContext("first second ", "").sh(Word.vq("TAG"))""")

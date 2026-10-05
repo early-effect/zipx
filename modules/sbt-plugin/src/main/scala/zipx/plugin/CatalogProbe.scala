@@ -36,8 +36,8 @@ private[plugin] object CatalogProbe:
       callers: Map[ResolvedModule, Set[ResolvedModule]],
   )
 
-  /** A configuration is probed when a forced module in it has a caller outside the build, or is one zipx excluded,
-    * whose library callers the report no longer shows.
+  /** A forced module zipx excluded is probed even with only in-repo callers: the report no longer shows its library
+    * callers.
     */
   def wanted(
       seen: CatalogResolution.Seen,
@@ -71,10 +71,8 @@ private[plugin] object CatalogProbe:
     )
   end graphOf
 
-  /** Rooted at the external modules this build depends on directly, with every external module forced to its selected
-    * revision and the in-repo ones left out (no registry holds them). A conflict counts on an edge the real graph has,
-    * or on an edge to a module zipx excluded from a library the graph resolved, so an exclusion the probe does not
-    * repeat cannot invent one.
+  /** In-repo modules are left out because no registry holds them. A conflict counts only on an edge the real graph has,
+    * or on one to a module zipx excluded, so an exclusion the probe does not repeat cannot invent one.
     */
   private def conflictsOf(
       config: String,
@@ -122,7 +120,6 @@ private[plugin] object CatalogProbe:
     }
   end conflictsOf
 
-  /** The version a library named, or the floor of the range it named. */
   private def wantedOf(constraint: VersionConstraint): Option[String] =
     constraint.preferred.orElse(constraint.interval.from).map(_.asString)
 

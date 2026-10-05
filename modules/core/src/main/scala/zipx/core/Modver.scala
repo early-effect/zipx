@@ -69,7 +69,7 @@ final case class Gav(organization: String, artifact: String, version: String)
 /** Identity is a Ship project id or a ShipGroup name. */
 final case class ShipBump(identity: String, from: ReleaseVersion, to: ReleaseVersion)
 
-/** Fail-closed bump and publish sets. Verify's [[Affected]] stays a sibling; do not call it from here. */
+/** Fail-closed bump and publish sets. */
 object Modver:
 
   /** `None < Patch < Minor < Major`. [[BumpKind.PreRelease]] is not a min-bump. */
@@ -184,7 +184,7 @@ object Modver:
         walk(next, qs ++ extra, dependents, inheritTrigger)
   end walk
 
-  /** Owning published matrix roots. Empty file list is empty set, not all. `.sbt` / `project/` do not expand. */
+  /** An empty file list is an empty set, not all, and `.sbt` / `project/` changes do not expand. */
   def dirtyRoots(graph: ModuleGraph, changedFiles: List[String]): Set[ModuleId] =
     changedFiles
       .flatMap(path => Affected.owningModules(graph, path))
@@ -193,7 +193,7 @@ object Modver:
       .map(_.matrixRoot)
       .toSet
 
-  /** Fail closed: None files => Left. Kinds are not Patch placeholders. */
+  /** Fails closed: `None` (the diff failed) is a `Left`. */
   def liftedBumpSet(
       graph: ModuleGraph,
       ships: ShipIndex,

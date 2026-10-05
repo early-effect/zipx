@@ -6,7 +6,7 @@ import RevisionGens.{commitOn, line as lineGen, parsed, revisionOn, row}
 
 object CatalogAuthoritySpec extends ZIOSpecDefault:
 
-  /** Plain string order: enough to show that revisions with no line defer to the plugin's order. */
+  /** Stands in for the plugin's order, which only revisions with no zipx line consult. */
   private given RevisionOrder = (a, b) => a.compareTo(b)
 
   private val widgets = ResolvedModule("com.example", "widgets_3")
@@ -14,14 +14,12 @@ object CatalogAuthoritySpec extends ZIOSpecDefault:
 
   private def wanted(revision: DepRevision): Wanted = Wanted(revision, library)
 
-  /** Two different lines, the older first. */
   private val twoLines: Gen[Any, (ReleaseVersion, ReleaseVersion)] =
     (lineGen <*> lineGen).collect {
       case (a, b) if ReleaseVersion.ordering.lt(a, b) => (a, b)
       case (a, b) if ReleaseVersion.ordering.gt(a, b) => (b, a)
     }
 
-  /** Two commits of `line` with different shas. */
   private def twoCommitsOn(line: ReleaseVersion): Gen[Any, (SnapshotRevision.Commit, SnapshotRevision.Commit)] =
     (commitOn(line) <*> commitOn(line)).collect { case (a, b) if a.abbrev != b.abbrev => (parsed(a), parsed(b)) }
 

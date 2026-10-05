@@ -34,9 +34,7 @@ object SnapshotGuard:
   def hint(row: PublishedRow, tag: String): String =
     s"${Modver.describe(row)} ${row.version} is released and unchanged since $tag. Open the next snapshot with $BumpCommand"
 
-  /** `Fail` refuses a changed, untagged, or unreadable row. `Warn` uses the same sentence and does not refuse.
-    * Unchanged is a hint under both. Order is the row's description, so the message does not depend on map order.
-    */
+  /** Sorted by row description so the message does not depend on map order. */
   def decide(rows: List[(PublishedRow, ReleasedDrift)], gate: DriftGate): SnapshotVerdict =
     val (refusals, warnings, hints) =
       rows

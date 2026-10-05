@@ -1,31 +1,26 @@
 package zipx.core
 
-/** Shared pins for remote-cache docs, planner tests, and live IT.
-  *
-  * One source of truth so Specular examples, `PlannerSpec`, and `RemoteCacheItSpec` cannot drift on image, port, or env
-  * names. Prefer this over `:latest` in any proof surface.
-  */
+/** Remote-cache pins shared by docs, planner tests and the live IT so none drift on image, port or env names. */
 object RemoteCacheProof:
 
-  /** Official Docker Hub image for [buchgr/bazel-remote](https://github.com/buchgr/bazel-remote), version-pinned. */
   val image: String = "buchgr/bazel-remote-cache:v2.6.1"
 
-  /** gRPC listen port inside the sidecar (HTTP is 8080; zipx points sbt at gRPC). */
+  /** zipx points sbt at gRPC, not HTTP. */
   val port: Int = 9092
 
-  /** HTTP status port on bazel-remote (readiness). */
+  /** Readiness only. */
   val httpPort: Int = 8080
 
   val envUri: String    = "ZIPX_REMOTE_CACHE"
   val envHeader: String = "ZIPX_REMOTE_CACHE_HEADER"
 
-  /** Service id / Docker network alias for bazel-remote (GHA services + IT network). */
+  /** Both the GHA service id and the IT's Docker network alias. */
   val serviceName: String = "bazel-remote"
 
-  /** JDK 25 + sbt 2.x light image used by the live IT fixture (not the host runner's setup-sbt). */
+  /** The live IT's sbt container, not the host runner's setup-sbt. */
   val sbtFixtureImage: String = "sbtscala/scala-sbt:eclipse-temurin-25.0.3_9_2.x"
 
-  /** In-compose / shared-network URI the fixture sbt container uses to reach bazel-remote. */
+  /** How the fixture sbt container reaches bazel-remote over the shared network. */
   def grpcServiceUri: String = s"grpc://$serviceName:$port"
 
   def sidecar: CacheBackend.BazelRemoteSidecar =

@@ -1,6 +1,6 @@
 package zipx.core
 
-/** Fail-closed default for leftover Scala Steward YAML after zipx stopped generating it. */
+/** Leftover Scala Steward files fail the build unless a `Warn` gives a reason. */
 enum LeftoverOpt:
   case Fail
   case Warn(reason: String)

@@ -2,10 +2,8 @@ import zipx.core.*
 import zipx.shell.*
 import zipx.workflow.Step
 
-/** Pre-pull Docker images used by core's live remote-cache suite (saferis-style).
-  *
-  * Runs as `extraSteps` on Aggregate `test` so Hub latency and retries sit outside the test JVM.
-  * Testcontainers then starts from local images. Ryuk stays enabled (unlike saferis' GHA setting).
+/** Pre-pulls the images core's live remote-cache suite uses, as `extraSteps` on Aggregate `test`, so Docker Hub
+  * latency and retries sit outside the test JVM. Ryuk stays enabled.
   */
 object RemoteCacheItSteps:
 
@@ -20,7 +18,6 @@ object RemoteCacheItSteps:
   private val attempts: List[Word] =
     List(Word.lit("1"), Word.lit("2"), Word.lit("3"), Word.lit("4"), Word.lit("5"))
 
-  /** Backoff before the next attempt: 10/20/30/40s after attempts 1..4 (literal sleeps; no arithmetic). */
   private val backoff: Command = If(
     ShTest.IntEq(Word.vq("attempt"), Word.lit("1")),
     Block(Exec("sleep", Word.lit("10"))),
@@ -31,7 +28,6 @@ object RemoteCacheItSteps:
     ),
   )
 
-  /** Retrying `docker pull` for both [[RemoteCacheProof]] images (bazel-remote + sbt fixture). */
   private val pullScript: Script = Script.strict(
     ForIn(
       VarName("image"),

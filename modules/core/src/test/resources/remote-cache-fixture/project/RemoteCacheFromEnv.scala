@@ -1,12 +1,8 @@
 import sbt.*
 import sbt.Keys.*
 
-/** Mirrors zipx plugin env wiring for the IT fixture.
-  *
-  * `Global / cacheVersion` is load-time only (safe for remote-cache keying). Override order:
-  *   1. `.it-cache-version` in the project base (written by `writeItCacheVersion111` / `222`, then `reload`)
-  *   2. `ZIPX_CACHE_VERSION` env
-  *   3. JDK/OS FNV hash (same idea as ZipxPlugin)
+/** Mirrors the zipx plugin's remote-cache env wiring. `Global / cacheVersion` is read at load time only, so the
+  * `.it-cache-version` override needs a `reload`; then `ZIPX_CACHE_VERSION`, then a JDK/OS FNV hash.
   */
 object RemoteCacheFromEnv extends AutoPlugin:
   override def trigger = allRequirements

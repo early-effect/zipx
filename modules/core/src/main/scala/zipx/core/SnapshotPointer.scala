@@ -35,7 +35,6 @@ object SnapshotPointer:
       s"$line-$stamp-$build"
     }
 
-  /** A checksum sidecar that names bytes the xml file does not have, or a sidecar whose xml is gone. */
   def deleteBroken(xmlExists: Boolean, sha1Agrees: Option[Boolean], md5Agrees: Option[Boolean]): Boolean =
     val disagrees = sha1Agrees.contains(false) || md5Agrees.contains(false)
     val orphan    = !xmlExists && (sha1Agrees.isDefined || md5Agrees.isDefined)

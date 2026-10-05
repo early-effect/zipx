@@ -3,13 +3,9 @@ package zipx.workflow
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.yaml.{Yaml, YamlTag}
 
-/** Deterministic block-style YAML printer for the `Yaml` AST.
-  *
-  * Written rather than reusing zio-blocks' `YamlWriter` because GitHub needs a multi-line value (notably
-  * `actions/cache`'s `path:`) as a literal block scalar, and `YamlWriter` escapes newlines into `\n` inside a quoted
-  * scalar, which `actions/cache` reads as one literal path. The block layout and quoting rules below mirror
-  * `YamlWriter` exactly, so single-line output stays byte-identical; only the block-scalar case is new. Owning the
-  * serializer also decouples zipx's byte-stable output from a pre-1.0 writer's internals.
+/** Not zio-blocks' `YamlWriter`, which escapes a multi-line value into one quoted scalar that `actions/cache` reads as
+  * a single literal path; GitHub needs a block scalar there. Layout and quoting otherwise mirror `YamlWriter`, so
+  * single-line output stays byte-identical.
   */
 object YamlPrinter:
   private val indentStep = 2
@@ -19,9 +15,8 @@ object YamlPrinter:
     writeNode(sb, yaml, 0, isTopLevel = true)
     sb.toString
 
-  /** A pre-pass rather than a check inside the writer, because the writer is a recursive `StringBuilder` walk whose
-    * every method would otherwise have to thread an `Either`. Separating them keeps [[print]] total for a tree that
-    * passed. See [[writeBlockScalar]] for why these cases are fatal rather than merely ugly.
+  /** A pre-pass so [[print]] stays total without threading an `Either` through the writer. See `writeBlockScalar` for
+    * why these cases are fatal rather than merely ugly.
     */
   def problem(yaml: Yaml): Option[String] = yaml match
     case Yaml.Mapping(entries)   => entries.iterator.flatMap((k, v) => problem(k).orElse(problem(v))).nextOption()
@@ -29,9 +24,7 @@ object YamlPrinter:
     case Yaml.Scalar(value, _)   => multiLineProblem(value)
     case Yaml.NullValue          => None
 
-  /** Only a multi-line value reaches a block scalar, so a single-line string with a control character is left to
-    * [[needsQuoting]], which handles it correctly.
-    */
+  /** A single-line value never reaches a block scalar; `needsQuoting` quotes its control characters correctly. */
   private def multiLineProblem(value: String): Option[String] =
     if !value.contains('\n') then None
     else
@@ -117,12 +110,10 @@ object YamlPrinter:
         first = false
       }
 
-  /** Plain `|`, which clips to a single final newline; that is what an `actions/cache` path list wants.
+  /** Plain `|` clips to a single final newline, which an `actions/cache` path list wants.
     *
-    * Two kinds of content would silently produce YAML GitHub cannot read: a `\r` or C0 control character, which
-    * [[needsQuoting]] forces into a quoted scalar and so collapses the whole program onto one escaped line, and a line
-    * starting with a tab, since block-scalar indentation must be spaces. `zipx-shell`'s `ScriptLine` makes both
-    * unconstructible for a DSL-built script; [[problem]] catches the hand-written string that still reaches here.
+    * A `\r` or C0 control character (which `needsQuoting` collapses onto one escaped line) or a tab-indented line would
+    * silently produce YAML GitHub cannot read; [[problem]] rejects both before printing.
     */
   private def writeBlockScalar(sb: java.lang.StringBuilder, value: String, contentIndent: Int): Unit =
     val lines = value.split("\n", -1)

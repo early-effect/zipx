@@ -3,7 +3,6 @@ package zipx.core
 import neotype.unwrap
 import zio.test.*
 
-/** `Capability.withNodeVersion` and the `setupNode` pin (#73). */
 object NodeVersionSpec extends ZIOSpecDefault:
   import Fixtures.*
 

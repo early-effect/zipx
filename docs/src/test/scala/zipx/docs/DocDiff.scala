@@ -3,7 +3,6 @@ package zipx.docs
 import ascent.*
 import ascent.dsl.*
 
-/** GitHub-style unified diff for Specular examples (catalog bump PRs). */
 object DocDiff:
 
   enum Kind:

@@ -2,12 +2,7 @@ package zipx.core
 
 import zio.test.*
 
-/** The coverage capability (#74).
-  *
-  * What is actually under test is one thing: the measured task is never a bare `test`. On sbt 2.0 that is `testQuick`,
-  * so a coverage job running it prints "No tests to run", reports near-zero, and passes. Every assertion here exists to
-  * make that regression a red test rather than a green pipeline.
-  */
+/** sbt's `test` is `testQuick`, so a coverage job running it measures nothing and still passes. */
 object CoverageSpec extends ZIOSpecDefault:
   import Fixtures.*
 
@@ -20,7 +15,6 @@ object CoverageSpec extends ZIOSpecDefault:
 
   private def plan(capabilities: Capability*) = Planner.plan(sampleGraph, capabilities.toList, config)
 
-  /** The command step: the last step that runs sbt, since `postSteps` puts the upload after it. */
   private def command(job: zipx.workflow.Job): String =
     job.steps.flatMap(_.run).filter(_.contains("sbt ")).lastOption.getOrElse("")
 
@@ -33,7 +27,6 @@ object CoverageSpec extends ZIOSpecDefault:
         )
       },
       test("a module that did not override it gets testFull, not the `test` default") {
-        // `schema` carries ModuleNode.DefaultTestTask, which is where the footgun lives.
         val wf = plan(Coverage.graph())
         assertTrue(
           sampleGraph.nodes.find(_.id == "schema").exists(_.testTask == ModuleNode.DefaultTestTask),

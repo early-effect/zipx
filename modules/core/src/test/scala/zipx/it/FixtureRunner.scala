@@ -14,11 +14,7 @@ import java.time.Duration
 import java.util.Comparator
 import scala.jdk.CollectionConverters.*
 
-/** Materializes the classpath fixture and runs sbt **inside** a plain Testcontainers `GenericContainer`
-  * (`RemoteCacheProof.sbtFixtureImage`) on the same Docker network as bazel-remote.
-  *
-  * No host `Process("sbt")`: the fixture does not depend on setup-sbt / PATH on the runner.
-  */
+/** Runs the fixture's sbt in a container on bazel-remote's network, so it never depends on the runner's sbt. */
 object FixtureRunner:
 
   private val FixtureResource = "remote-cache-fixture"
@@ -40,13 +36,11 @@ object FixtureRunner:
       else None
   end RunResult
 
-  /** Materialize fixture into a temp dir (unique per call). */
   def materializeFixture(): Path =
     val root = Files.createTempDirectory("zipx-remote-cache-fixture-")
     copyResourceTree(FixtureResource, root)
     root
 
-  /** One-shot sbt container: put/get scripts, isolated HOME inside the container. */
   def runSbt(
       network: Network,
       fixtureDir: Path,
@@ -56,8 +50,7 @@ object FixtureRunner:
     val c: GenericContainer[?] =
       new GenericContainer(DockerImageName.parse(RemoteCacheProof.sbtFixtureImage))
     c.withNetwork(network)
-    // Copy (not bind): Docker Desktop on macOS often cannot mount /var/folders or /tmp; a container-local
-    // copy is writable for wipeItCaches and works the same on GHA Linux.
+    // Copy, not bind: Docker Desktop on macOS often cannot mount /var/folders or /tmp, and wipeItCaches writes here.
     c.withCopyFileToContainer(
       MountableFile.forHostPath(fixtureDir.toAbsolutePath.toString),
       FixtureMount,

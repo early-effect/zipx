@@ -9,8 +9,8 @@ object PinRewrite:
       Right(source.replace(current, ZipxCatalog.constructorCall("Lib", group, artifact, to)))
     else Left(s"catalog has no $current")
 
-  /** The stored commit the pointer names, on the pin's own line. A dirty pin is refused. The same sha in the stored
-    * form is not a rewrite; a bare pin is rewritten to the stored form even at the same sha.
+  /** The stored commit the pointer names, on the pin's own line. A bare pin is rewritten to the stored form even at the
+    * same sha; an already-stored pin at that sha is not a rewrite.
     */
   def advance(current: String, pointerSha: GitSha): Either[String, Option[String]] =
     def to(pin: SnapshotRevision.Commit): Option[String] =
@@ -26,9 +26,7 @@ object PinRewrite:
         Left(SnapshotRevisionError.NotCommitPin(current).message)
   end advance
 
-  /** The stored commit the pointer of `line` names. Naming a line is the only way a pin changes lines; [[advance]]
-    * stays on the pin's own. A release row becomes a commit pin of that line. A dirty pin and the pointer are refused.
-    */
+  /** The only way a pin changes lines ([[advance]] stays on its own). A release row becomes a commit pin of `line`. */
   def moveTo(current: String, line: ReleaseVersion, pointerSha: GitSha): Either[String, Option[String]] =
     val next = SnapshotRevision.commit(line, pointerSha).storedId
     DepRevision.of(current) match
@@ -37,9 +35,7 @@ object PinRewrite:
         Left(s"$current is the snapshot pointer, not a pin. Run sbt zipxSnapshotStatus.")
       case _ => Right(Option.when(next != current)(next))
 
-  /** The same line, with the sha removed. Refuses a dirty pin, a pin that is already a release, and a missing release.
-    * It does not look up a newer line.
-    */
+  /** The same line with the sha removed. It does not look up a newer line. */
   def pinRelease(current: String, lineReleased: Boolean): Either[String, String] =
     DepRevision.of(current) match
       case DepRevision.Commit(pin)         => released(pin.line, lineReleased)

@@ -10,7 +10,6 @@ import zipx.shell.*
 import zipx.workflow.{ActionRef, Expr, Step}
 import zio.test.*
 
-/** The typed DSL a build writes steps with: shell scripts, expressions, step builders, and step bundles. */
 object ShellAndSteps extends DocSpecSuite:
 
   def doc = page("Shell and steps")(

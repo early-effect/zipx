@@ -6,7 +6,6 @@ import zio.test.*
 
 import scala.collection.mutable
 
-/** Pin-feed laws: fake lookup and OSV, synthetic ids, never a live registry. */
 object PinFeedSpec extends ZIOSpecDefault:
 
   private val graph = GraphFixture(

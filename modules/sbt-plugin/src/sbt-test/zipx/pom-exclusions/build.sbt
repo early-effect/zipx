@@ -1,5 +1,4 @@
-// What a published POM keeps its libraries from bringing: the in-repo modules a consumer inherits through it, and the
-// commit pins it compiles against. The registry is static POMs, so nothing is downloaded.
+// The registry is static POMs, so nothing is downloaded.
 MyVersions.settings
 zipxVerify                 := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 ThisBuild / organization   := "com.example.pe"

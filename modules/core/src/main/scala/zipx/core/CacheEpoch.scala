@@ -14,18 +14,14 @@ enum CacheEpoch:
     * `origin`, or when no tag matches and it falls back to `0.0.0`.
     *
     * @param tagMatch
-    *   a [[zipx.shell.SquoteText]] rather than a `String` because the generated script single-quotes it so `v*` reaches
-    *   git unglobbed, and a value containing a quote would break out of that quoting. [[CacheEpoch.gitTags]] writes one
-    *   as a literal checked while the build compiles.
+    *   single-quoted in the script so `v*` reaches git unglobbed.
     */
   case GitTags(tagMatch: SquoteText = CacheEpoch.DefaultTagMatch)
 
   /** User-supplied shell that must write `epoch=` and `release=` lines to `$GITHUB_OUTPUT`.
     *
     * @param stepId
-    *   a [[zipx.workflow.StepId]] rather than a `String` because the planner reads the epoch back out as
-    *   `steps.<id>.outputs.epoch`; an id that is not a legal Actions identifier would make that reference unparseable,
-    *   and the failure would surface as a broken cache key rather than as a rejected setting.
+    *   the planner reads the epoch back as `steps.<id>.outputs.epoch`.
     */
   case Script(run: String, stepId: StepId = CacheEpoch.GitTagsStepId)
 
@@ -48,15 +44,10 @@ object CacheEpoch:
   def gitTagsResolveScript(tagMatch: SquoteText = DefaultTagMatch): String =
     gitTagsResolveTypedScript(tagMatch).render
 
-  /** The acid test for the shell AST, and the reason it models what it does: one program needing a pipeline, both
-    * bracket forms (`[ ]` for the counts, `[[ ]]` for the glob match), `${VAR:-}` and `${VAR#prefix}` expansions, an
-    * assignment used as an `elif` condition, per-command stderr suppression, and two `$GITHUB_OUTPUT` writes.
-    */
   def gitTagsResolveTypedScript(tagMatch: SquoteText = DefaultTagMatch): zipx.shell.Script =
     val tagMatchWord = Word.Squote(tagMatch)
 
-    // `tr -d ' '` strips the padding `wc` adds on macOS. `InlineCommand` rather than `Command` because the argument
-    // becomes a pipeline leg, and only an inline command can be one.
+    // `tr -d ' '` strips the padding `wc` adds on macOS.
     def countOf(command: InlineCommand): Word =
       Word.subst(command | Exec("wc", Word.lit("-l")) | Exec("tr", Word.lit("-d"), Word.squote(" ")))
 
@@ -101,8 +92,7 @@ object CacheEpoch:
         Assign("epoch", Word.vq("release")),
       ),
       elifs = List(
-        // `elif tag=$(…); then` branches on git describe's exit status *and* keeps its output, which is why `ShTest.Cmd`
-        // takes a whole `Command` rather than a program name.
+        // `elif tag=$(…); then` branches on git describe's exit status and keeps its output.
         ShTest.Cmd(
           Assign(
             "tag",
@@ -145,7 +135,6 @@ object CacheEpoch:
         setOutput("epoch", Word.v("epoch")),
         setOutput("release", Word.v("release")),
       ),
-      // Emits a blank line after the last write, which the pre-DSL string did. Kept for byte parity.
       trailingNewline = true,
     )
   end gitTagsResolveTypedScript
@@ -153,7 +142,6 @@ object CacheEpoch:
   private inline def setOutput(inline name: String, value: Word.Quotable): Command =
     Exec("echo", Word.dquote(Word.lit(name + "="), value)).appendTo(Word.vq("GITHUB_OUTPUT"))
 
-  /** An Actions annotation is a `::warning` line on stdout, not an API call. */
   private def warn(message: Word.Quotable*): Command =
     Exec("echo", Word.dquote(Word.lit("::warning title=zipx cache epoch::") :: message.toList*))
 

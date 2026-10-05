@@ -44,7 +44,6 @@ end DeployTrigger
 
 object DeployTrigger:
 
-  /** [[Staged]] with both labels checked while the build compiles. */
   inline def staged(inline deployLabel: String, inline skipLabel: String): DeployTrigger =
     Staged(ExprLiteral(deployLabel), ExprLiteral(skipLabel))
 
@@ -200,7 +199,6 @@ object DeployWorkflow:
       case _                             => Nil
     required(condition).find(_ != "workflow_dispatch")
 
-  /** What a dispatch could ship, for [[DeployPlan.resolve]]. */
   def scope(graph: ModuleGraph, deploy: List[Capability], imagesEnvironment: String): DeployScope =
     val images   = deploy.filter(isImage).flatMap(c => graph.nodes.filter(c.participates).map(_.id)).distinct.sorted
     val byTarget =
@@ -216,12 +214,10 @@ object DeployWorkflow:
     DeployScope(imagesEnvironment, images, targets)
   end scope
 
-  /** Target names first, then groups, each sorted. */
   def targetChoices(graph: ModuleGraph, deploy: List[Capability]): List[String] =
     val targets = deploy.flatMap(c => graph.nodes.filter(c.participates).flatMap(c.targets))
     targets.map(t => t.name: String).distinct.sorted ++ targets.flatMap(_.group).map(g => g: String).distinct.sorted
 
-  /** The targets a `target` input selects: that target, or every target in that group. */
   def selectedTargets(graph: ModuleGraph, deploy: List[Capability], choice: String): Either[String, Set[TargetName]] =
     val targets  = deploy.flatMap(c => graph.nodes.filter(c.participates).flatMap(c.targets))
     val selected = targets.filter(t => (t.name: String) == choice || t.group.exists(g => (g: String) == choice))

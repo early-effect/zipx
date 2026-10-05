@@ -49,7 +49,6 @@ object Precedence:
     case _                               => None
 end Precedence
 
-/** A revision of a module that one library in the graph asked for. */
 final case class Wanted(revision: DepRevision, by: ResolvedModule)
 
 /** Why `update` stops after resolving. Each message names what fixes it. */
@@ -81,7 +80,7 @@ object CatalogConflict:
       .headOption
       .map(Stale(module, row, _))
 
-  /** Commits of one line that a module nothing in this build states is met at, when they are not one commit. */
+  /** Two or more distinct commits of one line, met for a module this build does not state. */
   def unpinned(module: ResolvedModule, revisions: List[DepRevision]): Option[Unpinned] =
     revisions
       .flatMap(Precedence.commitOf)
@@ -91,7 +90,6 @@ object CatalogConflict:
       .sortBy((line, _) => line)
       .collectFirst { case (_, first :: second :: rest) => Unpinned(module, ::(first, second :: rest)) }
 
-  /** The command that moves the catalog to what the dependency needs. */
   private def fix(row: Lib, wanted: DepRevision): String =
     def advance(line: ReleaseVersion) = s"Move the pin to that line: sbt 'zipxSnapshotAdvance ${row.artifact} $line'"
     (DepRevision.of(row.version), wanted) match

@@ -6,22 +6,18 @@ import zipx.workflow.{EnvName, Expr as GhaExpr, RawExpr, SecretName}
 import scala.collection.immutable.ListMap
 
 /** A value injected into a job's `env:` block, so a build never hand-writes `${{ secrets.X }}`. Secret *values* never
-  * appear in the model, only references: zipx owns the rendering, the build owns which names.
-  *
-  * Every case holds a *name* validated at construction, so [[render]] is total. A literal name goes through an `inline`
-  * constructor and is checked while the consumer's build compiles; runtime data goes through the `*Make` sibling and
-  * comes back as an `Either`.
+  * appear in the model, only references.
   */
 enum EnvValue:
 
-  /** Arbitrary text, the one case whose *content* is unconstrained: an env value is data the build computes, and GitHub
-    * accepts a multi-line one (a PEM, a JSON blob) as a block scalar.
+  /** The one case with unconstrained content: GitHub accepts a multi-line env value (a PEM, a JSON blob) as a block
+    * scalar.
     */
   case Plain(value: String)
   case FromSecret(name: SecretName)
   case FromEnv(name: EnvName)
 
-  /** Any [[zipx.workflow.Expr]], for a value the named cases cannot express. */
+  /** For a value the named cases cannot express. */
   case Typed(expr: GhaExpr)
 
   /** **Escape hatch.** See [[zipx.workflow.RawExpr]] for what it does and does not guarantee.
@@ -30,9 +26,7 @@ enum EnvValue:
 
   def render: String = textOrExpr.fold(identity, _.render)
 
-  /** `None` for [[EnvValue.Plain]], whose text is not an expression and can hold more than a [[zipx.workflow.Expr.Lit]]
-    * can. Named `asExpr` rather than `expr` because the [[EnvValue.Expr]] case already has a field of that name.
-    */
+  /** `None` for [[EnvValue.Plain]], whose text can hold more than a [[zipx.workflow.Expr.Lit]] can. */
   def asExpr: Option[GhaExpr] = textOrExpr.toOption
 
   private def textOrExpr: Either[String, GhaExpr] = this match
@@ -45,8 +39,7 @@ end EnvValue
 
 object EnvValue:
 
-  // `SecretName` and `EnvName` are separate newtypes because the rules genuinely differ: a secret may be named
-  // `GITHUB_TOKEN`, an env key may not be `GITHUB_`-prefixed at all.
+  // A secret may be named `GITHUB_TOKEN`; an env key may not be `GITHUB_`-prefixed at all.
 
   inline def secret(inline name: String): EnvValue = FromSecret(SecretName(name))
 
@@ -68,13 +61,11 @@ object EnvValue:
 
   def exprMake(raw: String): Either[String, EnvValue] = RawExpr.make(raw).map(Expr(_))
 
-  /** Keys sorted, so a `Map` still renders deterministically. */
   def renderAll(m: Map[String, EnvValue]): ListMap[String, String] =
     ListMap.from(m.toList.sortBy(_._1).map((k, v) => k -> v.render))
 
-  /** `secret"PGP_PASSPHRASE"`. `inline` all the way down, so an interpolation of *compile-time-known* parts is still
-    * checked: `secret"${prefix}_TOKEN"` for an `inline val prefix` is folded and validated. A name assembled from
-    * runtime data is a compile error naming the input rather than a silent runtime check; use [[secretMake]] there.
+  /** `secret"PGP_PASSPHRASE"`. Parts known at compile time (an `inline val prefix`) are folded and validated; a name
+    * built from runtime data is a compile error, so use [[secretMake]] there.
     */
   extension (inline sc: StringContext) inline def secret(inline args: Any*): EnvValue = EnvValue.secret(sc.s(args*))
 

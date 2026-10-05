@@ -2,7 +2,6 @@ package zipx.core
 
 import zio.test.Gen
 
-/** Release lines, shas, and the revisions built from them. */
 object RevisionGens:
 
   val line: Gen[Any, ReleaseVersion] =
@@ -30,11 +29,10 @@ object RevisionGens:
 
   val commit: Gen[Any, SnapshotRevision.Commit] = line.flatMap(commitOn)
 
-  /** The same commit as a parse returns it: line and abbreviation, no full sha. */
+  /** A commit as a parse returns it: no full sha. */
   def parsed(commit: SnapshotRevision.Commit): SnapshotRevision.Commit =
     SnapshotRevision.Commit(commit.line, commit.abbrev, None)
 
-  /** A revision that names `line`: its release, a stored commit, or its pointer. */
   def revisionOn(line: ReleaseVersion): Gen[Any, DepRevision] =
     Gen.oneOf(
       Gen.const(DepRevision.Release(line)),
@@ -55,7 +53,6 @@ object RevisionGens:
       Gen.elements("2.1.25-M26", "1.0.0-RC1", "1.2.3.4").map(DepRevision.Other(_)),
     )
 
-  /** A catalog row for `com.example:widgets` at `version`. */
   def row(version: String): Gen[Any, Lib] =
     Gen.const(DepVersion.make(version)).collect { case Right(v) =>
       Lib(GroupId("com.example"), ArtifactId("widgets"), v, Cross.Binary, None, Nil, None, None)

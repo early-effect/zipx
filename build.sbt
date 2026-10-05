@@ -32,13 +32,11 @@ val commonSettings = Seq(
   testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
   publishMavenStyle    := true,
   pomIncludeRepository := { _ => false },
-  // ZIOSpecDefault suites are discovered as mains; tests don't use mainClass. Suppress the warning.
+  // ZIOSpecDefault suites are discovered as mains; this suppresses that warning.
   Test / mainClass := None,
 )
 
-// The version handoff for Aggregate test post-steps: examples/monorepo needs the in-dev plugin version, and CI must
-// read it from a file rather than by capturing sbt stdout (which carries log lines). Same discipline as the plugin's
-// own `zipxAffectedModules`, which writes target/zipx-affected.json for exactly this reason.
+// examples/monorepo needs the in-dev plugin version; CI reads it from a file because sbt's stdout carries log lines.
 lazy val zipxWriteVersion = taskKey[File]("Write the build version to target/zipx-version.txt for the example check")
 
 lazy val root = (project in file("."))
@@ -53,7 +51,6 @@ lazy val root = (project in file("."))
       streams.value.log.info(s"zipx version ${(plugin / version).value} -> ${out.getPath}")
       out
     },
-    // Dogfood: snapshots on merge and on labeled PRs, Pages, fork-gated. Releases run from zipx-release.yml.
     zipxReleaseWorkflow := Some(ZipxCentral.releases),
     zipxDriftGate       := DriftGate.Fail,
     zipxCapabilities ++= {
@@ -63,9 +60,6 @@ lazy val root = (project in file("."))
         ZipxCentral.pullRequestSnapshots("snapshots"),
         // andCondition keeps ZipxDocs tag|dispatch filter and layers the fork gate
         ZipxDocs.pages().andCondition(upstream),
-        // Override Aggregate `test`: unit/IT tests, then publishLocal + examples/monorepo zipxWorkflowCheck (former
-        // consumer-verify job).
-        // extraSteps: saferis-style pre-pull so Testcontainers does not hit Hub mid-suite (Ryuk stays on).
         Capability
           .once(
             name = Capability.TestName,
@@ -77,7 +71,7 @@ lazy val root = (project in file("."))
           )
           // Replaces the builtin test by name, so it has to claim the LocalDir snapshot itself.
           .withLocalCache(LocalCacheMode.Save),
-        // Its own job, in parallel with `test`: in series, the two suites were the whole critical path.
+        // Its own job, parallel to `test`: in series the two suites are the whole critical path.
         zipxTasks.once(CapabilityName("scripted"), LocalProject("plugin") / scripted),
       )
     },
@@ -88,7 +82,7 @@ lazy val root = (project in file("."))
     zipxVersionUpdatesExtraSteps   := zipx.ExampleCheck.companionSteps,
   )
 
-// Scala 3. Shell AST: no zipx concepts, no zio-blocks, usable standalone.
+// No zipx concepts and no zio-blocks, so it stands alone.
 lazy val shell = (project in file("modules/shell"))
   .settings(commonSettings)
   .settings(
@@ -97,7 +91,6 @@ lazy val shell = (project in file("modules/shell"))
     libraryDependencies ++= V.shellLibraryDeps,
   )
 
-// Scala 3. GitHub Actions AST + deterministic YAML renderer.
 lazy val workflow = (project in file("modules/workflow"))
   .dependsOn(shell)
   .settings(commonSettings)
@@ -107,14 +100,13 @@ lazy val workflow = (project in file("modules/workflow"))
     libraryDependencies ++= V.workflowLibraryDeps,
   )
 
-// Scala 3. Module-graph model, toposort, capabilities, and the planner.
 lazy val core = (project in file("modules/core"))
   .dependsOn(workflow)
   .settings(commonSettings)
   .settings(
     name        := "zipx-core",
     description := "Pure planner: module graph, capabilities, EnvValue, ModuleGraph => Workflow",
-    // Embed ActionPins.Defaults from ZipxVersions Action rows (jar resource, not a committed pin file).
+    // ActionPins.Defaults come from the catalog's Action rows as a jar resource, not a committed pin file.
     Compile / resourceGenerators += Def.task {
       val out  = (Compile / resourceManaged).value / "zipx" / "action-pins.yml"
       val pins = zipx.core.ActionPins
@@ -123,15 +115,12 @@ lazy val core = (project in file("modules/core"))
       IO.write(out, zipx.core.ActionPinFile.render(pins))
       Seq(out)
     }.taskValue,
-    // Live remote-cache proof (plain Testcontainers, saferis-style). Fixture sbt runs in an sbt
-    // Docker image; host setup-sbt PATH is irrelevant. Docker is required when these tests run.
-    // Leave Testcontainers Ryuk enabled (do not set TESTCONTAINERS_RYUK_DISABLED): cleans up containers
-    // after aborted runs locally and is fine on GHA.
+    // The live remote-cache proof needs Docker; its fixture sbt runs in an sbt image, not the host's. Leave Ryuk
+    // enabled: it cleans up containers after aborted local runs.
     libraryDependencies ++= V.testcontainersDeps ++ V.deps(V.zioJson),
   )
 
-// Scala 3 compiler trees for catalog files. Not on a consumer's sbt session unless they load the plugin check
-// path: the plugin depends on this so zipxWorkflowCheck walks plugins.sbt the same way the CLI will.
+// The plugin depends on this so zipxWorkflowCheck parses plugins.sbt the way the CLI does.
 lazy val syntax = (project in file("modules/syntax"))
   .dependsOn(core % "compile->compile;test->test")
   .settings(commonSettings)
@@ -141,7 +130,7 @@ lazy val syntax = (project in file("modules/syntax"))
     libraryDependencies += "org.scala-lang" %% "scala3-compiler" % scalaVersion.value,
   )
 
-// ZIO CLI above the target sbt. No Typelevel. Published so the companion can cs launch it.
+// Published so the companion can `cs launch` it. No Typelevel.
 lazy val cli = (project in file("modules/cli"))
   .dependsOn(syntax, core % "compile->compile;test->test")
   .settings(commonSettings)
@@ -151,7 +140,6 @@ lazy val cli = (project in file("modules/cli"))
     Compile / mainClass := Some("zipx.cli.Main"),
   )
 
-// Early-effect / Maven Central paved path (typed secrets + GPG import + publishSigned + sonaRelease).
 lazy val central = (project in file("modules/central"))
   .dependsOn(core % "compile->compile;test->test")
   .settings(commonSettings)
@@ -160,7 +148,6 @@ lazy val central = (project in file("modules/central"))
     description := "zipx capability pack for CI-only Maven Central publishing (early-effect org secrets)",
   )
 
-// AWS paved path: OIDC role assumption, ECR registries that cannot omit their region, image tag sets.
 lazy val aws = (project in file("modules/aws"))
   .dependsOn(core % "compile->compile;test->test")
   .settings(commonSettings)
@@ -169,8 +156,7 @@ lazy val aws = (project in file("modules/aws"))
     description := "zipx capability pack for AWS: OIDC login, ECR registries, image tags",
   )
 
-// The sbt 2.x AutoPlugin, the only module that touches sbt.*. Publish + scripted live here;
-// the root build dogfoods via the meta-build source mirror in project/dogfood.sbt (no publishLocal).
+// The only module that touches sbt.*. The root build dogfoods it through project/dogfood.sbt's source mirror.
 lazy val plugin = (project in file("modules/sbt-plugin"))
   .enablePlugins(SbtPlugin)
   .dependsOn(core, syntax, central, aws)
@@ -186,7 +172,7 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     // Bundle the remote-cache transport so consumers need one addSbtPlugin line. RemoteCachePlugin triggers on
     // AllRequirements but is a no-op until Global/remoteCache is set (which zipx does only from the CI env).
     addSbtPlugin(V.remoteCachePlugin),
-    // sbt-pgp so ZipxCentral.release can take the real publishSigned TaskKey (Option C).
+    // sbt-pgp so ZipxCentral.release can take the real publishSigned TaskKey.
     addSbtPlugin(V.moduleID(V.pgp)),
     // JVM args for the sbt subprocess that runs scripted tests: suppress Unsafe/JNA warnings.
     scriptedLaunchOpts ++= Seq(
@@ -200,19 +186,16 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
       "--enable-native-access=ALL-UNNAMED",
       s"-Dplugin.version=${version.value}",
       // Scripted gives each launch its own sbt.global.base, and the launcher's boot directory defaults under it, so
-      // every launch fetched sbt and Scala into an empty directory. Share the running sbt's instead.
+      // every launch would fetch sbt and Scala into an empty directory. Share the running sbt's instead.
       s"-Dsbt.boot.directory=${appConfiguration.value.provider.scalaProvider.launcher.bootDirectory}",
     ),
-    // sbt 2's default turns batch mode off: it checks for a `1.x`-style binary version, and sbt 2's is `2`. Without
-    // batch mode every test gets a fresh JVM and scriptedParallelInstances is ignored. 4 matches a standard runner.
+    // Scripted's default leaves batch mode off here because it misreads this sbt's binary version. Without batch mode
+    // every test gets a fresh JVM and scriptedParallelInstances is ignored. 4 matches a standard runner.
     scriptedBatchExecution    := true,
     scriptedParallelInstances := 4,
     // Buffered, because parallel instances interleave: a failing test prints its whole log in one piece.
     scriptedBufferLog := true,
   )
-
-// Docs-as-tests site (Specular + early-effect theme). Deployed via ZipxDocs.pages in generated CI.
-// Preview is the plugin's docs/specularPreview (ascent preview). Do not prefix it with ~.
 
 /** Scala.js docs client: remounts `.interactive` ascent examples after SSR. */
 lazy val docsJS = project
@@ -227,7 +210,7 @@ lazy val docsJS = project
     Compile / mainClass := Some("zipx.docs.ClientMain"),
     Compile / unmanagedSourceDirectories += (LocalProject("docs") / baseDirectory).value / "shared" / "scala",
     libraryDependencies ++= V.deps(
-      // sbt 2 + ScalaJSPlugin: `%%` already appends `_sjs1` (no `%%%`).
+      // Under ScalaJSPlugin, `%%` already appends the Scala.js suffix (no `%%%`).
       V.specular,
       V.specularMermoid,
       V.zio,
@@ -242,7 +225,7 @@ lazy val docs = project
   .settings(
     name            := "zipx-docs",
     publish / skip  := true,
-    publishArtifact := false, // also honored; prefer publish/skip for opt-out
+    publishArtifact := false,
     scalacOptions ++= V.commonScalacOptions :+ "-language:implicitConversions",
     Test / unmanagedSourceDirectories += baseDirectory.value / "shared" / "scala",
     libraryDependencies ++= V.deps(

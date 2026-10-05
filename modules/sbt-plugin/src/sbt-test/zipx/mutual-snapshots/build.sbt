@@ -1,6 +1,5 @@
-// Ascent: a JS-only facade in its own ship, and an app that also depends on heddle, which is built against that
-// facade. Heddle's build is changes/heddle.sbt; the test swaps the two in place, one directory, one git history.
-// Ascent pins heddle only at commits and names no snapshot repository: zipx adds it for the commit pin.
+// Ascent, swapped in place with changes/heddle.sbt (one directory, one git history). It names no snapshot repository:
+// zipx adds it for the commit pin.
 MyVersions.settings
 Fixture.settings
 organization                           := Fixture.Organization
@@ -27,7 +26,6 @@ lazy val mcpApp = (projectMatrix in file("mcp-app"))
   )
   .jsPlatform(scalaVersions = Seq(scala3))
 
-// Publishes nothing, like ascent's docs site, and later takes a docs framework built against heddle, like specular.
 lazy val docs = (projectMatrix in file("docs"))
   .dependsOn(mcpApp)
   .settings(

@@ -39,13 +39,10 @@ object DeployModules:
           .toRight(s"zipx: modules '$other' is not $ChangedWire, $AllWire, or a module this deploy can ship")
 end DeployModules
 
-/** A module's last successful deploy to one environment, as GitHub recorded it. */
 final case class LastDeploy(environment: String, module: ModuleId, sha: GitSha)
 
-/** The modules one target deploys, and the Environment that records them. */
 final case class TargetModules(target: TargetName, environment: String, modules: List[ModuleId])
 
-/** Everything a dispatch could ship: every image module, and every target with the modules it deploys. */
 final case class DeployScope(imagesEnvironment: String, images: List[ModuleId], targets: List[TargetModules])
 
 /** What one `zipx-deploy.yml` run ships at `sha`: the images it builds or finds, and each target's modules. */
@@ -101,7 +98,6 @@ object DeployPlan:
     DeployPlan(sha, (changed ++ scope.images.filter(deployed)).distinct.sorted, targets)
   end resolve
 
-  /** A run that deploys nothing. */
   def empty(sha: GitSha): DeployPlan = DeployPlan(sha, Nil, ListMap.empty)
 
 end DeployPlan

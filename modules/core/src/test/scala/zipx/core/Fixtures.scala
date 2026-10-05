@@ -1,8 +1,6 @@
 package zipx.core
 
-/** The cross-published monorepo graph shared by the core tests: a diamond over `api`, one 2.13-only publisher, and
-  * non-publishing services and batch modules.
-  */
+/** The graph the core tests share: a diamond over `api`, a `scala2`-only publisher, and non-publishing services. */
 object Fixtures:
 
   val scala2 = "2.13.16"

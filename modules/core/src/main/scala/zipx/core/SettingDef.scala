@@ -3,7 +3,6 @@ package zipx.core
 import neotype.Subtype
 import scala.quoted.{Expr, Quotes, Type as QuotedType, quotes}
 
-/** Public `zipx*` setting / task key name as it appears in `build.sbt` and the Settings docs table. */
 type SettingName = SettingName.Type
 object SettingName extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -17,7 +16,6 @@ object TypeLabel extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
     if input.trim.isEmpty then "a type label must be non-empty" else true
 
-  /** Pretty type name for docs, from the actual type argument (not a hand-written string). */
   inline def of[A]: TypeLabel = ${ ofImpl[A] }
 
   private def ofImpl[A: QuotedType](using Quotes): Expr[TypeLabel] =
@@ -26,10 +24,8 @@ object TypeLabel extends Subtype[String]:
     val pretty = TypeLabel.shorten(raw)
     '{ TypeLabel.unsafeMake(${ Expr(pretty) }) }
 
-  /** Drop noisy package / neotype packaging so docs show `WorkflowName`, not `PlanConfig$package.WorkflowName.Type`.
-    *
-    * Leaving `$` in a type label also breaks Specular/markdown math (`$…$`), which is what garbled the Default column
-    * on the Settings page.
+  /** `WorkflowName`, not `PlanConfig$package.WorkflowName.Type`. A `$` left in a label also breaks Specular markdown
+    * math (`$…$`).
     */
   private[core] def shorten(shown: String): String =
     val stripped = shown
@@ -58,7 +54,7 @@ object TypeLabel extends Subtype[String]:
           functionArrow(shown.substring(0, idx) + pretty + shown.substring(endExclusive))
   end functionArrow
 
-  /** Split `Function1[` args at the top-level comma; returns (left, right, index after closing `]`). */
+  /** (left, right, index after the closing `]`), split at the top-level comma. */
   private def splitFunctionArgs(shown: String, from: Int): Option[(String, String, Int)] =
     var depth = 0
     var comma = -1
@@ -92,7 +88,6 @@ enum SettingScope:
 enum SettingKind:
   case Setting, Task, Input
 
-/** Documented default: a typed value (show text from the expression source), or a derived summary. */
 sealed trait SettingDefault[+A]:
   def render: String
 
@@ -105,7 +100,6 @@ object SettingDefault:
   final case class Derived(summary: String) extends SettingDefault[Nothing]:
     def render: String = summary
 
-  /** Capture both the value and its source text, e.g. `SettingDefault.value(Seq.empty)`. */
   inline def value[A](inline default: A): Value[A] = ${ valueImpl('default) }
 
   private def valueImpl[A: QuotedType](default: Expr[A])(using Quotes): Expr[Value[A]] =

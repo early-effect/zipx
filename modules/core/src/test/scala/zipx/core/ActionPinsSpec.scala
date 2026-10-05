@@ -15,8 +15,7 @@ object ActionPinsSpec extends ZIOSpecDefault:
 
   def spec = suite("ActionPins")(
     test("defaults are pinned to commit SHAs, not mutable tags or branches") {
-      // Stricter than [[ActionRef]] on purpose: `actions/checkout@v4` is a legal `uses:` value and would pass the
-      // field's own type, but a *default* zipx ships must be a SHA. Over every `Field`, so a new pin cannot escape it.
+      // Stricter than `ActionRef` on purpose: a tag ref is a legal `uses:`, but a default zipx ships must be a SHA.
       def isShaPinned(ref: ActionRef) = ref.unwrap.matches("^[^@]+@[0-9A-Fa-f]{40}$")
 
       val p = ActionPins.Defaults
