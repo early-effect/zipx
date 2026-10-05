@@ -11,7 +11,7 @@ enum CacheEpoch:
 
   /** On `refs/tags/v*` the epoch and release are both the tag without its `v`; otherwise the release is the latest
     * matching tag without its `v` and the epoch is `${release}-SNAPSHOT`. Annotates a warning when local tags lag
-    * `origin`, or when no tag matches and it falls back to `0.0.0`.
+    * `origin`, or when no tag matches.
     *
     * @param tagMatch
     *   single-quoted in the script so `v*` reaches git unglobbed.

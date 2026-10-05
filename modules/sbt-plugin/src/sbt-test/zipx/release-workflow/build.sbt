@@ -18,7 +18,7 @@ lazy val client = project.dependsOn(coreLib).settings(toFixtureRepo)
 ThisBuild / versionScheme := Some("early-semver")
 
 // Built against the released client, as a library from another repo would be. early-semver compares 0.y.0 and x.0.0
-// exactly, so sbt alone rejects the in-repo 0.3.0-ci against it. The in-repo client is what compiles either way.
+// exactly, so sbt alone rejects the in-repo `-ci` client against it. The in-repo client is what compiles either way.
 def usesClient = Seq(
   libraryDependencies += "com.example.ext" %% "uses-client" % "1.0.0",
   resolvers += "fixture" at released.toURI.toString,

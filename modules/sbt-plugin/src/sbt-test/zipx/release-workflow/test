@@ -65,7 +65,7 @@ $ touch dirty-tree
 > ++ 3.9.0!
 > assertReleaseSession
 
-# Back in development, client compiles 0.3.0-ci; a library built against released client 0.3.0 still resolves.
+# Back in development, client compiles its `-ci` build; a library built against the released client still resolves.
 > zipxSession development
 $ touch ext
 > reload
@@ -73,7 +73,7 @@ $ touch ext
 > consumer/update
 > downstream/update
 
-# Once client moves to 0.4.0, the library still asks for 0.3.0. This build compiles its own client either way, and
+# Once client moves to its next line, the library still asks for the release. This build compiles its own client either way, and
 # update does not judge what the library asked for, whether the project publishes or not.
 $ touch client-next
 > reload

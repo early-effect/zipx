@@ -94,7 +94,7 @@ object ActionPins:
 
   private[core] val ExtraPrefix: String = "extra"
 
-  /** `prefix` must be followed by `@` or nothing: `actions/cache/restore@v4` is a different action from
+  /** `prefix` must be followed by `@` or nothing: `actions/cache/restore@<ref>` is a different action from
     * `actions/cache`. The bare form matches so an unpinned `uses: actions/checkout` is refused, not skipped.
     */
   def namesPrefix(refOrName: String, prefix: String): Boolean =

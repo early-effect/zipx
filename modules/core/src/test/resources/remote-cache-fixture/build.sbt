@@ -19,7 +19,7 @@ lazy val root = (project in file("."))
   .settings(
     name                                   := "remote-cache-fixture",
     libraryDependencies += "org.scalameta" %% "munit" % "1.0.4" % Test,
-    // sbt 2 caches task outputs by default; these are side-effecting and must always run.
+    // sbt caches task outputs by default; these are side-effecting and must always run.
     itStamp := Def.uncached {
       streams.value.log.info(s"ZIPX_IT_STAMP ${System.currentTimeMillis()}")
     },

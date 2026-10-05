@@ -1,6 +1,6 @@
 import zipx.*
 
-// left and right were built against two commits of shared's 0.3.0 line, and the catalog states no shared.
+// left and right were built against two commits of one shared line, and the catalog states no shared.
 object MyVersions extends ZipxVersions:
   val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
   val scala: ScalaVersion = ScalaVersion("3.9.0")
