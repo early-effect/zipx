@@ -209,6 +209,22 @@ latest release once one at `0.15.0` or later exists, and stays pinned while the 
 **Snapshots and releases**.
 """
     ),
+    section("When update says the catalog is behind")(
+      md"""
+The catalog wins over what a library asked for (**Versions**), except when a library needs a newer revision than a row
+states. Then `update` fails. The message names the row, the library, what it needs, and the command:
+
+| `update` ends with | Run, then `reload` |
+|---|---|
+| `Update the catalog: sbt zipxDepUpdate, or pin 2.1.26` | `sbt "zipxDepUpdate yes"`, or set that one row |
+| `That line is released: sbt 'zipxPinRelease heddle'` | that command |
+| `Move the pin to that line: sbt 'zipxSnapshotAdvance heddle 0.10.0'` | that command |
+| `commits of 0.3.0 with no order. Pin one in the catalog.` | add a `Lib` row at one of the two commits |
+
+The scheduled job applies the first kind. It never moves a commit pin to another line: that is a decision about what
+to integrate, so advance takes the line as an argument.
+"""
+    ),
     section("Typed cron")(
       md"""
 Schedules use a typed [[zipx.workflow.Cron]] AST (not raw strings):

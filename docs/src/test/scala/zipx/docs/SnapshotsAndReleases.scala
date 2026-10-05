@@ -126,6 +126,7 @@ and the bump. Nothing here spends a release except the release job.
 | publish a pull request | label `snapshots`, then push | no | that commit's sha. The pointer does not move |
 | ask if a newer snapshot exists | `sbt zipxSnapshotStatus` | no | no |
 | take that newer sha | `sbt 'zipxSnapshotAdvance widgets'` then `reload` | the pin, same line | no |
+| move the pin to a newer line | `sbt 'zipxSnapshotAdvance widgets 1.5.0'` then `reload` | the pin, to that line | no |
 | ask if a ship can release | `sbt zipxReleasePlan` | no | no |
 | pin a release that already exists | `sbt 'zipxPinRelease widgets'` | the pin, to that same line | no |
 | release | **zipx release**, or a GitHub Release tag | no. The tag stays on the release commit | one deployment |
@@ -435,7 +436,7 @@ revalidation; a qualifier snapshot still does.
 | `reload`, `set`, `clean`, while a snapshot pin is in the catalog | forget sbt's in-memory resolutions |
 | `zipxRelease` | refuses while a released project depends on a snapshot, including a commit pin |
 | `zipxSnapshotStatus` | reads the pointer and reports a newer sha, a deleted build, or a local pin. It does not rewrite |
-| `zipxSnapshotAdvance` | rewrites the pin to the pointer's sha, in the stored form. A feature pull request does not run it |
+| `zipxSnapshotAdvance` | rewrites the pin to the pointer's sha, in the stored form, on the pin's own line. Given a line, it reads that line's pointer instead. A feature pull request does not run it |
 | `zipxPinRelease` | rewrites a commit pin to that same line after the release exists. It does not take a newer line |
 | catalog update | leaves a commit pin and a `<line>-SNAPSHOT` pointer alone, and names `zipxPinRelease` when that line is released |
 
@@ -478,7 +479,18 @@ may open a pull request that runs `zipxSnapshotAdvance`. That command rewrites t
 
 A dirty pin is a local build. Advance refuses it: commit the tree and publish the sha, or drop the pin. Central
 deletes a snapshot after 90 days. Status says so and names advance.
+
+Advance stays on the pin's line. When a library needs a newer line, `update` fails and names
+`sbt 'zipxSnapshotAdvance widgets 1.5.0'`. That reads the `1.5.0-SNAPSHOT` pointer and moves the row to its sha, a
+release row included. Naming the line is the only way a pin changes lines.
 """,
+      exampleValue {
+        PinRewrite.moveTo(
+          "1.4.2-1234abcd5678-SNAPSHOT",
+          ReleaseVersion("1.5.0"),
+          GitSha("9876fedcba09876543210fedcba9876543210abc"),
+        )
+      }.assert(moved => assertTrue(moved == Right(Some("1.5.0-9876fedcba09-SNAPSHOT")))),
       exampleValue {
         SnapshotStatus
           .report(
@@ -632,6 +644,9 @@ what they publish.
 A project that publishes gets the same treatment as one that does not, and neither gets a warning. The proof that the
 library still works against the in-repo module is this build's own compile, link, and tests. When that proof fails,
 the library is behind: advance its pin of this repo.
+
+A module this repo pins in the catalog, and does not build, wins the same way. **Versions** covers that half,
+including the one case `update` refuses: a library that needs a newer revision than the catalog states.
 """
     ),
   )

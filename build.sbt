@@ -26,9 +26,6 @@ ThisBuild / developers := List(
 // CI-only publishing: key hex from PGP_KEY_HEX (org secret). Sentinel keeps local loads working.
 usePgpKeyHex(sys.env.getOrElse("PGP_KEY_HEX", "MISSING_KEY_HEX"))
 
-// specular-site still pins zio-json 0.10.0; take 1.1.0.
-ThisBuild / libraryDependencySchemes += "dev.zio" %% "zio-json" % "always"
-
 val commonSettings = Seq(
   scalacOptions ++= V.commonScalacOptions,
   libraryDependencies ++= V.zioDeps,
@@ -183,7 +180,7 @@ lazy val plugin = (project in file("modules/sbt-plugin"))
     scalacOptions ++= V.commonScalacOptions,
     publishMavenStyle    := true,
     pomIncludeRepository := { _ => false },
-    libraryDependencies ++= V.zioDeps :+ V.moduleID(V.mimaCore),
+    libraryDependencies ++= V.zioDeps ++ V.deps(V.mimaCore, V.coursier),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     Test / mainClass := None,
     // Bundle the remote-cache transport so consumers need one addSbtPlugin line. RemoteCachePlugin triggers on

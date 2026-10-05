@@ -710,10 +710,12 @@ object ZipxPlugin extends AutoPlugin:
         case DepRevision.Commit(_) => module.withIsChanging(false)
         case _                     => module
     },
+    // The catalog states these modules for this build, so no transitive revision of one changes what compiles.
+    dependencyOverrides ++= CatalogResolution.overrides(catalogForced.value),
     // The refusals are a dependency, not a line above `update.value`: sbt runs every `.value` before the body.
     update := Def.taskDyn {
-      PinRefusal.of(libraryDependencies.value.map(_.revision)) match
-        case Nil      => Def.task(updateFull.value)
+      PinRefusal.of((libraryDependencies.value ++ dependencyOverrides.value).map(_.revision)) match
+        case Nil      => catalogChecked
         case refusals =>
           Def.task[sbt.librarymanagement.UpdateReport] {
             sys.error(refusals.map(refusal => s"zipx: ${refusal.message}").mkString("\n"))
@@ -733,6 +735,25 @@ object ZipxPlugin extends AutoPlugin:
       if changing then Some(scala.concurrent.duration.Duration.Zero) else forceUpdatePeriod.value
     },
   )
+
+  /** The catalog rows this project forces, named as it resolves them. A row naming a project in this build is left to
+    * sbt, which already forces it.
+    */
+  private def catalogForced: Def.Initialize[List[(ResolvedModule, Lib)]] = Def.setting {
+    val inRepo = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.map(CatalogResolution.of).toSet
+    CatalogResolution
+      .forced(zipxVersions.value, scalaModuleInfo.value)
+      .filterNot((module, _) => inRepo.contains(module))
+  }
+
+  /** `updateFull`, refused when the catalog is behind what a dependency needs or two commits of a module meet. */
+  private def catalogChecked: Def.Initialize[Task[sbt.librarymanagement.UpdateReport]] = Def.task {
+    val report = updateFull.value
+    val inRepo = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.map(CatalogResolution.of).toSet
+    CatalogResolution.conflicts(report, catalogForced.value, inRepo, csrConfiguration.value, streams.value.log) match
+      case Nil       => report
+      case conflicts => sys.error(conflicts.map(conflict => s"zipx: ${conflict.message}").mkString("\n"))
+  }
 
   /** A module opts into the docker capability by enabling sbt-native-packager's `DockerPlugin`, detected by label so
     * zipx needs no dependency on it.
@@ -762,7 +783,7 @@ object ZipxPlugin extends AutoPlugin:
       val publishes     = explicitOverride.getOrElse(!isAggregator && !skipsPublish && publishesArtifact)
       val crossVersions =
         read(crossScalaVersions, Nil) match
-          case Nil      => List(read(scalaVersion, "")).filter(_.nonEmpty)
+          case Nil      => extracted.getOpt(ref / scalaVersion).toList
           case versions => versions.toList
       val baseDir      = resolvedById.get(ref.project).map(p => relativeToRoot(buildRoot, p.base)).getOrElse("")
       val sourcePaths  = sourcePathsFor(ref, extracted, buildRoot)

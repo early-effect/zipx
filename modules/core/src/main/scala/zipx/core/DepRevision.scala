@@ -34,6 +34,16 @@ enum DepRevision:
   def resolvesFromSnapshots: Boolean = this match
     case Commit(_) | Pointer(_) | Changing(_) => true
     case _                                    => false
+
+  /** The revision as a build or a POM writes it. [[DepRevision.of]] reads it back to the same value. */
+  def render: String = this match
+    case Release(version)    => version
+    case Commit(pin)         => pin.storedId
+    case UnstoredCommit(pin) => pin.id
+    case Pointer(line)       => SnapshotPointer.pointerVersion(line)
+    case Local(revision)     => revision.id
+    case Changing(raw)       => raw
+    case Other(raw)          => raw
 end DepRevision
 
 object DepRevision:

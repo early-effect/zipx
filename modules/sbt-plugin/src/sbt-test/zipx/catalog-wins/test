@@ -1,0 +1,31 @@
+# The catalog states core at a commit. The libraries the app depends on asked for an older line and for another commit
+# of that line. The catalog wins over both, on the JVM and on Scala.js, with no override in build.sbt.
+> app/update
+> appJS/update
+> assertJvm core_3 1.1.0-aaaaaaaaaaaa-SNAPSHOT
+> assertJs core_sjs1_3 1.1.0-aaaaaaaaaaaa-SNAPSHOT
+
+# A library needs a newer line than the catalog states. Resolution still forces the catalog's revision, and update
+# refuses it: the catalog is behind.
+$ copy-file changes/Behind.scala project/ZipxVersions.scala
+> reload
+> app/updateFull
+> assertJvm core_3 1.1.0-aaaaaaaaaaaa-SNAPSHOT
+-> app/update
+
+# Moving the catalog to that line clears it.
+$ copy-file changes/Caught.scala project/ZipxVersions.scala
+> reload
+> app/update
+> assertJvm core_3 1.2.0
+
+# Two libraries bring two commits of a module the catalog does not state. Nothing orders them, so update refuses until
+# the catalog pins one.
+$ copy-file changes/Diamond.scala project/ZipxVersions.scala
+> reload
+> app/updateFull
+-> app/update
+$ copy-file changes/Pinned.scala project/ZipxVersions.scala
+> reload
+> app/update
+> assertJvm shared_3 0.3.0-aaaaaaaaaaaa-SNAPSHOT

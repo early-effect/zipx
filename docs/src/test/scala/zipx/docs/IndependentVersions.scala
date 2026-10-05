@@ -372,8 +372,9 @@ The reason is what a release carries. A row's POM names its in-repo dependencies
 released. Say `libs` breaks and releases 1.5.0 while `client` stays at its released 0.3.0: `client` 0.3.0 on the
 registry still names `libs` 1.4.2. A consumer that takes the new `libs` and any `client` now resolves a mix sbt
 rejects (`libs 1.5.0 is selected over 1.4.2`), and nothing in *this* repo fails, because in-repo builds always use the
-current `libs`. Only a consumer finds out, one release later. `MatchBump` makes the PR that breaks `libs` also move
-`client`, so one release carries both and every released POM agrees.
+current `libs`. Only a consumer finds out, one release later. A consumer on zipx is not refused, because its catalog
+states `libs` (**Versions**), but its `client` 0.3.0 then runs against a `libs` it was never built with. `MatchBump`
+makes the PR that breaks `libs` also move `client`, so one release carries both and every released POM agrees.
 
 ```mermaid
 flowchart LR

@@ -91,7 +91,7 @@ lazy val metaPlugin = project
     name           := "meta-sbt-zipx",
     publish / skip := true,
     scalacOptions ++= Dependencies.commonScalacOptions,
-    libraryDependencies += Dependencies.mimaCore,
+    libraryDependencies ++= Seq(Dependencies.mimaCore, Dependencies.coursier),
     addSbtPlugin(Dependencies.remoteCachePlugin),
   )
   .settings(Dogfood.mirrorMainScala("sbt-plugin"))

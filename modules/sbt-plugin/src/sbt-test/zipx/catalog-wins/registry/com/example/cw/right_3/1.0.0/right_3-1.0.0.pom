@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example.cw</groupId>
+  <artifactId>right_3</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+  <dependencies>
+    <dependency>
+      <groupId>com.example.cw</groupId>
+      <artifactId>shared_3</artifactId>
+      <version>0.3.0-bbbbbbbbbbbb-SNAPSHOT</version>
+    </dependency>
+  </dependencies>
+</project>

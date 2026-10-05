@@ -62,6 +62,16 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
         PinRewrite.advance(bare, newer) == Right(Some("1.4.2-9876fedcba09-SNAPSHOT")),
       )
     },
+    test("advance to a line moves a commit pin or a release row there, and refuses a dirty pin and the pointer") {
+      val next = ReleaseVersion("1.5.0")
+      assertTrue(
+        PinRewrite.moveTo(widgets, next, newer) == Right(Some("1.5.0-9876fedcba09-SNAPSHOT")),
+        PinRewrite.moveTo("1.4.2", next, newer) == Right(Some("1.5.0-9876fedcba09-SNAPSHOT")),
+        PinRewrite.moveTo("1.5.0-9876fedcba09-SNAPSHOT", next, newer) == Right(None),
+        PinRewrite.moveTo("1.4.2-1234abcd5678+20140707-1030", next, newer).isLeft,
+        PinRewrite.moveTo("1.4.2-SNAPSHOT", next, newer).isLeft,
+      )
+    },
     test("pin release stays on the same line") {
       assertTrue(
         PinRewrite.pinRelease(widgets, lineReleased = true) == Right("1.4.2"),

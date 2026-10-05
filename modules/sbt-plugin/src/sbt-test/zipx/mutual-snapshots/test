@@ -102,3 +102,42 @@ $ copy-file saved/AscentVersions.scala project/ZipxVersions.scala
 > reload
 > assertPin heddle 0.9.0 h2
 > mcpAppJS/compile
+
+# 8. The docs site takes a docs framework built against heddle h0, an older commit of the line ascent pins, the way
+# ascent's docs take specular. The catalog's h2 is what the site resolves, with no override in build.sbt.
+> writeDocsFramework 1.0.0 commit 0.9.0 h0
+$ touch use-docs-framework
+> reload
+> docsJS/update
+> assertDocsSelects heddle-mcp-apps_sjs1_3 commit 0.9.0 h2
+$ exec git add -A
+$ exec git commit -q -m a3-docs
+
+# 9. Heddle opens 0.10.0 and publishes h3, and the docs framework's next release is built against it. That is newer than
+# ascent's pin: resolution still forces the pin, update refuses it, and advancing the row to that line clears it.
+$ copy-file project/ZipxVersions.scala saved/AscentVersions.scala
+$ copy-file changes/heddle.sbt build.sbt
+$ copy-file saved/HeddleVersions.scala project/ZipxVersions.scala
+> reload
+> zipxModverBump heddle minor
+> reload
+$ exec git add -A
+$ exec git commit -q -m h3
+> recordSha h3
+> zipxSnapshotPublish
+> assertPointerNames heddle-mcp-apps_sjs1_3 0.10.0 h3
+$ copy-file saved/ascent.sbt build.sbt
+$ copy-file saved/AscentVersions.scala project/ZipxVersions.scala
+> reload
+> writeDocsFramework 1.1.0 commit 0.10.0 h3
+> pinVersion docs-framework 1.1.0
+> reload
+> docsJS/updateFull
+> assertDocsSelects heddle-mcp-apps_sjs1_3 commit 0.9.0 h2
+-> docsJS/update
+> zipxSnapshotAdvance heddle-mcp-apps 0.10.0
+> reload
+> assertPin heddle 0.10.0 h3
+> docsJS/update
+> assertDocsSelects heddle-mcp-apps_sjs1_3 commit 0.10.0 h3
+> mcpAppJS/compile

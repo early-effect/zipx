@@ -29,22 +29,24 @@ object SnapshotCommands:
       headers: Map[String, String],
       log: Logger,
   ): Unit =
-    families(select(arg, coords, "zipxSnapshotStatus"), coords).foreach { family =>
+    val command = "zipxSnapshotStatus"
+    families(select(rowOf(arg, command), pinsOf(coords), command), coords).foreach { family =>
       val report = SnapshotPinAdvice.hold(family.version) match
         case Some(SnapshotHold.Local(_)) =>
           SnapshotStatus.report(family.literal, family.version, None, artifactPresent = false)
         case _ =>
-          val pointer = family.members.iterator
-            .map(latestSha(registry, _, names, cache, headers))
-            .collectFirst { case Some(found) => found }
+          val pointer = lineOf(family.version).flatMap(familyPointer(registry, family, names, cache, headers, _))
           val present = family.members.exists { lib =>
             names(lib).exists(artifactPresent(registry, lib.group, _, lib.version, cache, headers))
           }
           SnapshotStatus.report(family.literal, family.version, pointer, present)
       log.info(report.fold(err => sys.error(s"zipx: $err"), SnapshotStatus.render))
     }
+  end status
 
-  /** Returns the rewritten catalog, or the same text when every selected pin is already current. */
+  /** Returns the rewritten catalog, or the same text when every selected pin is already current. `<row> <line>` moves
+    * the row to that line's latest commit; with no line, each pin stays on its own.
+    */
   def advance(
       arg: String,
       coords: Seq[ZipxCoord],
@@ -55,8 +57,50 @@ object SnapshotCommands:
       headers: Map[String, String],
       log: Logger,
   ): String =
-    val named = arg.trim.nonEmpty
-    families(select(arg, coords, "zipxSnapshotAdvance"), coords).foldLeft(source) { (src, family) =>
+    val (row, target) = tokensOf(arg) match
+      case Nil                => (None, None)
+      case one :: Nil         => (Some(one), None)
+      case one :: line :: Nil =>
+        ReleaseVersion.make(line) match
+          case Right(parsed) => (Some(one), Some(parsed))
+          case Left(_)       => sys.error(s"zipx: '$line' is not a release line. $AdvanceUsage")
+      case _ => sys.error(s"zipx: $AdvanceUsage")
+    target match
+      case Some(line) =>
+        families(select(row, libsOf(coords), "zipxSnapshotAdvance"), coords).foldLeft(source) { (src, family) =>
+          val sha = pointerOf(registry, family, names, cache, headers, line)
+          PinRewrite.moveTo(family.version, line, sha) match
+            case Left(err)   => sys.error(s"zipx: $err")
+            case Right(None) =>
+              log.info(s"zipx: ${family.literal} ${family.version} is the latest snapshot of $line")
+              src
+            case Right(Some(next)) => rewrite(src, family, next, log)
+        }
+      case None => advanceInPlace(row, coords, source, registry, names, cache, headers, log)
+    end match
+  end advance
+
+  private def advanceInPlace(
+      row: Option[String],
+      coords: Seq[ZipxCoord],
+      source: String,
+      registry: ArtifactRegistry,
+      names: Lib => List[String],
+      cache: File,
+      headers: Map[String, String],
+      log: Logger,
+  ): String =
+    val named = row.isDefined
+    families(select(row, pinsOf(coords), "zipxSnapshotAdvance"), coords).foldLeft(source) { (src, family) =>
+      def onLine(line: ReleaseVersion): String =
+        PinRewrite.advance(family.version, pointerOf(registry, family, names, cache, headers, line)) match
+          case Left(err) =>
+            sys.error(s"zipx: $err")
+          case Right(None) =>
+            log.info(s"zipx: ${family.literal} ${family.version} is the latest snapshot")
+            src
+          case Right(Some(next)) =>
+            rewrite(src, family, next, log)
       SnapshotPinAdvice.hold(family.version) match
         case Some(SnapshotHold.Local(id)) =>
           val message = SnapshotRevisionError.Unstable(id).message
@@ -65,27 +109,49 @@ object SnapshotCommands:
         case Some(SnapshotHold.Pointer(_)) if !named =>
           log.info(s"zipx: ${family.literal} ${family.version} is the snapshot pointer, not a pin.")
           src
-        case _ =>
-          val sha = family.members.iterator
-            .map(latestSha(registry, _, names, cache, headers))
-            .collectFirst { case Some(found) => found }
-            .getOrElse(sys.error(s"zipx: the pointer for ${family.literal} has no ${SnapshotPointer.ShaElement}"))
-          PinRewrite.advance(family.version, sha) match
-            case Left(err) =>
-              sys.error(s"zipx: $err")
-            case Right(None) =>
-              log.info(s"zipx: ${family.literal} ${family.version} is the latest snapshot")
-              src
-            case Right(Some(next)) =>
-              val rewritten =
-                PinRewrite
-                  .replace(src, family.group, family.literal, family.version, next)
-                  .fold(err => sys.error(s"zipx: $err"), identity)
-              log.info(s"zipx: ${family.literal} ${family.version} -> $next")
-              rewritten
-          end match
+        case Some(SnapshotHold.Pointer(line)) => onLine(line)
+        case Some(SnapshotHold.Commit(line))  => onLine(line)
+        case None                             => src
+      end match
     }
-  end advance
+  end advanceInPlace
+
+  private inline val AdvanceUsage =
+    "zipxSnapshotAdvance takes a row and, optionally, a line: sbt 'zipxSnapshotAdvance widgets 1.5.0'"
+
+  private def rewrite(source: String, family: Family, next: String, log: Logger): String =
+    val rewritten = PinRewrite
+      .replace(source, family.group, family.literal, family.version, next)
+      .fold(err => sys.error(s"zipx: $err"), identity)
+    log.info(s"zipx: ${family.literal} ${family.version} -> $next")
+    rewritten
+
+  /** The sha the first of the family's artifacts with a pointer for `line` names. One commit publishes them all. */
+  private def familyPointer(
+      registry: ArtifactRegistry,
+      family: Family,
+      names: Lib => List[String],
+      cache: File,
+      headers: Map[String, String],
+      line: ReleaseVersion,
+  ): Option[GitSha] =
+    family.members.iterator
+      .map(latestSha(registry, _, names, cache, headers, line))
+      .collectFirst { case Some(found) => found }
+
+  private def pointerOf(
+      registry: ArtifactRegistry,
+      family: Family,
+      names: Lib => List[String],
+      cache: File,
+      headers: Map[String, String],
+      line: ReleaseVersion,
+  ): GitSha =
+    familyPointer(registry, family, names, cache, headers, line).getOrElse(
+      sys.error(
+        s"zipx: ${registry.snapshotRepository} has no ${SnapshotPointer.pointerVersion(line)} pointer for ${family.literal}"
+      )
+    )
 
   def pinRelease(
       arg: String,
@@ -95,8 +161,9 @@ object SnapshotCommands:
       released: (String, String, String) => Boolean,
       log: Logger,
   ): String =
-    if arg.trim.isEmpty then sys.error("zipx: zipxPinRelease takes the artifact name, or group:artifact")
-    families(select(arg, coords, "zipxPinRelease"), coords).foldLeft(source) { (src, family) =>
+    val command = "zipxPinRelease"
+    val row     = rowOf(arg, command).orElse(sys.error(s"zipx: $command takes the artifact name, or group:artifact"))
+    families(select(row, pinsOf(coords), command), coords).foldLeft(source) { (src, family) =>
       val line   = lineOf(family.version)
       val onRepo = line.exists(v => family.members.exists(lib => names(lib).exists(released(lib.group, _, v))))
       PinRewrite.pinRelease(family.version, onRepo) match
@@ -132,62 +199,67 @@ object SnapshotCommands:
       .orElse(gitLine(root, "branch", "--show-current"))
       .getOrElse("main")
 
-  private def select(arg: String, coords: Seq[ZipxCoord], command: String): List[Lib] =
-    val pins   = coords.collect { case lib: Lib => lib }.filter(lib => SnapshotPinAdvice.hold(lib.version).isDefined)
-    val tokens = arg.split("\\s+").toList.filter(_.nonEmpty)
-    tokens match
-      case Nil =>
-        pins.toList
-      case one :: Nil =>
-        val matches = pins.filter(lib => (lib.artifact: String) == one || s"${lib.group}:${lib.artifact}" == one)
-        matches match
+  private def libsOf(coords: Seq[ZipxCoord]): List[Lib] = coords.collect { case lib: Lib => lib }.toList
+
+  private def pinsOf(coords: Seq[ZipxCoord]): List[Lib] =
+    libsOf(coords).filter(lib => SnapshotPinAdvice.hold(lib.version).isDefined)
+
+  /** The row a command names: `artifact` or `group:artifact`, or none for every candidate. */
+  private def rowOf(arg: String, command: String): Option[String] =
+    tokensOf(arg) match
+      case Nil        => None
+      case one :: Nil => Some(one)
+      case _          => sys.error(s"zipx: $command takes one coordinate, or no arguments for every snapshot pin")
+
+  private def tokensOf(arg: String): List[String] = arg.split("\\s+").toList.filter(_.nonEmpty)
+
+  private def select(row: Option[String], candidates: List[Lib], command: String): List[Lib] =
+    row match
+      case None      => candidates
+      case Some(one) =>
+        candidates.filter(lib => (lib.artifact: String) == one || s"${lib.group}:${lib.artifact}" == one) match
           case Nil =>
-            sys.error(s"zipx: '$one' is not a snapshot pin in the catalog")
+            sys.error(s"zipx: '$one' is not a row $command can take")
           case several if several.sizeIs > 1 && !one.contains(":") =>
             sys.error(
               s"zipx: '$one' matches ${several.map(lib => s"${lib.group}:${lib.artifact}").mkString(", ")}. Name group:artifact."
             )
           case several =>
-            several.toList
-      case _ =>
-        sys.error(s"zipx: $command takes one coordinate, or no arguments for every snapshot pin")
-    end match
-  end select
+            several
 
-  private def lineOf(version: String): Option[String] =
-    SnapshotPinAdvice
-      .hold(version)
-      .map {
-        case SnapshotHold.Commit(line)  => line: String
-        case SnapshotHold.Pointer(line) => line: String
-        case SnapshotHold.Local(_)      => ""
-      }
-      .filter(_.nonEmpty)
+  /** The line a commit pin or the pointer is on. A local build has none: no registry holds it. */
+  private def lineOf(version: String): Option[ReleaseVersion] =
+    SnapshotPinAdvice.hold(version).flatMap {
+      case SnapshotHold.Commit(line)  => Some(line)
+      case SnapshotHold.Pointer(line) => Some(line)
+      case SnapshotHold.Local(_)      => None
+    }
 
-  /** The sha the first of the row's artifacts that has a pointer names. Every platform publishes from one commit. */
+  /** The sha the first of the row's artifacts with a pointer for `line` names. Every platform publishes from one
+    * commit.
+    */
   private def latestSha(
       registry: ArtifactRegistry,
       lib: Lib,
       names: Lib => List[String],
       cache: File,
       headers: Map[String, String],
+      line: ReleaseVersion,
   ): Option[GitSha] =
     names(lib).iterator
-      .map(pointerSha(registry, lib.group, _, lineOf(lib.version), cache, headers))
+      .map(pointerSha(registry, lib.group, _, line, cache, headers))
       .collectFirst { case Some(sha) => sha }
 
   private def pointerSha(
       registry: ArtifactRegistry,
       organization: String,
       artifact: String,
-      line: Option[String],
+      line: ReleaseVersion,
       cache: File,
       headers: Map[String, String],
   ): Option[GitSha] =
-    line.flatMap(raw => ReleaseVersion.make(raw).toOption).flatMap { parsed =>
-      pomUnder(registry, organization, artifact, SnapshotPointer.pointerVersion(parsed), parsed, cache, headers)
-        .map(body => SnapshotPointer.shaFromPom(body).fold(err => sys.error(s"zipx: $err"), identity))
-    }
+    pomUnder(registry, organization, artifact, SnapshotPointer.pointerVersion(line), line, cache, headers)
+      .map(body => SnapshotPointer.shaFromPom(body).fold(err => sys.error(s"zipx: $err"), identity))
 
   private def artifactPresent(
       registry: ArtifactRegistry,

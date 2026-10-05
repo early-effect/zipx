@@ -27,10 +27,14 @@ lazy val mcpApp = (projectMatrix in file("mcp-app"))
   )
   .jsPlatform(scalaVersions = Seq(scala3))
 
-// Publishes nothing, like ascent's docs site.
+// Publishes nothing, like ascent's docs site, and later takes a docs framework built against heddle, like specular.
 lazy val docs = (projectMatrix in file("docs"))
   .dependsOn(mcpApp)
-  .settings(name := "ascent-docs", publish / skip := true)
+  .settings(
+    name           := "ascent-docs",
+    publish / skip := true,
+    if (file("use-docs-framework").exists) MyVersions.library(MyVersions.docsFramework) else Nil,
+  )
   .jsPlatform(scalaVersions = Seq(scala3))
 
 lazy val root = (project in file("."))
@@ -42,6 +46,9 @@ Fixture.inRepoWins(assertFacadeInRepo, LocalProject("mcpAppJS"), LocalProject("d
 
 val assertDocsFacadeInRepo = inputKey[Unit]("the docs site compiles the in-repo facade too")
 Fixture.inRepoWins(assertDocsFacadeInRepo, LocalProject("docsJS"), LocalProject("domFacadeJS"))
+
+val assertDocsSelects = inputKey[Unit]("the docs site resolves <artifact> at a release or a recorded commit")
+Fixture.selects(assertDocsSelects, LocalProject("docsJS"))
 
 val assertZipxResolver = taskKey[Unit]("a commit pin in the catalog brings the registry's snapshot repository")
 assertZipxResolver / aggregate := false
