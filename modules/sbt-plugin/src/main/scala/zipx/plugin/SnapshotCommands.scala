@@ -33,9 +33,11 @@ object SnapshotCommands:
     families(select(rowOf(arg, command), pinsOf(coords), command), coords).foreach { family =>
       val report = SnapshotPinAdvice.hold(family.version) match
         case Some(SnapshotHold.Local(_)) =>
-          SnapshotStatus.report(family.literal, family.version, None, artifactPresent = false)
+          SnapshotStatus.report(family.literal, family.version, PointerRead.Absent, artifactPresent = false)
         case _ =>
-          val pointer = lineOf(family.version).flatMap(familyPointer(registry, family, names, cache, headers, _))
+          val pointer = lineOf(family.version).fold(PointerRead.Absent)(
+            familyPointer(registry, family, names, cache, headers, _)
+          )
           val present = family.members.exists { lib =>
             names(lib).exists(artifactPresent(registry, lib.group, _, lib.version, cache, headers))
           }
@@ -126,7 +128,7 @@ object SnapshotCommands:
     log.info(s"zipx: ${family.literal} ${family.version} -> $next")
     rewritten
 
-  /** The sha the first of the family's artifacts with a pointer for `line` names. One commit publishes them all. */
+  /** What the first of the family's artifacts with a pointer for `line` says. One commit publishes them all. */
   private def familyPointer(
       registry: ArtifactRegistry,
       family: Family,
@@ -134,10 +136,8 @@ object SnapshotCommands:
       cache: File,
       headers: Map[String, String],
       line: ReleaseVersion,
-  ): Option[GitSha] =
-    family.members.iterator
-      .map(latestSha(registry, _, names, cache, headers, line))
-      .collectFirst { case Some(found) => found }
+  ): PointerRead =
+    PointerRead.first(family.members.iterator.map(rowPointer(registry, _, names, cache, headers, line)))
 
   private def pointerOf(
       registry: ArtifactRegistry,
@@ -147,11 +147,17 @@ object SnapshotCommands:
       headers: Map[String, String],
       line: ReleaseVersion,
   ): GitSha =
-    familyPointer(registry, family, names, cache, headers, line).getOrElse(
-      sys.error(
-        s"zipx: ${registry.snapshotRepository} has no ${SnapshotPointer.pointerVersion(line)} pointer for ${family.literal}"
-      )
-    )
+    val pointer = SnapshotPointer.pointerVersion(line)
+    familyPointer(registry, family, names, cache, headers, line) match
+      case PointerRead.Names(sha) => sha
+      case PointerRead.Absent     =>
+        sys.error(s"zipx: ${registry.snapshotRepository} has no $pointer pointer for ${family.literal}")
+      case PointerRead.Unnamed =>
+        sys.error(
+          s"zipx: the $pointer pointer for ${family.literal} names no commit (no ${SnapshotPointer.ShaElement}). " +
+            "Publish the line with sbt zipxSnapshotPublish, or pin a commit by its stored id."
+        )
+  end pointerOf
 
   def pinRelease(
       arg: String,
@@ -235,20 +241,16 @@ object SnapshotCommands:
       case SnapshotHold.Local(_)      => None
     }
 
-  /** The sha the first of the row's artifacts with a pointer for `line` names. Every platform publishes from one
-    * commit.
-    */
-  private def latestSha(
+  /** What the first of the row's artifacts with a pointer for `line` says. Every platform publishes from one commit. */
+  private def rowPointer(
       registry: ArtifactRegistry,
       lib: Lib,
       names: Lib => List[String],
       cache: File,
       headers: Map[String, String],
       line: ReleaseVersion,
-  ): Option[GitSha] =
-    names(lib).iterator
-      .map(pointerSha(registry, lib.group, _, line, cache, headers))
-      .collectFirst { case Some(sha) => sha }
+  ): PointerRead =
+    PointerRead.first(names(lib).iterator.map(pointerSha(registry, lib.group, _, line, cache, headers)))
 
   private def pointerSha(
       registry: ArtifactRegistry,
@@ -257,9 +259,10 @@ object SnapshotCommands:
       line: ReleaseVersion,
       cache: File,
       headers: Map[String, String],
-  ): Option[GitSha] =
-    pomUnder(registry, organization, artifact, SnapshotPointer.pointerVersion(line), line, cache, headers)
-      .map(body => SnapshotPointer.shaFromPom(body).fold(err => sys.error(s"zipx: $err"), identity))
+  ): PointerRead =
+    PointerRead.of(
+      pomUnder(registry, organization, artifact, SnapshotPointer.pointerVersion(line), line, cache, headers)
+    )
 
   private def artifactPresent(
       registry: ArtifactRegistry,

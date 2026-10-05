@@ -482,7 +482,9 @@ pin. `reload` does not either. A feature pull request stays on the sha it commit
 may open a pull request that runs `zipxSnapshotAdvance`. That command rewrites the pin. Reload so the new sha is what the session resolves. It does not commit.
 
 A dirty pin is a local build. Advance refuses it: commit the tree and publish the sha, or drop the pin. Central
-deletes a snapshot after 90 days. Status says so and names advance.
+deletes a snapshot after 90 days. Status says so and names advance. A pointer that a plain `publish` wrote has no
+`zipx.snapshot.sha`, so it names no commit. Status says that for the row and goes on to the next, and advance refuses
+until `zipxSnapshotPublish` publishes the line.
 
 Advance stays on the pin's line. When a library needs a newer line, `update` fails and names
 `sbt 'zipxSnapshotAdvance widgets 1.5.0'`. That reads the `1.5.0-SNAPSHOT` pointer and moves the row to its sha, a
@@ -500,8 +502,8 @@ release row included. Naming the line is the only way a pin changes lines.
           .report(
             "widgets",
             "1.4.2-1234abcd5678-SNAPSHOT",
-            Some(GitSha("9876fedcba09876543210fedcba9876543210abc")),
-            true,
+            PointerRead.Names(GitSha("9876fedcba09876543210fedcba9876543210abc")),
+            artifactPresent = true,
           )
           .map(SnapshotStatus.render)
           .fold(identity, identity)

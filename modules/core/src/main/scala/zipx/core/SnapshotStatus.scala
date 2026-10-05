@@ -1,5 +1,35 @@
 package zipx.core
 
+import scala.annotation.tailrec
+
+/** What a line's pointer POM says about the commit it stands for. */
+enum PointerRead:
+  case Names(sha: GitSha)
+
+  /** The snapshot repository has no pointer for the line. */
+  case Absent
+
+  /** A pointer POM that names no commit: it was published without `zipx.snapshot.sha`, by a plain publish. */
+  case Unnamed
+
+object PointerRead:
+  def of(pom: Option[String]): PointerRead =
+    pom.fold(Absent)(body => SnapshotPointer.shaFromPom(body).fold(_ => Unnamed, Names(_)))
+
+  /** The first read that names a commit, without reading past it. Failing that, [[Unnamed]] when any pointer exists. */
+  def first(reads: Iterator[PointerRead]): PointerRead =
+    @tailrec
+    def loop(seen: PointerRead): PointerRead =
+      if !reads.hasNext then seen
+      else
+        reads.next() match
+          case found @ Names(_) => found
+          case Unnamed          => loop(Unnamed)
+          case Absent           => loop(seen)
+    loop(Absent)
+  end first
+end PointerRead
+
 /** What `zipxSnapshotStatus` prints. The pointer names the latest sha. The command does not rewrite the pin. */
 object SnapshotStatus:
 
@@ -7,22 +37,22 @@ object SnapshotStatus:
     case Latest(name: String, pin: SnapshotRevision.Commit)
     case Newer(name: String, pin: SnapshotRevision.Commit, latest: AbbrevSha)
     case Missing(name: String, pin: SnapshotRevision.Commit)
+    case NoPointer(name: String, pin: SnapshotRevision.Commit)
+    case Unnamed(name: String, pin: SnapshotRevision.Commit)
     case Local(name: String, id: String)
 
-  /** `pointerSha` is the full sha in the pointer POM. `artifactPresent` is whether the pinned build is still in the
-    * snapshot repository.
-    */
+  /** `artifactPresent` is whether the pinned build is still in the snapshot repository. */
   def report(
       name: String,
       revision: String,
-      pointerSha: Option[GitSha],
+      pointer: PointerRead,
       artifactPresent: Boolean,
   ): Either[String, Report] =
     DepRevision.of(revision) match
       case DepRevision.Commit(pin) =>
-        commitReport(name, pin, pointerSha, artifactPresent)
+        Right(commitReport(name, pin, pointer, artifactPresent))
       case DepRevision.UnstoredCommit(pin) =>
-        commitReport(name, pin, pointerSha, artifactPresent)
+        Right(commitReport(name, pin, pointer, artifactPresent))
       case DepRevision.Local(local) =>
         Right(Report.Local(name, local.id))
       case DepRevision.Pointer(_) =>
@@ -45,6 +75,19 @@ object SnapshotStatus:
          |  commit ${pin.abbrev}
          |  the snapshot repository no longer has ${pin.storedId} (snapshots are kept 90 days)
          |  run: sbt 'zipxSnapshotAdvance $name'""".stripMargin
+    case Report.NoPointer(name, pin) =>
+      s"""$name ${pin.storedId}
+         |  commit ${pin.abbrev}
+         |  the snapshot repository has no ${SnapshotPointer.pointerVersion(
+          pin.line
+        )} pointer, so the latest is unknown""".stripMargin
+    case Report.Unnamed(name, pin) =>
+      s"""$name ${pin.storedId}
+         |  commit ${pin.abbrev}
+         |  the ${SnapshotPointer.pointerVersion(
+          pin.line
+        )} pointer names no commit (no ${SnapshotPointer.ShaElement}), so the latest is unknown
+         |  publish the line with sbt zipxSnapshotPublish to give it one""".stripMargin
     case Report.Local(name, id) =>
       s"""$name $id
          |  local build
@@ -53,15 +96,14 @@ object SnapshotStatus:
   private def commitReport(
       name: String,
       pin: SnapshotRevision.Commit,
-      pointerSha: Option[GitSha],
+      pointer: PointerRead,
       artifactPresent: Boolean,
-  ): Either[String, Report] =
-    pointerSha.map(AbbrevSha.fromFull) match
-      case Some(latest) if latest != pin.abbrev => Right(Report.Newer(name, pin, latest))
-      case _ if !artifactPresent                => Right(Report.Missing(name, pin))
-      case Some(_)                              => Right(Report.Latest(name, pin))
-      case None                                 =>
-        Left(
-          s"the pointer for ${pin.line} has no ${SnapshotPointer.ShaElement}, and ${pin.storedId} is still in the snapshot repository"
-        )
+  ): Report =
+    pointer match
+      case PointerRead.Names(sha) if AbbrevSha.fromFull(sha) != pin.abbrev =>
+        Report.Newer(name, pin, AbbrevSha.fromFull(sha))
+      case _ if !artifactPresent => Report.Missing(name, pin)
+      case PointerRead.Names(_)  => Report.Latest(name, pin)
+      case PointerRead.Absent    => Report.NoPointer(name, pin)
+      case PointerRead.Unnamed   => Report.Unnamed(name, pin)
 end SnapshotStatus

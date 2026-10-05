@@ -18,7 +18,9 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
   def spec = suite("SnapshotPlan")(
     test("status names a newer sha and does not claim the pin moved") {
       val text =
-        SnapshotStatus.report("widgets", widgets, Some(newer), artifactPresent = true).map(SnapshotStatus.render)
+        SnapshotStatus
+          .report("widgets", widgets, PointerRead.Names(newer), artifactPresent = true)
+          .map(SnapshotStatus.render)
       assertTrue(
         text == Right(
           s"""widgets $widgets
@@ -30,11 +32,40 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
     },
     test("status says when the pin is the pointer's sha") {
       val text =
-        SnapshotStatus.report("widgets", widgets, Some(full), artifactPresent = true).map(SnapshotStatus.render)
+        SnapshotStatus
+          .report("widgets", widgets, PointerRead.Names(full), artifactPresent = true)
+          .map(SnapshotStatus.render)
       assertTrue(text.toOption.exists(_.contains("this is the latest snapshot of 1.4.2")))
     },
+    test("a pointer with no commit, or no pointer, is reported for that row and the command carries on") {
+      def render(pointer: PointerRead) =
+        SnapshotStatus.report("widgets", widgets, pointer, artifactPresent = true).map(SnapshotStatus.render)
+      assertTrue(
+        render(PointerRead.Unnamed)
+          .exists(_.contains("the 1.4.2-SNAPSHOT pointer names no commit (no zipx.snapshot.sha)")),
+        render(PointerRead.Unnamed).exists(_.contains("sbt zipxSnapshotPublish")),
+        render(PointerRead.Absent).exists(_.contains("has no 1.4.2-SNAPSHOT pointer, so the latest is unknown")),
+      )
+    },
+    test("a pointer read stops at the first that names a commit, and only an absent one is absent") {
+      val named = PointerRead.Names(full)
+      assertTrue(
+        PointerRead.first(Iterator(PointerRead.Absent, PointerRead.Unnamed, named)) == named,
+        PointerRead.first(Iterator(PointerRead.Absent, PointerRead.Unnamed)) == PointerRead.Unnamed,
+        PointerRead.first(Iterator(PointerRead.Absent)) == PointerRead.Absent,
+        PointerRead.of(None) == PointerRead.Absent,
+        PointerRead.of(Some("<project><version>1.4.2-SNAPSHOT</version></project>")) == PointerRead.Unnamed,
+        PointerRead.of(
+          Some(s"<project><properties><zipx.snapshot.sha>$full</zipx.snapshot.sha></properties></project>")
+        ) ==
+          named,
+      )
+    },
     test("a deleted snapshot names the 90 day window and advance") {
-      val text = SnapshotStatus.report("widgets", widgets, None, artifactPresent = false).map(SnapshotStatus.render)
+      val text =
+        SnapshotStatus
+          .report("widgets", widgets, PointerRead.Absent, artifactPresent = false)
+          .map(SnapshotStatus.render)
       assertTrue(
         text.toOption.exists(_.contains("no longer has 1.4.2-1234abcd5678-SNAPSHOT (snapshots are kept 90 days)")),
         text.toOption.exists(_.contains("zipxSnapshotAdvance widgets")),
@@ -42,7 +73,7 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
     },
     test("a dirty pin is a local build") {
       val text = SnapshotStatus
-        .report("widgets", "1.4.2-1234abcd5678+20140707-1030", None, artifactPresent = false)
+        .report("widgets", "1.4.2-1234abcd5678+20140707-1030", PointerRead.Absent, artifactPresent = false)
         .map(SnapshotStatus.render)
       assertTrue(
         text.toOption.exists(_.contains("local build")),
