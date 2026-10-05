@@ -7,13 +7,13 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
   private val full    = GitSha("1234abcd56780123456789abcdef0123456789ab")
   private val newer   = GitSha("9876fedcba09876543210fedcba9876543210abc")
   private val line    = ReleaseVersion("1.4.2")
-  private val widgets = "1.4.2-1234abcd5678"
+  private val widgets = "1.4.2-1234abcd5678-SNAPSHOT"
+  private val bare    = "1.4.2-1234abcd5678"
 
   private def commit(raw: String): Either[SnapshotRevisionError, SnapshotRevision.Commit] =
-    SnapshotRevision.parse(raw).flatMap {
-      case pin: SnapshotRevision.Commit => Right(pin)
-      case other                        => Left(SnapshotRevisionError.NotCommitPin(other.id))
-    }
+    DepRevision.of(raw) match
+      case DepRevision.Commit(pin) => Right(pin)
+      case _                       => Left(SnapshotRevisionError.NotCommitPin(raw))
 
   def spec = suite("SnapshotPlan")(
     test("status names a newer sha and does not claim the pin moved") {
@@ -23,7 +23,7 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
         text == Right(
           s"""widgets $widgets
              |  commit 1234abcd5678
-             |  latest snapshot of 1.4.2 is 1.4.2-9876fedcba09
+             |  latest snapshot of 1.4.2 is 1.4.2-9876fedcba09-SNAPSHOT
              |  run: sbt 'zipxSnapshotAdvance widgets'""".stripMargin
         )
       )
@@ -36,7 +36,7 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
     test("a deleted snapshot names the 90 day window and advance") {
       val text = SnapshotStatus.report("widgets", widgets, None, artifactPresent = false).map(SnapshotStatus.render)
       assertTrue(
-        text.toOption.exists(_.contains("no longer has 1.4.2-1234abcd5678 (snapshots are kept 90 days)")),
+        text.toOption.exists(_.contains("no longer has 1.4.2-1234abcd5678-SNAPSHOT (snapshots are kept 90 days)")),
         text.toOption.exists(_.contains("zipxSnapshotAdvance widgets")),
       )
     },
@@ -49,11 +49,17 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
         text.toOption.exists(_.contains("will not resolve on another machine")),
       )
     },
-    test("advance rewrites only the sha, and a dirty pin is refused") {
+    test("advance rewrites only the sha, in the stored form, and a dirty pin is refused") {
       assertTrue(
-        PinRewrite.advance(widgets, newer) == Right(Some("1.4.2-9876fedcba09")),
+        PinRewrite.advance(widgets, newer) == Right(Some("1.4.2-9876fedcba09-SNAPSHOT")),
         PinRewrite.advance(widgets, full) == Right(None),
         PinRewrite.advance("1.4.2-1234abcd5678+20140707-1030", newer).isLeft,
+      )
+    },
+    test("advance repairs a bare pin, even at the sha it already names") {
+      assertTrue(
+        PinRewrite.advance(bare, full) == Right(Some(widgets)),
+        PinRewrite.advance(bare, newer) == Right(Some("1.4.2-9876fedcba09-SNAPSHOT")),
       )
     },
     test("pin release stays on the same line") {
@@ -70,7 +76,7 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
       )
     },
     test("the catalog rewrite touches one Lib constructor") {
-      val source = """val widgets = Lib("com.example", "widgets", "1.4.2-1234abcd5678")"""
+      val source = """val widgets = Lib("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")"""
       assertTrue(
         PinRewrite.replace(source, "com.example", "widgets", widgets, "1.4.2") ==
           Right("""val widgets = Lib("com.example", "widgets", "1.4.2")""")
@@ -97,12 +103,12 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
           """Not ready.
             |
             |client 0.3.0 cannot release.
-            |  com.example:widgets is 1.4.2-1234abcd5678 (a snapshot: it is not the release number).
+            |  com.example:widgets is 1.4.2-1234abcd5678-SNAPSHOT (a snapshot: it is not the release number).
             |  A release POM cannot depend on a snapshot build. The snapshot repository deletes it.
             |
             |  1. Release widgets 1.4.2 from the build that publishes it. One deployment.
             |  2. Here: sbt 'zipxPinRelease widgets'
-            |     That rewrites the pin from 1.4.2-1234abcd5678 to 1.4.2. Same number.
+            |     That rewrites the pin from 1.4.2-1234abcd5678-SNAPSHOT to 1.4.2. Same number.
             |  3. sbt zipxReleasePlan
             |
             |libs 1.4.2 can release.
@@ -157,7 +163,7 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
       )
     },
     test("dep update names pin release and does not take a newer line") {
-      val pin = Lib("com.example", "widgets", "1.4.2-1234abcd5678")
+      val pin = Lib("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")
       assertTrue(
         ZipxCatalog.outdated(List(pin), _ => Right(Some("1.4.3"))) == Right(Nil),
         SnapshotPinAdvice.message("widgets", widgets, Some("1.4.3")).exists(_.contains("zipxPinRelease widgets")),
@@ -167,9 +173,10 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
           .exists(_.contains("zipxPinRelease widgets")),
       )
     },
-    test("a release refuses a commit pin") {
+    test("a release refuses a commit pin, stored or bare") {
       assertTrue(
-        ReleasePlan.refuseSnapshots(List(s"com.example:widgets:$widgets")).isLeft
+        ReleasePlan.refuseSnapshots(List(s"com.example:widgets:$widgets")).isLeft,
+        ReleasePlan.refuseSnapshots(List(s"com.example:widgets:$bare")).isLeft,
       )
     },
   )

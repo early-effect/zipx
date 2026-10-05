@@ -66,8 +66,8 @@ end SnapshotRevisionError
   * The catalog line is the next release number. A clean commit names that line plus the commit. A dirty tree and a tree
   * with no git are local publishes: dynver's `+YYYYMMDD-HHmm` mark, and not a registry upload.
   *
-  * `-SNAPSHOT` is not part of the id. [[ArtifactRegistry.MavenCentral]] requires it on the stored revision, the way
-  * dynver's `sonatypeVersion` appends it. Every other registry stores [[SnapshotRevision.id]].
+  * `-SNAPSHOT` is not part of the id. Every registry stores a clean commit as the id plus `-SNAPSHOT` (Central and
+  * snapshot-policy repositories refuse anything else), and that stored revision is also what a downstream catalog pins.
   */
 enum SnapshotRevision:
   case Commit(line: ReleaseVersion, abbrev: AbbrevSha, full: Option[GitSha])
@@ -84,13 +84,10 @@ enum SnapshotRevision:
     case _: Commit           => true
     case _: Dirty | _: NoGit => false
 
-  /** The revision a registry stores. Unstable ids are refused. Central appends `-SNAPSHOT`. */
-  def mavenRevision(registry: ArtifactRegistry): Either[SnapshotRevisionError, String] =
-    this match
-      case _: Commit =>
-        Right(if SnapshotRevision.appendsSnapshotSuffix(registry) then s"$id${Modver.UnreleasedSuffix}" else id)
-      case _ =>
-        Left(SnapshotRevisionError.Unstable(id))
+  /** The revision every registry stores. A dirty or git-less id is never uploaded. */
+  def stored: Either[SnapshotRevisionError, String] = this match
+    case commit: Commit      => Right(commit.storedId)
+    case _: Dirty | _: NoGit => Left(SnapshotRevisionError.Unstable(id))
 end SnapshotRevision
 
 object SnapshotRevision:
@@ -102,6 +99,10 @@ object SnapshotRevision:
 
   def commit(line: ReleaseVersion, full: GitSha): Commit =
     Commit(line, AbbrevSha.fromFull(full), Some(full))
+
+  extension (commit: Commit)
+    /** `<line>-<sha>-SNAPSHOT`: the coordinate a registry holds and a catalog pins. */
+    def storedId: String = s"${commit.id}${Modver.UnreleasedSuffix}"
 
   def dirty(line: ReleaseVersion, full: GitSha, at: DirtyStamp): Dirty =
     Dirty(line, AbbrevSha.fromFull(full), at)
@@ -130,12 +131,6 @@ object SnapshotRevision:
         Left(SnapshotRevisionError.ShaTooShort(sha))
       case _ =>
         Left(SnapshotRevisionError.NotCommitPin(raw))
-
-  /** Sonatype's snapshot repository rejects a version that does not end in `-SNAPSHOT`. */
-  def appendsSnapshotSuffix(registry: ArtifactRegistry): Boolean =
-    registry match
-      case ArtifactRegistry.MavenCentral => true
-      case _                             => false
 
   private def releaseLine(raw: String): Either[SnapshotRevisionError, ReleaseVersion] =
     ReleaseVersion.make(raw).left.map(_ => SnapshotRevisionError.BadLine(raw))

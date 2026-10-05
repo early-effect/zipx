@@ -11,21 +11,13 @@ object ReleaseBlocker:
 
   /** `None` when the revision is a release number. An in-repo module is filtered by the caller: it rides along. */
   def classify(group: String, artifact: String, revision: String): Option[ReleaseBlocker] =
-    SnapshotRevision.parse(revision) match
-      case Right(pin: SnapshotRevision.Commit) =>
-        Some(ReleaseBlocker.CommitPin(group, artifact, pin))
-      case Right(other) =>
-        Some(ReleaseBlocker.LocalPin(group, artifact, other.id))
-      case Left(_) if SnapshotPublishRevision.isPointer(revision) =>
-        Some(ReleaseBlocker.Pointer(group, artifact, revision))
-      case Left(_) if SnapshotPublishRevision.isImmutablePin(revision) =>
-        SnapshotRevision.parse(revision.stripSuffix(Modver.UnreleasedSuffix)) match
-          case Right(pin: SnapshotRevision.Commit) => Some(ReleaseBlocker.CommitPin(group, artifact, pin))
-          case _                                   => None
-      case Left(_) if SnapshotPins.isSnapshot(revision) =>
-        Some(ReleaseBlocker.ChangingSnapshot(group, artifact, revision))
-      case Left(_) =>
-        None
+    DepRevision.of(revision) match
+      case DepRevision.Commit(pin)         => Some(ReleaseBlocker.CommitPin(group, artifact, pin))
+      case DepRevision.UnstoredCommit(pin) => Some(ReleaseBlocker.CommitPin(group, artifact, pin))
+      case DepRevision.Local(local)        => Some(ReleaseBlocker.LocalPin(group, artifact, local.id))
+      case DepRevision.Pointer(_)          => Some(ReleaseBlocker.Pointer(group, artifact, revision))
+      case DepRevision.Changing(_)         => Some(ReleaseBlocker.ChangingSnapshot(group, artifact, revision))
+      case DepRevision.Release(_) | DepRevision.Other(_) => None
 end ReleaseBlocker
 
 /** One unreleased ship and the external pins that block it. `ridesAlong` are in-repo ships that publish with it. */
@@ -109,12 +101,12 @@ object ReleaseReadiness:
 
   private def blockerText(block: ReleaseBlocker): String = block match
     case ReleaseBlocker.CommitPin(group, artifact, pin) =>
-      s"""  $group:$artifact is ${pin.id} (a snapshot: it is not the release number).
+      s"""  $group:$artifact is ${pin.storedId} (a snapshot: it is not the release number).
          |  A release POM cannot depend on a snapshot build. The snapshot repository deletes it.
          |
          |  1. Release $artifact ${pin.line} from the build that publishes it. One deployment.
          |  2. Here: sbt 'zipxPinRelease $artifact'
-         |     That rewrites the pin from ${pin.id} to ${pin.line}. Same number.
+         |     That rewrites the pin from ${pin.storedId} to ${pin.line}. Same number.
          |  3. sbt zipxReleasePlan""".stripMargin
     case ReleaseBlocker.LocalPin(group, artifact, id) =>
       s"""  $group:$artifact is $id (a local build).

@@ -19,25 +19,28 @@ import scala.util.control.NonFatal
   */
 object SnapshotCommands:
 
+  /** `names` gives the artifact names a row resolves as, one per platform the build uses it on. */
   def status(
       arg: String,
       coords: Seq[ZipxCoord],
       registry: ArtifactRegistry,
-      scalaBin: String,
-      scalaVer: String,
+      names: Lib => List[String],
       cache: File,
       headers: Map[String, String],
       log: Logger,
   ): Unit =
-    select(arg, coords, "zipxSnapshotStatus").foreach { lib =>
-      val artifact = mavenName(lib, scalaBin, scalaVer)
-      val report   = SnapshotPinAdvice.hold(lib.version) match
+    families(select(arg, coords, "zipxSnapshotStatus"), coords).foreach { family =>
+      val report = SnapshotPinAdvice.hold(family.version) match
         case Some(SnapshotHold.Local(_)) =>
-          SnapshotStatus.report(lib.artifact, lib.version, None, artifactPresent = false)
+          SnapshotStatus.report(family.literal, family.version, None, artifactPresent = false)
         case _ =>
-          val pointer = pointerSha(registry, lib.group, artifact, lineOf(lib.version), cache, headers)
-          val present = artifactPresent(registry, lib.group, artifact, lib.version, cache, headers)
-          SnapshotStatus.report(lib.artifact, lib.version, pointer, present)
+          val pointer = family.members.iterator
+            .map(latestSha(registry, _, names, cache, headers))
+            .collectFirst { case Some(found) => found }
+          val present = family.members.exists { lib =>
+            names(lib).exists(artifactPresent(registry, lib.group, _, lib.version, cache, headers))
+          }
+          SnapshotStatus.report(family.literal, family.version, pointer, present)
       log.info(report.fold(err => sys.error(s"zipx: $err"), SnapshotStatus.render))
     }
 
@@ -47,38 +50,38 @@ object SnapshotCommands:
       coords: Seq[ZipxCoord],
       source: String,
       registry: ArtifactRegistry,
-      scalaBin: String,
-      scalaVer: String,
+      names: Lib => List[String],
       cache: File,
       headers: Map[String, String],
       log: Logger,
   ): String =
     val named = arg.trim.nonEmpty
-    select(arg, coords, "zipxSnapshotAdvance").foldLeft(source) { (src, lib) =>
-      SnapshotPinAdvice.hold(lib.version) match
+    families(select(arg, coords, "zipxSnapshotAdvance"), coords).foldLeft(source) { (src, family) =>
+      SnapshotPinAdvice.hold(family.version) match
         case Some(SnapshotHold.Local(id)) =>
           val message = SnapshotRevisionError.Unstable(id).message
-          if named then sys.error(s"zipx: $message") else log.info(s"zipx: ${lib.artifact} $message")
+          if named then sys.error(s"zipx: $message") else log.info(s"zipx: ${family.literal} $message")
           src
         case Some(SnapshotHold.Pointer(_)) if !named =>
-          log.info(s"zipx: ${lib.artifact} ${lib.version} is the snapshot pointer, not a pin.")
+          log.info(s"zipx: ${family.literal} ${family.version} is the snapshot pointer, not a pin.")
           src
         case _ =>
-          val sha =
-            pointerSha(registry, lib.group, mavenName(lib, scalaBin, scalaVer), lineOf(lib.version), cache, headers)
-              .getOrElse(sys.error(s"zipx: the pointer for ${lib.artifact} has no ${SnapshotPointer.ShaElement}"))
-          PinRewrite.advance(lib.version, sha) match
+          val sha = family.members.iterator
+            .map(latestSha(registry, _, names, cache, headers))
+            .collectFirst { case Some(found) => found }
+            .getOrElse(sys.error(s"zipx: the pointer for ${family.literal} has no ${SnapshotPointer.ShaElement}"))
+          PinRewrite.advance(family.version, sha) match
             case Left(err) =>
               sys.error(s"zipx: $err")
             case Right(None) =>
-              log.info(s"zipx: ${lib.artifact} ${lib.version} is the latest snapshot")
+              log.info(s"zipx: ${family.literal} ${family.version} is the latest snapshot")
               src
             case Right(Some(next)) =>
               val rewritten =
                 PinRewrite
-                  .replace(src, lib.group, lib.artifact, lib.version, next)
+                  .replace(src, family.group, family.literal, family.version, next)
                   .fold(err => sys.error(s"zipx: $err"), identity)
-              log.info(s"zipx: ${lib.artifact} ${lib.version} -> $next")
+              log.info(s"zipx: ${family.literal} ${family.version} -> $next")
               rewritten
           end match
     }
@@ -88,30 +91,41 @@ object SnapshotCommands:
       arg: String,
       coords: Seq[ZipxCoord],
       source: String,
-      scalaBin: String,
-      scalaVer: String,
+      names: Lib => List[String],
       released: (String, String, String) => Boolean,
       log: Logger,
   ): String =
     if arg.trim.isEmpty then sys.error("zipx: zipxPinRelease takes the artifact name, or group:artifact")
-    select(arg, coords, "zipxPinRelease").foldLeft(source) { (src, lib) =>
-      val artifact = mavenName(lib, scalaBin, scalaVer)
-      val line     = lineOf(lib.version)
-      val onRepo   = line.exists(v => released(lib.group, artifact, v))
-      PinRewrite.pinRelease(lib.version, onRepo) match
-        case Left(err)                                    => sys.error(s"zipx: $err")
-        case Right(next) if next == (lib.version: String) =>
-          log.info(s"zipx: ${lib.artifact} is already $next")
+    families(select(arg, coords, "zipxPinRelease"), coords).foldLeft(source) { (src, family) =>
+      val line   = lineOf(family.version)
+      val onRepo = line.exists(v => family.members.exists(lib => names(lib).exists(released(lib.group, _, v))))
+      PinRewrite.pinRelease(family.version, onRepo) match
+        case Left(err)                                       => sys.error(s"zipx: $err")
+        case Right(next) if next == (family.version: String) =>
+          log.info(s"zipx: ${family.literal} is already $next")
           src
         case Right(next) =>
           val rewritten = PinRewrite
-            .replace(src, lib.group, lib.artifact, lib.version, next)
+            .replace(src, family.group, family.literal, family.version, next)
             .fold(err => sys.error(s"zipx: $err"), identity)
-          log.info(s"zipx: ${lib.artifact} ${lib.version} -> $next")
+          log.info(s"zipx: ${family.literal} ${family.version} -> $next")
           rewritten
       end match
     }
   end pinRelease
+
+  /** One `Lib(...)` literal in the catalog source, and every row that shares its version through `.mod`. */
+  private final case class Family(group: GroupId, literal: ArtifactId, version: DepVersion, members: ::[Lib])
+
+  /** The families the selected rows belong to, each once. A `.mod` row is rewritten through its family's literal. */
+  private def families(selected: List[Lib], coords: Seq[ZipxCoord]): List[Family] =
+    val libs                            = coords.collect { case lib: Lib => lib }.toList
+    def literalOf(lib: Lib): ArtifactId = lib.family.getOrElse(lib.artifact)
+    selected.map(lib => (lib.group, literalOf(lib))).distinct.flatMap { (group, literal) =>
+      libs.filter(lib => lib.group == group && literalOf(lib) == literal) match
+        case head :: tail => Some(Family(group, literal, head.version, ::(head, tail)))
+        case Nil          => None
+    }
 
   def defaultBranch(root: File): String =
     gitLine(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
@@ -150,6 +164,18 @@ object SnapshotCommands:
       }
       .filter(_.nonEmpty)
 
+  /** The sha the first of the row's artifacts that has a pointer names. Every platform publishes from one commit. */
+  private def latestSha(
+      registry: ArtifactRegistry,
+      lib: Lib,
+      names: Lib => List[String],
+      cache: File,
+      headers: Map[String, String],
+  ): Option[GitSha] =
+    names(lib).iterator
+      .map(pointerSha(registry, lib.group, _, lineOf(lib.version), cache, headers))
+      .collectFirst { case Some(sha) => sha }
+
   private def pointerSha(
       registry: ArtifactRegistry,
       organization: String,
@@ -158,37 +184,10 @@ object SnapshotCommands:
       cache: File,
       headers: Map[String, String],
   ): Option[GitSha] =
-    line match
-      case None      => None
-      case Some(raw) =>
-        ReleaseVersion.make(raw).toOption.flatMap { parsed =>
-          val version = SnapshotPointer.pointerVersion(parsed)
-          val pom     =
-            fetch(
-              registry.snapshotRepository,
-              SnapshotPointer.pomRelative(organization, artifact, version),
-              cache,
-              headers,
-            )
-          val xml = pom.orElse {
-            val metadata =
-              fetch(
-                registry.snapshotRepository,
-                SnapshotPointer.metadataRelative(organization, artifact, version),
-                cache,
-                headers,
-              )
-            metadata.flatMap(body => SnapshotPointer.timestampedVersion(raw, body)).flatMap { stamped =>
-              fetch(
-                registry.snapshotRepository,
-                SnapshotPointer.uniquePomRelative(organization, artifact, version, stamped),
-                cache,
-                headers,
-              )
-            }
-          }
-          xml.map(body => SnapshotPointer.shaFromPom(body).fold(err => sys.error(s"zipx: $err"), identity))
-        }
+    line.flatMap(raw => ReleaseVersion.make(raw).toOption).flatMap { parsed =>
+      pomUnder(registry, organization, artifact, SnapshotPointer.pointerVersion(parsed), parsed, cache, headers)
+        .map(body => SnapshotPointer.shaFromPom(body).fold(err => sys.error(s"zipx: $err"), identity))
+    }
 
   private def artifactPresent(
       registry: ArtifactRegistry,
@@ -198,23 +197,33 @@ object SnapshotCommands:
       cache: File,
       headers: Map[String, String],
   ): Boolean =
-    val id = SnapshotRevision.parse(revision) match
-      case Right(pin: SnapshotRevision.Commit) => pin.id
-      case _                                   => revision
-    val stored = SnapshotPointer.storedRevision(id, registry)
-    fetch(
-      registry.snapshotRepository,
-      SnapshotPointer.pomRelative(organization, artifact, stored),
-      cache,
-      headers,
-    ).isDefined
+    def present(pin: SnapshotRevision.Commit): Boolean =
+      pomUnder(registry, organization, artifact, pin.storedId, pin.id, cache, headers).isDefined
+    DepRevision.of(revision) match
+      case DepRevision.Commit(pin)         => present(pin)
+      case DepRevision.UnstoredCommit(pin) => present(pin)
+      case _                               => false
   end artifactPresent
 
-  private def mavenName(lib: Lib, scalaBin: String, scalaVer: String): String =
-    lib.cross match
-      case Cross.Java   => lib.artifact
-      case Cross.Full   => s"${lib.artifact}_$scalaVer"
-      case Cross.Binary => s"${lib.artifact}_$scalaBin"
+  /** A POM under `version`: the plain file, or sbt's unique snapshot named by that directory's metadata. `base` is the
+    * version without `-SNAPSHOT`, which the timestamp replaces in the file name.
+    */
+  private def pomUnder(
+      registry: ArtifactRegistry,
+      organization: String,
+      artifact: String,
+      version: String,
+      base: String,
+      cache: File,
+      headers: Map[String, String],
+  ): Option[String] =
+    def get(relative: String) = fetch(registry.snapshotRepository, relative, cache, headers)
+    get(SnapshotPointer.pomRelative(organization, artifact, version)).orElse {
+      get(SnapshotPointer.metadataRelative(organization, artifact, version))
+        .flatMap(body => SnapshotPointer.timestampedVersion(base, body))
+        .flatMap(stamped => get(SnapshotPointer.uniquePomRelative(organization, artifact, version, stamped)))
+    }
+  end pomUnder
 
   private def fetch(root: String, relative: String, cache: File, headers: Map[String, String]): Option[String] =
     val url = s"${root.stripSuffix("/")}/$relative"

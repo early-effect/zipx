@@ -39,13 +39,10 @@ enum BuildSession:
   /** The `version` a session actually sets. Development stays on [[versionOf]]. A snapshot session publishes the git
     * id. The sbt setting turns a `Left` into `zipx: …`; core keeps the error.
     */
-  def artifactVersion(
-      row: PublishedRow,
-      registry: ArtifactRegistry,
-      props: collection.Map[String, String],
-  ): Either[SnapshotRevisionError, String] = this match
-    case Release | Development                    => Right(versionOf(row))
-    case SnapshotPublish | PullRequestSnapshot(_) => SnapshotPublishRevision.revision(row, registry, props)
+  def artifactVersion(row: PublishedRow, props: collection.Map[String, String]): Either[SnapshotRevisionError, String] =
+    this match
+      case Release | Development                    => Right(versionOf(row))
+      case SnapshotPublish | PullRequestSnapshot(_) => SnapshotPublishRevision.revision(row, props)
 
   /** Central validates docs on a release only; scaladoc is the slow part of a snapshot publish. */
   def publishesDocs: Boolean = this match

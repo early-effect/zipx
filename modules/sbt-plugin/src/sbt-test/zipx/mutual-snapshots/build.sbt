@@ -1,5 +1,6 @@
 // Ascent: a JS-only facade in its own ship, and an app that also depends on heddle, which is built against that
 // facade. Heddle's build is changes/heddle.sbt; the test swaps the two in place, one directory, one git history.
+// Ascent pins heddle only at commits and names no snapshot repository: zipx adds it for the commit pin.
 MyVersions.settings
 Fixture.settings
 organization                           := Fixture.Organization
@@ -10,19 +11,18 @@ LocalRootProject / zipxReleaseWorkflow := Some(Fixture.releaseWorkflow)
 val scala3 = "3.9.0"
 
 lazy val domFacade = (projectMatrix in file("dom-facade"))
-  .settings(name := "ascent-dom-facade", Fixture.resolve)
+  .settings(name := "ascent-dom-facade")
   .jsPlatform(scalaVersions = Seq(scala3))
 
 lazy val js = (projectMatrix in file("js"))
   .dependsOn(domFacade)
-  .settings(name := "ascent-js", Fixture.resolve)
+  .settings(name := "ascent-js")
   .jsPlatform(scalaVersions = Seq(scala3))
 
 lazy val mcpApp = (projectMatrix in file("mcp-app"))
   .dependsOn(js)
   .settings(
     name := "ascent-mcp-app",
-    Fixture.resolve,
     if (file("use-heddle").exists) MyVersions.library(MyVersions.heddleMcpApps) else Nil,
   )
   .jsPlatform(scalaVersions = Seq(scala3))
@@ -30,7 +30,7 @@ lazy val mcpApp = (projectMatrix in file("mcp-app"))
 // Publishes nothing, like ascent's docs site.
 lazy val docs = (projectMatrix in file("docs"))
   .dependsOn(mcpApp)
-  .settings(name := "ascent-docs", Fixture.resolve, publish / skip := true)
+  .settings(name := "ascent-docs", publish / skip := true)
   .jsPlatform(scalaVersions = Seq(scala3))
 
 lazy val root = (project in file("."))
@@ -42,3 +42,11 @@ Fixture.inRepoWins(assertFacadeInRepo, LocalProject("mcpAppJS"), LocalProject("d
 
 val assertDocsFacadeInRepo = inputKey[Unit]("the docs site compiles the in-repo facade too")
 Fixture.inRepoWins(assertDocsFacadeInRepo, LocalProject("docsJS"), LocalProject("domFacadeJS"))
+
+val assertZipxResolver = taskKey[Unit]("a commit pin in the catalog brings the registry's snapshot repository")
+assertZipxResolver / aggregate := false
+assertZipxResolver := Def.uncached {
+  val expected = zipx.core.SnapshotPins.resolverName(Fixture.releaseWorkflow.registry)
+  val names    = (LocalProject("mcpAppJS") / resolvers).value.map(_.name)
+  assert(names.contains(expected), s"no $expected in $names")
+}

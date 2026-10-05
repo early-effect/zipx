@@ -75,7 +75,8 @@ lazy val service = project.settings(MyVersions.service)
 ```
 
 A `Ship` or `ShipGroup` number is the next release. Everyday builds compile `<row>-ci`. A snapshot publish stores
-`<row>-<sha>` and, on the default branch, a `<row>-SNAPSHOT` pointer that is not a dependency. `zipxSnapshotStatus`
+`<row>-<sha>-SNAPSHOT`, the coordinate a downstream catalog pins, and, on the default branch, a `<row>-SNAPSHOT`
+pointer that is not a dependency. `zipxSnapshotStatus`
 reads that pointer. `zipxSnapshotAdvance` rewrites the pin. `zipxReleasePlan` says whether a ship can release.
 `zipxPinRelease` rewrites a sha pin to that same line after the release exists. Once the number is on the release
 registry, further snapshots of it publish nothing. `zipxDriftGate` defaults to `Fail`: that row stops compiling, and

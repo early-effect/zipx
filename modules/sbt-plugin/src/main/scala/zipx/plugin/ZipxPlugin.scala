@@ -229,7 +229,7 @@ object ZipxPlugin extends AutoPlugin:
       def snapshots: Capability =
         Capability.snapshots(CapabilityTasks.of(snapshotPublishCommand)).withEnv(zipx.central.ZipxCentral.snapshotEnv)
 
-      /** On each push to a same-repo PR labeled `label`: unreleased rows at that commit's `<row>-<sha>`. */
+      /** On each push to a same-repo PR labeled `label`: unreleased rows at that commit's `<row>-<sha>-SNAPSHOT`. */
       inline def pullRequestSnapshots(inline label: String): Capability =
         zipx.central.ZipxCentral.pullRequestSnapshots(label)
     end ZipxCentral
@@ -704,19 +704,20 @@ object ZipxPlugin extends AutoPlugin:
       zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.distinct.map { own =>
         own.organization % own.name % VersionScheme.Always
       },
-    // The pointer refusal is a dependency, not a line above `update.value`: sbt runs every `.value` before the body.
+    // A commit pin names one build forever, so Coursier never re-reads its metadata.
     libraryDependencies := libraryDependencies.value.map { module =>
-      if zipx.core.SnapshotPublishRevision.isImmutablePin(module.revision) then module.withIsChanging(false)
-      else module
+      DepRevision.of(module.revision) match
+        case DepRevision.Commit(_) => module.withIsChanging(false)
+        case _                     => module
     },
+    // The refusals are a dependency, not a line above `update.value`: sbt runs every `.value` before the body.
     update := Def.taskDyn {
-      val pointers =
-        libraryDependencies.value.map(_.revision).filter(zipx.core.SnapshotPublishRevision.isPointer).distinct
-      if pointers.nonEmpty then
-        Def.task[sbt.librarymanagement.UpdateReport] {
-          sys.error(s"zipx: ${zipx.core.SnapshotPublishRevision.pointerRefusal(pointers)}")
-        }
-      else Def.task(updateFull.value)
+      PinRefusal.of(libraryDependencies.value.map(_.revision)) match
+        case Nil      => Def.task(updateFull.value)
+        case refusals =>
+          Def.task[sbt.librarymanagement.UpdateReport] {
+            sys.error(refusals.map(refusal => s"zipx: ${refusal.message}").mkString("\n"))
+          }
     }.value,
     Compile / compile        := (Compile / compile).dependsOn(zipxEnforceDrift).value,
     Test / compile           := (Test / compile).dependsOn(zipxEnforceDrift).value,
@@ -725,9 +726,9 @@ object ZipxPlugin extends AutoPlugin:
     zipxRequireVersionScheme := Def.uncached { requireVersionScheme.value },
     forceUpdatePeriod        := {
       val changing = libraryDependencies.value.exists { module =>
-        SnapshotPins.isSnapshot(module.revision) &&
-        !zipx.core.SnapshotPublishRevision.isImmutablePin(module.revision) &&
-        !zipx.core.SnapshotPublishRevision.isPointer(module.revision)
+        DepRevision.of(module.revision) match
+          case DepRevision.Changing(_) => true
+          case _                       => false
       }
       if changing then Some(scala.concurrent.duration.Duration.Zero) else forceUpdatePeriod.value
     },
@@ -1488,7 +1489,7 @@ object ZipxPlugin extends AutoPlugin:
               (publish, release.registry.snapshotRepository)
           plan.entries.foreach { e =>
             val shown = session
-              .artifactVersion(e.row, release.registry, sys.props)
+              .artifactVersion(e.row, sys.props)
               .fold(err => sys.error(s"zipx: ${err.message}"), identity)
             next.log.info(s"zipx: publishing ${Modver.describe(e.row)} $shown to $destination")
           }
@@ -2217,16 +2218,7 @@ object ZipxPlugin extends AutoPlugin:
     Def.inputTask {
       val arg = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
       val ctx = snapshotContext.value
-      SnapshotCommands.status(
-        arg,
-        ctx.coords,
-        ctx.registry,
-        ctx.scalaBin,
-        ctx.scalaVer,
-        ctx.cache,
-        ctx.headers,
-        ctx.log,
-      )
+      SnapshotCommands.status(arg, ctx.coords, ctx.registry, ctx.names, ctx.cache, ctx.headers, ctx.log)
     }
 
   private def snapshotAdvanceTask: Def.Initialize[InputTask[Unit]] =
@@ -2238,8 +2230,7 @@ object ZipxPlugin extends AutoPlugin:
         ctx.coords,
         IO.read(ctx.file),
         ctx.registry,
-        ctx.scalaBin,
-        ctx.scalaVer,
+        ctx.names,
         ctx.cache,
         ctx.headers,
         ctx.log,
@@ -2253,15 +2244,7 @@ object ZipxPlugin extends AutoPlugin:
     Def.inputTask {
       val arg  = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
       val ctx  = snapshotContext.value
-      val next = SnapshotCommands.pinRelease(
-        arg,
-        ctx.coords,
-        IO.read(ctx.file),
-        ctx.scalaBin,
-        ctx.scalaVer,
-        ctx.released,
-        ctx.log,
-      )
+      val next = SnapshotCommands.pinRelease(arg, ctx.coords, IO.read(ctx.file), ctx.names, ctx.released, ctx.log)
       if next != IO.read(ctx.file) then
         IO.write(ctx.file, next)
         ctx.log.info(s"zipx: wrote ${ctx.file.getPath}")
@@ -2294,8 +2277,7 @@ object ZipxPlugin extends AutoPlugin:
   private final case class SnapshotCtx(
       coords: Seq[ZipxCoord],
       registry: ArtifactRegistry,
-      scalaBin: String,
-      scalaVer: String,
+      names: Lib => List[String],
       cache: File,
       file: File,
       headers: Map[String, String],
@@ -2319,8 +2301,7 @@ object ZipxPlugin extends AutoPlugin:
     SnapshotCtx(
       readBuildSetting(extracted, zipxVersions, Seq.empty),
       release.registry,
-      (LocalRootProject / scalaBinaryVersion).value,
-      (LocalRootProject / scalaVersion).value,
+      resolvedNames(extracted, (LocalRootProject / scalaModuleInfo).value),
       (LocalRootProject / target).value / "zipx-snapshot-pointer",
       file,
       headers,
@@ -2328,6 +2309,28 @@ object ZipxPlugin extends AutoPlugin:
       streams.value.log,
     )
   }
+
+  /** The artifact names a catalog row resolves as, from every project that depends on it, each crossed with that
+    * project's `scalaModuleInfo`: `heddle_3` from a JVM project, `heddle_sjs1_3` from a Scala.js one. A row no project
+    * uses is crossed the way the root project would cross it.
+    */
+  private def resolvedNames(extracted: Extracted, rootScala: Option[ScalaModuleInfo])(lib: Lib): List[String] =
+    val module                                                = ZipxDeps.moduleID(lib)
+    def crossed(dep: ModuleID, info: Option[ScalaModuleInfo]) =
+      info.flatMap(CrossVersion(dep, _)).fold(dep.name)(_(dep.name))
+    val used = extracted.structure.allProjectRefs.toList.flatMap { ref =>
+      val info = extracted.getOpt(ref / scalaModuleInfo).flatten
+      extracted
+        .getOpt(ref / libraryDependencies)
+        .toList
+        .flatten
+        .filter(dep => dep.organization == module.organization && dep.name == module.name)
+        .map(crossed(_, info))
+    }
+    used.distinct match
+      case Nil   => List(crossed(module, rootScala))
+      case names => names
+  end resolvedNames
 
   private def releaseGates(st: State, extracted: Extracted, own: Set[ModuleID]): List[ShipGate] =
     val ships = readBuildSetting(extracted, zipxShips, Seq.empty).toList
@@ -3086,13 +3089,14 @@ object ZipxPlugin extends AutoPlugin:
       .flatMap { node =>
         extracted.structure.allProjectRefs.find(_.project == (node.id: String)).toList.flatMap { ref =>
           val module  = extracted.get(ref / projectID)
-          val namer   = extracted.get(ref / artifactName)
+          val info    = extracted.getOpt(ref / scalaModuleInfo).flatten
           val version = index.rowFor(node.matrixRoot).map(r => r.version: String).getOrElse("0.0.0")
           val scalaVs = extracted.getOpt(ref / crossScalaVersions).getOrElse(Seq.empty)
           val fullVs  = if scalaVs.isEmpty then extracted.getOpt(ref / scalaVersion).toSeq else scalaVs
           fullVs.toList.map { sv =>
             val bin = sbt.librarymanagement.CrossVersion.binaryScalaVersion(sv)
-            val art = PublishedModule.artifactId(module, sv, bin, namer)
+            val art =
+              PublishedModule.artifactId(module, info.map(_.withScalaFullVersion(sv).withScalaBinaryVersion(bin)))
             (node.id, (bin, Gav(module.organization, art, version)))
           }
         }
@@ -3146,12 +3150,14 @@ object ZipxPlugin extends AutoPlugin:
       release: ReleaseWorkflow,
       version: ReleaseVersion,
   ): Either[String, Option[File]] =
-    val module    = extracted.get(ref / projectID)
-    val namer     = extracted.get(ref / artifactName)
-    val scalaFull = extracted.getOpt(ref / scalaVersion).getOrElse("")
-    val scalaBin  = extracted.getOpt(ref / scalaBinaryVersion).getOrElse("")
-    val gav       = Gav(module.organization, PublishedModule.artifactId(module, scalaFull, scalaBin, namer), version)
-    val dest      =
+    val module = extracted.get(ref / projectID)
+    val gav    =
+      Gav(
+        module.organization,
+        PublishedModule.artifactId(module, extracted.getOpt(ref / scalaModuleInfo).flatten),
+        version,
+      )
+    val dest =
       extracted.get(LocalRootProject / baseDirectory) / "target" / "zipx-mima" / s"${gav.artifact}-$version.jar"
     dest.getParentFile.mkdirs()
     registryHeaders(release).flatMap(headers => download(release.registry.jarUrl(gav), headers, dest))

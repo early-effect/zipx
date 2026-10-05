@@ -43,6 +43,7 @@ $ exec git commit -q -m h1
 
 # 4. Ascent moves on (a2, same 0.11.0 line) and pins heddle h0, built against facade 0.10.0. The app and the docs
 # site compile the in-repo facade; what heddle asked for is evicted and fails nothing.
+$ copy-file project/ZipxVersions.scala saved/HeddleVersions.scala
 $ copy-file saved/ascent.sbt build.sbt
 $ copy-file saved/AscentVersions.scala project/ZipxVersions.scala
 $ copy-file changes/Facade.v2.scala dom-facade/src/main/scala/Facade.scala
@@ -65,4 +66,39 @@ $ exec git commit -q -m a2
 > docsJS/update
 > assertFacadeInRepo commit 0.11.0 a1
 > assertDocsFacadeInRepo commit 0.11.0 a1
+> mcpAppJS/compile
+> assertZipxResolver
+$ exec git add -A
+$ exec git commit -q -m a2-pins-h1
+
+# 6. Heddle h2 moves heddle's pointer.
+$ copy-file project/ZipxVersions.scala saved/AscentVersions.scala
+$ copy-file changes/heddle.sbt build.sbt
+$ copy-file saved/HeddleVersions.scala project/ZipxVersions.scala
+$ copy-file changes/Heddle.v2.scala heddle/src/main/scala/Heddle.scala
+> reload
+$ exec git add -A
+$ exec git commit -q -m h2
+> recordSha h2
+> zipxSnapshotPublish
+> assertPointerNames heddle-mcp-apps_sjs1_3 0.9.0 h2
+
+# 7. Ascent takes heddle's newest commit the way the weekly job does: no arguments, one rewrite for the heddle family,
+# in the stored form. A bare pin fails update before anything resolves, and advance repairs it.
+$ copy-file project/ZipxVersions.scala saved/HeddleVersions.scala
+$ copy-file saved/ascent.sbt build.sbt
+$ copy-file saved/AscentVersions.scala project/ZipxVersions.scala
+> reload
+> zipxSnapshotStatus
+> zipxSnapshotAdvance
+> reload
+> assertPin heddle 0.9.0 h2
+> mcpAppJS/update
+> assertFacadeInRepo commit 0.11.0 a1
+> pinBare heddle 0.9.0 h2
+> reload
+-> mcpAppJS/update
+> zipxSnapshotAdvance heddle-mcp-apps
+> reload
+> assertPin heddle 0.9.0 h2
 > mcpAppJS/compile

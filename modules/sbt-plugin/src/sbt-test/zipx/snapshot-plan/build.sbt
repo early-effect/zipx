@@ -21,8 +21,8 @@ seedPointer / aggregate := false
 seedPointer := Def.uncached {
   val base = widgetsRepo((LocalRootProject / baseDirectory).value)
   writePom(base / "1.4.2-SNAPSHOT", "1.4.2-SNAPSHOT", Some("9876fedcba09876543210fedcba9876543210abc"))
-  writePom(base / "1.4.2-aaaaaaaaaaaa", "1.4.2-aaaaaaaaaaaa", None)
-  writePom(base / "1.4.2-9876fedcba09", "1.4.2-9876fedcba09", None)
+  writePom(base / "1.4.2-aaaaaaaaaaaa-SNAPSHOT", "1.4.2-aaaaaaaaaaaa-SNAPSHOT", None)
+  writePom(base / "1.4.2-9876fedcba09-SNAPSHOT", "1.4.2-9876fedcba09-SNAPSHOT", None)
 }
 
 val seedRelease = taskKey[Unit]("Write the release POM for widgets 1.4.2")
@@ -35,7 +35,7 @@ val assertAdvanced = taskKey[Unit]("advance rewrote the pin to the pointer sha")
 assertAdvanced / aggregate := false
 assertAdvanced := Def.uncached {
   val text = IO.read((LocalRootProject / baseDirectory).value / "project" / "ZipxVersions.scala")
-  assert(text.contains(""""1.4.2-9876fedcba09""""), text)
+  assert(text.contains(""""1.4.2-9876fedcba09-SNAPSHOT""""), text)
   assert(!text.contains("aaaaaaaaaaaa"), text)
 }
 
