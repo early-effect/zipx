@@ -1,3 +1,8 @@
+# A pointer a plain publish wrote names no commit. Status reports that row and finishes; advance refuses it.
+> seedUnnamedPointer
+> zipxSnapshotStatus widgets
+> zipxSnapshotStatus
+-> zipxSnapshotAdvance widgets
 > seedPointer
 > zipxSnapshotStatus widgets
 > zipxSnapshotStatus localpin

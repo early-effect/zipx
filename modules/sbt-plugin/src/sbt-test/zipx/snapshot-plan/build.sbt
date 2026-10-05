@@ -25,6 +25,14 @@ seedPointer := Def.uncached {
   writePom(base / "1.4.2-9876fedcba09-SNAPSHOT", "1.4.2-9876fedcba09-SNAPSHOT", None)
 }
 
+val seedUnnamedPointer = taskKey[Unit]("Write the pointer POM a plain publish writes: it names no commit")
+seedUnnamedPointer / aggregate := false
+seedUnnamedPointer := Def.uncached {
+  val base = widgetsRepo((LocalRootProject / baseDirectory).value)
+  writePom(base / "1.4.2-SNAPSHOT", "1.4.2-SNAPSHOT", None)
+  writePom(base / "1.4.2-aaaaaaaaaaaa-SNAPSHOT", "1.4.2-aaaaaaaaaaaa-SNAPSHOT", None)
+}
+
 val seedRelease = taskKey[Unit]("Write the release POM for widgets 1.4.2")
 seedRelease / aggregate := false
 seedRelease := Def.uncached {
