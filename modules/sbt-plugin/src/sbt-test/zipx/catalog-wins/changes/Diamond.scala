@@ -1,4 +1,3 @@
-import sbt.{ModuleID, Setting}
 import zipx.*
 
 // left and right were built against two commits of shared's 0.3.0 line, and the catalog states no shared.
@@ -10,7 +9,3 @@ object MyVersions extends ZipxVersions:
 
   def clients: Seq[Lib] = Seq(left, right)
 end MyVersions
-
-object Scenario:
-  def catalog: Seq[Setting[?]] = MyVersions.settings
-  def clients: Seq[ModuleID]   = MyVersions.deps(MyVersions.clients*)

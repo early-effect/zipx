@@ -1,27 +1,26 @@
 package zipx
 
-/** Catalog surface a process that is not the target sbt can compile: `sbt` / `scala` / [[coords]] / [[pins]] /
-  * [[actions]] / [[ships]]. No sbt types.
-  *
-  * Consumer files still extend [[ZipxVersions]] from the plugin, which adds `settings` / `deps` / `library`. The CLI
-  * compiles that file against zipx jars on *its* classpath, not against the target `plugins.sbt`.
+/** Collected where the catalog object compiles: no caller's compile cache can hold a stale row list. Read lazily, after
+  * the object's vals are set.
   */
-trait Catalog:
+final class CatalogContents(read: () => CatalogContents.Rows):
+  lazy val rows: CatalogContents.Rows = read()
+
+object CatalogContents:
+  final case class Rows(coords: Seq[ZipxCoord], pins: Seq[Pin], actions: Seq[Action], ships: Seq[PublishedRow])
+
+  inline given CatalogContents = ${ zipx.core.ZipxCatalog.contentsImpl }
+
+/** No sbt types, so the CLI compiles a catalog without the target build. Catalogs extend the plugin's `ZipxVersions`.
+  */
+trait Catalog(using contents: CatalogContents):
   def sbt: SbtVersion
   def scala: ScalaVersion
 
-  /** Scala versions a cross-built module compiles. Default is only [[scala]]. Override for 2.13 + 3. */
   def crossScala: Seq[ScalaVersion] = Seq(scala)
 
-  /** Every val on this object whose type has an [[AsCoords]] given (`Lib`, `Plugin`, or a plugin bundle). */
-  inline def coords: Seq[ZipxCoord] = zipx.core.ZipxCatalog.coordsOf[this.type](this)
-
-  /** Every val on this object whose type has an [[AsPins]] given. */
-  inline def pins: Seq[Pin] = zipx.core.ZipxCatalog.pinsOf[this.type](this)
-
-  /** Every val on this object whose type has an [[AsActions]] given. */
-  inline def actions: Seq[Action] = zipx.core.ZipxCatalog.actionsOf[this.type](this)
-
-  /** Every val on this object whose type has an [[AsShips]] given (`Ship`, `ShipGroup`, or a bundle). */
-  inline def ships: Seq[PublishedRow] = zipx.core.ZipxCatalog.shipsOf[this.type](this)
+  def coords: Seq[ZipxCoord]   = contents.rows.coords
+  def pins: Seq[Pin]           = contents.rows.pins
+  def actions: Seq[Action]     = contents.rows.actions
+  def ships: Seq[PublishedRow] = contents.rows.ships
 end Catalog

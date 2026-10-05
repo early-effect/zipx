@@ -100,10 +100,7 @@ object ZipxCatalog:
     if plugin.excludes.isEmpty then s"addSbtPlugin($mid)"
     else s"addSbtPlugin(($mid).excludeAll(${plugin.excludes.map(renderExclude).mkString(", ")}))"
 
-  /** What every movable catalog row can move to. A `.mod` family moves on its literal, to the newest version every
-    * member has on every platform it is published for, so each bump [[applyBumps]] writes is one the catalog can take.
-    * A member that could go further alone is a [[FamilyHold]]. Aligned rows and snapshot pins do not move here.
-    */
+  /** A `.mod` family moves on its literal, to a version every member has, so [[applyBumps]] writes every bump. */
   def outdated(
       coords: Seq[ZipxCoord],
       crossing: CatalogCrossing,
@@ -138,7 +135,7 @@ object ZipxCatalog:
     }
   end outdated
 
-  /** Rows that share one version literal, in catalog order, each with that literal's row first. A plugin is alone. */
+  /** Catalog order, each family's literal first. */
   private def familiesOf(coords: Seq[ZipxCoord]): List[(ZipxCoord, List[ZipxCoord])] =
     def key(coord: ZipxCoord): (String, String, String) = coord match
       case lib: Lib       => ("Lib", lib.group, lib.family.getOrElse(lib.artifact))
@@ -154,7 +151,6 @@ object ZipxCatalog:
     }
   end familiesOf
 
-  /** The newest of `versions` that `preRelease` admits. */
   def latest(
       versions: List[String],
       classify: VersionStrategy = VersionStrategy.npm,
@@ -168,7 +164,6 @@ object ZipxCatalog:
         case (best, _)                                                                      => best
       }
 
-  /** The newest version above `current` that `preRelease` admits. */
   private def newest(
       current: String,
       versions: List[String],
@@ -323,6 +318,25 @@ object ZipxCatalog:
   inline def shipsOf[A](inline catalog: A): Seq[PublishedRow] =
     ${ shipsOfImpl[A]('catalog) }
 
+  /** The given resolves in the catalog object's own constructor, so the splice's enclosing object is the catalog. */
+  def contentsImpl(using Quotes): Expr[zipx.CatalogContents] =
+    import quotes.reflect.*
+    def enclosingObject(owner: Symbol): Symbol =
+      if owner.isNoSymbol then
+        report.errorAndAbort("zipx: a catalog is an object: object MyVersions extends ZipxVersions")
+      else if owner.isClassDef && owner.flags.is(Flags.Module) then owner
+      else enclosingObject(owner.owner)
+    val module = enclosingObject(Symbol.spliceOwner).companionModule
+    module.termRef.asType match
+      case '[a] =>
+        val catalog = Ref(module).asExprOf[a]
+        val coords  = coordsOfImpl[a](catalog)
+        val pins    = pinsOfImpl[a](catalog)
+        val actions = actionsOfImpl[a](catalog)
+        val ships   = shipsOfImpl[a](catalog)
+        '{ zipx.CatalogContents(() => zipx.CatalogContents.Rows($coords, $pins, $actions, $ships)) }
+  end contentsImpl
+
   private def coordsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[ZipxCoord]] =
     import quotes.reflect.*
     val parts = catalogValParts[A].flatMap { (sym, mt) =>
@@ -383,8 +397,8 @@ object ZipxCatalog:
         cls == defn.AnyClass || cls == defn.MatchableClass ||
         cls == defn.AnyRefClass || cls == defn.ObjectClass
 
-    /** `fieldMembers` is reverse, and `Symbol.pos` is empty once the catalog is TASTy-loaded (`coords` expands in
-      * `build.sbt`). ClassDef bodies from TASTy keep source order.
+    /** `fieldMembers` is reverse, and `Symbol.pos` is empty for a TASTy-loaded class. ClassDef bodies keep source
+      * order.
       */
     def valsInSourceOrder(cls: Symbol): List[Symbol] =
       val fromTree =
