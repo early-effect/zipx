@@ -2,7 +2,7 @@
 // shape zipx targets: cross-built publishing libraries in a dependency chain, plus a
 // non-publishing service (a docker target).
 //
-//   models ──▶ core-lib ──▶ client   (publish; ShipGroup libs 1.4.2 + Ship client 0.3.0)
+//   models ──▶ core-lib ──▶ client   (publish; ShipGroup libs + Ship client)
 //     └───────────────────▶ service  (non-publishing app; depends on core-lib)
 //
 // Every build compiles `<row>-ci`, and each merge publishes unreleased rows at `<row>-<sha>`
@@ -16,8 +16,8 @@ organization := "com.example"
 zipxReleaseWorkflow := Some(ZipxCentral.releases)
 zipxDriftGate       := DriftGate.Fail
 
-// Build-level zipx config: plain bare settings (sbt 2.0 common settings). zipx reads these from the root project's
-// scope, so no `ThisBuild /` prefix is needed.
+// Build-level zipx config: bare settings. zipx reads these from the root project's scope, so no `ThisBuild /` prefix
+// is needed.
 zipxWorkflowName := WorkflowName("CI")
 zipxJavaVersion  := JdkVersion("21")
 // In-dev sbt-zipx is loaded from project/zipx.sbt via -Dzipx.version; do not emit a static GAV.
@@ -35,7 +35,7 @@ lazy val client = project
   .settings(MyVersions.cross, MyVersions.libraries)
 
 // A deploy-time promote task that re-tags the image with a tier-scoped moving tag. It reads the TIER env var that
-// zipx injects from the deploy target, proving a user sbt task can consume per-target config (Gap 2).
+// zipx injects from the deploy target, proving a user sbt task can consume per-target config.
 val promote = taskKey[Unit]("Re-tag the image with a tier-scoped moving tag, using the injected TIER env var.")
 
 // A service: not a Maven library, but a docker image. Enabling DockerPlugin is the ONLY signal
@@ -94,7 +94,7 @@ lazy val root = (project in file("."))
 // Layer-mode test: dependency-ordered waves, few sbt sessions.
 zipxCapabilities ++= Seq(Capability.testLayers, ZipxCentral.snapshots)
 
-// Multi-registry image publish (Gap 1). Overrides the built-in single-target `docker` capability (same name ⇒
+// Multi-registry image publish. Overrides the built-in single-target `docker` capability (same name ⇒
 // replace) to push the service image to N registries, each with its own credentials.
 //
 // **One** job, not one per registry: `Docker / publish` builds the image once and pushes every `dockerAliases` entry
@@ -111,7 +111,7 @@ zipxCapabilities += ZipxAws.dockerPublishAll(Registry.destinations)
 // external YAML config + resolver script). zipx knows nothing about clouds/tiers; it just fans out
 // one job per target, binds the GitHub Environment, injects the env, and wires needs.
 // Note: the deploy command is given as the real `promote` TaskKey (not a string) via `zipxTasks.deploy`, so it's
-// code-completed and compile-checked. zipx renders it to `<module>/promote`. It reads the injected TIER env (Gap 2).
+// code-completed and compile-checked. zipx renders it to `<module>/promote`. It reads the injected TIER env.
 zipxCapabilities += zipxTasks
   .deploy(
     participates = _.id == "service",

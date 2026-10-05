@@ -8,7 +8,7 @@ $ exec git config commit.gpgsign false
 $ exec git add -A
 $ exec git commit -q -m ascent
 
-# 1. Ascent releases dom 0.10.0, opens 0.11.0, and publishes commit a1.
+# 1. Ascent releases dom, opens the next minor line, and publishes commit a1.
 > zipxRelease refs/tags/dom/v0.10.0
 > zipxSession development
 > zipxModverBump minor
@@ -20,7 +20,7 @@ $ exec git commit -q -m a1
 > assertInRegistry ascent-dom-facade_sjs1_3 release 0.10.0
 > assertInRegistry ascent-dom-facade_sjs1_3 commit 0.11.0 a1
 
-# 2. Heddle h0 is built against the released facade 0.10.0.
+# 2. Heddle h0 is built against the released facade.
 $ copy-file build.sbt saved/ascent.sbt
 $ copy-file project/ZipxVersions.scala saved/AscentVersions.scala
 $ copy-file changes/heddle.sbt build.sbt
@@ -41,8 +41,8 @@ $ exec git commit -q -m h1
 > zipxSnapshotPublish
 > assertHeddleNamesFacade h1 commit 0.11.0 a1
 
-# 4. Ascent moves on (a2, same 0.11.0 line) and pins heddle h0, built against facade 0.10.0. The app and the docs
-# site compile the in-repo facade. What heddle asked for never enters the graph: the app keeps heddle from bringing it.
+# 4. Ascent moves on (a2, the line a1 is on) and pins heddle h0, built against the released facade. The app and the
+# docs site compile the in-repo facade. What heddle asked for never enters the graph: the app keeps heddle from bringing it.
 $ copy-file project/ZipxVersions.scala saved/HeddleVersions.scala
 $ copy-file saved/ascent.sbt build.sbt
 $ copy-file saved/AscentVersions.scala project/ZipxVersions.scala
@@ -113,7 +113,7 @@ $ touch use-docs-framework
 $ exec git add -A
 $ exec git commit -q -m a3-docs
 
-# 9. Heddle opens 0.10.0 and publishes h3, and the docs framework's next release is built against it. That is newer than
+# 9. Heddle opens its next minor line and publishes h3, and the docs framework's next release is built against it. That is newer than
 # ascent's pin: resolution still forces the pin, update refuses it, and advancing the row to that line clears it.
 $ copy-file project/ZipxVersions.scala saved/AscentVersions.scala
 $ copy-file changes/heddle.sbt build.sbt

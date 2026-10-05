@@ -19,7 +19,7 @@ enum DepRevision:
   /** A dirty tree or a tree with no git. Published to ivy-local only. */
   case Local(revision: SnapshotRevision)
 
-  /** Any other `-SNAPSHOT`, such as `1.0.0-RC1-SNAPSHOT`. Republished in place. */
+  /** Any other `-SNAPSHOT`. Republished in place. */
   case Changing(raw: String)
 
   /** Everything else: milestones, release candidates, four-part numbers. */

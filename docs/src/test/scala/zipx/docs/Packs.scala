@@ -329,22 +329,32 @@ general rule and what a shared job refuses.
 ### Image tags
 
 `ImageTag` is the registry's own rule, so a tag that would go somewhere unexpected is refused where it is written rather
-than pushed:
-
-```scala
-ImageTag.forCommit(version, sha, branch)
-// on main:      List("1.4.2-abc1234", "1.4.2-main-abc1234", "1.4.2-main-latest")
-// on feat-x:    List("1.4.2-abc1234")
-
-ImageTag.branchCommit("1.4.2", "feat/x", "abc1234")  // Left: a tag may not contain '/'
-ImageTag.slug("feat/x")                              // Right("feat-x"): the opt-in mangle
-```
-
-The moving tags land only on the default branch, because a moving tag on a feature branch is a race between two PRs
-pushing the same name. And a `/` is refused rather than silently replaced: `example:main-feat/x` parses as a different
-*repository*, so the image would publish where nothing deploys from while the build stayed green. `ImageTag.slug` is
-there when mangling is what you want, and it truncates to the registry's limit rather than producing a name ECR rejects.
+than pushed. The default branch gets the moving tags:
 """,
+      exampleValue {
+        ImageTag.forCommit("1.4.2", "abc1234", branch = "main")
+      }.assert(tags => assertTrue(tags == Right(List("1.4.2-abc1234", "1.4.2-main-abc1234", "1.4.2-main-latest")))),
+      md"""
+Any other branch gets only the immutable one, because a moving tag on a feature branch is a race between two PRs
+pushing the same name:
+""",
+      exampleValue {
+        ImageTag.forCommit("1.4.2", "abc1234", branch = "feat-x")
+      }.assert(tags => assertTrue(tags == Right(List("1.4.2-abc1234")))),
+      md"""
+A `/` is refused rather than silently replaced: `example:main-feat/x` parses as a different *repository*, so the image
+would publish where nothing deploys from while the build stayed green:
+""",
+      exampleValue {
+        ImageTag.branchCommit("1.4.2", "feat/x", "abc1234")
+      }.assert(tag => assertTrue(tag.left.exists(_.contains("ImageTag.slug")))),
+      md"""
+`ImageTag.slug` is there when mangling is what you want, and it truncates to the registry's limit rather than producing
+a name ECR rejects:
+""",
+      exampleValue {
+        ImageTag.slug("feat/x")
+      }.assert(tag => assertTrue(tag == Right("feat-x"))),
       md"""
 ### Pinning the action
 
