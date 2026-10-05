@@ -36,7 +36,8 @@ object HttpLookup:
   val DefaultRetry: Schedule[Any, Any, (Duration, Long)] =
     (Schedule.exponential(100.millis) && Schedule.recurs(5)).jittered
 
-  private val sharedEtags = new ConcurrentHashMap[String, String]()
+  /** The last answer with an ETag, per URL: a 304 to its revalidation returns it, so no caller sees a bodiless 304. */
+  private val sharedCache = new ConcurrentHashMap[String, HttpLookupResult]()
 
   private val client: HttpClient =
     HttpClient.newBuilder().connectTimeout(ConnectTimeout).build()
@@ -62,11 +63,11 @@ object HttpLookup:
       send: Send = jdkSend,
       retry: Schedule[Any, Any, ?] = DefaultRetry,
       firstJitter: Duration = FirstAttemptJitter,
-      etags: ConcurrentHashMap[String, String] = sharedEtags,
+      cache: ConcurrentHashMap[String, HttpLookupResult] = sharedCache,
       followRedirect: Boolean = false,
   ): Either[String, HttpLookupResult] =
     if url.startsWith("file:") then Right(readFile(url))
-    else runEither(getZio(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, etags, followRedirect))
+    else runEither(getZio(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, cache, followRedirect))
 
   /** A `file:` registry, for a release or snapshot rehearsed entirely on one machine. */
   private def readFile(url: String): HttpLookupResult =
@@ -116,10 +117,10 @@ object HttpLookup:
       send: Send = jdkSend,
       retry: Schedule[Any, Any, ?] = DefaultRetry,
       firstJitter: Duration = FirstAttemptJitter,
-      etags: ConcurrentHashMap[String, String] = sharedEtags,
+      cache: ConcurrentHashMap[String, HttpLookupResult] = sharedCache,
       followRedirect: Boolean = false,
   ): IO[String, HttpLookupResult] =
-    fetchGet(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, Some(etags), passRedirects = followRedirect)
+    fetchGet(url, headers, timeout, ifNoneMatch, send, retry, firstJitter, Some(cache), passRedirects = followRedirect)
       .flatMap { first =>
         if !followRedirect then ZIO.succeed(first)
         else
@@ -139,12 +140,13 @@ object HttpLookup:
       send: Send,
       retry: Schedule[Any, Any, ?],
       firstJitter: Duration,
-      etags: Option[ConcurrentHashMap[String, String]],
+      cache: Option[ConcurrentHashMap[String, HttpLookupResult]],
       passRedirects: Boolean,
   ): IO[String, HttpLookupResult] =
-    val inm = ifNoneMatch.orElse(etags.flatMap(map => Option(map.get(url)))).filter(_.nonEmpty)
-    val req = request(url, headers, timeout, body = None, ifNoneMatch = inm)
-    execute(url, req, send, retry, firstJitter, etags, passRedirects)
+    val revalidating = ifNoneMatch.fold(cache.flatMap(map => Option(map.get(url))))(_ => None)
+    val inm          = ifNoneMatch.orElse(revalidating.flatMap(_.etag)).filter(_.nonEmpty)
+    val req          = request(url, headers, timeout, body = None, ifNoneMatch = inm)
+    execute(url, req, send, retry, firstJitter, cache, revalidating, passRedirects)
   end fetchGet
 
   private[core] def postZio(
@@ -157,7 +159,7 @@ object HttpLookup:
       firstJitter: Duration = FirstAttemptJitter,
   ): IO[String, HttpLookupResult] =
     val req = request(url, headers, timeout, body = Some(body), ifNoneMatch = None)
-    execute(url, req, send, retry, firstJitter, etags = None, passRedirects = false)
+    execute(url, req, send, retry, firstJitter, cache = None, revalidating = None, passRedirects = false)
   end postZio
 
   private[core] def jdkSend(req: HttpRequest): Task[HttpLookupResult] =
@@ -180,11 +182,12 @@ object HttpLookup:
       send: Send,
       retry: Schedule[Any, Any, ?],
       firstJitter: Duration,
-      etags: Option[ConcurrentHashMap[String, String]],
+      cache: Option[ConcurrentHashMap[String, HttpLookupResult]],
+      revalidating: Option[HttpLookupResult],
       passRedirects: Boolean,
   ): IO[String, HttpLookupResult] =
     val once: IO[LookupFailure, HttpLookupResult] =
-      send(req).mapError(throwableFailure).flatMap(classify(_, url, etags, passRedirects))
+      send(req).mapError(throwableFailure).flatMap(classify(_, url, cache, revalidating, passRedirects))
     val policy = retry.whileInput[LookupFailure] {
       case LookupFailure.Retryable(_, _) => true
       case LookupFailure.Fatal(_)        => false
@@ -199,16 +202,16 @@ object HttpLookup:
   private def classify(
       result: HttpLookupResult,
       url: String,
-      etags: Option[ConcurrentHashMap[String, String]],
+      cache: Option[ConcurrentHashMap[String, HttpLookupResult]],
+      revalidating: Option[HttpLookupResult],
       passRedirects: Boolean,
   ): IO[LookupFailure, HttpLookupResult] =
     result.status match
       case s if s >= 200 && s < 300 =>
-        etags.foreach { map =>
-          result.etag.foreach(tag => map.put(url, tag))
-        }
-        ZIO.succeed(result)
-      case 304 | 404 | 410 =>
+        ZIO.succeed(if result.etag.isDefined then cache.foreach(_.put(url, result))).as(result)
+      case 304 =>
+        ZIO.succeed(revalidating.getOrElse(result))
+      case 404 | 410 =>
         ZIO.succeed(result)
       case 301 | 302 | 303 | 307 | 308 if passRedirects && result.header("location").exists(_.nonEmpty) =>
         ZIO.succeed(result)
