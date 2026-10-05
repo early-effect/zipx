@@ -175,7 +175,9 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
     test("dep update names pin release and does not take a newer line") {
       val pin = Lib("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")
       assertTrue(
-        ZipxCatalog.outdated(List(pin), _ => Right(Some("1.4.3"))) == Right(Nil),
+        ZipxCatalog
+          .outdated(List(pin), FakeReleases.crossing, FakeReleases.of("widgets_3" -> List("1.4.2", "1.4.3")))
+          .map(_.bumps) == Right(Nil),
         SnapshotPinAdvice.message("widgets", widgets, Some("1.4.3")).exists(_.contains("zipxPinRelease widgets")),
         SnapshotPinAdvice.message("widgets", widgets, None).exists(_.contains("stays until 1.4.2")),
         SnapshotPinAdvice

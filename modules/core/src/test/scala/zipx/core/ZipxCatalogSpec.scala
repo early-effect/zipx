@@ -155,22 +155,12 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
     test("outdated skips aligned rows and may still bump the parent") {
       val http    = Lib("dev.zio", "zio-http", "3.11.4")
       val testkit = http.mod("zio-http-testkit").test.fromGraph
-      ZipxCatalog.outdated(
-        List(http, testkit),
-        {
-          case l: Lib if (l.artifact: String) == "zio-http"         => Right(Some("3.12.0"))
-          case l: Lib if (l.artifact: String) == "zio-http-testkit" => Right(Some("9.9.9"))
-          case _                                                    => Right(None)
-        },
-      ) match
-        case Left(err)    => assertTrue(err.isEmpty)
-        case Right(bumps) =>
-          assertTrue(
-            bumps.size == 1,
-            bumps.head.artifact == "zio-http",
-            bumps.head.to == "3.12.0",
-          )
-      end match
+      val repo    = FakeReleases.of(
+        "zio-http_3"         -> List("3.11.4", "3.12.0"),
+        "zio-http-testkit_3" -> List("3.11.4", "9.9.9"),
+      )
+      val bumps = ZipxCatalog.outdated(List(http, testkit), FakeReleases.crossing, repo).map(_.bumps)
+      assertTrue(bumps.map(_.map(bump => (bump.artifact: String) -> bump.to)) == Right(List("zio-http" -> "3.12.0")))
     },
     test("extraLibs ignores Plugin rows") {
       val plugin = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
@@ -184,40 +174,25 @@ object ZipxCatalogSpec extends ZIOSpecDefault:
         ZipxCatalog.scalaMismatch("3.7.0", Some(ScalaVersion("3.8.4"))).exists(_.contains("3.7.0")),
       )
     },
-    test("outdated ignores equal versions and never rewrites the source") {
-      val zio = Lib("dev.zio", "zio", "2.1.26")
-      ZipxCatalog.outdated(List(zio), _ => Right(Some("2.1.26"))) match
-        case Left(err)    => assertTrue(err.isEmpty)
-        case Right(bumps) => assertTrue(bumps.isEmpty)
+    test("outdated ignores equal versions and lists a newer stable") {
+      val zio     = Lib("dev.zio", "zio", "2.1.26")
+      val current = FakeReleases.of("zio_3" -> List("2.1.25", "2.1.26"))
+      val newer   = FakeReleases.of("zio_3" -> List("2.1.26", "2.1.27"))
+      assertTrue(
+        ZipxCatalog.outdated(List(zio), FakeReleases.crossing, current).map(_.bumps) == Right(Nil),
+        ZipxCatalog.outdated(List(zio), FakeReleases.crossing, newer).map(_.bumps) ==
+          Right(List(DepBump(zio, BumpKind.Patch, "2.1.27"))),
+        ZipxCatalog.formatBumps(Nil) == "no outdated catalog versions",
+      )
     },
-    test("outdated lists a bump when lookup returns a newer stable") {
-      val zio = Lib("dev.zio", "zio", "2.1.26")
-      ZipxCatalog.outdated(List(zio), _ => Right(Some("2.1.27"))) match
-        case Left(err)    => assertTrue(err.isEmpty)
-        case Right(bumps) =>
-          assertTrue(
-            bumps.size == 1,
-            bumps.head.to == "2.1.27",
-            bumps.head.bump == BumpKind.Patch,
-            ZipxCatalog.formatBumps(Nil) == "no outdated catalog versions",
-          )
-    },
-    test("outdated skips a pre-release by default") {
-      val slf4j = Lib("org.slf4j", "slf4j-simple", "2.0.18")
-      ZipxCatalog.outdated(List(slf4j), _ => Right(Some("2.1.0-alpha1"))) match
-        case Left(err)    => assertTrue(err.isEmpty)
-        case Right(bumps) => assertTrue(bumps.isEmpty)
-    },
-    test("outdated lists a pre-release when Include") {
-      val slf4j = Lib("org.slf4j", "slf4j-simple", "2.0.18")
-      ZipxCatalog.outdated(List(slf4j), _ => Right(Some("2.1.0-alpha1")), preRelease = PreRelease.Include) match
-        case Left(err)    => assertTrue(err.isEmpty)
-        case Right(bumps) =>
-          assertTrue(
-            bumps.size == 1,
-            bumps.head.to == "2.1.0-alpha1",
-            bumps.head.bump == BumpKind.PreRelease,
-          )
+    test("outdated skips a pre-release by default and lists it when Include") {
+      val slf4j = Lib("org.slf4j", "slf4j-simple", "2.0.18").java
+      val repo  = FakeReleases.of("slf4j-simple" -> List("2.0.18", "2.1.0-alpha1"))
+      assertTrue(
+        ZipxCatalog.outdated(List(slf4j), FakeReleases.crossing, repo).map(_.bumps) == Right(Nil),
+        ZipxCatalog.outdated(List(slf4j), FakeReleases.crossing, repo, preRelease = PreRelease.Include).map(_.bumps) ==
+          Right(List(DepBump(slf4j, BumpKind.PreRelease, "2.1.0-alpha1"))),
+      )
     },
     test("applyBumps rewrites Lib and Plugin constructors and skips .mod copies") {
       val src =

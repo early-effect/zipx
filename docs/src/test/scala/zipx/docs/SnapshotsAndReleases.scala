@@ -444,8 +444,12 @@ An ivy copy of `<line>-ci` is a different revision from the sha pin, so it is no
 deletes snapshots after 90 days.
 """,
       exampleValue {
-        val pin   = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678-SNAPSHOT")
-        val bumps = ZipxCatalog.outdated(List(pin), _ => Right(Some("0.15.1"))).map(_.map(b => s"${b.from} -> ${b.to}"))
+        val pin                 = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678-SNAPSHOT")
+        val repo: ReleaseLookup =
+          (_, artifact) => Right(Option.when(artifact == "zipx-core_3")(List("0.15.0", "0.15.1")))
+        val bumps = ZipxCatalog
+          .outdated(List(pin), CatalogCrossing.of("3.9.0", "2.1.0-M3"), repo)
+          .map(_.bumps.map(b => s"${b.from} -> ${b.to}"))
         val advice = SnapshotPinAdvice.message("zipx-core", pin.version, Some("0.15.1")).getOrElse("")
         s"$bumps\n$advice"
       }.assert(text =>

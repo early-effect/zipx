@@ -2451,21 +2451,21 @@ object ZipxPlugin extends AutoPlugin:
       val log       = streams.value.log
       if coords.isEmpty then log.info("zipx: zipxVersions is empty; nothing to update")
       else
-        val scalaBin     = (LocalRootProject / scalaBinaryVersion).value
-        val sbtBin       = sbtBinaryVersion.value
-        val preRelease   = readBuildSetting(extracted, zipxPreRelease, PreRelease.Skip)
-        val (held, rest) = coords.partition(coord => SnapshotPinAdvice.hold(coord.version).isDefined)
-        held.foreach { coord =>
-          val latest = orFail(MavenMetadata.latest(coord, scalaBin, sbtBin, preRelease))
+        val crossing = CatalogCrossing(
+          (LocalRootProject / scalaVersion).value,
+          (LocalRootProject / scalaBinaryVersion).value,
+          sbtBinaryVersion.value.takeWhile(_ != '.'),
+        )
+        val preRelease = readBuildSetting(extracted, zipxPreRelease, PreRelease.Skip)
+        coords.filter(coord => SnapshotPinAdvice.hold(coord.version).isDefined).foreach { coord =>
+          val versions = orFail(CatalogReleases.available(coord, crossing, MavenMetadata.releases))
+          val latest   = ZipxCatalog.latest(versions, preRelease = preRelease)
           SnapshotPinAdvice.message(coord.artifact, coord.version, latest).foreach(msg => log.info(msg))
         }
-        val bumps = orFail(
-          ZipxCatalog.outdated(
-            rest,
-            c => MavenMetadata.latest(c, scalaBin, sbtBin, preRelease),
-            preRelease = preRelease,
-          )
-        )
+        val updates =
+          orFail(ZipxCatalog.outdated(coords, crossing, MavenMetadata.releases, preRelease = preRelease))
+        val bumps = updates.bumps
+        updates.held.foreach(hold => log.info(s"zipx: ${hold.message}"))
         log.info(s"zipx dep update:\n${ZipxCatalog.formatBumps(bumps)}")
         if bumps.isEmpty then ()
         else

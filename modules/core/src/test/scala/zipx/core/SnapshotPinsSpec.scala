@@ -72,7 +72,9 @@ object SnapshotPinsSpec extends ZIOSpecDefault:
     test("catalog update does not promote a line-SNAPSHOT pin onto a newer release") {
       val gPin = gRelease.map(v => DepVersion.make(s"$v-SNAPSHOT").map(v -> _)).collect { case Right(pin) => pin }
       check(gPin, gRelease) { case ((next, version), latest) =>
-        val bumps  = ZipxCatalog.outdated(List(pinned.copy(version = version)), _ => Right(Some(latest: String)))
+        val repo  = FakeReleases(Map(s"${pinned.artifact}_3" -> List(latest: String)))
+        val bumps =
+          ZipxCatalog.outdated(List(pinned.copy(version = version)), FakeReleases.crossing, repo).map(_.bumps)
         val onRepo = ReleaseVersion.ordering.gteq(latest, next)
         val advice = SnapshotPinAdvice.message(pinned.artifact, version, Some(latest: String))
         assertTrue(
