@@ -1,0 +1,7 @@
+target/
+released/
+shas/
+saved/
+global/
+.bsp/
+.bloop/

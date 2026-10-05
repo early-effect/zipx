@@ -589,12 +589,9 @@ released row. A ship id rewrites that one row even when it is not released. The 
 request from `zipx/modver-bump-${'$'}GITHUB_RUN_ID` whose commit is `sbt zipxModverBump`. The step summary names that
 command and appends `target/zipx-release-tags.txt`. The GitHub Release body stays `--generate-notes`.
 
-- **A library built against the release meets the in-repo copy.** sbt always uses the in-repo project, and its
-  eviction check reads `0.10.0-ci` against `0.10.0` literally. zipx exempts the build's own artifacts from that check
-  and checks them itself after `update`: the row's next number, with `-ci` stripped, against the release the library
-  needs, under the module's own `versionScheme`. zipx sets that key to `early-semver`. A module opts into
-  `semver-spec`, `pvp`, `strict`, or `always` by setting it. An empty value fails the publish, and `semver` is
-  rejected as ambiguous. `0.10.0-ci` over `0.10.0` resolves; `0.11.0-ci` over `0.10.0` is a conflict, naming both.
+- **`versionScheme` is what a module promises its consumers.** zipx sets that key to `early-semver`. A module opts
+  into `semver-spec`, `pvp`, `strict`, or `always` by setting it. An empty value fails the publish, and `semver` is
+  rejected as ambiguous. It does not decide which artifact this build compiles; the next section does.
 """,
       exampleValue {
         val libs = ShipGroup("libs", "1.0.0")("models")
@@ -606,30 +603,29 @@ command and appends `target/zipx-release-tags.txt`. The GitHub Release body stay
         )
       ),
     ),
-    section("A conflict's severity follows what ships")(
+    section("This build's modules win")(
       md"""
-When zipx finds that conflict, what it does depends on whether the project publishes:
+A library from another repo is built against some revision of a module this repo builds. It can be a release, or a
+commit snapshot of the line this build is still on. Two repos that depend on each other always meet this way: the
+other repo is built against an older commit of yours, because it cannot depend on the commit that depends on it.
 
-| Project | Conflict | Why |
+When a project here depends on that library and on the in-repo module, sbt compiles the in-repo project, whatever
+revision the library asked for. That revision is evicted. Say a docs framework was built against `client` 0.3.0, or
+against `client` `0.4.0-1234abcd5678`, and this build compiles `client` `0.4.0-ci`:
+
+| Library asked for | This build compiles | `update` |
 |---|---|---|
-| publishes (a `Ship` / `ShipGroup` member) | fails `update` | its POM would ship the mix to every consumer |
-| does not publish (`publish / skip := true`: docs, examples) | loud warning; `update` resolves | nothing downstream sees it; its own compile, link, and tests are the proof |
+| `client` 0.3.0, a release | `0.4.0-ci`, the in-repo project | resolves |
+| `client` `0.4.0-1234abcd5678`, an older commit of the same line | `0.4.0-ci`, the in-repo project | resolves |
 
-That is what lets a repo release its libraries on their own schedule, even when its docs depend on something built
-against those libraries. Say the docs site uses a docs framework, and the framework's released version was built
-against `client` 0.3.0. When this repo moves `client` to 0.4.0, the docs project meets the in-repo `0.4.0-ci`
-against a library that needs 0.3.0:
+Choosing the in-repo project is not a compatibility claim. It is which artifact this build compiles. sbt's own
+eviction check would read `0.4.0-ci` against either revision literally and fail, because early-semver compares a
+`0.y.0` or `x.0.0` exactly. zipx stands that check down for the build's own modules only. Their `versionScheme` stays
+what they publish.
 
-```text
-[warn] zipx: the build's own artifacts conflict with a release:
-  * com.example:client_3:0.4.0-ci (early-semver) is selected over 0.3.0: 0.4.0 is not early-semver-compatible with it
-  (a warning: this project does not publish)
-```
-
-The docs project publishes nothing, so `client` 0.4.0 releases anyway. If the framework really cannot run on the new
-`client`, the docs fail to compile, link, or test, which is the real signal; if they pass, the old framework is fine
-until it catches up. A published row in the same position fails instead, and should: its POM would carry the mix to
-every consumer.
+A project that publishes gets the same treatment as one that does not, and neither gets a warning. The proof that the
+library still works against the in-repo module is this build's own compile, link, and tests. When that proof fails,
+the library is behind: advance its pin of this repo.
 """
     ),
   )
