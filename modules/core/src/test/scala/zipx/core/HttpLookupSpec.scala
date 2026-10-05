@@ -106,16 +106,38 @@ object HttpLookupSpec extends ZIOSpecDefault:
         count  <- n.get
       yield assertTrue(result.isLeft, count == 3)
     },
-    test("304 with If-None-Match is not-modified") {
-      val etags                 = new ConcurrentHashMap[String, String]()
+    test("a repeat GET revalidates with the first ETag, and a 304 answers with the first body") {
+      val seen                  = new ConcurrentHashMap[String, String]()
       val send: HttpLookup.Send = req =>
         val inm = req.headers().firstValue("If-None-Match").orElse("")
+        seen.put(if inm.isEmpty then "plain" else "conditional", inm)
         if inm == "\"abc\"" then ZIO.succeed(status(304, Map("ETag" -> "\"abc\"")))
         else ZIO.succeed(ok("body", Some("\"abc\"")))
+      val cache = new ConcurrentHashMap[String, HttpLookupResult]()
       for
-        first  <- HttpLookup.getZio(url, send = send, retry = Schedule.stop, firstJitter = Duration.Zero, etags = etags)
-        second <- HttpLookup.getZio(url, send = send, retry = Schedule.stop, firstJitter = Duration.Zero, etags = etags)
-      yield assertTrue(first.status == 200, first.body == "body", second.notModified, second.isMiss)
+        first  <- HttpLookup.getZio(url, send = send, retry = Schedule.stop, firstJitter = Duration.Zero, cache = cache)
+        second <- HttpLookup.getZio(url, send = send, retry = Schedule.stop, firstJitter = Duration.Zero, cache = cache)
+      yield assertTrue(
+        first.status == 200,
+        second.status == 200,
+        second.body == "body",
+        !second.isMiss,
+        seen.get("conditional") == "\"abc\"",
+      )
+      end for
+    },
+    test("a caller's own If-None-Match gets the server's 304 back") {
+      val send: HttpLookup.Send = req =>
+        if req.headers().firstValue("If-None-Match").orElse("") == "\"abc\"" then ZIO.succeed(status(304, Map.empty))
+        else ZIO.succeed(ok("body", Some("\"abc\"")))
+      for result <- HttpLookup.getZio(
+          url,
+          ifNoneMatch = Some("\"abc\""),
+          send = send,
+          retry = Schedule.stop,
+          firstJitter = Duration.Zero,
+        )
+      yield assertTrue(result.notModified)
     },
     test("parseRetryAfter reads delta-seconds") {
       HttpLookup.parseRetryAfter("12").map(d => assertTrue(d.contains(12.seconds)))

@@ -29,11 +29,10 @@ object MavenMetadata:
 
   private def fetchVersions(url: String): Either[String, Option[List[String]]] =
     HttpLookup.get(url, timeout = Duration.ofSeconds(15)) match
-      case Left(err)                                                               => Left(s"lookup $url: $err")
-      case Right(res) if res.status == 200                                         => Right(Some(versionsIn(res.body)))
-      case Right(res) if res.status == 404 || res.status == 410 || res.notModified =>
-        Right(None)
-      case Right(res) => Left(s"lookup $url: HTTP ${res.status}")
+      case Left(err)                                            => Left(s"lookup $url: $err")
+      case Right(res) if res.status == 200                      => Right(Some(versionsIn(res.body)))
+      case Right(res) if res.status == 404 || res.status == 410 => Right(None)
+      case Right(res)                                           => Left(s"lookup $url: HTTP ${res.status}")
 
   def versionsIn(xml: String): List[String] =
     raw"<version>([^<]+)</version>".r.findAllMatchIn(xml).map(_.group(1).trim).toList
