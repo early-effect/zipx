@@ -28,7 +28,7 @@ assertDrift := Def.uncached {
 val assertOpenRowPublished = taskKey[Unit]("an unreleased sibling publishes its commit id, and the released row publishes nothing")
 assertOpenRowPublished := Def.uncached {
   val abbrev  = headSha((LocalRootProject / baseDirectory).value).take(12)
-  val sideJar = ivyLocalRepo / "side_3" / s"0.2.0-$abbrev" / "jars" / "side_3.jar"
+  val sideJar = ivyLocalRepo / "side_3" / s"0.2.0-$abbrev-SNAPSHOT" / "jars" / "side_3.jar"
   val models  = ivyLocalRepo / "models_3"
   assert(!models.exists, s"published a released row at $models")
   assert(sideJar.isFile, s"no open-row snapshot at $sideJar")

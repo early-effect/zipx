@@ -89,30 +89,26 @@ object ZipxVersions:
       else
         def session =
           zipx.core.BuildSession.of(sys.props).fold(err => sys.error(s"zipx: ${err.message}"), identity)
-        def registryOf(workflow: Option[zipx.core.ReleaseWorkflow]): zipx.core.ArtifactRegistry =
-          workflow.map(_.registry).getOrElse(zipx.core.ArtifactRegistry.Url("file:///tmp/zipx-none"))
-        def artifact(row: zipx.core.PublishedRow, registry: zipx.core.ArtifactRegistry) =
+        def artifact(row: zipx.core.PublishedRow) =
           session
-            .artifactVersion(row, registry, sys.props)
+            .artifactVersion(row, sys.props)
             .fold(err => sys.error(s"zipx: ${err.message}"), identity)
         Seq(
           // sonaRelease refuses while the root's version is a snapshot, and a root in no row has sbt's default.
           // `.value` stays in this block: a local def hides it from the setting macro.
           version := {
-            val registry = registryOf((LocalRootProject / zipxReleaseWorkflow).value)
             zipx.core.Modver
               .rowForProject(thisProject.value.id, zipxShips.value)
               .fold(if baseDirectory.value == (LocalRootProject / baseDirectory).value then "0.0.0"
-              else "0.1.0-SNAPSHOT")(row => artifact(row, registry))
+              else "0.1.0-SNAPSHOT")(artifact)
           },
           isSnapshot := zipx.core.Modver
             .rowForProject(thisProject.value.id, zipxShips.value)
             .fold(isSnapshot.value)(_ => session != zipx.core.BuildSession.Release),
           projectID := {
-            val registry = registryOf((LocalRootProject / zipxReleaseWorkflow).value)
             zipx.core.Modver
               .rowForProject(thisProject.value.id, zipxShips.value)
-              .fold(projectID.value)(row => projectID.value.withRevision(artifact(row, registry)))
+              .fold(projectID.value)(row => projectID.value.withRevision(artifact(row)))
           },
           pomPostProcess := {
             val previous = pomPostProcess.value

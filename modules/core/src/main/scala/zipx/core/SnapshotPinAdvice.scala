@@ -12,32 +12,22 @@ enum SnapshotHold:
 
 object SnapshotPinAdvice:
 
-  /** A release POM cannot depend on this revision. Commit pins do not end in `-SNAPSHOT`, so the suffix check is not
-    * enough.
+  /** A release POM cannot depend on this revision. `declared` is either a revision or `group:artifact:revision`, which
+    * is what a release check is handed.
     */
-  /** `declared` is either a revision or `group:artifact:revision`, which is what a release check is handed. */
   def blocksRelease(declared: String): Boolean =
     val revision = declared.split(':').toList.reverse match
       case head :: _ => head
       case Nil       => declared
-    SnapshotPins.isSnapshot(revision) ||
-    SnapshotPublishRevision.isImmutablePin(revision) ||
-    SnapshotRevision.parse(revision).exists(!_.stable)
+    DepRevision.of(revision).blocksRelease
 
   def hold(version: String): Option[SnapshotHold] =
-    SnapshotRevision.parse(version) match
-      case Right(pin: SnapshotRevision.Commit) => Some(SnapshotHold.Commit(pin.line))
-      case Right(other)                        => Some(SnapshotHold.Local(other.id))
-      case Left(_)                             =>
-        if SnapshotPublishRevision.isPointer(version) then
-          ReleaseVersion.make(version.stripSuffix(Modver.UnreleasedSuffix)).toOption.map(SnapshotHold.Pointer(_))
-        else
-          val bare =
-            if version.endsWith(Modver.UnreleasedSuffix) then version.stripSuffix(Modver.UnreleasedSuffix)
-            else version
-          SnapshotRevision.parse(bare) match
-            case Right(pin: SnapshotRevision.Commit) => Some(SnapshotHold.Commit(pin.line))
-            case _                                   => None
+    DepRevision.of(version) match
+      case DepRevision.Commit(pin)         => Some(SnapshotHold.Commit(pin.line))
+      case DepRevision.UnstoredCommit(pin) => Some(SnapshotHold.Commit(pin.line))
+      case DepRevision.Local(local)        => Some(SnapshotHold.Local(local.id))
+      case DepRevision.Pointer(line)       => Some(SnapshotHold.Pointer(line))
+      case DepRevision.Release(_) | DepRevision.Changing(_) | DepRevision.Other(_) => None
 
   /** `latest` is the registry's newest release, when the lookup found one. A newer release is not a reason to leave the
     * pin's line.

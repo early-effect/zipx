@@ -36,18 +36,15 @@ object SnapshotsAndReleases extends DocSpecSuite:
         val commit   = SnapshotRevision.commit(line, full)
         val dirty    = SnapshotRevision.dirty(line, full, stamp)
         val noGit    = SnapshotRevision.noGit(stamp)
-        val central  = commit.mavenRevision(ArtifactRegistry.MavenCentral).fold(_.message, identity)
-        val file     = commit.mavenRevision(ArtifactRegistry.Url("file:///tmp/zipx-repo")).fold(_.message, identity)
         val floating = SnapshotRevision.parse("1.4.2-SNAPSHOT").fold(_ => "floating refused", _ => "floating accepted")
         List(
           s"commit ${commit.id}",
           commit.full.fold("full missing")(sha => s"full $sha"),
-          s"central $central",
-          s"file $file",
+          s"stored ${commit.storedId}",
           s"dirty ${dirty.id}",
           s"nogit ${noGit.id}",
           floating,
-        ).mkString("\n")
+        ).mkString("\n") + "\n" + PinRefusal.of(Seq(commit.id)).map(_.message).mkString("\n")
       case _ =>
         "example inputs rejected"
 
@@ -78,8 +75,7 @@ Three strings show up. Only one of them is what you pin, and only one of them is
 | String | What it is | Who resolves it |
 |---|---|---|
 | `1.4.2-ci` | the compile version. Stable across commits, so caches hold | this build, and only this build |
-| `1.4.2-1234abcd5678` | one clean commit. The pin | a downstream catalog |
-| `1.4.2-1234abcd5678-SNAPSHOT` | the same pin, as Central stores the file | Central only. The catalog still writes the id without the suffix |
+| `1.4.2-1234abcd5678-SNAPSHOT` | one clean commit, as every registry stores it. The pin | a downstream catalog |
 | `1.4.2-1234abcd5678+20140707-1030` | a dirty tree. This machine, this minute | nobody else. Ivy only |
 | `1.4.2-SNAPSHOT` | the pointer. Its POM names the latest full sha | `zipxSnapshotStatus`. `update` refuses it |
 | `1.4.2` | the release number | everyone, after you release it |
@@ -97,10 +93,10 @@ zipxReleaseWorkflow := Some(ZipxCentral.releases)
 | Build | Compiles | What a publish stores |
 |---|---|---|
 | any build | `1.4.2-ci`, `0.3.0-ci` | nowhere until you publish |
-| `sbt zipxSnapshotPublish local`, clean commit | those `-ci` versions | `1.4.2-<sha>` and `0.3.0-<sha>` in `~/.ivy2/local` |
-| `sbt zipxSnapshotPublish`, clean commit | those `-ci` versions | those ids in the snapshot repository. Central appends `-SNAPSHOT` to the file name |
-| a merge to the default branch | those `-ci` versions | the same ids, plus a `<row>-SNAPSHOT` pointer POM that names the full sha |
-| a push to PR #42 labeled `snapshots` | those `-ci` versions | that PR commit's `<row>-<sha>`. The pointer stays where the default branch left it |
+| `sbt zipxSnapshotPublish local`, clean commit | those `-ci` versions | `1.4.2-<sha>-SNAPSHOT` and `0.3.0-<sha>-SNAPSHOT` in `~/.ivy2/local` |
+| `sbt zipxSnapshotPublish`, clean commit | those `-ci` versions | the same coordinates in the snapshot repository |
+| a merge to the default branch | those `-ci` versions | the same coordinates, plus a `<row>-SNAPSHOT` pointer POM that names the full sha |
+| a push to PR #42 labeled `snapshots` | those `-ci` versions | that PR commit's `<row>-<sha>-SNAPSHOT`. The pointer stays where the default branch left it |
 | a dirty tree, `sbt zipxSnapshotPublish local` | those `-ci` versions | `<row>-<sha>+YYYYMMDD-HHmm` in ivy only |
 | a `zipxRelease` session | `1.4.2`, `0.3.0` | the release repository, at the catalog numbers |
 
@@ -142,18 +138,22 @@ runs advance. It does not commit from a test run.
     section("The three ids")(
       md"""
 A published snapshot names the commit it was built from. The catalog line stays the next release number (`1.4.2`).
-Git supplies the rest. `-SNAPSHOT` is not that id. `isSnapshot` is true because the build is not the release number.
-Central's snapshot repository rejects a version that does not end in `-SNAPSHOT`, so the upload to Central appends it.
-A `file:` registry stores the id as written.
+Git supplies the rest. `isSnapshot` is true because the build is not the release number.
 
-| Tree | Id | Where it goes |
-| --- | --- | --- |
-| clean commit `1234abcd5678` | `1.4.2-1234abcd5678` | the snapshot repository. Central stores `1.4.2-1234abcd5678-SNAPSHOT` |
-| dirty working tree | `1.4.2-1234abcd5678+20140707-1030` | `zipxSnapshotPublish local` only. The `+YYYYMMDD-HHmm` mark is the minute, not a commit |
-| no git | `HEAD+20140707-1030` | local only |
+A registry stores a clean commit as that id plus `-SNAPSHOT`. Central's snapshot repository, and any repository with a
+snapshot version policy, refuses a version without it, so zipx writes the one form everywhere: Central, GitHub
+Packages, any Maven URL, a `file:` registry, and `~/.ivy2/local`. The stored coordinate is also what a downstream
+catalog pins, so nothing translates one into the other.
+
+| Tree | Id | Stored and pinned as | Where it goes |
+| --- | --- | --- | --- |
+| clean commit `1234abcd5678` | `1.4.2-1234abcd5678` | `1.4.2-1234abcd5678-SNAPSHOT` | the snapshot repository, or ivy with `local` |
+| dirty working tree | `1.4.2-1234abcd5678+20140707-1030` | not stored | `zipxSnapshotPublish local` only. The `+YYYYMMDD-HHmm` mark is the minute, not a commit |
+| no git | `HEAD+20140707-1030` | not stored | local only |
 
 A dirty id is not a pin another machine can resolve. `1.4.2-SNAPSHOT` is not one of these ids: it is the moving
-pointer the status command reads, not a dependency.
+pointer the status command reads, not a dependency. A pin written as the bare id fails `update` before anything
+resolves, and the message names the stored form.
 """,
       exampleValue {
         threeIds
@@ -161,11 +161,11 @@ pointer the status command reads, not a dependency.
         assertTrue(
           text.contains("commit 1.4.2-1234abcd5678"),
           text.contains("full 1234abcd56780123456789abcdef0123456789ab"),
-          text.contains("central 1.4.2-1234abcd5678-SNAPSHOT"),
-          text.contains("file 1.4.2-1234abcd5678"),
+          text.contains("stored 1.4.2-1234abcd5678-SNAPSHOT"),
           text.contains("dirty 1.4.2-1234abcd5678+20140707-1030"),
           text.contains("nogit HEAD+20140707-1030"),
           text.contains("floating refused"),
+          text.contains("1.4.2-1234abcd5678 is not stored anywhere. Pin 1.4.2-1234abcd5678-SNAPSHOT"),
         )
       ),
     ),
@@ -174,18 +174,19 @@ pointer the status command reads, not a dependency.
 Proving a change across two libraries needs no PR, no CI, and no release. Commit the upstream, then:
 
 ```text
-sbt zipxSnapshotPublish local     # every unreleased row's <row>-<sha> to ~/.ivy2/local
+sbt zipxSnapshotPublish local     # every unreleased row's <row>-<sha>-SNAPSHOT to ~/.ivy2/local
 ```
 
-That does not write `<row>-ci`, and it does not write the pointer. Pin the id downstream, then `reload`:
+That does not write `<row>-ci`, and it does not write the pointer. Pin the commit downstream, then `reload`:
 
 ```scala
-val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678")
+val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678-SNAPSHOT")
 ```
 
-On Central the same commit is stored as `0.15.0-1234abcd5678-SNAPSHOT`. The pin is not a changing module: `update`
-does not re-read `maven-metadata.xml`. `<row>-SNAPSHOT` with nothing after the line is the pointer, not a build.
-Depending on it fails `update` and the message names `zipxSnapshotStatus`.
+The registry publish below stores the same coordinate, so the pin does not change when the bits move from a laptop to
+CI. The pin is not a changing module: after the first resolve, `update` does not re-read `maven-metadata.xml`.
+`<row>-SNAPSHOT` with nothing after the line is the pointer, not a build. Depending on it fails `update` and the
+message names `zipxSnapshotStatus`.
 
 A dirty working tree is refused by a registry publish. The message names the id and `zipxSnapshotPublish local`.
 That local publish writes `<row>-<sha>+YYYYMMDD-HHmm` on this machine only. Another clone cannot resolve it.
@@ -195,7 +196,7 @@ Publishing the same commit again overwrites that coordinate and no other. A new 
 To share the same bits with a teammate, or with a downstream PR's CI, publish them to the registry instead:
 
 ```text
-sbt zipxSnapshotPublish           # the same commit ids, to the registry's snapshot repository
+sbt zipxSnapshotPublish           # the same coordinates, to the registry's snapshot repository
 ```
 
 Both forms publish exactly the rows a merge would (every row whose number is not released yet), skip scaladoc, and
@@ -234,8 +235,8 @@ rehearses snapshots and releases entirely on one machine.
     section("Mainline snapshots")(
       md"""
 With `ZipxCentral.snapshots`, every push to the default branch publishes each row whose catalog number is not
-released yet, at `<row>-<sha>` of that commit, and a pointer module at `<row>-SNAPSHOT` whose POM records the full
-sha. A downstream repo pins the sha, not the pointer. A row that is already released is skipped: a snapshot of that
+released yet, at `<row>-<sha>-SNAPSHOT` of that commit, and a pointer module at `<row>-SNAPSHOT` whose POM records
+the full sha. A downstream repo pins the commit, not the pointer. A row that is already released is skipped: a snapshot of that
 line sorts before the release.
 
 The `snapshots` job needs `verify`, so it publishes only after every Verify job has passed or skipped. On a merge
@@ -263,7 +264,7 @@ the same `zipxSnapshotPublish` you run from a laptop.
     section("PR snapshots")(
       md"""
 `ZipxCentral.pullRequestSnapshots("snapshots")` publishes the same rows from a pull request, on each push once the PR
-carries the label, at that commit's `<row>-<sha>`. It does not move the pointer. There is no `<row>-pr<N>-SNAPSHOT`:
+carries the label, at that commit's `<row>-<sha>-SNAPSHOT`. It does not move the pointer. There is no `<row>-pr<N>-SNAPSHOT`:
 the sha is the id, so two pull requests cannot overwrite each other. A downstream PR pins that sha while the pull
 request is open. A fork's PR never runs it: its run has no publishing secrets.
 
@@ -413,28 +414,28 @@ Nothing uploads until the plan is sound. Each refusal says what to do next.
     ),
     section("Pin a snapshot downstream")(
       md"""
-A downstream catalog pins the commit, not the pointer:
+A downstream catalog pins the commit, as the registry stores it, not the pointer:
 
 ```scala
-val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678")
+val zipxCore = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678-SNAPSHOT")
 ```
 
-On Central that file is `0.15.0-1234abcd5678-SNAPSHOT`. The module is not changing: `update` does not re-read
-`maven-metadata.xml`, and `forceUpdatePeriod` stays unset. `<line>-SNAPSHOT` fails `update` and names
-`zipxSnapshotStatus`.
+The module is not changing: `update` does not re-read `maven-metadata.xml`, and `forceUpdatePeriod` stays unset.
+`<line>-SNAPSHOT` fails `update` and names `zipxSnapshotStatus`. The bare `0.15.0-1234abcd5678` fails `update` too,
+and names the stored form.
 
 Every generated sbt job sets `COURSIER_TTL: 0s`. `zipxEnv` cannot lengthen that TTL. A commit pin does not need the
 revalidation; a qualifier snapshot still does.
 
 | Where | What |
 |---|---|
-| `resolvers`, and `project/plugins.sbt` when a `Plugin` version ends in `-SNAPSHOT` | the publish registry's snapshot repository, plus any `zipxSnapshotRegistries`; Central snapshots when the build has no release workflow |
-| a dependency that ends in `-SNAPSHOT` and is not a commit pin | `forceUpdatePeriod := Some(Duration.Zero)`, so `update` re-resolves every session |
-| the `test` job | a warning annotation naming those `-SNAPSHOT` pins, without failing the run |
-| `reload`, `set`, `clean`, while a `-SNAPSHOT` pin is in the catalog | forget sbt's in-memory resolutions |
+| `resolvers`, and `project/plugins.sbt` for a `Plugin` pin | the publish registry's snapshot repository, plus any `zipxSnapshotRegistries`, while a commit pin, the pointer, or a qualifier snapshot is in the catalog; Central snapshots when the build has no release workflow |
+| a qualifier snapshot such as `1.0.0-RC1-SNAPSHOT` | `forceUpdatePeriod := Some(Duration.Zero)`, so `update` re-resolves every session |
+| the `test` job | a warning annotation naming those snapshot pins, without failing the run |
+| `reload`, `set`, `clean`, while a snapshot pin is in the catalog | forget sbt's in-memory resolutions |
 | `zipxRelease` | refuses while a released project depends on a snapshot, including a commit pin |
 | `zipxSnapshotStatus` | reads the pointer and reports a newer sha, a deleted build, or a local pin. It does not rewrite |
-| `zipxSnapshotAdvance` | rewrites the pin to the pointer's sha. A feature pull request does not run it |
+| `zipxSnapshotAdvance` | rewrites the pin to the pointer's sha, in the stored form. A feature pull request does not run it |
 | `zipxPinRelease` | rewrites a commit pin to that same line after the release exists. It does not take a newer line |
 | catalog update | leaves a commit pin and a `<line>-SNAPSHOT` pointer alone, and names `zipxPinRelease` when that line is released |
 
@@ -442,7 +443,7 @@ An ivy copy of `<line>-ci` is a different revision from the sha pin, so it is no
 deletes snapshots after 90 days.
 """,
       exampleValue {
-        val pin   = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678")
+        val pin   = Lib("rocks.earlyeffect", "zipx-core", "0.15.0-1234abcd5678-SNAPSHOT")
         val bumps = ZipxCatalog.outdated(List(pin), _ => Right(Some("0.15.1"))).map(_.map(b => s"${b.from} -> ${b.to}"))
         val advice = SnapshotPinAdvice.message("zipx-core", pin.version, Some("0.15.1")).getOrElse("")
         s"$bumps\n$advice"
@@ -480,15 +481,20 @@ deletes a snapshot after 90 days. Status says so and names advance.
 """,
       exampleValue {
         SnapshotStatus
-          .report("widgets", "1.4.2-1234abcd5678", Some(GitSha("9876fedcba09876543210fedcba9876543210abc")), true)
+          .report(
+            "widgets",
+            "1.4.2-1234abcd5678-SNAPSHOT",
+            Some(GitSha("9876fedcba09876543210fedcba9876543210abc")),
+            true,
+          )
           .map(SnapshotStatus.render)
           .fold(identity, identity)
       }.assert(text =>
         assertTrue(
           text ==
-            """widgets 1.4.2-1234abcd5678
+            """widgets 1.4.2-1234abcd5678-SNAPSHOT
               |  commit 1234abcd5678
-              |  latest snapshot of 1.4.2 is 1.4.2-9876fedcba09
+              |  latest snapshot of 1.4.2 is 1.4.2-9876fedcba09-SNAPSHOT
               |  run: sbt 'zipxSnapshotAdvance widgets'""".stripMargin
         )
       ),

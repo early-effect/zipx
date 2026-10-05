@@ -34,7 +34,7 @@ lazy val downstream = project.dependsOn(client).settings(if (file("ext").exists)
 
 lazy val root = (project in file(".")).aggregate(models, coreLib, client).settings(publish / skip := true)
 
-// Depends on the Central form of the models sha (`<line>-<sha>-SNAPSHOT`). Not aggregated: its update is the proof.
+// Pins the models commit as every registry stores it (`<line>-<sha>-SNAPSHOT`). Not aggregated: its update is the proof.
 lazy val pinned = project.settings(
   publish / skip := true,
   libraryDependencies ++= commitPins((LocalRootProject / baseDirectory).value),
@@ -109,14 +109,14 @@ assertSnapshotsJob := {
 def headSha(root: File): String =
   scala.sys.process.Process(Seq("git", "rev-parse", "HEAD"), root).!!.trim.toLowerCase
 
-val assertSnapshotsPublished = taskKey[Unit]("a clean commit publishes <line>-<sha> and a pointer POM, without scaladoc")
+val assertSnapshotsPublished = taskKey[Unit]("a clean commit publishes <line>-<sha>-SNAPSHOT and a pointer POM, without scaladoc")
 assertSnapshotsPublished := {
   val root   = (LocalRootProject / baseDirectory).value
   val base   = released / "com" / "example" / "zipx" / "release"
   val full   = headSha(root)
   val abbrev = full.take(12)
   for (artifact, version) <- List("models_3" -> "1.4.2", "corelib_3" -> "1.4.2", "client_3" -> "0.3.0") do
-    val id  = s"$version-$abbrev"
+    val id  = s"$version-$abbrev-SNAPSHOT"
     val dir = base / artifact / id
     assert((dir / s"$artifact-$id.jar").exists, s"$dir has no jar: ${Option(dir.list).map(_.toList)}")
     assert((dir / s"$artifact-$id-sources.jar").exists, s"$dir has no sources jar")
@@ -137,7 +137,7 @@ assertPrSnapshotsPublished := Def.uncached {
     .toLowerCase
   assert(pointer.contains(first), pointer)
   assert(!pointer.contains(full), pointer)
-  val id = s"0.3.0-${full.take(12)}"
+  val id = s"0.3.0-${full.take(12)}-SNAPSHOT"
   assert((base / "client_3" / id / s"client_3-$id.jar").exists, s"client has no jar at $id")
   assert((client / version).value == "0.3.0-ci", (client / version).value)
   val yml = IO.read((LocalRootProject / baseDirectory).value / ".github/workflows/ci.yml")
@@ -174,14 +174,24 @@ commitAll := Def.uncached {
 val forgetIvyLocal = taskKey[Unit]("Remove this fixture's organization from the machine's ivy repository")
 forgetIvyLocal := Def.uncached(IO.delete(ivyLocalRepo))
 
-val assertLocalSnapshots = taskKey[Unit]("zipxSnapshotPublish local publishes the commit id to ivy-local, and the shell is a development session again")
+val assertLocalSnapshots = taskKey[Unit]("zipxSnapshotPublish local publishes the stored commit to ivy-local, and the shell is a development session again")
 assertLocalSnapshots := Def.uncached {
-  val models = ivyLocalRepo / "models_3" / s"1.4.2-${headSha((LocalRootProject / baseDirectory).value).take(12)}"
+  val models = ivyLocalRepo / "models_3" / s"1.4.2-${headSha((LocalRootProject / baseDirectory).value).take(12)}-SNAPSHOT"
   assert((models / "jars" / "models_3.jar").exists, s"no local models jar under $models")
   assert(!(ivyLocalRepo / "models_3" / "1.4.2-SNAPSHOT").exists, "local publish must not occupy the pointer")
   assert(!(models / "docs").exists, "a local snapshot publish carries no scaladoc")
   assert(!sys.props.contains("zipx.session"), s"session left at ${sys.props.get("zipx.session")}")
   assert((client / Compile / packageDoc / publishArtifact).value, "a development session publishes docs again")
+}
+
+val assertLocalPinResolves = taskKey[Unit]("the pin a registry would hold resolves from ivy-local after a local publish")
+assertLocalPinResolves / aggregate := false
+assertLocalPinResolves := Def.uncached {
+  val jars = (pinned / updateFull).value.allFiles.filter(_.getName.startsWith("models_3")).toList
+  jars match
+    case one :: _ => assert(one.getAbsolutePath.contains(".ivy2"), one.toString)
+    case Nil      => sys.error("the stored pin did not resolve from ivy-local")
+  lmcoursier.internal.SbtCoursierCache.default.clear()
 }
 
 val assertSnapshotVersions = taskKey[Unit]("outside a release every row member compiles at <row>-ci")
@@ -203,7 +213,7 @@ assertOnlyShaAndPointer := Def.uncached {
   val abbrev = full.take(12)
   for (artifact, version) <- List("models_3" -> "1.4.2", "corelib_3" -> "1.4.2", "client_3" -> "0.3.0") do
     val names = versionDirs(artifact)
-    assert(names == List(s"$version-$abbrev", s"$version-SNAPSHOT").sorted, s"$artifact versions: $names")
+    assert(names == List(s"$version-$abbrev-SNAPSHOT", s"$version-SNAPSHOT").sorted, s"$artifact versions: $names")
     val pointer = IO.read(
       released / "com" / "example" / "zipx" / "release" / artifact / s"$version-SNAPSHOT" / s"$artifact-$version-SNAPSHOT.pom"
     )
@@ -223,46 +233,20 @@ assertDirtyLocal := Def.uncached {
     case other      => sys.error(s"expected one dirty id under $modelsDir, got $other")
   assert(stamp.matches("""\d{8}-\d{4}"""), stamp)
   assert(!names.contains(s"1.4.2-$abbrev"), names.toString)
+  assert(!names.contains(s"1.4.2-$abbrev-SNAPSHOT"), names.toString)
   assert(!names.contains("1.4.2-ci"), names.toString)
   assert(!names.contains("1.4.2-SNAPSHOT"), names.toString)
   assert((modelsDir / s"1.4.2-$abbrev+$stamp" / "jars" / "models_3.jar").exists, dirty.toString)
   assert(!versionDirs("models_3").exists(_.contains("+")), versionDirs("models_3").toString)
 }
 
-/** Copy the published bare id to the Central file name so a `-SNAPSHOT` pin resolves from this file repo. */
-def installCentralForm(root: File): Unit =
-  val abbrev = headSha(root).take(12)
-  val id     = s"1.4.2-$abbrev"
-  val snap   = s"$id-SNAPSHOT"
-  val from   = released / "com" / "example" / "zipx" / "release" / "models_3" / id
-  val to     = released / "com" / "example" / "zipx" / "release" / "models_3" / snap
-  assert(from.isDirectory, s"missing $from")
-  IO.delete(to)
-  IO.copyDirectory(from, to)
-  Option(to.listFiles()).foreach(_.foreach { file =>
-    val renamed = new File(to, file.getName.replace(id, snap))
-    if file != renamed then IO.move(file, renamed)
-  })
-  val pom = to / s"models_3-$snap.pom"
-  IO.write(pom, IO.read(pom).replace(s"<version>$id</version>", s"<version>$snap</version>"))
-  Option(to.listFiles()).foreach(_.foreach { copied =>
-    val name = copied.getName
-    if name.endsWith(".sha1") || name.endsWith(".md5") || name.endsWith(".asc") || name.startsWith("maven-metadata") then
-      IO.delete(copied)
-  })
-
+/** Every metadata file sbt or a registry writes beside an artifact, `maven-metadata-local.xml` included. */
 def deleteMavenMetadata(dir: File): Unit =
   Option(dir.listFiles()).foreach(_.foreach { file =>
-    if file.getName.startsWith("maven-metadata.xml") then IO.delete(file)
+    if file.getName.startsWith("maven-metadata") then IO.delete(file)
   })
 
-val prepareCentralForm = taskKey[Unit]("Copy the published sha to the Central file name, <sha>-SNAPSHOT")
-prepareCentralForm / aggregate := false
-prepareCentralForm := Def.uncached {
-  installCentralForm((LocalRootProject / baseDirectory).value)
-}
-
-val assertImmutableResolve = taskKey[Unit]("the Central-form sha pin is not changing, resolves from the file repo, and ignores ivy -ci")
+val assertImmutableResolve = taskKey[Unit]("the stored sha pin is not changing, resolves from the file repo, and ignores ivy -ci")
 assertImmutableResolve / aggregate := false
 assertImmutableResolve := Def.uncached {
   val root = (LocalRootProject / baseDirectory).value
@@ -282,7 +266,6 @@ assertImmutableResolve := Def.uncached {
   val artifact = released / "com" / "example" / "zipx" / "release" / "models_3"
   deleteMavenMetadata(artifact)
   deleteMavenMetadata(artifact / rev)
-  deleteMavenMetadata(artifact / rev.stripSuffix("-SNAPSHOT"))
   lmcoursier.internal.SbtCoursierCache.default.clear()
 }
 

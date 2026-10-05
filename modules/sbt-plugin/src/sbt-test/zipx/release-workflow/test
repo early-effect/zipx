@@ -5,12 +5,14 @@ $ exists .github/workflows/zipx-release.yml
 > assertSnapshotsJob
 > zipxWorkflowCheck
 
-# A clean commit publishes <line>-<sha>. A laptop publish of that commit goes to ivy, then the shell is development again.
+# A clean commit publishes <line>-<sha>-SNAPSHOT. A laptop publish of that commit goes to ivy under the same
+# coordinate, so the registry pin resolves from there too; then the shell is development again.
 > initGit
 > reload
 > forgetIvyLocal
 > zipxSnapshotPublish local
 > assertLocalSnapshots
+> assertLocalPinResolves
 > forgetIvyLocal
 
 > zipxSnapshotPublish
@@ -20,7 +22,6 @@ $ exists .github/workflows/zipx-release.yml
 
 # ivy has the compile version. The sha pin still resolves from the file repo, including after metadata is deleted.
 > models/publishLocal
-> prepareCentralForm
 > assertImmutableResolve
 > pinned/clean
 > pinned/update

@@ -18,40 +18,37 @@ object SnapshotStatus:
       pointerSha: Option[GitSha],
       artifactPresent: Boolean,
   ): Either[String, Report] =
-    SnapshotRevision.parse(bare(revision)) match
-      case Right(pin: SnapshotRevision.Commit) =>
+    DepRevision.of(revision) match
+      case DepRevision.Commit(pin) =>
         commitReport(name, pin, pointerSha, artifactPresent)
-      case Right(other) =>
-        Right(Report.Local(name, other.id))
-      case Left(_) if SnapshotPublishRevision.isPointer(revision) =>
+      case DepRevision.UnstoredCommit(pin) =>
+        commitReport(name, pin, pointerSha, artifactPresent)
+      case DepRevision.Local(local) =>
+        Right(Report.Local(name, local.id))
+      case DepRevision.Pointer(_) =>
         Left(s"$revision is the snapshot pointer, not a pin. Run sbt zipxSnapshotStatus on a commit pin.")
-      case Left(err) =>
-        Left(err.message)
+      case DepRevision.Release(_) | DepRevision.Changing(_) | DepRevision.Other(_) =>
+        Left(SnapshotRevisionError.NotCommitPin(revision).message)
 
   def render(report: Report): String = report match
     case Report.Latest(name, pin) =>
-      s"""$name ${pin.id}
+      s"""$name ${pin.storedId}
          |  commit ${pin.abbrev}
          |  this is the latest snapshot of ${pin.line}""".stripMargin
     case Report.Newer(name, pin, latest) =>
-      s"""$name ${pin.id}
+      s"""$name ${pin.storedId}
          |  commit ${pin.abbrev}
-         |  latest snapshot of ${pin.line} is ${pin.line}-$latest
+         |  latest snapshot of ${pin.line} is ${SnapshotRevision.Commit(pin.line, latest, None).storedId}
          |  run: sbt 'zipxSnapshotAdvance $name'""".stripMargin
     case Report.Missing(name, pin) =>
-      s"""$name ${pin.id}
+      s"""$name ${pin.storedId}
          |  commit ${pin.abbrev}
-         |  the snapshot repository no longer has ${pin.id} (snapshots are kept 90 days)
+         |  the snapshot repository no longer has ${pin.storedId} (snapshots are kept 90 days)
          |  run: sbt 'zipxSnapshotAdvance $name'""".stripMargin
     case Report.Local(name, id) =>
       s"""$name $id
          |  local build
          |  it will not resolve on another machine""".stripMargin
-
-  private def bare(revision: String): String =
-    if SnapshotPublishRevision.isImmutablePin(revision) && revision.endsWith(Modver.UnreleasedSuffix) then
-      revision.stripSuffix(Modver.UnreleasedSuffix)
-    else revision
 
   private def commitReport(
       name: String,
@@ -65,6 +62,6 @@ object SnapshotStatus:
       case Some(_)                              => Right(Report.Latest(name, pin))
       case None                                 =>
         Left(
-          s"the pointer for ${pin.line} has no ${SnapshotPointer.ShaElement}, and ${pin.id} is still in the snapshot repository"
+          s"the pointer for ${pin.line} has no ${SnapshotPointer.ShaElement}, and ${pin.storedId} is still in the snapshot repository"
         )
 end SnapshotStatus

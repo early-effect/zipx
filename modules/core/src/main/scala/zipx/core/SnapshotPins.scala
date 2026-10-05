@@ -3,8 +3,8 @@ package zipx.core
 import zipx.shell.{Exec, Script, Word}
 import zipx.workflow.Step
 
-/** Catalog rows that name an unreleased upstream at `-SNAPSHOT`. While any is pinned, the build resolves the publish
-  * registry's snapshot repository, plus any registry added beside it, and re-resolves them on every session. A pin
+/** Catalog rows resolved from a snapshot repository: a commit pin, the pointer, or a changing `-SNAPSHOT`. While any is
+  * pinned, the build resolves the publish registry's snapshot repository, plus any registry added beside it. A pin
   * names no registry of its own. With no publish registry, the resolver is Central snapshots.
   */
 object SnapshotPins:
@@ -22,9 +22,7 @@ object SnapshotPins:
     env + CoursierTtl
 
   def of(coords: Seq[ZipxCoord]): List[ZipxCoord] =
-    coords.filter(c => isSnapshot(c.version)).toList
-
-  def isSnapshot(version: String): Boolean = version.endsWith(Modver.UnreleasedSuffix)
+    coords.filter(c => DepRevision.of(c.version).resolvesFromSnapshots).toList
 
   def describe(coord: ZipxCoord): String = s"${coord.group}:${coord.artifact}:${coord.version}"
 

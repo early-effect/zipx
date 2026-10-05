@@ -17,11 +17,6 @@ object SnapshotPointer:
 
   def pointerVersion(line: ReleaseVersion): String = s"$line${Modver.UnreleasedSuffix}"
 
-  /** The revision a registry stored for a commit id. Central appends `-SNAPSHOT`. Every other registry stores the id.
-    */
-  def storedRevision(id: String, registry: ArtifactRegistry): String =
-    if SnapshotRevision.appendsSnapshotSuffix(registry) then s"$id${Modver.UnreleasedSuffix}" else id
-
   def shaFromPom(xml: String): Either[String, GitSha] =
     val start = s"<$ShaElement>"
     val end   = s"</$ShaElement>"

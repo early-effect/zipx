@@ -113,7 +113,7 @@ object ReleaseDiagram:
   def strings: UI[Any] =
     diagram(
       Block.Card("1.4.2-ci · every compile"),
-      Block.Card("1.4.2-sha · the pin"),
+      Block.Card("1.4.2-sha-SNAPSHOT · the pin"),
       Block.Split(
         List(
           List(Block.Card("1.4.2 · the release", Role.Mark)),
@@ -131,7 +131,7 @@ object ReleaseDiagram:
       Block.Card("zipxSnapshotPublish"),
       Block.Split(
         List(
-          List(Block.Card("downstream pins 1.4.2-sha")),
+          List(Block.Card("downstream pins 1.4.2-sha-SNAPSHOT")),
           List(
             Block.Card("pointer 1.4.2-SNAPSHOT", Role.Aside),
             Block.Card("zipxSnapshotStatus"),

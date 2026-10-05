@@ -27,7 +27,7 @@ object SnapshotRevisionSpec extends ZIOSpecDefault:
     yield DirtyStamp.from(f"2026$month%02d$day%02d-$hour%02d$minute%02d")).collect { case Right(stamp) => stamp }
 
   def spec = suite("SnapshotRevision")(
-    test("a clean commit renders the 12-character id, keeps the full sha, and appends -SNAPSHOT only for Central") {
+    test("a clean commit renders the 12-character id, keeps the full sha, and is stored as the id plus -SNAPSHOT") {
       built match
         case Some(line, full) =>
           val rev = SnapshotRevision.commit(line, full)
@@ -36,13 +36,8 @@ object SnapshotRevisionSpec extends ZIOSpecDefault:
             rev.full.contains(full),
             rev.stable,
             SnapshotRevision.parse(rev.id) == Right(SnapshotRevision.Commit(line, rev.abbrev, None)),
-            rev.mavenRevision(ArtifactRegistry.MavenCentral) == Right("1.4.2-1234abcd5678-SNAPSHOT"),
-            rev.mavenRevision(ArtifactRegistry.Url("file:///tmp/zipx-repo")) == Right("1.4.2-1234abcd5678"),
-            rev.mavenRevision(ArtifactRegistry.GitHubPackages("early-effect", "widgets")) == Right(rev.id),
-            rev.mavenRevision(
-              ArtifactRegistry.Maven("https://example.test/snapshots", "https://example.test/releases")
-            ) ==
-              Right(rev.id),
+            rev.storedId == "1.4.2-1234abcd5678-SNAPSHOT",
+            rev.stored == Right(rev.storedId),
           )
         case None =>
           assertTrue(false)
@@ -55,7 +50,7 @@ object SnapshotRevisionSpec extends ZIOSpecDefault:
             rev.id == "1.4.2-1234abcd5678+20140707-1030",
             !rev.stable,
             SnapshotRevision.parse(rev.id) == Right(rev),
-            rev.mavenRevision(ArtifactRegistry.MavenCentral) == Left(SnapshotRevisionError.Unstable(rev.id)),
+            rev.stored == Left(SnapshotRevisionError.Unstable(rev.id)),
           )
         case _ =>
           assertTrue(false)
@@ -68,7 +63,7 @@ object SnapshotRevisionSpec extends ZIOSpecDefault:
             rev.id == "HEAD+20140707-1030",
             !rev.stable,
             SnapshotRevision.parse(rev.id) == Right(rev),
-            rev.mavenRevision(ArtifactRegistry.Url("file:///tmp/zipx-repo")).isLeft,
+            rev.stored == Left(SnapshotRevisionError.Unstable(rev.id)),
           )
         case Left(_) =>
           assertTrue(false)
@@ -97,8 +92,9 @@ object SnapshotRevisionSpec extends ZIOSpecDefault:
               commit.full.contains(full),
               SnapshotRevision.parse(dirty.id) == Right(dirty),
               SnapshotRevision.parse(bare.id) == Right(bare),
-              commit.mavenRevision(ArtifactRegistry.MavenCentral) == Right(s"${commit.id}-SNAPSHOT"),
-              commit.mavenRevision(ArtifactRegistry.Url("file:///tmp/repo")) == Right(commit.id),
+              commit.stored == Right(s"${commit.id}-SNAPSHOT"),
+              dirty.stored.isLeft,
+              bare.stored.isLeft,
             )
           case Left(_) =>
             assertTrue(false)

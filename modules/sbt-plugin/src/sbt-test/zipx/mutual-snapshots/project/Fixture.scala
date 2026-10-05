@@ -2,7 +2,7 @@ import sbt.*
 import sbt.Keys.*
 import sbt.complete.DefaultParsers.*
 import sbt.complete.Parser
-import zipx.core.{ArtifactRegistry, GitSha, Lib, PinRewrite, ReleaseVersion, ReleaseWorkflow, SnapshotRevision}
+import zipx.core.{ArtifactRegistry, GitSha, Lib, PinRewrite, ReleaseVersion, ReleaseWorkflow, SnapshotRevision, ZipxCoord}
 import zipx.plugin.ZipxPlugin.autoImport.zipxVersions
 
 /** What both repos in this fixture share: one registry, commit ids recorded by name, and the catalog edit a person
@@ -29,34 +29,56 @@ object Fixture:
         Wanted.Commit(line, name)
       }
 
-  val recordSha        = inputKey[Unit]("recordSha <name>: write HEAD's sha to shas/<name>")
-  val pinCommit        = inputKey[Unit]("pinCommit <artifact> <line> <name>: pin a recorded commit as the registry stores it")
-  val assertInRegistry = inputKey[Unit]("assertInRegistry <artifact> release <v> | commit <line> <name>")
+  val recordSha          = inputKey[Unit]("recordSha <name>: write HEAD's sha to shas/<name>")
+  val pinCommit          = inputKey[Unit]("pinCommit <artifact> <line> <name>: pin a recorded commit as the registry stores it")
+  val pinBare            = inputKey[Unit]("pinBare <artifact> <line> <name>: pin a recorded commit without -SNAPSHOT")
+  val assertPin          = inputKey[Unit]("assertPin <artifact> <line> <name>: the catalog pins that commit, stored form")
+  val assertPointerNames = inputKey[Unit]("assertPointerNames <artifact> <line> <name>: the line's pointer names that sha")
+  val assertInRegistry   = inputKey[Unit]("assertInRegistry <artifact> release <v> | commit <line> <name>")
+
+  private val pinArgs = Space ~> StringBasic ~ (Space ~> StringBasic) ~ (Space ~> StringBasic)
 
   /** Each task acts on the repo once. A bare setting applies to every project, so aggregation would repeat it. */
   def settings: Seq[Setting[?]] = Seq(
-    recordSha / aggregate        := false,
-    pinCommit / aggregate        := false,
-    assertInRegistry / aggregate := false,
+    recordSha / aggregate          := false,
+    pinCommit / aggregate          := false,
+    pinBare / aggregate            := false,
+    assertPin / aggregate          := false,
+    assertPointerNames / aggregate := false,
+    assertInRegistry / aggregate   := false,
     recordSha := {
       val name = (Space ~> StringBasic).parsed
       val root = (LocalRootProject / baseDirectory).value
       IO.write(root / "shas" / name, git(root, "rev-parse", "HEAD"))
     },
     pinCommit := {
-      val ((artifact, line), name) = (Space ~> StringBasic ~ (Space ~> StringBasic) ~ (Space ~> StringBasic)).parsed
+      val ((artifact, line), name) = pinArgs.parsed
       val root                     = (LocalRootProject / baseDirectory).value
-      val catalog                  = root / "project" / "ZipxVersions.scala"
-      val rows                     = zipxVersions.value
-      val next                     =
+      rewritePin(root, zipxVersions.value, artifact, revision(root, Wanted.Commit(line, name)))
+    },
+    pinBare := {
+      val ((artifact, line), name) = pinArgs.parsed
+      val root                     = (LocalRootProject / baseDirectory).value
+      rewritePin(root, zipxVersions.value, artifact, commit(root, line, name).map(_.id))
+    },
+    assertPin := {
+      val ((artifact, line), name) = pinArgs.parsed
+      val root                     = (LocalRootProject / baseDirectory).value
+      val pinned                   = owningRow(zipxVersions.value, artifact).map(lib => lib.version: String)
+      (pinned, revision(root, Wanted.Commit(line, name))) match
+        case (Right(actual), Right(expected)) => assert(actual == expected, s"$artifact pins $actual, not $expected")
+        case (left, right)                    => sys.error(s"$left / $right")
+    },
+    assertPointerNames := {
+      val ((artifact, line), name) = pinArgs.parsed
+      val root                     = (LocalRootProject / baseDirectory).value
+      val checked                  =
         for
-          lib <- rows
-            .collectFirst { case lib: Lib if lib.artifact == artifact && lib.family.isEmpty => lib }
-            .toRight(s"no Lib row for $artifact")
-          to     <- revision(root, Wanted.Commit(line, name))
-          source <- PinRewrite.replace(IO.read(catalog), lib.group, lib.artifact, lib.version, to)
-        yield source
-      next.fold(sys.error, IO.write(catalog, _))
+          sha  <- commit(root, line, name).flatMap(_.full.toRight(s"$name has no full sha"))
+          file <- pom(organizationDir / artifact / s"$line-SNAPSHOT").toRight(s"no pointer for $artifact $line")
+          named = (scala.xml.XML.loadFile(file) \\ "zipx.snapshot.sha").text.trim
+        yield (named, sha: String)
+      checked.fold(sys.error, { case (named, sha) => assert(named == sha, s"pointer names $named, not $sha") })
     },
     assertInRegistry := {
       val (artifact, want) = ((Space ~> StringBasic) ~ wanted).parsed
@@ -123,15 +145,33 @@ object Fixture:
 
   private def revision(root: File, want: Wanted): Either[String, String] =
     want match
-      case Wanted.Release(version) => Right(version)
-      case Wanted.Commit(line, name) =>
-        val recorded = root / "shas" / name
-        for
-          raw        <- Option.when(recorded.exists)(IO.read(recorded).trim).toRight(s"no commit recorded as $name")
-          parsedLine <- ReleaseVersion.make(line)
-          full       <- GitSha.make(raw)
-          stored     <- SnapshotRevision.commit(parsedLine, full).mavenRevision(releaseWorkflow.registry).left.map(_.message)
-        yield stored
+      case Wanted.Release(version)   => Right(version)
+      case Wanted.Commit(line, name) => commit(root, line, name).map(_.storedId)
+
+  private def commit(root: File, line: String, name: String): Either[String, SnapshotRevision.Commit] =
+    val recorded = root / "shas" / name
+    for
+      raw        <- Option.when(recorded.exists)(IO.read(recorded).trim).toRight(s"no commit recorded as $name")
+      parsedLine <- ReleaseVersion.make(line)
+      full       <- GitSha.make(raw)
+    yield SnapshotRevision.commit(parsedLine, full)
+
+  /** The row that owns the `Lib(...)` literal, not a `.mod` sibling. */
+  private def owningRow(rows: Seq[ZipxCoord], artifact: String): Either[String, Lib] =
+    rows
+      .collectFirst { case lib: Lib if lib.artifact == artifact && lib.family.isEmpty => lib }
+      .toRight(s"no Lib row for $artifact")
+
+  /** The edit a person makes to pin another repo's commit, through zipx's own catalog rewrite. */
+  private def rewritePin(root: File, rows: Seq[ZipxCoord], artifact: String, to: Either[String, String]): Unit =
+    val catalog = root / "project" / "ZipxVersions.scala"
+    val next    =
+      for
+        lib    <- owningRow(rows, artifact)
+        pin    <- to
+        source <- PinRewrite.replace(IO.read(catalog), lib.group, lib.artifact, lib.version, pin)
+      yield source
+    next.fold(sys.error, IO.write(catalog, _))
 
   private def git(root: File, args: String*): String =
     scala.sys.process.Process("git" +: args, root).!!.trim

@@ -101,8 +101,9 @@ flowchart TD
 4. You write the number (`sbt zipxModverBump`, or one row by hand) and push. The bump does not run MiMa.
    `modver-check` does, against the opened number.
 5. Before merging, prove the change downstream without a release: commit, `sbt zipxSnapshotPublish local` here, and
-   pin `<row>-<sha>` there (or `sbt zipxSnapshotPublish` for another machine's CI). See **Snapshots and releases**.
-6. Merge. The default branch still compiles `<row>-ci` and publishes that commit's `<row>-<sha>`. Later PRs in the
+   pin `<row>-<sha>-SNAPSHOT` there (or `sbt zipxSnapshotPublish` for another machine's CI). See **Snapshots and
+   releases**.
+6. Merge. The default branch still compiles `<row>-ci` and publishes that commit's `<row>-<sha>-SNAPSHOT`. Later PRs in the
    same cycle pass without another bump unless MiMa says their change is bigger than the row already declares.
 7. Release when ready: a GitHub Release tagged `client/v0.3.1`, or Run workflow on **zipx release**. See **Snapshots
    and releases** for the picture: status, advance, release plan, pin-release, then the release.
@@ -208,7 +209,7 @@ unpublished apps keep sbt's default version.
 |---|---|---|
 | Catalog constructor | release number only (`1.4.2`, never `1.4.2-SNAPSHOT`) | the human writes the next release |
 | Any build: PR, merge, a snapshot publish | `<row>-ci` (`1.4.2-ci`) | the same from commit to commit, so caches hold |
-| `sbt zipxSnapshotPublish` of a clean commit | `<row>-<sha>` in the repository | the pin another build resolves. Central stores that id plus `-SNAPSHOT` |
+| `sbt zipxSnapshotPublish` of a clean commit | `<row>-<sha>-SNAPSHOT` in the repository | the pin another build resolves, the same coordinate on every registry |
 | A `zipxRelease` session | catalog number, for every row member | its POMs name in-repo dependencies at release numbers |
 
 A cache needs a version that does not change between commits. `<row>-ci` is that version. A per-commit version, such
