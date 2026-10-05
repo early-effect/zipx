@@ -169,6 +169,44 @@ secrets or neither; exactly one fails the job. Grant the App contents + pull-req
         )
       ),
     ),
+    section("What a row moves to")(
+      md"""
+An update reads each row off the repository under every name sbt could publish it as:
+
+- `zio_3`, `zio_sjs1_3`, and `zio_native0.5_3` for a `%%` row;
+- the bare artifact for a `.java` row;
+- the full Scala version, such as `_3.9.0`, for a `.full` row;
+- `_sbt2_3` for a plugin.
+
+A row is published for the platforms that list its current version, and it moves only to a version every one of them
+has. A Scala.js-only row such as `ascent-js` is read off `ascent-js_sjs1_3`. A row on the JVM and Scala.js never moves
+to a version only one of them has.
+
+A `.mod` family shares one version literal, so it moves on that literal, to the newest version every member has. When a
+member could go further alone, the update says so: give it its own `Lib` row to take that version. The scheduled job
+and `zipxDepUpdate` read rows the same way, from the catalog source or the loaded build.
+""",
+      exampleValue {
+        val js   = Lib("rocks.earlyeffect", "ascent-js", "0.7.1")
+        val css  = js.mod("ascent-css")
+        val repo = Map(
+          "ascent-js_sjs1_3"  -> List("0.7.1", "0.9.0", "0.10.0"),
+          "ascent-css_3"      -> List("0.7.1", "0.9.0"),
+          "ascent-css_sjs1_3" -> List("0.7.1", "0.9.0"),
+        )
+        val lookup: ReleaseLookup = (_, artifact) => Right(repo.get(artifact))
+        ZipxCatalog.outdated(List(js, css), CatalogCrossing.of("3.9.0", "2.1.0-M3"), lookup).map { updates =>
+          (ZipxCatalog.formatBumps(updates.bumps) :: updates.held.map(_.message)).mkString("\n")
+        }
+      }.assert(text =>
+        assertTrue(
+          text == Right(
+            """- Lib rocks.earlyeffect % ascent-js: 0.7.1 -> 0.9.0 (Minor)
+              |ascent-js could move to 0.10.0 alone; its family moves together to 0.9.0. Give it its own Lib row to take 0.10.0.""".stripMargin
+          )
+        )
+      ),
+    ),
     section("Local apply")(
       md"""
 The same rewrite, without waiting for the schedule. You do not need to know CI YAML.

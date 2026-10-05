@@ -100,36 +100,89 @@ object ZipxCatalog:
     if plugin.excludes.isEmpty then s"addSbtPlugin($mid)"
     else s"addSbtPlugin(($mid).excludeAll(${plugin.excludes.map(renderExclude).mkString(", ")}))"
 
-  /** Lookup + classify every catalog row. `lookup` is `(group, artifact, current) => latest`. */
+  /** What every movable catalog row can move to. A `.mod` family moves on its literal, to the newest version every
+    * member has on every platform it is published for, so each bump [[applyBumps]] writes is one the catalog can take.
+    * A member that could go further alone is a [[FamilyHold]]. Aligned rows and snapshot pins do not move here.
+    */
   def outdated(
       coords: Seq[ZipxCoord],
-      lookup: (ZipxCoord) => Either[String, Option[String]],
+      crossing: CatalogCrossing,
+      lookup: ReleaseLookup,
       classify: VersionStrategy = VersionStrategy.npm,
       preRelease: PreRelease = PreRelease.Skip,
-  ): Either[String, List[DepBump]] =
-    coords
-      .filter {
-        case l: Lib if l.isAligned                                    => false
-        case coord if SnapshotPinAdvice.hold(coord.version).isDefined => false
-        case _                                                        => true
-      }
-      .foldLeft[Either[String, List[DepBump]]](Right(Nil)) { (accE, coord) =>
-        accE.flatMap { acc =>
-          lookup(coord).map { latest =>
-            latest
-              .flatMap { candidate =>
-                val kind = classify.classify(coord.version, candidate)
-                Option.when(kind != BumpKind.None && preRelease.allows(kind)) {
-                  val to =
-                    if kind == BumpKind.PreRelease then candidate
-                    else classify.latestStable(List(candidate)).getOrElse(candidate)
-                  DepBump(coord, kind, to)
-                }
-              }
-              .fold(acc)(acc :+ _)
+  ): Either[String, CatalogUpdates] =
+    val movable = coords.filter {
+      case l: Lib if l.isAligned                                    => false
+      case coord if SnapshotPinAdvice.hold(coord.version).isDefined => false
+      case _                                                        => true
+    }
+    familiesOf(movable).foldLeft[Either[String, CatalogUpdates]](Right(CatalogUpdates(Nil, Nil))) {
+      case (found, (literal, members)) =>
+        for
+          updates <- found
+          offered <- members.foldLeft[Either[String, List[(ZipxCoord, List[String])]]](Right(Nil)) { (acc, member) =>
+            acc.flatMap(sofar => CatalogReleases.available(member, crossing, lookup).map(v => sofar :+ (member -> v)))
           }
-        }
+        yield
+          val together = newest(literal.version, CatalogReleases.intersect(offered.map(_._2)), classify, preRelease)
+          val bump     = together.map(to => DepBump(literal, classify.classify(literal.version, to), to))
+          val held     =
+            if members.sizeIs < 2 then Nil
+            else
+              offered.flatMap { (member, versions) =>
+                newest(member.version, versions, classify, preRelease)
+                  .filter(alone => together.forall(to => classify.classify(to, alone) != BumpKind.None))
+                  .map(FamilyHold(member, _, together))
+              }
+          CatalogUpdates(updates.bumps ++ bump, updates.held ++ held)
+    }
+  end outdated
+
+  /** Rows that share one version literal, in catalog order, each with that literal's row first. A plugin is alone. */
+  private def familiesOf(coords: Seq[ZipxCoord]): List[(ZipxCoord, List[ZipxCoord])] =
+    def key(coord: ZipxCoord): (String, String, String) = coord match
+      case lib: Lib       => ("Lib", lib.group, lib.family.getOrElse(lib.artifact))
+      case plugin: Plugin => ("Plugin", plugin.group, plugin.artifact)
+    val keys = coords.map(key).distinct.toList
+    keys.flatMap { k =>
+      val members = coords.filter(key(_) == k).toList
+      val literal = members.find {
+        case lib: Lib => lib.family.isEmpty
+        case _        => true
       }
+      literal.orElse(members.headOption).map(lit => lit -> (lit :: members.filterNot(_ == lit)))
+    }
+  end familiesOf
+
+  /** The newest of `versions` that `preRelease` admits. */
+  def latest(
+      versions: List[String],
+      classify: VersionStrategy = VersionStrategy.npm,
+      preRelease: PreRelease = PreRelease.Skip,
+  ): Option[String] =
+    versions
+      .filter(version => preRelease == PreRelease.Include || !classify.isPreRelease(version))
+      .foldLeft(Option.empty[String]) {
+        case (None, candidate)                                                              => Some(candidate)
+        case (Some(best), candidate) if classify.classify(best, candidate) != BumpKind.None => Some(candidate)
+        case (best, _)                                                                      => best
+      }
+
+  /** The newest version above `current` that `preRelease` admits. */
+  private def newest(
+      current: String,
+      versions: List[String],
+      classify: VersionStrategy,
+      preRelease: PreRelease,
+  ): Option[String] =
+    latest(
+      versions.filter { candidate =>
+        val kind = classify.classify(current, candidate)
+        kind != BumpKind.None && preRelease.allows(kind)
+      },
+      classify,
+      PreRelease.Include,
+    )
 
   def formatBumps(bumps: List[DepBump]): String =
     if bumps.isEmpty then "no outdated catalog versions"
