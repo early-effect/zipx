@@ -716,6 +716,8 @@ object ZipxPlugin extends AutoPlugin:
     },
     // The catalog states these modules for this build, so no transitive revision of one changes what compiles.
     dependencyOverrides ++= CatalogResolution.overrides(catalogForced.value),
+    // The platform plugin states its own runtime, which the catalog's Plugin row pins.
+    dependencyOverrides ++= AutoPlatform.overrides(libraryDependencies.value, scalaModuleInfo.value),
     zipxPomEdges := Def.uncached {
       CatalogResolution.of(zipxResolvedModule.value) -> PomAuthority.edges(projectDependencies.value, crossing.value)
     },
