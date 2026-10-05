@@ -2270,7 +2270,7 @@ object ZipxPlugin extends AutoPlugin:
   private final case class SnapshotCtx(
       coords: Seq[ZipxCoord],
       registry: ArtifactRegistry,
-      names: Lib => List[String],
+      names: ZipxCoord => List[String],
       cache: File,
       file: File,
       headers: Map[String, String],
@@ -2294,7 +2294,11 @@ object ZipxPlugin extends AutoPlugin:
     SnapshotCtx(
       readBuildSetting(extracted, zipxVersions, Seq.empty),
       release.registry,
-      resolvedNames(extracted, (LocalRootProject / scalaModuleInfo).value),
+      resolvedNames(
+        extracted,
+        (LocalRootProject / scalaModuleInfo).value,
+        CatalogCrossing.of(appConfiguration.value.provider.scalaProvider.version, sbtVersion.value),
+      ),
       (LocalRootProject / target).value / "zipx-snapshot-pointer",
       file,
       headers,
@@ -2304,9 +2308,17 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   /** Crossed per depending project's `scalaModuleInfo`, so a row used on the JVM and on Scala.js yields both names. A
-    * row no project uses is crossed the way the root project would cross it.
+    * row no project uses is crossed the way the root project would cross it. A plugin row is crossed for the sbt
+    * running this build.
     */
-  private def resolvedNames(extracted: Extracted, rootScala: Option[ScalaModuleInfo])(lib: Lib): List[String] =
+  private def resolvedNames(extracted: Extracted, rootScala: Option[ScalaModuleInfo], sbtCrossing: CatalogCrossing)(
+      row: ZipxCoord
+  ): List[String] =
+    row match
+      case plugin: Plugin => PublishedNames.of(plugin, sbtCrossing)
+      case lib: Lib       => libNames(extracted, rootScala, lib)
+
+  private def libNames(extracted: Extracted, rootScala: Option[ScalaModuleInfo], lib: Lib): List[String] =
     val module                                                = ZipxDeps.moduleID(lib)
     def crossed(dep: ModuleID, info: Option[ScalaModuleInfo]) =
       info.flatMap(CrossVersion(dep, _)).fold(dep.name)(_(dep.name))
@@ -2322,7 +2334,7 @@ object ZipxPlugin extends AutoPlugin:
     used.distinct match
       case Nil   => List(crossed(module, rootScala))
       case names => names
-  end resolvedNames
+  end libNames
 
   private def releaseGates(st: State, extracted: Extracted, own: Set[ModuleID]): List[ShipGate] =
     val ships = readBuildSetting(extracted, zipxShips, Seq.empty).toList

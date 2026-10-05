@@ -192,6 +192,14 @@ object ZipxCatalog:
   def constructorCall(ctor: String, group: String, artifact: String, version: String): String =
     s"""$ctor("$group", "$artifact", "$version")"""
 
+  def constructorCall(row: ZipxCoord, version: String): String =
+    constructorCall(constructorName(row), row.group, row.artifact, version)
+
+  def constructorName(row: ZipxCoord): String =
+    row match
+      case _: Lib    => "Lib"
+      case _: Plugin => "Plugin"
+
   /** Canonical `Pin("feed", "id", "ver", sha256 = "...", purl = "...")` as catalog apply rewrites it. */
   def pinConstructor(pin: Pin): String =
     val extras = List(
