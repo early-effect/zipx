@@ -133,6 +133,8 @@ and the bump. Nothing here spends a release except the release job.
 
 A feature pull request stays on the sha it committed. The weekly version-updates job may open a pull request that
 runs advance. It does not commit from a test run.
+
+Each command takes a `Plugin` row the same way it takes a `Lib` row: `sbt 'zipxSnapshotAdvance sbt-widgets 1.5.0'`.
 """,
     ),
     section("The three ids")(

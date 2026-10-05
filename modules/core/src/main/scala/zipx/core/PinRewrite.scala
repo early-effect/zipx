@@ -1,12 +1,11 @@
 package zipx.core
 
-/** Rewriting one `Lib` version in the catalog source. Advance changes the sha. Pin-release drops it. */
+/** Rewriting one row's version in the catalog source. Advance changes the sha. Pin-release drops it. */
 object PinRewrite:
 
-  def replace(source: String, group: String, artifact: String, from: String, to: String): Either[String, String] =
-    val current = ZipxCatalog.constructorCall("Lib", group, artifact, from)
-    if source.contains(current) then
-      Right(source.replace(current, ZipxCatalog.constructorCall("Lib", group, artifact, to)))
+  def replace(source: String, row: ZipxCoord, to: String): Either[String, String] =
+    val current = ZipxCatalog.constructorCall(row, row.version)
+    if source.contains(current) then Right(source.replace(current, ZipxCatalog.constructorCall(row, to)))
     else Left(s"catalog has no $current")
 
   /** The stored commit the pointer names, on the pin's own line. A bare pin is rewritten to the stored form even at the

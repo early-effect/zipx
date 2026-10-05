@@ -252,7 +252,7 @@ object Fixture:
       for
         lib    <- owningRow(rows, artifact)
         pin    <- to
-        source <- PinRewrite.replace(IO.read(catalog), lib.group, lib.artifact, lib.version, pin)
+        source <- PinRewrite.replace(IO.read(catalog), lib, pin)
       yield source
     next.fold(sys.error, IO.write(catalog, _))
 

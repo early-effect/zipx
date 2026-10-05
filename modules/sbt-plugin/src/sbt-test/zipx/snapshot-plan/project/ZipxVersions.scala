@@ -6,5 +6,6 @@ object MyVersions extends ZipxVersions:
 
   val widgets = Lib("com.example.zipx.plan", "widgets", "1.4.2-aaaaaaaaaaaa-SNAPSHOT")
   val local   = Lib("com.example.zipx.plan", "localpin", "1.4.2-bbbbbbbbbbbb+20140707-1030")
+  val gadgets = Plugin("com.example.zipx.plan", "sbt-gadgets", "0.2.0")
   val client  = Ship("client", "0.3.0")
 end MyVersions

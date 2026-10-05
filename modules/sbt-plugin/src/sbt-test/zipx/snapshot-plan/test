@@ -18,3 +18,11 @@
 > assertPinned
 > reload
 > zipxReleasePlan
+# A plugin row takes the same path: onto its line's commit, then back to its release.
+> seedPluginLine
+> zipxSnapshotAdvance sbt-gadgets 0.2.0
+> assertPluginOnCommit
+> reload
+> zipxSnapshotStatus sbt-gadgets
+> zipxPinRelease sbt-gadgets
+> assertPluginReleased

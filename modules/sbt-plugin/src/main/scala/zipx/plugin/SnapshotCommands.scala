@@ -24,7 +24,7 @@ object SnapshotCommands:
       arg: String,
       coords: Seq[ZipxCoord],
       registry: ArtifactRegistry,
-      names: Lib => List[String],
+      names: ZipxCoord => List[String],
       cache: File,
       headers: Map[String, String],
       log: Logger,
@@ -38,8 +38,8 @@ object SnapshotCommands:
           val pointer = lineOf(family.version).fold(PointerRead.Absent)(
             familyPointer(registry, family, names, cache, headers, _)
           )
-          val present = family.members.exists { lib =>
-            names(lib).exists(artifactPresent(registry, lib.group, _, lib.version, cache, headers))
+          val present = family.members.exists { row =>
+            names(row).exists(artifactPresent(registry, row.group, _, row.version, cache, headers))
           }
           SnapshotStatus.report(family.literal, family.version, pointer, present)
       log.info(report.fold(err => sys.error(s"zipx: $err"), SnapshotStatus.render))
@@ -54,7 +54,7 @@ object SnapshotCommands:
       coords: Seq[ZipxCoord],
       source: String,
       registry: ArtifactRegistry,
-      names: Lib => List[String],
+      names: ZipxCoord => List[String],
       cache: File,
       headers: Map[String, String],
       log: Logger,
@@ -69,7 +69,7 @@ object SnapshotCommands:
       case _ => sys.error(s"zipx: $AdvanceUsage")
     target match
       case Some(line) =>
-        families(select(row, libsOf(coords), "zipxSnapshotAdvance"), coords).foldLeft(source) { (src, family) =>
+        families(select(row, coords.toList, "zipxSnapshotAdvance"), coords).foldLeft(source) { (src, family) =>
           val sha = pointerOf(registry, family, names, cache, headers, line)
           PinRewrite.moveTo(family.version, line, sha) match
             case Left(err)   => sys.error(s"zipx: $err")
@@ -87,7 +87,7 @@ object SnapshotCommands:
       coords: Seq[ZipxCoord],
       source: String,
       registry: ArtifactRegistry,
-      names: Lib => List[String],
+      names: ZipxCoord => List[String],
       cache: File,
       headers: Map[String, String],
       log: Logger,
@@ -122,9 +122,7 @@ object SnapshotCommands:
     "zipxSnapshotAdvance takes a row and, optionally, a line: sbt 'zipxSnapshotAdvance widgets 1.5.0'"
 
   private def rewrite(source: String, family: Family, next: String, log: Logger): String =
-    val rewritten = PinRewrite
-      .replace(source, family.group, family.literal, family.version, next)
-      .fold(err => sys.error(s"zipx: $err"), identity)
+    val rewritten = PinRewrite.replace(source, family.written, next).fold(err => sys.error(s"zipx: $err"), identity)
     log.info(s"zipx: ${family.literal} ${family.version} -> $next")
     rewritten
 
@@ -132,7 +130,7 @@ object SnapshotCommands:
   private def familyPointer(
       registry: ArtifactRegistry,
       family: Family,
-      names: Lib => List[String],
+      names: ZipxCoord => List[String],
       cache: File,
       headers: Map[String, String],
       line: ReleaseVersion,
@@ -142,7 +140,7 @@ object SnapshotCommands:
   private def pointerOf(
       registry: ArtifactRegistry,
       family: Family,
-      names: Lib => List[String],
+      names: ZipxCoord => List[String],
       cache: File,
       headers: Map[String, String],
       line: ReleaseVersion,
@@ -163,7 +161,7 @@ object SnapshotCommands:
       arg: String,
       coords: Seq[ZipxCoord],
       source: String,
-      names: Lib => List[String],
+      names: ZipxCoord => List[String],
       released: (String, String, String) => Boolean,
       log: Logger,
   ): String =
@@ -171,34 +169,39 @@ object SnapshotCommands:
     val row     = rowOf(arg, command).orElse(sys.error(s"zipx: $command takes the artifact name, or group:artifact"))
     families(select(row, pinsOf(coords), command), coords).foldLeft(source) { (src, family) =>
       val line   = lineOf(family.version)
-      val onRepo = line.exists(v => family.members.exists(lib => names(lib).exists(released(lib.group, _, v))))
+      val onRepo = line.exists(v => family.members.exists(row => names(row).exists(released(row.group, _, v))))
       PinRewrite.pinRelease(family.version, onRepo) match
         case Left(err)                                       => sys.error(s"zipx: $err")
         case Right(next) if next == (family.version: String) =>
           log.info(s"zipx: ${family.literal} is already $next")
           src
         case Right(next) =>
-          val rewritten = PinRewrite
-            .replace(src, family.group, family.literal, family.version, next)
-            .fold(err => sys.error(s"zipx: $err"), identity)
+          val rewritten = PinRewrite.replace(src, family.written, next).fold(err => sys.error(s"zipx: $err"), identity)
           log.info(s"zipx: ${family.literal} ${family.version} -> $next")
           rewritten
       end match
     }
   end pinRelease
 
-  /** One `Lib(...)` literal in the catalog source, and every row that shares its version through `.mod`. */
-  private final case class Family(group: GroupId, literal: ArtifactId, version: DepVersion, members: ::[Lib])
+  /** One constructor in the catalog source, and every row that shares its version through `.mod`. */
+  private final case class Family(written: ZipxCoord, members: ::[ZipxCoord]):
+    def group: GroupId      = written.group
+    def literal: ArtifactId = written.artifact
+    def version: DepVersion = written.version
 
-  /** A `.mod` row is rewritten through its family's literal. */
-  private def families(selected: List[Lib], coords: Seq[ZipxCoord]): List[Family] =
-    val libs                            = coords.collect { case lib: Lib => lib }.toList
-    def literalOf(lib: Lib): ArtifactId = lib.family.getOrElse(lib.artifact)
-    selected.map(lib => (lib.group, literalOf(lib))).distinct.flatMap { (group, literal) =>
-      libs.filter(lib => lib.group == group && literalOf(lib) == literal) match
-        case head :: tail => Some(Family(group, literal, head.version, ::(head, tail)))
-        case Nil          => None
-    }
+  /** A `.mod` row is rewritten through its family's literal. A plugin row is a family of one. */
+  private def families(selected: List[ZipxCoord], coords: Seq[ZipxCoord]): List[Family] =
+    val libs                                     = libsOf(coords)
+    def literalOf(lib: Lib): ArtifactId          = lib.family.getOrElse(lib.artifact)
+    def familyOf(row: ZipxCoord): Option[Family] =
+      row match
+        case plugin: Plugin => Some(Family(plugin, ::(plugin, Nil)))
+        case lib: Lib       =>
+          libs.filter(other => other.group == lib.group && literalOf(other) == literalOf(lib)) match
+            case head :: tail => Some(Family(head.copy(artifact = literalOf(head), family = None), ::(head, tail)))
+            case Nil          => None
+    selected.flatMap(familyOf).distinctBy(_.written)
+  end families
 
   def defaultBranch(root: File): String =
     gitLine(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
@@ -207,8 +210,8 @@ object SnapshotCommands:
 
   private def libsOf(coords: Seq[ZipxCoord]): List[Lib] = coords.collect { case lib: Lib => lib }.toList
 
-  private def pinsOf(coords: Seq[ZipxCoord]): List[Lib] =
-    libsOf(coords).filter(lib => SnapshotPinAdvice.hold(lib.version).isDefined)
+  private def pinsOf(coords: Seq[ZipxCoord]): List[ZipxCoord] =
+    coords.toList.filter(row => SnapshotPinAdvice.hold(row.version).isDefined)
 
   /** The row a command names: `artifact` or `group:artifact`, or none for every candidate. */
   private def rowOf(arg: String, command: String): Option[String] =
@@ -219,16 +222,16 @@ object SnapshotCommands:
 
   private def tokensOf(arg: String): List[String] = arg.split("\\s+").toList.filter(_.nonEmpty)
 
-  private def select(row: Option[String], candidates: List[Lib], command: String): List[Lib] =
+  private def select(row: Option[String], candidates: List[ZipxCoord], command: String): List[ZipxCoord] =
     row match
       case None      => candidates
       case Some(one) =>
-        candidates.filter(lib => (lib.artifact: String) == one || s"${lib.group}:${lib.artifact}" == one) match
+        candidates.filter(row => (row.artifact: String) == one || s"${row.group}:${row.artifact}" == one) match
           case Nil =>
             sys.error(s"zipx: '$one' is not a row $command can take")
           case several if several.sizeIs > 1 && !one.contains(":") =>
             sys.error(
-              s"zipx: '$one' matches ${several.map(lib => s"${lib.group}:${lib.artifact}").mkString(", ")}. Name group:artifact."
+              s"zipx: '$one' matches ${several.map(row => s"${row.group}:${row.artifact}").mkString(", ")}. Name group:artifact."
             )
           case several =>
             several
@@ -244,13 +247,13 @@ object SnapshotCommands:
   /** The first artifact with a pointer for `line` speaks for the row: every platform publishes from one commit. */
   private def rowPointer(
       registry: ArtifactRegistry,
-      lib: Lib,
-      names: Lib => List[String],
+      row: ZipxCoord,
+      names: ZipxCoord => List[String],
       cache: File,
       headers: Map[String, String],
       line: ReleaseVersion,
   ): PointerRead =
-    PointerRead.first(names(lib).iterator.map(pointerSha(registry, lib.group, _, line, cache, headers)))
+    PointerRead.first(names(row).iterator.map(pointerSha(registry, row.group, _, line, cache, headers)))
 
   private def pointerSha(
       registry: ArtifactRegistry,

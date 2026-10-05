@@ -265,10 +265,7 @@ final case class DepBump(coord: ZipxCoord, bump: BumpKind, to: String):
   def group: String    = coord.group
   def artifact: String = coord.artifact
   def from: String     = coord.version
-  def ctor: String     =
-    coord match
-      case _: Lib    => "Lib"
-      case _: Plugin => "Plugin"
+  def ctor: String     = ZipxCatalog.constructorName(coord)
 
 /** A non-Maven catalog row: CDN / checksum / vendor pin. Not a [[ZipxCoord]]. */
 final case class Pin(

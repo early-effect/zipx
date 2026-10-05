@@ -116,11 +116,23 @@ object SnapshotPlanSpec extends ZIOSpecDefault:
         PinRewrite.pinRelease("1.4.2-SNAPSHOT", lineReleased = true) == Right("1.4.2"),
       )
     },
-    test("the catalog rewrite touches one Lib constructor") {
-      val source = """val widgets = Lib("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")"""
+    test("the catalog rewrite touches the row's own constructor") {
+      val lib    = Lib("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")
+      val plugin = Plugin("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")
+      val source =
+        """val widgets = Lib("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")
+          |val sbtWidgets = Plugin("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")""".stripMargin
       assertTrue(
-        PinRewrite.replace(source, "com.example", "widgets", widgets, "1.4.2") ==
-          Right("""val widgets = Lib("com.example", "widgets", "1.4.2")""")
+        PinRewrite.replace(source, lib, "1.4.2") ==
+          Right(
+            """val widgets = Lib("com.example", "widgets", "1.4.2")
+              |val sbtWidgets = Plugin("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")""".stripMargin
+          ),
+        PinRewrite.replace(source, plugin, "1.4.2") ==
+          Right(
+            """val widgets = Lib("com.example", "widgets", "1.4.2-1234abcd5678-SNAPSHOT")
+              |val sbtWidgets = Plugin("com.example", "widgets", "1.4.2")""".stripMargin
+          ),
       )
     },
     test("release plan names the ship and the sha, and all refuses") {
