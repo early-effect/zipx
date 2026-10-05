@@ -26,6 +26,17 @@ object PinRewrite:
         Left(SnapshotRevisionError.NotCommitPin(current).message)
   end advance
 
+  /** The stored commit the pointer of `line` names. Naming a line is the only way a pin changes lines; [[advance]]
+    * stays on the pin's own. A release row becomes a commit pin of that line. A dirty pin and the pointer are refused.
+    */
+  def moveTo(current: String, line: ReleaseVersion, pointerSha: GitSha): Either[String, Option[String]] =
+    val next = SnapshotRevision.commit(line, pointerSha).storedId
+    DepRevision.of(current) match
+      case DepRevision.Local(local) => Left(SnapshotRevisionError.Unstable(local.id).message)
+      case DepRevision.Pointer(_)   =>
+        Left(s"$current is the snapshot pointer, not a pin. Run sbt zipxSnapshotStatus.")
+      case _ => Right(Option.when(next != current)(next))
+
   /** The same line, with the sha removed. Refuses a dirty pin, a pin that is already a release, and a missing release.
     * It does not look up a newer line.
     */

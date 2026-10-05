@@ -19,6 +19,12 @@ object ZipxVersions extends zipx.ZipxVersions:
   val zioTestSbt: Lib     = zio.mod("zio-test-sbt").test
   val zioJson: Lib        = Lib("dev.zio", "zio-json", "1.1.0")
   val mimaCore: Lib       = Lib("com.typesafe", "mima-core", "1.1.5")
+  // sbt bundles a shaded copy whose TASTy still names coursier.*, so the plugin compiles against its own. The plexus
+  // archive stack is cache extraction, which resolution never uses; sbt drops it too.
+  val coursier: Lib = Lib("io.get-coursier", "coursier", "2.1.26").excluding(
+    ZipxExclude.org("org.codehaus.plexus", "plexus-archiver"),
+    ZipxExclude.org("org.codehaus.plexus", "plexus-container-default"),
+  )
   val zioBlocks: Lib      = Lib("dev.zio", "zio-blocks-schema", "0.0.51")
   val zioBlocksYaml: Lib  = zioBlocks.mod("zio-blocks-schema-yaml")
   val neotype: Lib        = Lib("io.github.kitlangton", "neotype", "0.7.0")

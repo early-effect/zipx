@@ -35,6 +35,12 @@ object Fixture:
   val assertPin          = inputKey[Unit]("assertPin <artifact> <line> <name>: the catalog pins that commit, stored form")
   val assertPointerNames = inputKey[Unit]("assertPointerNames <artifact> <line> <name>: the line's pointer names that sha")
   val assertInRegistry   = inputKey[Unit]("assertInRegistry <artifact> release <v> | commit <line> <name>")
+  val pinVersion         = inputKey[Unit]("pinVersion <artifact> <version>: set a release row the way zipxDepUpdate would")
+  val writeDocsFramework =
+    inputKey[Unit]("writeDocsFramework <version> release <v> | commit <line> <name>: publish a docs framework POM")
+
+  /** A library from outside both repos, built against heddle-mcp-apps, the way specular-site is built against heddle. */
+  val DocsGroup: String = "com.example.docs"
 
   private val pinArgs = Space ~> StringBasic ~ (Space ~> StringBasic) ~ (Space ~> StringBasic)
 
@@ -46,6 +52,41 @@ object Fixture:
     assertPin / aggregate          := false,
     assertPointerNames / aggregate := false,
     assertInRegistry / aggregate   := false,
+    pinVersion / aggregate         := false,
+    writeDocsFramework / aggregate := false,
+    pinVersion := {
+      val (artifact, version) = ((Space ~> StringBasic) ~ (Space ~> StringBasic)).parsed
+      val root                = (LocalRootProject / baseDirectory).value
+      rewritePin(root, zipxVersions.value, artifact, Right(version))
+    },
+    writeDocsFramework := {
+      val (version, want) = ((Space ~> StringBasic) ~ wanted).parsed
+      val root            = (LocalRootProject / baseDirectory).value
+      val artifact        = "docs-framework_sjs1_3"
+      revision(root, want).fold(
+        sys.error,
+        heddle =>
+          IO.write(
+            DocsGroup.split('.').foldLeft(registry)(_ / _) / artifact / version / s"$artifact-$version.pom",
+            s"""<?xml version="1.0" encoding="UTF-8"?>
+               |<project xmlns="http://maven.apache.org/POM/4.0.0">
+               |  <modelVersion>4.0.0</modelVersion>
+               |  <groupId>$DocsGroup</groupId>
+               |  <artifactId>$artifact</artifactId>
+               |  <version>$version</version>
+               |  <packaging>pom</packaging>
+               |  <dependencies>
+               |    <dependency>
+               |      <groupId>$Organization</groupId>
+               |      <artifactId>heddle-mcp-apps_sjs1_3</artifactId>
+               |      <version>$heddle</version>
+               |    </dependency>
+               |  </dependencies>
+               |</project>
+               |""".stripMargin,
+          ),
+      )
+    },
     recordSha := {
       val name = (Space ~> StringBasic).parsed
       val root = (LocalRootProject / baseDirectory).value
@@ -114,6 +155,29 @@ object Fixture:
         rev =>
           assert(selected == Vector(id.revision), s"$name: selected $selected, this build compiles ${id.revision}")
           assert(evicted.contains(rev), s"$name: evicted $evicted, expected $rev"),
+      )
+    },
+  )
+
+  /** `<artifact> release <v> | commit <line> <name>`: `consumer`'s compile graph selected that module of this fixture's
+    * organization at exactly that revision.
+    */
+  def selects(key: InputKey[Unit], consumer: ProjectReference): Seq[Setting[?]] = Seq(
+    key / aggregate := false,
+    key := {
+      val (artifact, want) = ((Space ~> StringBasic) ~ wanted).parsed
+      val root             = (LocalRootProject / baseDirectory).value
+      val selected         = (consumer / updateFull).value.configurations
+        .filter(_.configuration.name == Compile.name)
+        .flatMap(_.details)
+        .filter(d => d.organization == Organization && d.name == artifact)
+        .flatMap(_.modules)
+        .filterNot(_.evicted)
+        .map(_.module.revision)
+        .distinct
+      revision(root, want).fold(
+        sys.error,
+        rev => assert(selected == Vector(rev), s"$artifact: selected $selected, expected $rev"),
       )
     },
   )

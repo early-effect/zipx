@@ -2,34 +2,9 @@ package zipx.core
 
 import zio.test.*
 
+import RevisionGens.{commit as commitGen, line as lineGen, parsed, sha as shaGen, stamp as stampGen}
+
 object DepRevisionSpec extends ZIOSpecDefault:
-
-  private val lineGen: Gen[Any, ReleaseVersion] =
-    (for
-      major <- Gen.int(0, 5)
-      minor <- Gen.int(0, 20)
-      patch <- Gen.int(0, 9)
-    yield ReleaseVersion.make(s"$major.$minor.$patch")).collect { case Right(line) => line }
-
-  private val shaGen: Gen[Any, GitSha] =
-    Gen.listOfN(40)(Gen.elements("0123456789abcdef".toList*)).map(_.mkString).map(GitSha.make).collect {
-      case Right(sha) => sha
-    }
-
-  private val stampGen: Gen[Any, DirtyStamp] =
-    (for
-      month  <- Gen.int(1, 12)
-      day    <- Gen.int(1, 28)
-      hour   <- Gen.int(0, 23)
-      minute <- Gen.int(0, 59)
-    yield DirtyStamp.from(f"2026$month%02d$day%02d-$hour%02d$minute%02d")).collect { case Right(stamp) => stamp }
-
-  private val commitGen: Gen[Any, SnapshotRevision.Commit] =
-    (lineGen <*> shaGen).map((line, sha) => SnapshotRevision.commit(line, sha))
-
-  /** The same commit as a parse returns it: line and abbreviation, no full sha. */
-  private def parsed(commit: SnapshotRevision.Commit): SnapshotRevision.Commit =
-    SnapshotRevision.Commit(commit.line, commit.abbrev, None)
 
   def spec = suite("DepRevision")(
     test("a stored commit reads back as that commit, and its bare id as the same commit unstored") {
@@ -63,6 +38,9 @@ object DepRevisionSpec extends ZIOSpecDefault:
         DepRevision.of("1.0.0-RC1-SNAPSHOT") == DepRevision.Changing("1.0.0-RC1-SNAPSHOT"),
         DepRevision.of("2.1.25-M26") == DepRevision.Other("2.1.25-M26"),
       )
+    },
+    test("a revision renders as it was written, and reads back to itself") {
+      check(RevisionGens.revision)(revision => assertTrue(DepRevision.of(revision.render) == revision))
     },
     test("only a release number or another published version may appear in a release POM") {
       check(commitGen, lineGen) { (commit, line) =>

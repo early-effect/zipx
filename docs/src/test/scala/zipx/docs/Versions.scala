@@ -13,6 +13,10 @@ object Versions extends DocSpecSuite:
   private val zipx     = Plugin("rocks.earlyeffect", "sbt-zipx", "0.5.1")
   private val zio      = Lib("dev.zio", "zio", "2.1.26")
 
+  /** The plugin supplies Coursier's order. Only revisions with no zipx line consult it, and these examples have none.
+    */
+  private given RevisionOrder = (a, b) => a.compareTo(b)
+
   def doc = page("Versions")(
     md"""
 Extend `ZipxVersions`. Drop `MyVersions.settings` at the top of `build.sbt`. Every `Lib` / `Plugin` / `Pin` / `Action`
@@ -146,6 +150,72 @@ compares GAV only. Lib excludes never appear in `plugins.sbt`; that file is plug
           text.contains("excludeAll"),
           text.contains("""ExclusionRule(organization = "org.scala-sbt")"""),
           !text.contains("coursier-cache"),
+        )
+      ),
+    ),
+    section("The catalog wins")(
+      md"""
+A library this build depends on was built against its own revisions of the modules it uses. Those are what its author
+tested, not a statement about this build. The catalog is that statement: each `Lib` row names the revision this build
+compiles, links, tests, and publishes against, for every project that reaches the module, directly or through a
+library.
+
+So zipx forces every row. A Scala.js project has the `_sjs1_3` artifact forced and a JVM project the `_3` one, named by
+sbt's own cross function. A `.fromGraph` row has no revision of its own, so it is not forced. Nothing goes in
+`build.sbt`: no `dependencyOverrides`, no `excluding`.
+
+What a library asked for still counts in one direction. When it needs a newer revision than the row states, the
+catalog is behind, and `update` fails with the command that catches it up:
+
+| A library asked for | `update` |
+|---|---|
+| an older release, or another commit of the line the row pins | resolves, at the row's revision |
+| a newer release | fails, naming `sbt zipxDepUpdate` |
+| the release of the commit line the row pins | fails, naming `sbt 'zipxPinRelease <row>'` |
+| a commit, or the pointer, of a newer line | fails, naming `sbt 'zipxSnapshotAdvance <row> <line>'` |
+| two commits of one line of a module no row states | fails: nothing orders two shas, so pin one in the catalog |
+
+Lines are ordered by their release numbers, and a release is newer than every commit of its own line. Two commits of
+one line have no order, because a sha is not a sequence. A revision with no zipx line, such as `2.1.25-M26`, takes
+Coursier's order. A module this build compiles itself is never judged (**Snapshots and releases**).
+
+sbt's update report leaves out what a library asked of a forced module. zipx reads it from Coursier's conflict graph,
+over the cache `update` just filled, so the check fetches nothing.
+""",
+      exampleValue {
+        val zioHttp = ResolvedModule("dev.zio", "zio-http_3")
+        List("2.1.24" -> "2.1.26", "2.1.26" -> "2.1.24")
+          .flatMap((stated, wanted) => DepVersion.make(stated).toOption.map(_ -> wanted))
+          .map { (stated, wanted) =>
+            val row = Lib(GroupId("dev.zio"), ArtifactId("zio"), stated, Cross.Binary, None, Nil, None, None)
+            CatalogConflict
+              .stale(ResolvedModule("dev.zio", "zio_3"), row, List(Wanted(DepRevision.of(wanted), zioHttp)))
+              .fold(s"catalog $stated, zio-http asks $wanted: resolves at $stated")(_.message)
+          }
+          .mkString("\n")
+      }.assert(text =>
+        assertTrue(
+          text ==
+            """dev.zio:zio_3: the catalog pins 2.1.24, and dev.zio:zio-http_3 needs 2.1.26. Update the catalog: sbt zipxDepUpdate, or pin 2.1.26
+              |catalog 2.1.26, zio-http asks 2.1.24: resolves at 2.1.26""".stripMargin
+        )
+      ),
+      exampleValue {
+        val heddle = Lib("com.example", "heddle-mcp-apps", "0.9.0-1234abcd5678-SNAPSHOT")
+        val docs   = ResolvedModule("com.example", "docs-framework_sjs1_3")
+        val wanted = Wanted(DepRevision.of("0.10.0-9876fedcba09-SNAPSHOT"), docs)
+        CatalogConflict
+          .stale(ResolvedModule("com.example", "heddle-mcp-apps_sjs1_3"), heddle, List(wanted))
+          .fold("resolves")(_.message)
+      }.assert(text =>
+        assertTrue(text.endsWith("Move the pin to that line: sbt 'zipxSnapshotAdvance heddle-mcp-apps 0.10.0'"))
+      ),
+      exampleValue {
+        val commits = List("0.3.0-aaaaaaaaaaaa-SNAPSHOT", "0.3.0-bbbbbbbbbbbb-SNAPSHOT").map(DepRevision.of)
+        CatalogConflict.unpinned(ResolvedModule("com.example", "shared_3"), commits).fold("resolves")(_.message)
+      }.assert(text =>
+        assertTrue(
+          text == "com.example:shared_3 meets 0.3.0-aaaaaaaaaaaa-SNAPSHOT and 0.3.0-bbbbbbbbbbbb-SNAPSHOT, commits of 0.3.0 with no order. Pin one in the catalog."
         )
       ),
     ),
