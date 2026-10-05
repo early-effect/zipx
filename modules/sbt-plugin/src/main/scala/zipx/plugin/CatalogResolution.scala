@@ -34,16 +34,21 @@ private[plugin] object CatalogResolution:
 
   def of(module: ModuleID): ResolvedModule = ResolvedModule(module.organization, module.name)
 
-  /** Stale catalog rows and unpinned commits in `report`. In-repo modules are never judged. */
+  /** What one project's resolution saw. `excluded` are the modules zipx keeps every library from bringing, so the
+    * report has no edge from a library to one.
+    */
+  final case class Seen(report: UpdateReport, inRepo: Set[ResolvedModule], excluded: Set[ResolvedModule])
+
+  /** Stale catalog rows and unpinned commits. In-repo modules are never judged. */
   def conflicts(
-      report: UpdateReport,
+      seen: Seen,
       forced: List[(ResolvedModule, Lib)],
-      inRepo: Set[ResolvedModule],
       conf: CoursierConfiguration,
       log: Logger,
   ): List[CatalogConflict] =
-    val rows  = forced.toMap
-    val stale = CatalogProbe.wanted(report, rows.keySet, inRepo, conf) match
+    val Seen(report, inRepo, _) = seen
+    val rows                    = forced.toMap
+    val stale                   = CatalogProbe.wanted(seen, rows.keySet, conf) match
       case Left(err) =>
         log.warn(s"zipx: ${err.message}")
         Nil

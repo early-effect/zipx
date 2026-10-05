@@ -9,7 +9,7 @@ import coursier.params.{Mirror, ResolutionParams}
 import coursier.version.VersionConstraint
 import coursier.{CoursierEnv, Resolve}
 import lmcoursier.CoursierConfiguration
-import sbt.librarymanagement.{ConfigurationReport, FileRepository, Patterns, Resolver, URLRepository, UpdateReport}
+import sbt.librarymanagement.{ConfigurationReport, FileRepository, Patterns, Resolver, URLRepository}
 import zipx.core.*
 
 import java.io.File
@@ -36,19 +36,25 @@ private[plugin] object CatalogProbe:
       callers: Map[ResolvedModule, Set[ResolvedModule]],
   )
 
+  /** A configuration is probed when a forced module in it has a caller outside the build, or is one zipx excluded,
+    * whose library callers the report no longer shows.
+    */
   def wanted(
-      report: UpdateReport,
+      seen: CatalogResolution.Seen,
       forced: Set[ResolvedModule],
-      inRepo: Set[ResolvedModule],
       conf: CoursierConfiguration,
   ): Either[ProbeError, Map[ResolvedModule, List[Wanted]]] =
-    val graphs = report.configurations.toList
+    val graphs = seen.report.configurations.toList
       .map(config => config.configuration.name -> graphOf(config))
-      .filter((_, graph) => graph.callers.exists((module, by) => forced.contains(module) && !by.subsetOf(inRepo)))
+      .filter { (_, graph) =>
+        graph.callers.exists { (module, by) =>
+          forced.contains(module) && (!by.subsetOf(seen.inRepo) || seen.excluded.contains(module))
+        }
+      }
       .distinctBy((_, graph) => graph)
     graphs
       .foldLeft[Either[ProbeError, List[(ResolvedModule, Wanted)]]](Right(Nil)) { case (found, (config, graph)) =>
-        found.flatMap(sofar => conflictsOf(config, graph, forced, inRepo, conf).map(sofar ++ _))
+        found.flatMap(sofar => conflictsOf(config, graph, forced, seen, conf).map(sofar ++ _))
       }
       .map(_.distinct.groupMap((module, _) => module)((_, want) => want))
   end wanted
@@ -66,16 +72,18 @@ private[plugin] object CatalogProbe:
   end graphOf
 
   /** Rooted at the external modules this build depends on directly, with every external module forced to its selected
-    * revision and the in-repo ones left out (no registry holds them). Only conflicts on an edge the real graph has
-    * count, so an exclusion the probe does not repeat cannot invent one.
+    * revision and the in-repo ones left out (no registry holds them). A conflict counts on an edge the real graph has,
+    * or on an edge to a module zipx excluded from a library the graph resolved, so an exclusion the probe does not
+    * repeat cannot invent one.
     */
   private def conflictsOf(
       config: String,
       graph: Graph,
       forced: Set[ResolvedModule],
-      inRepo: Set[ResolvedModule],
+      seen: CatalogResolution.Seen,
       conf: CoursierConfiguration,
   ): Either[ProbeError, List[(ResolvedModule, Wanted)]] =
+    val inRepo   = seen.inRepo
     val external = graph.selected.filterNot((module, _) => inRepo.contains(module))
     val roots    = external.toList.collect {
       case (module, revision) if graph.callers.get(module).exists(_.exists(inRepo.contains)) =>
@@ -105,7 +113,8 @@ private[plugin] object CatalogProbe:
       Conflict(resolution).toList.flatMap { conflict =>
         val module = of(conflict.module)
         val by     = of(conflict.dependeeModule)
-        val onEdge = graph.callers.get(module).exists(_.contains(by))
+        val onEdge = graph.callers.get(module).exists(_.contains(by)) ||
+          (seen.excluded.contains(module) && graph.selected.contains(by))
         wantedOf(conflict.wantedVersionConstraint)
           .filter(_ => forced.contains(module) && onEdge)
           .map(raw => module -> Wanted(DepRevision.of(raw), by))

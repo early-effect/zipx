@@ -628,8 +628,9 @@ commit snapshot of the line this build is still on. Two repos that depend on eac
 other repo is built against an older commit of yours, because it cannot depend on the commit that depends on it.
 
 When a project here depends on that library and on the in-repo module, sbt compiles the in-repo project, whatever
-revision the library asked for. That revision is evicted. Say a docs framework was built against `client` 0.3.0, or
-against `client` `0.4.0-1234abcd5678`, and this build compiles `client` `0.4.0-ci`:
+revision the library asked for. The project keeps the library from bringing the module at all (next section), so that
+revision does not reach the graph; where it reaches it another way, it is evicted. Say a docs framework was built
+against `client` 0.3.0, or against `client` `0.4.0-1234abcd5678`, and this build compiles `client` `0.4.0-ci`:
 
 | Library asked for | This build compiles | `update` |
 |---|---|---|
@@ -648,6 +649,54 @@ the library is behind: advance its pin of this repo.
 A module this repo pins in the catalog, and does not build, wins the same way. **Versions** covers that half,
 including the one case `update` refuses: a library that needs a newer revision than the catalog states.
 """
+    ),
+    section("What a consumer resolves")(
+      md"""
+A consumer of a published project meets that project's POM and every library's POM at once. When a library names an
+older commit of a module the project states, nothing orders the two commits for the consumer, so it could resolve
+either, and a zipx consumer whose catalog states neither refuses the pair.
+
+So a published POM keeps each of its libraries from bringing what the project states itself:
+
+- every in-repo module a consumer inherits through it: compile and runtime dependencies, transitively. A `test`,
+  `provided`, or `optional` dependency is not inherited, so it is not excluded.
+- every commit pin the project declares in a scope a consumer inherits.
+
+The consumer resolves one revision, the one the project was built with. A release is left to the consumer's own order,
+which is meaningful for releases. Resolution in this build reads the same list, so what it compiles and what it
+publishes agree. Toolchain dependencies (the Scala, Scala.js, and Native libraries) carry no exclusions.
+
+```xml
+<dependency>
+  <groupId>com.example</groupId>
+  <artifactId>docs-framework_3</artifactId>
+  <version>1.1.0</version>
+  <exclusions>
+    <exclusion>
+      <groupId>com.example</groupId>
+      <artifactId>models_3</artifactId>
+    </exclusion>
+    <exclusion>
+      <groupId>com.example</groupId>
+      <artifactId>widgets_3</artifactId>
+    </exclusion>
+  </exclusions>
+</dependency>
+```
+""",
+      exampleValue {
+        val client               = ResolvedModule("com.example", "client_3")
+        def module(name: String) = ResolvedModule("com.example", name)
+        val inRepo               = Map(
+          client -> List(PomEdge(PomScope.Compile, module("models_3")), PomEdge(PomScope.Test, module("testkit_3")))
+        )
+        val declared = List(
+          PomDependency(PomScope.Compile, module("widgets_3"), DepRevision.of("1.4.2-1234abcd5678-SNAPSHOT")),
+          PomDependency(PomScope.Compile, module("zio_3"), DepRevision.of("2.1.26")),
+          PomDependency(PomScope.Test, module("fixtures_3"), DepRevision.of("0.2.0-9876fedcba09-SNAPSHOT")),
+        )
+        PomExclusions.of(client, inRepo, declared).map(_.name)
+      }.assert(excluded => assertTrue(excluded == List("models_3", "widgets_3"))),
     ),
   )
 end SnapshotsAndReleases

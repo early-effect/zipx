@@ -42,7 +42,7 @@ $ exec git commit -q -m h1
 > assertHeddleNamesFacade h1 commit 0.11.0 a1
 
 # 4. Ascent moves on (a2, same 0.11.0 line) and pins heddle h0, built against facade 0.10.0. The app and the docs
-# site compile the in-repo facade; what heddle asked for is evicted and fails nothing.
+# site compile the in-repo facade. What heddle asked for never enters the graph: the app keeps heddle from bringing it.
 $ copy-file project/ZipxVersions.scala saved/HeddleVersions.scala
 $ copy-file saved/ascent.sbt build.sbt
 $ copy-file saved/AscentVersions.scala project/ZipxVersions.scala
@@ -126,6 +126,7 @@ $ exec git commit -q -m h3
 > recordSha h3
 > zipxSnapshotPublish
 > assertPointerNames heddle-mcp-apps_sjs1_3 0.10.0 h3
+> assertNextHeddleNamesFacade h3 commit 0.11.0 a1
 $ copy-file saved/ascent.sbt build.sbt
 $ copy-file saved/AscentVersions.scala project/ZipxVersions.scala
 > reload
@@ -141,3 +142,21 @@ $ copy-file saved/AscentVersions.scala project/ZipxVersions.scala
 > docsJS/update
 > assertDocsSelects heddle-mcp-apps_sjs1_3 commit 0.10.0 h3
 > mcpAppJS/compile
+
+# 10. Ascent publishes a3. The app's POM keeps heddle-mcp-apps, built against facade a1, from bringing the facade or js:
+# the app states both itself.
+$ exec git add -A
+$ exec git commit -q -m a3
+> recordSha a3
+> zipxSnapshotPublish
+> assertAppExcludes a3 ascent-dom-facade_sjs1_3 ascent-js_sjs1_3
+
+# 11. A third repo depends only on the app at a3. It meets heddle's POM and the app's at once, and resolves one facade:
+# a3, the one the app was built with. Nothing orders a1 and a3, so without the app's exclusions update would refuse.
+$ copy-file changes/demo.sbt build.sbt
+$ copy-file changes/DemoVersions.scala project/ZipxVersions.scala
+> reload
+> pinCommit ascent-mcp-app 0.10.0 a3
+> reload
+> demoJS/update
+> assertDemoSelects ascent-dom-facade_sjs1_3 commit 0.11.0 a3

@@ -23,3 +23,6 @@ lazy val root = (project in file("."))
 
 val assertHeddleNamesFacade = inputKey[Unit]("heddle's POM at a recorded commit names the facade it was built against")
 Fixture.pomNames(assertHeddleNamesFacade, "heddle_sjs1_3", "0.9.0", "ascent-dom-facade_sjs1_3")
+
+val assertNextHeddleNamesFacade = inputKey[Unit]("the same, on heddle's 0.10.0 line")
+Fixture.pomNames(assertNextHeddleNamesFacade, "heddle_sjs1_3", "0.10.0", "ascent-dom-facade_sjs1_3")

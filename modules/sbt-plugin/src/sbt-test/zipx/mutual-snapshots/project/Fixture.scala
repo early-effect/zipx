@@ -131,8 +131,8 @@ object Fixture:
     },
   )
 
-  /** `consumer` compiles `module` from this build, whatever revision a library asked for, and that revision is
-    * evicted.
+  /** `consumer` compiles `module` from this build, whatever revision a library asked for. That revision never enters
+    * the graph: the project depending on the library keeps it from bringing a module the build states itself.
     */
   def inRepoWins(key: InputKey[Unit], consumer: ProjectReference, module: ProjectReference): Seq[Setting[?]] = Seq(
     key / aggregate := false,
@@ -154,7 +154,7 @@ object Fixture:
         sys.error,
         rev =>
           assert(selected == Vector(id.revision), s"$name: selected $selected, this build compiles ${id.revision}")
-          assert(evicted.contains(rev), s"$name: evicted $evicted, expected $rev"),
+          assert(!evicted.contains(rev), s"$name: $rev reached the graph and was evicted, $evicted"),
       )
     },
   )
@@ -199,6 +199,30 @@ object Fixture:
             .toRight(s"$artifact $own does not depend on $dependency")
         yield (named, dep)
       checked.fold(sys.error, { case (named, dep) => assert(named == dep, s"$artifact names $dependency $named, not $dep") })
+    },
+  )
+
+  /** `<name> <excluded>...`: the POM `artifact` published at the commit recorded under `<name>` keeps its dependency on
+    * `dependency` from bringing exactly those modules.
+    */
+  def pomExcludes(key: InputKey[Unit], artifact: String, line: String, dependency: String): Seq[Setting[?]] = Seq(
+    key / aggregate := false,
+    key := {
+      val (name, expected) = ((Space ~> StringBasic) ~ (Space ~> StringBasic).*).parsed
+      val root             = (LocalRootProject / baseDirectory).value
+      val checked          =
+        for
+          own      <- revision(root, Wanted.Commit(line, name))
+          file     <- pom(organizationDir / artifact / own).toRight(s"no POM for $artifact $own")
+          excluded <- (scala.xml.XML.loadFile(file) \\ "dependency")
+            .find(d => (d \ "artifactId").text == dependency)
+            .map(d => (d \ "exclusions" \ "exclusion").map(e => (e \ "artifactId").text).toSet)
+            .toRight(s"$artifact $own does not depend on $dependency")
+        yield excluded
+      checked.fold(
+        sys.error,
+        excluded => assert(excluded == expected.toSet, s"$artifact keeps $dependency from $excluded, not $expected"),
+      )
     },
   )
 
