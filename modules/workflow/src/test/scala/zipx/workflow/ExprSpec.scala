@@ -152,7 +152,7 @@ object ExprSpec extends ZIOSpecDefault:
       },
     ),
     suite("operators")(
-      test("&& and || join bare, and only Group emits a paren") {
+      test("a comparison joins bare, since it binds tighter than && and ||") {
         val a = Expr.github("event_name") === Expr.quoted("push")
         val b = Expr.jobResult("gate") !== Expr.quoted("success")
         assertTrue(
@@ -161,11 +161,18 @@ object ExprSpec extends ZIOSpecDefault:
           Expr.group(a).unwrapped == "(github.event_name == 'push')",
         )
       },
-      test("! negates without parens, so !( … ) is written explicitly") {
-        val call = Expr.cancelled
+      test("an operand that binds looser than its position renders in parens, so the YAML means what the tree says") {
+        val (a, b, c) = (Expr.lit("a"), Expr.lit("b"), Expr.lit("c"))
         assertTrue(
-          (!call).unwrapped == "!cancelled()",
-          (!Expr.group(call)).unwrapped == "!(cancelled())",
+          (!(a && b)).unwrapped == "!(a && b)",
+          (!(a === b)).unwrapped == "!(a == b)",
+          ((a || b) && c).unwrapped == "(a || b) && c",
+          ((a && b) === c).unwrapped == "(a && b) == c",
+          (!Expr.raw("a && b")).unwrapped == "!(a && b)",
+          (!Expr.cancelled).unwrapped == "!cancelled()",
+          (!Expr.group(Expr.cancelled)).unwrapped == "!(cancelled())",
+          (a && (b && c)).unwrapped == "a && b && c",
+          (a || (b || c)).unwrapped == "a || b || c",
         )
       },
       test("the planner's verify gate composes to the exact string it has always emitted") {

@@ -6,8 +6,8 @@ import zipx.shell.ShText
 /** [[Expr.Lit]], [[Expr.Quoted]] and [[Expr.Raw]] render bare where every other case wraps in `\${{ … }}`, which lets
   * [[Expr.Concat]] build `sbt-\${{ runner.os }}-key` without an interpolator.
   *
-  * Grouping is explicit: [[&&]] and [[||]] join bare and only [[Expr.Group]] emits a paren. `JobCondition` instead
-  * parenthesizes every clause, because it composes user-supplied conditions of unknown shape.
+  * An operand that binds looser than its position renders in parens, so the rendered expression means what the tree
+  * says.
   */
 enum Expr:
 
@@ -81,17 +81,28 @@ enum Expr:
     case JobResult(id)        => s"needs.$id.result"
     case Matrix(axis)         => s"matrix.${axis.unwrap}"
     case Input(name)          => s"inputs.$name"
-    case Member(of, key)      => s"${of.unwrapped}.$key"
-    case Index(of, key)       => s"${of.unwrapped}[${key.unwrapped}]"
+    case Member(of, key)      => s"${of.operand(Binding.Atom)}.$key"
+    case Index(of, key)       => s"${of.operand(Binding.Atom)}[${key.unwrapped}]"
     case Lit(text)            => text.unwrap
     case Quoted(text)         => s"'${text.unwrap}'"
     case Call(fn, args)       => s"${fn.unwrap}(${args.map(_.unwrapped).mkString(", ")})"
-    case Compare(l, op, r)    => s"${l.unwrapped} ${op.symbol} ${r.unwrapped}"
-    case Join(l, op, r)       => s"${l.unwrapped} ${op.symbol} ${r.unwrapped}"
-    case Not(inner)           => s"!${inner.unwrapped}"
+    case Compare(l, op, r)    => s"${l.operand(Binding.Equality)} ${op.symbol} ${r.operand(Binding.Negation)}"
+    case Join(l, op, r)       => s"${l.operand(op.binding)} ${op.symbol} ${r.operand(op.binding)}"
+    case Not(inner)           => s"!${inner.operand(Binding.Negation)}"
     case Group(inner)         => s"(${inner.unwrapped})"
     case Concat(parts)        => parts.map(_.unwrapped).mkString
     case Raw(expression)      => expression.unwrap
+
+  /** A raw expression's shape is unknown, so it binds loosest. */
+  private def binding: Binding = this match
+    case Join(_, op, _)   => op.binding
+    case Compare(_, _, _) => Binding.Equality
+    case Not(_)           => Binding.Negation
+    case Raw(_)           => Binding.Or
+    case _                => Binding.Atom
+
+  private def operand(position: Binding): String =
+    if binding.ordinal < position.ordinal then s"($unwrapped)" else unwrapped
 
   /** Not `==`, which is `Any`'s and cannot be an expression. */
   infix def ===(other: Expr): Expr = Compare(this, CompareOp.Eq, other)
@@ -102,7 +113,6 @@ enum Expr:
 
   infix def ||(other: Expr): Expr = Join(this, JoinOp.Or, other)
 
-  /** No parens: `!(a && b)` renders `!a && b`. Write `!Expr.group(a && b)`. */
   def unary_! : Expr = Not(this)
 
   def member(key: PropertyName): Expr = Member(this, key)
@@ -132,9 +142,13 @@ enum CompareOp(val symbol: String):
   case Eq extends CompareOp("==")
   case Ne extends CompareOp("!=")
 
-enum JoinOp(val symbol: String):
-  case And extends JoinOp("&&")
-  case Or  extends JoinOp("||")
+enum JoinOp(val symbol: String, val binding: Binding):
+  case And extends JoinOp("&&", Binding.And)
+  case Or  extends JoinOp("||", Binding.Or)
+
+/** GitHub's expression precedence, loosest first. */
+enum Binding:
+  case Or, And, Equality, Negation, Atom
 
 object Expr:
 
