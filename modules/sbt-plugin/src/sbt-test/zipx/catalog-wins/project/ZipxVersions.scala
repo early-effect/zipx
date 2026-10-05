@@ -1,4 +1,3 @@
-import sbt.{ModuleID, Setting}
 import zipx.*
 
 // core is stated at one commit. old-client was built against an older line and peer-client against another commit of
@@ -12,10 +11,3 @@ object MyVersions extends ZipxVersions:
 
   def clients: Seq[Lib] = Seq(oldClient, peerClient)
 end MyVersions
-
-/** What build.sbt reads. sbt does not recompile an inline `settings` expansion when the catalog gains or loses a row,
-  * so the expansion lives in the file each scenario swaps.
-  */
-object Scenario:
-  def catalog: Seq[Setting[?]] = MyVersions.settings
-  def clients: Seq[ModuleID]   = MyVersions.deps(MyVersions.clients*)

@@ -1,4 +1,3 @@
-import sbt.{ModuleID, Setting}
 import zipx.*
 
 // The catalog moved to the line new-client needs.
@@ -10,7 +9,3 @@ object MyVersions extends ZipxVersions:
 
   def clients: Seq[Lib] = Seq(newClient)
 end MyVersions
-
-object Scenario:
-  def catalog: Seq[Setting[?]] = MyVersions.settings
-  def clients: Seq[ModuleID]   = MyVersions.deps(MyVersions.clients*)

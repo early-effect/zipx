@@ -45,10 +45,9 @@ val ZipxSelf = zipx.plugin.ZipxSelf
   */
 trait ZipxVersions extends Catalog:
   /** Drop at the top of `build.sbt`. Bare `scalaVersion` (sbt 2 common setting, no `ThisBuild`) plus the zipx catalog
-    * keys generate and `zipxCheckDeps` read. Inline so [[coords]] / [[pins]] / [[actions]] expand against the concrete
-    * object.
+    * keys generate and `zipxCheckDeps` read.
     */
-  inline def settings: Seq[Setting[?]] = ZipxVersions.applySettings(sbt, scala, coords, pins, actions, ships)
+  def settings: Seq[Setting[?]] = ZipxVersions.applySettings(sbt, scala, coords, pins, actions, ships)
 
   /** Per-module `crossScalaVersions` from [[crossScala]]. Scala-3-only modules inherit [[settings]] and skip this. */
   def cross: Seq[Setting[?]] = Seq(
