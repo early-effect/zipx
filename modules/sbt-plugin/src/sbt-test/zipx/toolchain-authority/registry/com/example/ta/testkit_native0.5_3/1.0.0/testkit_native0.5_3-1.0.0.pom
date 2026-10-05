@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example.ta</groupId>
+  <artifactId>testkit_native0.5_3</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+  <dependencies>
+    <dependency>
+      <groupId>org.scala-native</groupId>
+      <artifactId>test-interface_native0.5_3</artifactId>
+      <version>0.5.10</version>
+    </dependency>
+  </dependencies>
+</project>

@@ -164,6 +164,10 @@ So zipx forces every row. A Scala.js project has the `_sjs1_3` artifact forced a
 sbt's own cross function. A `.fromGraph` row has no revision of its own, so it is not forced. Nothing goes in
 `build.sbt`: no `dependencyOverrides`, no `excluding`.
 
+A platform plugin's own runtime is stated the same way, by its `Plugin` row. sbt-scalajs and sbt-scala-native inject
+their libraries and test interface at the plugin's version, and zipx forces those too. A test library built against an
+older Native `test-interface` never decides which one talks to the plugin's test runner.
+
 What a library asked for still counts in one direction. When it needs a newer revision than the row states, the
 catalog is behind, and `update` fails with the command that catches it up:
 
