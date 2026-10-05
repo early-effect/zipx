@@ -31,9 +31,41 @@ object CatalogSource:
     val ships   = List.newBuilder[PublishedRow]
     var sbt     = Option.empty[SbtVersion]
     var scala   = Option.empty[ScalaVersion]
+    // Every Lib a val names so far, so `x.mod("b")` reads the row `x` names.
+    val rows = _root_.scala.collection.mutable.Map.empty[String, Lib]
+
+    /** The row a val's right-hand side builds, read the way the DSL builds it. */
+    def libOf(t: Tree): Option[Lib] =
+      t match
+        case Apply(fun, args) if isCtor(fun, "Lib") =>
+          lits(args) match
+            case g :: a :: v :: _ => mkLib(g, a, v)
+            case _                => None
+        case Apply(Select(base, name), Literal(c) :: Nil) if name.toString == "mod" && c.tag == Constants.StringTag =>
+          for
+            row      <- libOf(base)
+            artifact <- ArtifactId.make(c.stringValue).toOption
+          yield row.copy(artifact = artifact, family = Some(row.artifact))
+        case Apply(Select(base, name), _) if name.toString == "excluding" => libOf(base)
+        case Select(base, name)                                           =>
+          name.toString match
+            case "test"      => libOf(base).map(_.test)
+            case "java"      => libOf(base).map(_.java)
+            case "full"      => libOf(base).map(_.full)
+            case "fromGraph" => libOf(base).map(_.fromGraph)
+            case _           => None
+        case Ident(name)    => rows.get(name.toString)
+        case Parens(inner)  => libOf(inner)
+        case Typed(expr, _) => libOf(expr)
+        case _              => None
 
     def go(t: Tree): Unit =
       t match
+        case vd: ValDef if libOf(vd.rhs).isDefined =>
+          libOf(vd.rhs).foreach { row =>
+            rows(vd.name.toString) = row
+            libs += row
+          }
         case Apply(Apply(fun, args1), args2) if isCtor(fun, "ShipGroup") =>
           (lits(args1), memberLits(args2)) match
             case (n :: v :: _, members) => mkGroup(n, v, members).foreach(ships += _)

@@ -2,6 +2,8 @@ package zipx.core
 
 import zio.test.*
 
+import scala.collection.mutable.ListBuffer
+
 object MavenMetadataSpec extends ZIOSpecDefault:
 
   private val xml =
@@ -9,6 +11,11 @@ object MavenMetadataSpec extends ZIOSpecDefault:
       |  <versioning>
       |    <latest>2.1.0-alpha1</latest>
       |    <release>2.0.18</release>
+      |    <versions>
+      |      <version>2.0.17</version>
+      |      <version>2.0.18</version>
+      |      <version>2.1.0-alpha1</version>
+      |    </versions>
       |  </versioning>
       |</metadata>""".stripMargin
 
@@ -16,58 +23,44 @@ object MavenMetadataSpec extends ZIOSpecDefault:
   private val scalafmt = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
 
   def spec = suite("MavenMetadata")(
-    test("Skip prefers a stable <release> over an alpha <latest>") {
-      assertTrue(MavenMetadata.parseLatest(xml, PreRelease.Skip) == Some("2.0.18"))
+    test("every listed version is read, in order, pre-releases included") {
+      assertTrue(MavenMetadata.versionsIn(xml) == List("2.0.17", "2.0.18", "2.1.0-alpha1"))
     },
-    test("Include prefers <latest> even when it is a pre-release") {
-      assertTrue(MavenMetadata.parseLatest(xml, PreRelease.Include) == Some("2.1.0-alpha1"))
-    },
-    test("Skip drops a pre-release when it is the only version") {
-      val onlyAlpha =
-        """<metadata>
-          |  <versioning>
-          |    <latest>2.1.0-alpha1</latest>
-          |    <release>2.1.0-alpha1</release>
-          |  </versioning>
-          |</metadata>""".stripMargin
-      assertTrue(MavenMetadata.parseLatest(onlyAlpha, PreRelease.Skip).isEmpty)
-    },
-    test("Lib metadata is Maven Central only") {
-      val urls = MavenMetadata.metadataUrls(zio, "3", "2.0.0")
+    test("a Lib's metadata is Maven Central only, under the name it is asked for") {
       assertTrue(
-        urls == List("https://repo1.maven.org/maven2/dev/zio/zio_3/maven-metadata.xml")
+        MavenMetadata.metadataUrls(zio, "zio_sjs1_3") ==
+          List("https://repo1.maven.org/maven2/dev/zio/zio_sjs1_3/maven-metadata.xml")
       )
     },
-    test("Plugin metadata is Central then the sbt plugin repo") {
-      val urls = MavenMetadata.metadataUrls(scalafmt, "3", "2.0.0")
+    test("a Plugin's metadata is Central, then the sbt plugin repo") {
+      val urls = MavenMetadata.metadataUrls(scalafmt, "sbt-scalafmt_sbt2_3")
       assertTrue(
-        urls.head.contains("repo1.maven.org"),
-        urls.lift(1).exists(_.contains("repo.scala-sbt.org")),
         urls.length == 2,
+        urls.headOption.exists(_.contains("repo1.maven.org")),
+        urls.lift(1).exists(_.contains("repo.scala-sbt.org")),
       )
     },
-    test("Plugin lookup skips the plugin repo after a Central hit") {
-      var seen: List[String] = Nil
-      val fetch              = (url: String) =>
-        seen = seen :+ url
-        Right(Some("2.6.3"))
-      val out = MavenMetadata.latest(scalafmt, "3", "2.0.0", fetch)
-      assertTrue(out == Right(Some("2.6.3")), seen.length == 1, seen.head.contains("repo1.maven.org"))
-    },
-    test("Plugin lookup tries the sbt repo after a Central miss") {
-      var seen: List[String] = Nil
-      val fetch              = (url: String) =>
-        seen = seen :+ url
-        if url.contains("repo1.maven.org") then Right(None) else Right(Some("2.6.3"))
-      val out = MavenMetadata.latest(scalafmt, "3", "2.0.0", fetch)
-      assertTrue(out == Right(Some("2.6.3")), seen.length == 2, seen(1).contains("repo.scala-sbt.org"))
+    test("a Central hit never reaches the plugin repo, and a Central miss does") {
+      val seen    = ListBuffer.empty[String]
+      val hit     = MavenMetadata.lookup { url => seen += url; Right(Some(List("2.6.3"))) }
+      val hitOut  = hit.versions(scalafmt, "sbt-scalafmt_sbt2_3")
+      val hitSeen = seen.toList
+      seen.clear()
+      val miss = MavenMetadata.lookup { url =>
+        seen += url
+        if url.contains("repo1.maven.org") then Right(None) else Right(Some(List("2.6.3")))
+      }
+      val missOut = miss.versions(scalafmt, "sbt-scalafmt_sbt2_3")
+      assertTrue(
+        hitOut == Right(Some(List("2.6.3"))),
+        hitSeen.length == 1,
+        missOut == Right(Some(List("2.6.3"))),
+        seen.lift(1).exists(_.contains("repo.scala-sbt.org")),
+      )
     },
     test("a Central error does not fall through to the plugin repo") {
-      var seen: List[String] = Nil
-      val fetch              = (url: String) =>
-        seen = seen :+ url
-        Left("HTTP 503")
-      val out = MavenMetadata.latest(scalafmt, "3", "2.0.0", fetch)
+      val seen = ListBuffer.empty[String]
+      val out  = MavenMetadata.lookup { url => seen += url; Left("HTTP 503") }.versions(scalafmt, "sbt-scalafmt_sbt2_3")
       assertTrue(out == Left("HTTP 503"), seen.length == 1)
     },
   )
