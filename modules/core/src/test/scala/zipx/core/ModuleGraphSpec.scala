@@ -62,9 +62,6 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       )
     },
     test("the test-scope fixture throws where make reports, so a bad fixture fails at the fixture") {
-      // `make` is the only constructor `src/main` offers; `GraphFixture` is the test-scope helper that unwraps it, and a
-      // cycle in a literal node list is a bug in the test rather than user input. Asserted so the helper cannot quietly
-      // start returning some default graph instead.
       assertTrue(
         scala.util
           .Try(GraphFixture(List(ModuleNode(ModuleId("a"), List("b")), ModuleNode(ModuleId("b"), List("a")))))
@@ -105,7 +102,6 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       assertTrue(cyclic.isLeft, cyclic.swap.exists(_.contains("a, b, c")))
     },
     test("cycle reports the names without building a graph, for a caller wording its own error") {
-      // Edges rather than nodes: the caller that needs this is ordering capabilities, whose names are not module ids.
       assertTrue(
         ModuleGraph.cycle(Map("a" -> List("b"), "b" -> List("a"))) == Some(List("a", "b")),
         ModuleGraph.cycle(Map("a" -> Nil, "b" -> List("a"))).isEmpty,
@@ -127,7 +123,6 @@ object ModuleGraphSpec extends ZIOSpecDefault:
       )
     },
     test("mapNodes ignores edits to id and dependsOn, which is what makes it total") {
-      // A structure-preserving map cannot invalidate the layers, so there is no cycle to report and no Either to unwrap.
       val rewired = sampleGraph.mapNodes(n => n.copy(id = ModuleId("renamed"), dependsOn = List("clientA")))
       assertTrue(
         rewired.ids == sampleGraph.ids,

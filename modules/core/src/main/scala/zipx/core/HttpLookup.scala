@@ -8,11 +8,6 @@ import java.util.concurrent.ConcurrentHashMap
 import scala.jdk.CollectionConverters.*
 import zio.*
 
-/** One HTTP GET/POST with first-attempt jitter, exponential retry, and Retry-After.
-  *
-  * sbt tasks stay `Either[String, A]`. Tests inject `send`, `retry`, and `firstJitter` and drive ZIO `Clock` / `Random`
-  * so they never hit the network or sleep wall-clock time.
-  */
 final case class HttpLookupResult(
     status: Int,
     body: String,
@@ -27,6 +22,9 @@ final case class HttpLookupResult(
   def isMiss: Boolean            = status == 404 || status == 410 || status == 304
 end HttpLookupResult
 
+/** One HTTP GET/POST with first-attempt jitter, exponential retry, and Retry-After. The public calls return `Either`
+  * for sbt tasks; the effects under them wait on ZIO `Clock` / `Random`, so tests never sleep wall-clock time.
+  */
 object HttpLookup:
 
   type Send = HttpRequest => Task[HttpLookupResult]
@@ -43,9 +41,8 @@ object HttpLookup:
   private val client: HttpClient =
     HttpClient.newBuilder().connectTimeout(ConnectTimeout).build()
 
-  /** Where a 3xx GET keeps the bytes. GitHub Packages answers 302 for an authenticated jar and puts the artifact at
-    * `Location`, a pre-signed URL on another host. `None` means this status is the answer, including a 302 with no
-    * location.
+  /** GitHub Packages answers 302 for an authenticated jar, with the artifact at a pre-signed `Location` on another
+    * host. `None` means this status is the answer, including a 302 with no location.
     */
   def redirectTarget(status: Int, location: Option[String], requestUrl: String): Option[String] =
     status match
@@ -53,10 +50,9 @@ object HttpLookup:
         location.filter(_.nonEmpty).map(loc => URI.create(requestUrl).resolve(loc).toString)
       case _ => None
 
-  /** `followRedirect` fetches one 301/302/303/307/308 hop and drops `Authorization` on it. GitHub Packages and
-    * CodeArtifact answer an authenticated POM, jar, or `maven-metadata.xml` with a pre-signed URL on another host. The
-    * hop's status is the artifact: 200 is published, 404 is a miss. A redirect with no location stays an error. API
-    * callers leave this off, because their redirects still need the credential.
+  /** `followRedirect` fetches one 3xx hop without `Authorization`, whose status is the answer: GitHub Packages and
+    * CodeArtifact redirect an authenticated artifact GET to a pre-signed URL on another host. API callers leave it off,
+    * since their redirects still need the credential.
     */
   def get(
       url: String,

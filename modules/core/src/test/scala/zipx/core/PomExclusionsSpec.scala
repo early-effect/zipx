@@ -12,7 +12,7 @@ object PomExclusionsSpec extends ZIOSpecDefault:
 
   private val scope: Gen[Any, PomScope] = Gen.elements(PomScope.values.toList*)
 
-  /** In-repo projects rooted at `m0`, where a project only depends on a later one, each edge in some scope. */
+  /** Acyclic by construction: a project only depends on a later one. */
   private val inRepo: Gen[Any, Map[ResolvedModule, List[PomEdge]]] =
     for
       count <- Gen.int(2, 7)

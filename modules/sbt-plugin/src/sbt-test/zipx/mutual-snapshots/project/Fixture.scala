@@ -5,9 +5,6 @@ import sbt.complete.Parser
 import zipx.core.{ArtifactRegistry, GitSha, Lib, PinRewrite, ReleaseVersion, ReleaseWorkflow, SnapshotRevision, ZipxCoord}
 import zipx.plugin.ZipxPlugin.autoImport.zipxVersions
 
-/** What both repos in this fixture share: one registry, commit ids recorded by name, and the catalog edit a person
-  * makes when they pin another repo's commit.
-  */
 object Fixture:
   val Organization: String = "com.example.ee"
 
@@ -15,10 +12,8 @@ object Fixture:
 
   val releaseWorkflow: ReleaseWorkflow = ReleaseWorkflow(ArtifactRegistry.Url(registry.toURI.toString))
 
-  /** Ascent and heddle both name their snapshot repository in the build. */
   val resolve: Setting[?] = resolvers += "fixture" at registry.toURI.toString
 
-  /** A revision a library asked for: a release, or a commit recorded under a name. */
   enum Wanted:
     case Release(version: String)
     case Commit(line: String, shaName: String)
@@ -39,7 +34,7 @@ object Fixture:
   val writeDocsFramework =
     inputKey[Unit]("writeDocsFramework <version> release <v> | commit <line> <name>: publish a docs framework POM")
 
-  /** A library from outside both repos, built against heddle-mcp-apps, the way specular-site is built against heddle. */
+  /** A library from outside both repos, built against heddle-mcp-apps. */
   val DocsGroup: String = "com.example.docs"
 
   private val pinArgs = Space ~> StringBasic ~ (Space ~> StringBasic) ~ (Space ~> StringBasic)

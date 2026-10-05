@@ -9,17 +9,14 @@ import dotty.tools.dotc.parsing.Parsers
 import dotty.tools.dotc.reporting.StoreReporter
 import dotty.tools.dotc.util.SourceFile
 
-/** `project/plugins.sbt` as Scala 3: parse with the compiler, walk untyped trees.
-  *
-  * Accepts the generated dialect (`addSbtPlugin`, `%`, `.excludeAll(ExclusionRule(...))`, extra parens, `//` trivia).
-  * Anything else (`resolvers`, `%%`, unknown calls) is a `zipx:` error naming the tree.
+/** Accepts the generated dialect (`addSbtPlugin`, `%`, `.excludeAll(ExclusionRule(...))`, extra parens, `//` trivia,
+  * zipx's own snapshot resolver). Anything else (another resolver, `%%`, unknown calls) is an error naming the tree.
   */
 object PluginsSbt:
 
   def parse(source: String): Either[String, List[Plugin]] =
     given Context = ScalaParse.freshContext()
-    // plugins.sbt is a sequence of expressions. Regular Scala 3 compilation units reject that
-    // ("Illegal start of toplevel definition"), so wrap as an object body and walk that.
+    // A compilation unit rejects top-level expressions ("Illegal start of toplevel definition"), so wrap them.
     ScalaParse.untyped(s"object ZipxPluginsSbt {\n$source\n}\n", "plugins.sbt").flatMap(fromTree)
 
   private def fromTree(tree: Tree)(using Context): Either[String, List[Plugin]] =
@@ -54,8 +51,7 @@ object PluginsSbt:
       case _: TypeDef | _: ValDef | _: DefDef         => true
       case _                                          => false
 
-  /** A resolver zipx writes while a plugin row is pinned to a snapshot. Any other stays refused. */
-  /** `forceUpdatePeriod := Some(scala.concurrent.duration.Duration.Zero)`, which zipx writes beside that resolver. */
+  /** zipx writes this beside its snapshot resolver. */
   private def isForcedUpdate(tree: Tree): Boolean =
     tree match
       case InfixOp(Ident(key), Ident(op), Apply(Ident(some), List(zero))) =>
@@ -69,6 +65,7 @@ object PluginsSbt:
       case Select(prefix, name) => path(prefix).map(_ :+ name.toString)
       case _                    => None
 
+  /** The resolver zipx writes while a plugin row is pinned to a snapshot. Any other stays refused. */
   private def isResolver(tree: Tree): Boolean =
     tree match
       case InfixOp(Ident(key), Ident(op), InfixOp(Literal(repo), Ident(at), Literal(url))) =>

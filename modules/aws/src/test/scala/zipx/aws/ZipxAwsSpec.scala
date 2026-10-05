@@ -28,9 +28,7 @@ object ZipxAwsSpec extends ZIOSpecDefault:
 
   def spec = suite("ZipxAws")(
     suite("the login step passes both role-to-assume and aws-region")(
-      // #65: omitting aws-region makes configure-aws-credentials fail on the runner reporting a *credentials* problem,
-      // which sends the reader to the trust policy rather than to the missing input. The composite bakes that pair in;
-      // the workflow step only chooses which env keys to read.
+      // The composite bakes in both inputs; the workflow step only chooses which env keys they read.
       test("both inputs are present, reading the job env the pack also sets") {
         val step = ZipxAws.oidcLoginSteps(stepContext()).head
         val yaml = ZipxComposites.renderAwsLogin(ActionPins.Defaults).toOption.get
@@ -214,7 +212,6 @@ object ZipxAwsSpec extends ZIOSpecDefault:
     ),
   )
 
-  /** Six registries across two accounts, the shape #71 describes: one assume-role per destination, one image. */
   private val sixRegistries: List[(TargetName, EcrRegistry, EnvValue)] =
     val us = EcrRegistry(AwsAccountId("111122223333"), AwsRegion("us-east-1"))
     val eu = EcrRegistry(AwsAccountId("444455556666"), AwsRegion("eu-west-1"))

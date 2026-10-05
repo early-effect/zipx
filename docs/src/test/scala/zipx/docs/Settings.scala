@@ -5,7 +5,6 @@ import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zio.test.*
 
-/** Settings and tasks reference (tables generated from [[ZipxSettings]]). */
 object Settings extends DocSpecSuite:
 
   def doc = page("Settings")(

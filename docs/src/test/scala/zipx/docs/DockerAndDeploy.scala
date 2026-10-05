@@ -8,7 +8,6 @@ import zipx.docs.DocsFixtures.*
 import zipx.docs.DocsRender.yaml
 import zio.test.*
 
-/** Docker paved path and multi-target deploy. */
 object DockerAndDeploy extends DocSpecSuite:
 
   def doc = page("Docker and deploy")(
@@ -110,13 +109,10 @@ expression (see **Packs**).
         )
       }.assert(yaml =>
         assertTrue(
-          // One `docker:` job, and both destinations' values in its env under their own prefix.
           yaml.contains("ZIPX_US_AWS_REGION: us-east-1"),
           yaml.contains("ZIPX_EU_AWS_REGION: eu-west-1"),
           yaml.contains("ZIPX_US_AWS_ROLE_TO_ASSUME: ${{ secrets.US_ROLE }}"),
           yaml.contains("service/Docker/publish"),
-          // Not `docker-us:` / `docker-eu:`: the ids are the ones the capability would have had with no targets, so a
-          // `needs:` edge onto `docker` keeps working when a registry is added.
           !yaml.contains("docker-us:"),
         )
       ),

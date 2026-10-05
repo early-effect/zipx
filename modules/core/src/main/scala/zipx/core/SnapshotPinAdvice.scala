@@ -1,8 +1,6 @@
 package zipx.core
 
-/** A catalog version that is a commit pin, a dirty local id, or the `<line>-SNAPSHOT` pointer.
-  *
-  * `zipxDepUpdate` does not rewrite one of these to a newer release. A commit pin moves to its own line with
+/** `zipxDepUpdate` never rewrites one of these to a newer release. A commit pin moves to its own line with
   * `zipxPinRelease`, and only after that line is on the release repository.
   */
 enum SnapshotHold:
@@ -12,9 +10,7 @@ enum SnapshotHold:
 
 object SnapshotPinAdvice:
 
-  /** A release POM cannot depend on this revision. `declared` is either a revision or `group:artifact:revision`, which
-    * is what a release check is handed.
-    */
+  /** `declared` is either a revision or the `group:artifact:revision` a release check is handed. */
   def blocksRelease(declared: String): Boolean =
     val revision = declared.split(':').toList.reverse match
       case head :: _ => head
@@ -29,9 +25,7 @@ object SnapshotPinAdvice:
       case DepRevision.Pointer(line)       => Some(SnapshotHold.Pointer(line))
       case DepRevision.Release(_) | DepRevision.Changing(_) | DepRevision.Other(_) => None
 
-  /** `latest` is the registry's newest release, when the lookup found one. A newer release is not a reason to leave the
-    * pin's line.
-    */
+  /** `latest` is the registry's newest release, if found. A newer release is not a reason to leave the pin's line. */
   def message(artifact: String, version: String, latest: Option[String]): Option[String] =
     hold(version).map {
       case SnapshotHold.Local(id) =>

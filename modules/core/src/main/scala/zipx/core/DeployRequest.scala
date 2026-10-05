@@ -12,7 +12,6 @@ enum DeployEvent:
   /** A push to `ref`. `prLabels` are the labels of the PR it merged, empty for a direct push. */
   case Merge(ref: String, prLabels: Set[String])
 
-  /** A `pull_request` event on a PR carrying `labels`. */
   case PullRequest(labels: Set[String])
 end DeployEvent
 
@@ -32,8 +31,7 @@ enum DeploySelection:
 
 object DeployRequest:
 
-  /** The dispatch form's first `target` option, so the default of a click or a bare `gh workflow run` deploys nothing.
-    */
+  /** The dispatch form's first `target` option, so a click or a bare `gh workflow run` deploys nothing. */
   val ChooseWire: String = "choose"
 
   /** The rules that keep a branch off every target without its label, and anything but the default branch off a

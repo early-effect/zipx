@@ -12,7 +12,6 @@ import zio.test.*
 
 import scala.collection.immutable.ListMap
 
-/** Typed job `if:` predicates and concrete recipes. */
 object JobConditions extends DocSpecSuite:
 
   def doc = page("Job conditions")(

@@ -2,16 +2,15 @@ package zipx.core
 
 import neotype.unwrap
 
-/** How a [[ReleaseWorkflow]] authenticates. The workflow exports each secret as an env var of the same name.
-  * `zipxRelease` refuses before any upload when the host has neither sbt credentials nor these vars. A `file:` registry
-  * is [[RegistryCredentials.Anonymous]].
+/** How a [[ReleaseWorkflow]] authenticates; each secret is exported as an env var of the same name. `zipxRelease`
+  * refuses before any upload when the host has neither sbt credentials nor these vars.
   */
 enum RegistryCredentials:
   case Anonymous
   case UserPassword(username: EnvValue, password: EnvValue)
   case Bearer(token: EnvValue)
 
-  /** Env bindings for the release job. Literals (a GitHub Packages owner used as the username) are not exported. */
+  /** Literals (a GitHub Packages owner used as the username) are not exported. */
   def env: Map[String, EnvValue] =
     parts.flatMap(RegistryCredentials.binding).toMap
 
@@ -19,7 +18,6 @@ enum RegistryCredentials:
   def described: List[String] =
     parts.flatMap(RegistryCredentials.envName)
 
-  /** Every declared part is available: a non-empty literal, or a non-empty env var. Anonymous is never supplied. */
   def supplied(env: Map[String, String]): Boolean = this match
     case Anonymous => false
     case _         => parts.forall(part => RegistryCredentials.read(part, env).isDefined)
@@ -32,8 +30,8 @@ end RegistryCredentials
 
 object RegistryCredentials:
 
-  /** `${{ github.token }}` is not a secret name. The runner exports it as this env var, and the metadata GET has to
-    * read that var. A request that leaves it off is anonymous, and GitHub Packages answers 401.
+  /** `${{ github.token }}` is not a secret name; the runner exports it as this var. Without it the metadata GET is
+    * anonymous and GitHub Packages answers 401.
     */
   val GithubTokenEnv: String = "GITHUB_TOKEN"
 

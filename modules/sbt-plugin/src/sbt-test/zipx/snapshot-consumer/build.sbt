@@ -16,7 +16,7 @@ lazy val other    = project
 
 lazy val root = (project in file(".")).aggregate(helper, upstream, consumer, other).settings(publish / skip := true)
 
-/** sbt 2's publishLocal ignores `ivyPaths`, so this is the machine's ivy repository. */
+/** publishLocal ignores `ivyPaths`, so this is the machine's ivy repository. */
 def fixtureRepo: File = file(sys.props("user.home")) / ".ivy2" / "local" / "com.example.zipx.pins"
 
 val forgetFixtureRepo = taskKey[Unit]("Remove this fixture's organization from the machine's ivy repository")

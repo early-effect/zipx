@@ -1,5 +1,5 @@
 # A project id sbt allows but GitHub cannot name is rejected when the graph is built, not mid-plan.
-# `-> task` asserts the task FAILS. sbt loaded this build fine, so the failure is zipx's own check.
+# sbt loads this build fine, so the failure is zipx's own check.
 -> zipxGraph
 -> zipxWorkflowGenerate
 # Nothing was written: the check runs before any output, so a rejected build leaves no half-generated workflow.

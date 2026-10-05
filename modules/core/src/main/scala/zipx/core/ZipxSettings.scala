@@ -7,8 +7,6 @@ object ZipxSettings:
 
   import SettingScope.*
 
-  // ---- Build-level settings ----
-
   val capabilities: SettingDef[Seq[Capability]] =
     SettingDef.setting(
       SettingName("zipxCapabilities"),
@@ -607,8 +605,6 @@ object ZipxSettings:
       Build,
     )
 
-  // ---- Per-project settings ----
-
   val ciRelevant: SettingDef[Boolean] =
     SettingDef.settingDerived(
       SettingName("zipxCiRelevant"),
@@ -670,8 +666,6 @@ object ZipxSettings:
       ),
       Build,
     )
-
-  // ---- Tasks / inputs ----
 
   val depCleanup: SettingDef[Unit] =
     SettingDef.task(

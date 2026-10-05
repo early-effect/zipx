@@ -6,7 +6,6 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zio.test.*
 
-/** Path-based affected gating: the one closure, who reads it, the fail-open handoff. */
 object AffectedDoc extends DocSpecSuite:
 
   def doc = page("Affected")(
@@ -262,7 +261,6 @@ it, where a Verify-only setup skips there. That is free: on a non-PR event it ta
         DocsRender.jobs("publish-schema", "publish-api")(Capability.publishGraph)
       }.assert(yaml =>
         assertTrue(
-          // The release gate survives the narrowing; losing it would publish off every PR.
           yaml.contains("startsWith(github.ref, 'refs/tags/v')"),
           yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'schema')"),
           yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'all')"),
@@ -399,10 +397,8 @@ taking a diff. And an unusable diff **fails open** to `["all"]` the same way.
         )
       }.assert(yaml =>
         assertTrue(
-          // Its own module's clause, which is what puts it in lockstep with docker-service.
           yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'service')"),
           yaml.contains("contains(fromJson(needs.affected.outputs.modules), 'all')"),
-          // And neither the branch condition nor the Environment approval was displaced by the narrowing.
           yaml.contains("github.ref == 'refs/heads/main'"),
           yaml.contains("environment: production"),
           yaml.contains("needs.docker-service.result != 'failure'"),

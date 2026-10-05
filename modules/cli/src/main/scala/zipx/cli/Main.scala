@@ -4,10 +4,7 @@ import zio.*
 
 import java.nio.file.Path
 
-/** ZIO entry for `cs launch rocks.earlyeffect:zipx-cli_3:… -- catalog …`.
-  *
-  * No Typelevel. No Cats Effect. Apply sits above the target sbt session.
-  */
+/** `cs launch rocks.earlyeffect:zipx-cli_3:… -- catalog …`, run outside the target sbt session. */
 object Main extends ZIOAppDefault:
 
   def run: ZIO[ZIOAppArgs, Any, ExitCode] =

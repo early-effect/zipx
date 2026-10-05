@@ -9,7 +9,6 @@ import zipx.shell.{Exec, Script, Word}
 import zipx.workflow.{Cron, Expr, Step}
 import zio.test.*
 
-/** Verify-phase knobs shared by Aggregate, Layer, and Graph. */
 object Verify extends DocSpecSuite:
 
   def doc = page("Verify")(
@@ -181,7 +180,6 @@ and that should be a red job rather than an empty upload. Turn it off with `uplo
         DocsRender.job("coverage-schema")(Coverage.graph())
       }.assert(yaml =>
         assertTrue(
-          // `schema` never set zipxTestTask, so this is the substitution doing its job.
           yaml.contains("sbt 'coverage; schema/testFull; schema/coverageReport'"),
           yaml.contains("coverage-report-schema"),
         )

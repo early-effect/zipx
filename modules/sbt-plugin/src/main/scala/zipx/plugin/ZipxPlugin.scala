@@ -9,12 +9,7 @@ import zipx.workflow.Step
 import zipx.workflow.Workflow
 import zio.json.*
 
-/** zipx: the build describes its own GitHub Actions CI.
-  *
-  * Introspects the sbt build graph (`buildDependencies`, per-project settings) into a [[zipx.core.ModuleGraph]], then
-  * uses [[zipx.core.Planner]] to generate a workflow YAML that fans out per-module jobs wired by `needs` derived from
-  * the real `dependsOn` graph, with dependency-ordered publishing and commit-stable caching.
-  */
+/** zipx: the build describes its own GitHub Actions CI, planned from the real `dependsOn` graph. */
 object ZipxPlugin extends AutoPlugin:
   override def trigger  = allRequirements
   override def requires = plugins.JvmPlugin
@@ -116,23 +111,15 @@ object ZipxPlugin extends AutoPlugin:
     type StepContext = zipx.core.StepContext
     val StepContext = zipx.core.StepContext
 
-    /** Whether a capability's targets each get a job or all share one. A build names it when it passes `targetFanOut`
-      * to `Capability.custom`; `Capability.withSharedTargets` / `withTargets` set it without naming it, which is the
-      * shorter path.
-      */
+    /** A job per target or one shared job. `Capability.withSharedTargets` / `withTargets` set it without naming it. */
     type TargetFanOut = zipx.core.TargetFanOut
     val TargetFanOut = zipx.core.TargetFanOut
 
-    /** A sidecar container for a capability's jobs: `Capability.testGraph.withService("postgres",
-      * JobService("postgres:17", ports = List("5432:5432")))`.
-      */
+    /** A sidecar container for a capability's jobs, attached with `Capability.withService`. */
     type JobService = zipx.workflow.JobService
     val JobService = zipx.workflow.JobService
 
-    /** The names that become GitHub job ids, so a `build.sbt` can write one: `CapabilityName("docker-stg")`,
-      * `Target(TargetName("stg"))`. Both are validated at compile time when the argument is a literal, which is the
-      * usual case in a build file.
-      */
+    /** Names that become GitHub job ids. A literal argument is validated at compile time. */
     type CapabilityName = zipx.core.CapabilityName
     val CapabilityName = zipx.core.CapabilityName
     type TargetName = zipx.core.TargetName
@@ -144,12 +131,8 @@ object ZipxPlugin extends AutoPlugin:
     type DeployStage = zipx.core.DeployStage
     val DeployStage = zipx.core.DeployStage
 
-    /** The validated settings types: see [[zipxWorkflowName]], [[zipxJavaVersion]] and [[zipxRunnerOs]]. A build names
-      * one when it overrides the setting, `zipxJavaVersion := JdkVersion("17")`, and gets the check at the point of
-      * writing rather than at generate time.
-      *
-      * The JDK one is `JdkVersion` and not `JavaVersion` because sbt 2.0 exports a `sbt.JavaVersion`: with both in a
-      * `build.sbt`'s scope, naming it would be an ambiguous reference rather than a shadow.
+    /** Validated settings types, checked where a build writes them rather than at generate time. `JdkVersion`, not
+      * `JavaVersion`: sbt exports `sbt.JavaVersion`, and both in a `build.sbt`'s scope would be an ambiguous reference.
       */
     type WorkflowName = zipx.core.WorkflowName
     val WorkflowName = zipx.core.WorkflowName
@@ -158,15 +141,11 @@ object ZipxPlugin extends AutoPlugin:
     type RunnerOs = zipx.core.RunnerOs
     val RunnerOs = zipx.core.RunnerOs
 
-    /** Not a settings type: a Node toolchain is per-capability,
-      * `Capability.testGraph.withNodeVersion(NodeVersion("22"))`.
-      */
+    /** Not a settings type: a Node toolchain is per capability (`Capability.withNodeVersion`). */
     type NodeVersion = zipx.core.NodeVersion
     val NodeVersion = zipx.core.NodeVersion
 
-    /** Exported under its own name rather than as `Command`, which is sbt's own name in a `build.sbt` (see the note at
-      * the end of this object). A `Capability`'s `command` is this type, so a build that writes one literally needs it.
-      */
+    /** Not exported as `Command`, which is sbt's own name in a `build.sbt`. */
     type SbtCommand = zipx.core.SbtCommand
     val SbtCommand = zipx.core.SbtCommand
     type SbtCommandText = zipx.core.SbtCommandText
@@ -190,9 +169,8 @@ object ZipxPlugin extends AutoPlugin:
     val Secret   = zipx.core.Secret
     export zipx.core.EnvValue.secret
 
-    /** Nested object rather than a re-exported type: this way a `build.sbt` needs only `Capability` from the plugin
-      * jar, not `zipx-central` on the meta classpath. Release vals are built from real keys (`publishSigned`,
-      * `sonaRelease`); pure signing helpers still come from the central jar.
+    /** A nested object, not a re-exported type, so a `build.sbt` needs only `Capability` from the plugin jar. Release
+      * vals are built from real keys (`publishSigned`, `sonaRelease`).
       */
     object ZipxCentral:
       import com.jsuereth.sbtpgp.PgpKeys.publishSigned as publishSignedKey
@@ -234,9 +212,8 @@ object ZipxPlugin extends AutoPlugin:
         zipx.central.ZipxCentral.pullRequestSnapshots(label)
     end ZipxCentral
 
-    /** The AWS pack. The newtypes are re-exported as `type` + `val` pairs rather than hidden behind factories, because
-      * a `build.sbt` writes `EcrRegistry(AwsAccountId("111122223333"), AwsRegion("us-east-1"))` as a literal and that
-      * is exactly where the `inline apply` check earns its keep.
+    /** Newtypes are re-exported as `type` + `val` pairs, not factories, so a `build.sbt` literal such as
+      * `AwsRegion("us-east-1")` keeps its `inline apply` check.
       */
     object ZipxAws:
       type EcrRegistry = zipx.aws.EcrRegistry
@@ -271,9 +248,7 @@ object ZipxPlugin extends AutoPlugin:
         zipx.aws.ZipxAws.dockerPublish(registry, role, name, scope, condition)
       def sharedLoginSteps: Steps = zipx.aws.ZipxAws.sharedLoginSteps
 
-      /** Several registries pushed from **one** job, the shape to prefer for a multi-registry image: see
-        * `TargetFanOut`.
-        */
+      /** Several registries pushed from one job, the shape to prefer for a multi-registry image. */
       def dockerPublishAll(
           registries: List[(TargetName, EcrRegistry, EnvValue)],
           name: CapabilityName = Capability.DockerName,
@@ -351,9 +326,8 @@ object ZipxPlugin extends AutoPlugin:
         zipx.maven.ZipxMaven.releases(snapshots, releases, token)
     end ZipxMaven
 
-    /** scoverage, as `zipxCoverageWorkflow := Some(Coverage.workflow(...))` or `zipxCapabilities += Coverage.once()`.
-      * In `zipx-core` rather than a pack because the thing it guards against, sbt 2's `test` being `testQuick`, is a
-      * core concern; see [[zipx.core.Coverage]].
+    /** scoverage, via `zipxCoverageWorkflow` or `zipxCapabilities += Coverage.once()`. In core, not a pack, because it
+      * guards against `test` being `testQuick`.
       */
     val Coverage = zipx.core.Coverage
     type CoverageTrigger = zipx.core.CoverageTrigger
@@ -397,7 +371,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxOff: Option[Boolean]  = Some(false)
     val zipxAuto: Option[Boolean] = None
 
-    // Descriptions come from [[ZipxSettings]] (sbt macros require settingKey/taskKey/inputKey on the val RHS).
+    // sbt's macros need settingKey/taskKey/inputKey on the val RHS, so descriptions are read from `ZipxSettings`.
     val zipxCapabilities      = settingKey[Seq[Capability]](ZipxSettings.capabilities.description)
     val zipxCache             = settingKey[CacheBackend](ZipxSettings.cache.description)
     val zipxWorkflowName      = settingKey[WorkflowName](ZipxSettings.workflowName.description)
@@ -500,15 +474,13 @@ object ZipxPlugin extends AutoPlugin:
 
   import autoImport.*
 
-  /** Git-only. Build-scoped so one compile wave diffs once. Not a documented task. */
+  /** Build-scoped so one compile wave diffs git once. */
   private val zipxGitDrift =
     taskKey[List[(PublishedRow, ReleasedDrift)]]("Git drift of every ship row against its catalog tag.")
 
-  /** Project-scoped. Compile depends on it. Not a documented task. */
   private val zipxEnforceDrift =
     taskKey[Unit]("Warn or fail when this project's released row has changed since its tag.")
 
-  /** Project-scoped. `publish` depends on it. Not a documented task. */
   private val zipxRequireVersionScheme =
     taskKey[Unit]("Fail when versionScheme is empty or not a scheme sbt accepts.")
 
@@ -575,9 +547,8 @@ object ZipxPlugin extends AutoPlugin:
     zipxWorkflowDispatch         := false,
   )
 
-  /** Wires sbt's remote cache from the environment the generated workflow sets up, and is inert when that env is unset:
-    * the bundled gRPC transport (`sbt.plugins.RemoteCachePlugin`) triggers on AllRequirements but no-ops until
-    * `Global / remoteCache` is `Some`, so local builds are unaffected.
+  /** Inert when the generated workflow's remote-cache env is unset: sbt's bundled `RemoteCachePlugin` triggers on
+    * AllRequirements but no-ops until `Global / remoteCache` is `Some`.
     */
   private def remoteCacheWiring: Seq[Setting[?]] =
     sys.env.get(RemoteCacheProof.envUri).filter(_.nonEmpty) match
@@ -594,11 +565,8 @@ object ZipxPlugin extends AutoPlugin:
 
   private def runtimeOs: String = sys.props.getOrElse("os.name", "unknown").toLowerCase.split(' ').head
 
-  /** Partitions the remote cache by the two axes sbt's own content-addressed key omits. sbt hashes sources, classpath
-    * and scalacOptions but not the JDK or the OS, so without this a JDK-21 runner and a JDK-17 runner would read each
-    * other's blobs. The commit epoch is deliberately not an axis: cross-epoch reuse is the point of a persistent cache.
-    *
-    * FNV-1a over the UTF-8 bytes, so the same (jdk, os) hashes the same on every machine.
+  /** sbt's content-addressed cache key omits the JDK and the OS, so without this, runners on different JDKs read each
+    * other's blobs. The commit epoch is not an axis: cross-epoch reuse is the point. FNV-1a is stable across machines.
     */
   private def cacheVersionFor(jdk: String, os: String): Long =
     val FnvOffsetBasis = 0xcbf29ce484222325L
@@ -610,8 +578,7 @@ object ZipxPlugin extends AutoPlugin:
     hash & Long.MaxValue
 
   override def buildSettings: Seq[Setting[?]] = Seq(
-    // sbt only warns when this is empty, then stamps nothing on the POM. early-semver is the default. A build opts
-    // into semver-spec, pvp, strict, or always by setting the key. publish fails if it is cleared.
+    // sbt only warns when this is empty and stamps nothing on the POM, so publish fails if a build clears it.
     versionScheme    := Some(LibraryVersionScheme.Default.token),
     zipxGraph        := graphTask.value,
     zipxPublishOrder := publishOrderTask.value,
@@ -670,9 +637,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxPinRelease / aggregate      := false,
   )
 
-  /** An aggregator is a container rather than a testable module, so it is CI-irrelevant by default. Plain settings, so
-    * a project can override any of them.
-    */
+  /** An aggregator is a container, not a testable module, so it is CI-irrelevant by default. */
   override def projectSettings: Seq[Setting[?]] = Seq(
     zipxCiRelevant   := thisProject.value.aggregate.isEmpty,
     zipxCacheEpoch   := (if zipxShips.value.nonEmpty then CacheEpoch.ShipCatalog else CacheEpoch.GitTags()),
@@ -728,9 +693,8 @@ object ZipxPlugin extends AutoPlugin:
         PomAuthority.declared(libraryDependencies.value, crossing.value),
       )
     },
-    // A consumer meets this POM and every library's at once. Each library is kept from bringing what this project
-    // states itself, so the consumer resolves the revision this project was built with. Resolution here, the POM, and
-    // ivy.xml all read this one list.
+    // Each library is kept from bringing what this project states itself, so a consumer resolves the revision this
+    // project was built with. Resolution here, the POM, and ivy.xml all read this one list.
     allDependencies := Def.uncached {
       val excluded = zipxPomExclusions.value
       val declared = libraryDependencies.value.toSet
@@ -764,9 +728,7 @@ object ZipxPlugin extends AutoPlugin:
     },
   )
 
-  /** The catalog rows this project forces, named as it resolves them. A row naming a project in this build is left to
-    * sbt, which already forces it.
-    */
+  /** A row naming a project in this build is left to sbt, which already forces it. */
   private def catalogForced: Def.Initialize[List[(ResolvedModule, Lib)]] = Def.setting {
     val inRepo = zipxResolvedModule.all(ScopeFilter(inAnyProject)).value.map(CatalogResolution.of).toSet
     CatalogResolution
@@ -793,9 +755,7 @@ object ZipxPlugin extends AutoPlugin:
     */
   private inline val DockerPluginLabel = "com.typesafe.sbt.packager.docker.DockerPlugin"
 
-  /** The loaded build as a [[ModuleGraph]]. A task rather than a setting: the per-project settings it reads are
-    * resolved per-ref against the loaded structure.
-    */
+  /** A task, not a setting: the per-project settings it reads resolve per ref against the loaded structure. */
   private def buildGraph: Def.Initialize[Task[ModuleGraph]] = Def.task {
     val st        = state.value
     val extracted = Project.extract(st)
@@ -878,20 +838,16 @@ object ZipxPlugin extends AutoPlugin:
         )
     }.toList
 
-    // sbt rejects a `dependsOn` cycle when it loads the build, so this cannot fail for a build that got this far. It
-    // goes through `orFail` anyway: that is the boundary's job, and a graph is user input regardless of who checked it.
+    // sbt already rejects a `dependsOn` cycle at load; `orFail` stays because the graph is still user input.
     orFail(ModuleGraph.make(nodes))
   }
 
-  /** A path relative to the build root, with forward slashes, matching what `git diff --name-only` prints. */
+  /** Forward slashes, matching what `git diff --name-only` prints. */
   private def relativeToRoot(buildRoot: java.nio.file.Path, f: File): String =
     buildRoot.relativize(f.toPath).toString.replace('\\', '/')
 
-  /** A project's Compile and Test source directories relative to the build root, for [[ModuleNode.sourcePaths]].
-    *
-    * Two filters: a path outside the build root (`../…`, from a source dependency elsewhere on disk) can never match a
-    * git path, and a machine-owned one (under `target`, or a `projectMatrix` row's `.sbt/matrix/<id>`) is never edited.
-    * Directories that do not exist yet are kept, so creating `src/main/scalajs` later needs no regeneration.
+  /** Drops paths outside the build root (they never match a git path) and machine-owned ones (`target`, a
+    * `projectMatrix` row's `.sbt/matrix/<id>`). Missing directories stay, so creating one later needs no regeneration.
     */
   private def sourcePathsFor(
       ref: ProjectRef,
@@ -917,10 +873,8 @@ object ZipxPlugin extends AutoPlugin:
   private def rootRef(structure: sbt.internal.BuildStructure): ProjectRef =
     ProjectRef(structure.root, structure.rootProject(structure.root))
 
-  /** Reads a build-level setting from the *root project's* scope rather than ThisBuild's, so that every sbt-2.0
-    * assignment form resolves: a bare `zipxX := …` (a per-project common setting), a `ThisBuild / zipxX := …`, and the
-    * plugin's Global default all reach here via project → ThisBuild → Global delegation. A ThisBuild-scoped read would
-    * miss the bare form, since delegation only goes specific → general.
+  /** Reads from the root project's scope, not ThisBuild's: a bare `zipxX := …` (a per-project common setting) is only
+    * visible there, while `ThisBuild / zipxX` and the Global default still reach it by delegation.
     */
   private def readBuildSetting[A](extracted: Extracted, key: SettingKey[A], default: A): A =
     extracted.getOpt(rootRef(extracted.structure) / key).getOrElse(default)
@@ -961,9 +915,7 @@ object ZipxPlugin extends AutoPlugin:
     )
   }
 
-  /** A committed pin YAML is leftover input and always fails, even if `zipxActions` is set. Dual source is not allowed.
-    * Else explicit `zipxActions` (≠ Defaults) wins; else overlay jar Defaults with catalog Action rows.
-    */
+  /** A committed pin YAML is leftover input and always fails, even when `zipxActions` is set. */
   private def resolveActionPins(extracted: Extracted, root: File): ActionPins =
     val rel = readBuildSetting(extracted, zipxActionsPath, ActionPinFile.DefaultPath).trim
     if rel.nonEmpty && (root / rel).exists then
@@ -1013,10 +965,7 @@ object ZipxPlugin extends AutoPlugin:
         Capability.once(name = name, command = command, phase = Phase.Verify, gate = Gate.Always)
       case VerifyOpt.Skip(reason) => Capability.skipOnce(name, gate, reason)
 
-  /** The one place a zipx failure value becomes a thrown error. The libraries below report failures as `Either` and
-    * never throw; sbt's task contract is the opposite, a task fails by throwing. This is the seam, and it lives here so
-    * that a library caller still sees the `Either`.
-    */
+  /** The seam where a library's `Either` becomes a throw, which is how an sbt task fails. */
   private def orFail[A](result: Either[String, A]): A =
     result.fold(error => sys.error(s"zipx: $error"), identity)
 
@@ -1046,7 +995,6 @@ object ZipxPlugin extends AutoPlugin:
           )
   end checkFmtPlugin
 
-  /** Fail generate/check when a capability declares a command name sbt does not know (aliases, `sonaRelease`, …). */
   private def checkCommandNames(
       declared: List[SbtCommandName],
       st: State,
@@ -1128,8 +1076,8 @@ object ZipxPlugin extends AutoPlugin:
         combined.map(c => if c.name == Capability.TestName then c.plusExtraSteps(note) else c)
   end capabilitiesOf
 
-  /** Under [[DeployTrigger.Manual]] or [[DeployTrigger.Staged]], the images-and-deploys half of the build's
-    * capabilities, refused when `zipx-deploy.yml` could not run it as declared. `None` under [[DeployTrigger.OnMerge]].
+  /** The images-and-deploys half that `zipx-deploy.yml` runs, refused when it could not run as declared. `None` under
+    * `DeployTrigger.OnMerge`.
     */
   private def deploySplit(extracted: Extracted, graph: ModuleGraph): Option[(DeployWorkflow.Split, DeployTrigger)] =
     readBuildSetting(extracted, zipxDeployTrigger, DeployTrigger.OnMerge) match
@@ -1139,7 +1087,6 @@ object ZipxPlugin extends AutoPlugin:
         DeployWorkflow.problems(split, graph, trigger).headOption.foreach(sys.error)
         Some(split -> trigger)
 
-  /** What `ci.yml` plans: every capability, less what [[deploySplit]] moved to `zipx-deploy.yml`. */
   private def ciCapabilitiesOf(extracted: Extracted, graph: ModuleGraph): List[Capability] =
     deploySplit(extracted, graph).fold(capabilitiesOf(extracted, graph))((split, _) => split.ci)
 
@@ -1215,9 +1162,7 @@ object ZipxPlugin extends AutoPlugin:
         log.info(s"zipx deleted ${leftoverDir.getPath}")
   }
 
-  /** Warns once per escape-hatch fragment, naming the bundle. Raw content is typed, so it cannot emit YAML GitHub fails
-    * to parse; it can still emit broken shell, and nothing checks that.
-    */
+  /** Raw content is typed, so it cannot break the YAML, but it can still emit broken shell that nothing checks. */
   private def warnRawFragments: Def.Initialize[Task[Unit]] = Def.task {
     val log          = streams.value.log
     val graph        = buildGraph.value
@@ -1645,9 +1590,7 @@ object ZipxPlugin extends AutoPlugin:
   private def annotate(kind: String, title: String, text: String): Unit =
     if sys.env.contains("GITHUB_ACTIONS") then println(s"::$kind title=$title::$text")
 
-  /** Rows the release registry already has. A private registry (GitHub Packages, CodeArtifact) that cannot be read is
-    * [[ReleaseError.RegistryUnreachable]], never "not released".
-    */
+  /** A private registry that cannot be read is `ReleaseError.RegistryUnreachable`, never "not released". */
   private def releasedDrift(
       extracted: Extracted,
       graph: ModuleGraph,
@@ -1774,9 +1717,7 @@ object ZipxPlugin extends AutoPlugin:
     }
   end requireCredentials
 
-  /** sbt credentials from the registry's declared env, present only when those vars are set. A credentials file the
-    * build already has stays ahead of these.
-    */
+  /** Present only when the registry's env vars are set; a credentials file the build already has stays ahead. */
   private def directCredentials(release: ReleaseWorkflow): List[Credentials] =
     val realm = release.registry match
       case ArtifactRegistry.GitHubPackages(_, _) => "GitHub Package Registry"
@@ -1959,9 +1900,7 @@ object ZipxPlugin extends AutoPlugin:
     orFail(PinInventory.parse(IO.read(jsonFile)))
   end inventoryAtBase
 
-  /** A user capability whose `name` matches a built-in *replaces* it, so supplying a multi-registry `docker` capability
-    * yields one set of `docker-<module>` jobs rather than duplicates.
-    */
+  /** A user capability replaces the built-in of the same name, so a custom `docker` yields no duplicate jobs. */
   private def combineCapabilities(builtins: List[Capability], user: List[Capability]): List[Capability] =
     val userByName = user.map(c => c.name -> c).toMap
     val overridden = builtins.map(b => userByName.getOrElse(b.name, b))
@@ -2043,7 +1982,7 @@ object ZipxPlugin extends AutoPlugin:
       }
   }
 
-  /** A task rather than a setting because `baseDirectory` is a task in sbt 2.x. */
+  /** A task, not a setting, because `baseDirectory` is a task. */
   private def workflowFile: Def.Initialize[Task[File]] = Def.task {
     (LocalRootProject / baseDirectory).value / zipxWorkflowPath.value
   }
@@ -2239,8 +2178,8 @@ object ZipxPlugin extends AutoPlugin:
             "zipx: zipxEmitSelf is true but the sbt-zipx version is unknown. Set zipxPluginVersion, or zipxEmitSelf := false when dogfooding from source."
           )
 
-  /** Root-project `scalaVersion`, then ThisBuild / Global via delegation. Preferring ThisBuild misses
-    * `MyVersions.settings`'s bare `scalaVersion :=` (sbt 2 common setting) and reads the metabuild default instead.
+  /** Root scope, not ThisBuild: ThisBuild misses `MyVersions.settings`'s bare `scalaVersion :=` and reads the metabuild
+    * default instead.
     */
   private def declaredScalaVersion(extracted: Extracted): String =
     readBuildSetting(extracted, scalaVersion, "")
@@ -2263,7 +2202,7 @@ object ZipxPlugin extends AutoPlugin:
 
   private def isSbtPluginModule(m: ModuleID): Boolean =
     m.extraAttributes.keys.exists(k => k.contains("sbtVersion")) ||
-      // sbt 2 `addSbtPlugin` uses CrossVersion.binaryWith("sbt2_", "") instead of extraAttributes.
+      // `addSbtPlugin` can mark a plugin with an `sbt` binary cross prefix rather than extraAttributes.
       (m.crossVersion match
         case b: sbt.librarymanagement.Binary => b.prefix.startsWith("sbt")
         case _                               => false)
@@ -2364,9 +2303,8 @@ object ZipxPlugin extends AutoPlugin:
     )
   }
 
-  /** The artifact names a catalog row resolves as, from every project that depends on it, each crossed with that
-    * project's `scalaModuleInfo`: `heddle_3` from a JVM project, `heddle_sjs1_3` from a Scala.js one. A row no project
-    * uses is crossed the way the root project would cross it.
+  /** Crossed per depending project's `scalaModuleInfo`, so a row used on the JVM and on Scala.js yields both names. A
+    * row no project uses is crossed the way the root project would cross it.
     */
   private def resolvedNames(extracted: Extracted, rootScala: Option[ScalaModuleInfo])(lib: Lib): List[String] =
     val module                                                = ZipxDeps.moduleID(lib)
@@ -2532,9 +2470,8 @@ object ZipxPlugin extends AutoPlugin:
       end if
     }
 
-  /** `Released` asks the release registry. `One` does not, so an explicit bump can run offline. A partial row or an
-    * unreachable registry fails the command: a private registry (GitHub Packages, CodeArtifact) must not be treated as
-    * "not released" when its credentials are missing.
+  /** `One` skips the registry, so an explicit bump runs offline. Under `Released`, a partial row or an unreachable
+    * registry fails: a private registry without credentials must not read as "not released".
     */
   private def rowsForBump(
       st: State,
@@ -2673,9 +2610,8 @@ object ZipxPlugin extends AutoPlugin:
     log.info("zipx: no advisory findings")
   }
 
-  /** `zipxAffectedModules <base-ref>`. Writes the ids to a fixed `target/zipx-affected.json` rather than stdout because
-    * the generated `affected` job reads the file, which keeps sbt's log lines out of `GITHUB_OUTPUT`. The path is built
-    * from `baseDirectory`, not `(target).value`, which under sbt 2 is a versioned `target/out/…` tree.
+  /** Writes a fixed `target/zipx-affected.json` because the `affected` job reads it, keeping sbt's log out of
+    * `GITHUB_OUTPUT`. The path is built from `baseDirectory`: `target.value` is a nested `target/out/…` tree.
     */
   private def affectedModulesTask: Def.Initialize[InputTask[Unit]] =
     Def.inputTask {
@@ -2697,12 +2633,8 @@ object ZipxPlugin extends AutoPlugin:
   /** The loaded build as a graph, for commands: a command cannot read [[buildGraph]] directly. */
   private val zipxModuleGraph = taskKey[ModuleGraph]("zipx internal: the module graph, for zipxTestAffected")
 
-  /** `zipxTestAffected [base]`, the builtin `test` under `AffectedOnPR`: this session runs what [[TestAffected.plan]]
-    * picks.
-    *
-    * The diff runs here, not in the `affected` job, so `test` neither waits on that job nor pays a second sbt load. Its
-    * base is the one `affected` uses: the PR base, or the pushed-over commit under `zipxAffectedOnPush`. No base, or an
-    * all-zero one (a dispatch, a force-push), tests everything.
+  /** The builtin `test` under `AffectedOnPR`. Diffing here, not in the `affected` job, avoids waiting on that job and a
+    * second sbt load. No base, or an all-zero one (a dispatch, a force-push), tests everything.
     */
   private val testAffectedCommand: Command = Command.args(TestAffected.CommandName, "[base]") { (st, args) =>
     val extracted     = Project.extract(st)
@@ -2732,9 +2664,7 @@ object ZipxPlugin extends AutoPlugin:
     end match
   }
 
-  /** `zipx-deploy.yml`'s resolve step. Inputs arrive as env and the plan leaves as files under
-    * [[DeployWorkflow.ShaFile]] and its siblings, for the reason [[affectedModulesTask]] writes a file.
-    */
+  /** `zipx-deploy.yml`'s resolve step: env in, plan out as files, for the reason [[affectedModulesTask]] writes one. */
   private def deployPlanTask: Def.Initialize[Task[Unit]] = Def.task {
     val st               = state.value
     val extracted        = Project.extract(st)
@@ -2843,7 +2773,6 @@ object ZipxPlugin extends AutoPlugin:
       case None =>
         git(root, "rev-parse", "HEAD").flatMap(GitSha.make(_).toOption).toRight("zipx: git rev-parse HEAD failed")
 
-  /** One git command's trimmed stdout, or `None` when it fails. */
   private def git(root: File, args: String*): Option[String] =
     try
       val out  = new StringBuilder
@@ -2888,9 +2817,7 @@ object ZipxPlugin extends AutoPlugin:
     IO.write(root / DeployWorkflow.ImageMissingFile, s"${missing.nonEmpty}\n")
   }
 
-  /** [[Affected.outputModules]] for HEAD since its merge-base with `baseRef`, reading the build files it can (see
-    * [[buildFileReadings]]) at that merge-base, the commit the three-dot diff compares against.
-    */
+  /** Build files are read at the merge-base, the commit the three-dot diff compares against. */
   private def affectedSinceMergeBase(
       root: File,
       extracted: Extracted,
@@ -2908,9 +2835,7 @@ object ZipxPlugin extends AutoPlugin:
     Affected.outputModules(graph, changed, readings)
   end affectedSinceMergeBase
 
-  /** How the catalog file reads between two commits, when it is among `changed`. Unreadable at either commit is
-    * build-wide, as the file was before zipx could read it.
-    */
+  /** A catalog unreadable at either commit counts as build-wide. */
   private def catalogEdit(
       root: File,
       extracted: Extracted,
@@ -2937,9 +2862,7 @@ object ZipxPlugin extends AutoPlugin:
     }
     s"zipx: ${edit.path}: ${readings.mkString(", ")}"
 
-  /** A reading of every changed build file zipx can read between two commits: the catalog and the root `build.sbt`.
-    * Other build files have none, so they still affect every module.
-    */
+  /** Only the catalog and the root `build.sbt` get a reading; other build files still affect every module. */
   private def buildFileReadings(
       root: File,
       extracted: Extracted,
@@ -2966,11 +2889,8 @@ object ZipxPlugin extends AutoPlugin:
     catalog.toList ++ buildSbt.toList
   end buildFileReadings
 
-  /** Files changed on HEAD since its merge-base with `baseRef`, repo-root-relative with forward slashes.
-    *
-    * `None` means the diff *failed*, `Some(Nil)` means it succeeded and found nothing. [[Affected.outputModules]] needs
-    * that distinction to fail open; collapsing both to `Nil` is what once made a bad base ref skip every Verify job and
-    * report the PR green.
+  /** `None` means the diff failed, `Some(Nil)` that it found nothing. `Affected.outputModules` fails open on `None`, so
+    * a bad base ref cannot skip every Verify job.
     */
   private def gitDiffNames(root: File, baseRef: String): Option[List[String]] =
     try
@@ -3089,9 +3009,8 @@ object ZipxPlugin extends AutoPlugin:
     }
   end lastReleases
 
-  /** Central's public repo and a `file:` registry need no auth. Any other registry sends the credentials its workflow
-    * declared. A declared token that is not in the environment is a failure: an anonymous GET must not be read as "not
-    * released", which is what a registry that answers 404 for a bad token would look like.
+  /** Central's public repo and a `file:` registry need no auth. A declared token missing from the environment fails: an
+    * anonymous GET that a registry answers with 404 must not read as "not released".
     */
   private def registryHeaders(release: ReleaseWorkflow): Either[String, Map[String, String]] =
     val public =
@@ -3122,10 +3041,7 @@ object ZipxPlugin extends AutoPlugin:
     if named.isEmpty then s"no credentials for $where"
     else s"no credentials for $where. Set ${named.mkString(" and ")}."
 
-  /** The release root of [[ArtifactRegistry]]: Central's public repo, a GitHub Packages repo, a `file:` URL, or the
-    * release URL of a split Maven registry (CodeArtifact, Artifactory, Nexus). Never the snapshot repository. A 302 is
-    * followed once, without `Authorization`.
-    */
+  /** The registry's release root, never its snapshot repository. A 302 is followed once, without `Authorization`. */
   private def lookupGav(release: ReleaseWorkflow, gav: Gav): Either[String, RegistryStatus] =
     for
       headers <- registryHeaders(release)

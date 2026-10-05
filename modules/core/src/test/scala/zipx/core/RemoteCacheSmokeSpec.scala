@@ -15,7 +15,6 @@ object RemoteCacheSmokeSpec extends ZIOSpecDefault:
       )
     },
     test("live remote-cache proof is Aggregate test, not a parallel once-job") {
-      // Put/Get runs inside core tests via Testcontainers; CI only needs the normal `test` job.
       val wf = Planner.plan(
         RemoteCacheSmoke.graph,
         List(Capability.test),

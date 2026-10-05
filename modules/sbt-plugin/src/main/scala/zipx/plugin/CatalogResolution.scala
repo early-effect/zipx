@@ -12,9 +12,7 @@ private[plugin] object CatalogResolution:
   /** Coursier's own order, for revisions zipx has no line for. */
   given RevisionOrder = (a, b) => Version(a).compare(Version(b))
 
-  /** Each catalog `Lib` row, named as a project with `scala` resolves it. A row aligned to the graph has no revision of
-    * its own to force.
-    */
+  /** A row aligned to the graph has no revision of its own to force. */
   def forced(coords: Seq[ZipxCoord], scala: Option[ScalaModuleInfo]): List[(ResolvedModule, Lib)] =
     coords.toList
       .collect {
@@ -25,7 +23,7 @@ private[plugin] object CatalogResolution:
       .distinctBy((module, _) => module)
 
   /** Already crossed: lm-coursier crosses an override with no platform, so a `%%` override in a Scala.js project would
-    * force `x_3` and leave `x_sjs1_3` alone.
+    * force the JVM artifact and leave the JS one alone.
     */
   def overrides(forced: List[(ResolvedModule, Lib)]): Seq[ModuleID] =
     forced.map((module, lib) =>
@@ -34,9 +32,7 @@ private[plugin] object CatalogResolution:
 
   def of(module: ModuleID): ResolvedModule = ResolvedModule(module.organization, module.name)
 
-  /** What one project's resolution saw. `excluded` are the modules zipx keeps every library from bringing, so the
-    * report has no edge from a library to one.
-    */
+  /** `excluded`: modules zipx keeps every library from bringing, so the report has no edge from a library to one. */
   final case class Seen(report: UpdateReport, inRepo: Set[ResolvedModule], excluded: Set[ResolvedModule])
 
   /** Stale catalog rows and unpinned commits. In-repo modules are never judged. */
@@ -63,9 +59,7 @@ private[plugin] object CatalogResolution:
     stale ++ unpinned
   end conflicts
 
-  /** Every revision each module was met at, selected or evicted, across configurations. Forced modules have no
-    * evictions here; [[CatalogProbe]] reads theirs.
-    */
+  /** Forced modules have no evictions here; [[CatalogProbe]] reads theirs. */
   private def revisionsOf(report: UpdateReport): Map[ResolvedModule, List[String]] =
     report.configurations.toList
       .flatMap(_.details)

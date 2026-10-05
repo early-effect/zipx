@@ -55,8 +55,7 @@ object NamesSpec extends ZIOSpecDefault:
         check(gIdent)(s => assertTrue(JobId.make(s).isRight, StepId.make(s).isRight))
       },
       test("make round-trips the input unchanged, with no unwrapping needed") {
-        // No `.unwrap`: `JobId` is a `Subtype`, so the validated value *is* the `String` that went in. That is the
-        // property the planner relies on to hold an id typed from construction through to the YAML.
+        // `JobId` is a `Subtype`, so the ascription to `String` compiles with no `.unwrap`.
         assertTrue(JobId.make("build-1").map(id => id: String) == Right("build-1"))
       },
     ),
@@ -253,8 +252,6 @@ object NamesSpec extends ZIOSpecDefault:
         )
       },
       test("accepts any owner/repo@40-hex, which is the shape every SHA pin takes") {
-        // The form `ActionPinFile` reads and every generated `uses:` carries, so it is worth a property rather than
-        // the handful of examples above: a validator that rejected some SHA alphabet would break real pin files.
         check(gIdent, gIdent, gSha) { (owner, repo, sha) =>
           assertTrue(ActionRef.make(s"$owner/$repo@$sha").isRight)
         }

@@ -4,12 +4,10 @@ import zipx.workflow.Step
 
 import scala.collection.immutable.ListMap
 
-/** scoverage as a capability, built so that the task it measures cannot be sbt 2's `test`.
+/** scoverage as a capability, built so that the task it measures cannot be plain `test`.
   *
-  * Why this is API rather than a documented alias: on sbt 2.0 plain `test` runs `testQuick`, which skips tests it deems
-  * unaffected and prints "No tests to run". A hand-rolled `coverage; test; coverageAggregate` therefore satisfies a
-  * `coverageMinimum` having measured almost nothing, and the job is green. Building the command from the module's own
-  * [[ModuleNode.testTask]] is what closes that off.
+  * Plain `test` runs `testQuick`, which skips suites it deems unaffected, so a hand-rolled
+  * `coverage; test; coverageAggregate` passes a `coverageMinimum` having measured almost nothing.
   *
   * {{{
   * zipxCoverageWorkflow := Some(Coverage.workflow(CoverageTrigger.Dispatch, CoverageTrigger.prLabel("coverage")))
@@ -24,53 +22,43 @@ object Coverage:
 
   val Name: CapabilityName = CapabilityName("coverage")
 
-  /** Wire form: scoverage's `coverage` alias. Declared name; generate checks it when the alias is on the classpath. */
+  /** Generate checks this name when the scoverage alias is on the classpath. */
   private val Enable: SbtCommand = SbtCommand.unsafeCommand("coverage")
 
-  /** Wire form: scoverage `coverageAggregate` task label. */
   private val Aggregate: SbtCommand = SbtCommand.unsafeTask("coverageAggregate")
   private val Report: SbtCommand    = SbtCommand.unsafeTask("coverageReport")
 
-  /** Wire form: sbt 2's full suite (not `testQuick`). */
+  /** The full suite, since `test` is `testQuick`. */
   private[core] val FullTest: SbtCommand = SbtCommand.unsafeTask("testFull")
 
-  /** Whether `capability`'s session turns scoverage on. */
   private[core] def instruments(capability: Capability): Boolean =
     capability.declaredNames.exists(Enable.declaredNames.contains)
 
-  /** `coverage; <task>; coverageAggregate`. */
   private[core] def aggregateSession(task: SbtCommand): SbtCommand =
     SbtCommand.session(Enable, task, Aggregate)
 
-  /** Coverage in its own workflow, off `ci.yml`'s required checks. See [[CoverageWorkflow]]. */
+  /** Coverage in its own workflow, off `ci.yml`'s required checks. */
   def workflow(first: CoverageTrigger, rest: CoverageTrigger*): CoverageWorkflow =
     CoverageWorkflow(::(first, rest.toList))
 
-  /** The task to measure for `node`: its own [[ModuleNode.testTask]], substituting [[FullTest]] when that is still the
-    * default `test`.
-    *
-    * The substitution is the point of the pack. A module that set `zipxTestTask` itself is left alone: an explicit
-    * choice outranks this one.
-    *
-    * Pass `_.testTask` to [[graph]] for literal inheritance instead, default included.
+  /** The module's own [[ModuleNode.testTask]], except that the default `test` becomes [[FullTest]]. Pass `_.testTask`
+    * to [[graph]] to keep the default as is.
     */
   def measuredTask(node: ModuleNode): SbtCommand =
     if node.testTask == ModuleNode.DefaultTestTask then FullTest else node.testTask
 
-  /** Where sbt-scoverage writes HTML and XML, per module and for `coverageAggregate`. A glob because the Scala version
-    * is in the path (`target/scala-3.8.4/scoverage-report`).
-    */
+  /** A glob because the Scala version is in the path (`target/scala-<version>/scoverage-report`). */
   val ReportPaths: String = "**/scoverage-report/**"
 
   val DefaultArtifact: String = "coverage-report"
 
   def moduleArtifactName(moduleId: String): String = s"$DefaultArtifact-$moduleId"
 
-  /** Uploads the reports under one fixed artifact name, for a capability with one job. */
+  /** One fixed artifact name, for a capability with one job. */
   def uploadReportSteps(artifact: String = DefaultArtifact, path: String = ReportPaths): Steps =
     Steps.one("coverage-report")(ctx => uploadStep(ctx.actions, artifact, path))
 
-  /** The same, named per module, so [[CapabilityScope.Graph]]'s jobs do not collide on one artifact name. */
+  /** Named per module, so [[CapabilityScope.Graph]]'s jobs do not collide on one artifact name. */
   def uploadModuleReportSteps(path: String = ReportPaths): Steps =
     Steps.one("coverage-report-per-module")(ctx => uploadStep(ctx.actions, moduleArtifactName(ctx.node.id), path))
 
@@ -88,18 +76,11 @@ object Coverage:
       ),
     )
 
-  /** One build-wide session: `coverage; testFull; coverageAggregate`.
+  /** One build-wide session, `coverage; testFull; coverageAggregate`: the shape to prefer, since `coverageAggregate`
+    * reads every module's data. No trailing `coverageOff`, because the session ends with the job.
     *
-    * The shape to prefer. `coverageAggregate` is a root task over every module's measurement data, so splitting it
-    * across jobs means merging artifacts back together to get the number.
-    *
-    * No trailing `coverageOff`: the session ends with the job. It is in every hand-rolled alias because a developer's
-    * shell session outlives the command, which CI's does not.
-    *
-    * `task` is a literal rather than the build's `zipxTestTask` because there is no module here to read one from, and a
-    * root `test` is `testQuick` too. Pass it explicitly if the root task is not [[FullTest]].
-    *
-    * Generate refuses `name = Capability.TestName`: that makes coverage every PR's required check. Use [[workflow]].
+    * `task` is a literal because there is no module here to read `zipxTestTask` from. Generate refuses
+    * `name = Capability.TestName`, which would make coverage every PR's required check; use [[workflow]].
     */
   def once(
       task: SbtCommand = FullTest,

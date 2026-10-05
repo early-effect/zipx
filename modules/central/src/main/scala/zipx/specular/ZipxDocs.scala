@@ -3,17 +3,9 @@ package zipx.specular
 import zipx.core.*
 import zipx.workflow.ActionRef
 
-/** Early-effect Specular docs paved path for zipx: a once-job that delegates to the org reusable workflow rather than
-  * running steps of its own, so generated CI owns what a hand-written `docs.yml` used to.
-  *
-  * Reaching the `workflow_dispatch` half of [[deployWhen]] needs `zipxWorkflowDispatch := true`.
-  *
-  * {{{
-  * zipxCapabilities += ZipxDocs.pages()
-  * zipxWorkflowDispatch := true
-  * // Layer a fork gate without wiping the tag|dispatch condition:
-  * zipxCapabilities += ZipxDocs.pages().andCondition(JobCondition.repositoryIs("acme/libs"))
-  * }}}
+/** A once-job that delegates to the org reusable workflow rather than running steps of its own. The `workflow_dispatch`
+  * half of [[deployWhen]] needs `zipxWorkflowDispatch := true`; add a fork gate with `andCondition` so the
+  * tag-or-dispatch condition survives.
   */
 object ZipxDocs:
 

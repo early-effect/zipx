@@ -13,9 +13,6 @@ object EcrSpec extends ZIOSpecDefault:
       test("host is <account>.dkr.ecr.<region>.amazonaws.com") {
         assertTrue(registry.host == "111122223333.dkr.ecr.us-east-1.amazonaws.com")
       },
-      // The whole reason this type exists (#65 / #68): the case class it replaces held a hand-written `host` and no
-      // region, so there was no region for the login step to pass. Here the region is a constructor parameter, so a
-      // registry with no region is not a bug to catch but a value that cannot be built.
       test("there is no way to construct a registry without a region") {
         for missing <- typeCheck("""EcrRegistry(AwsAccountId("111122223333"))""")
         yield assertTrue(missing.isLeft)
@@ -38,8 +35,6 @@ object EcrSpec extends ZIOSpecDefault:
       test("a 12-digit account id is accepted") {
         assertTrue(AwsAccountId.make("111122223333").isRight)
       },
-      // Length is the whole rule and it is worth having: 11 digits still produces a syntactically fine host, so without
-      // this the failure surfaces as a DNS error on the runner.
       test("an account id of the wrong length is refused") {
         assertTrue(
           AwsAccountId.make("11112222333").isLeft,
@@ -82,7 +77,6 @@ object EcrSpec extends ZIOSpecDefault:
           EcrRepository.make("a.b_c-d").isRight,
         )
       },
-      // ECR refuses an uppercase repository name at push time, which is far later than here.
       test("uppercase, a leading separator, or an empty name is refused") {
         assertTrue(
           EcrRepository.make("Example").isLeft,
@@ -101,8 +95,6 @@ object EcrSpec extends ZIOSpecDefault:
           ImageTag.branchLatest("1.4.2", "main") == Right("1.4.2-main-latest"),
         )
       },
-      // The immutable tag always; the moving ones only on the default branch, because a moving tag on a feature branch
-      // is a race between two PRs pushing the same name.
       test("forCommit adds the moving tags only on the default branch") {
         assertTrue(
           ImageTag.forCommit("1.4.2", "abc1234", "main") ==
@@ -110,8 +102,6 @@ object EcrSpec extends ZIOSpecDefault:
           ImageTag.forCommit("1.4.2", "abc1234", "feat-x") == Right(List("1.4.2-abc1234")),
         )
       },
-      // This is the silent failure the type exists for: a `/` makes `example:main-feat/x` a different *repository*, so
-      // the image publishes somewhere nothing deploys from and the build stays green.
       test("a branch name with a slash in it is refused rather than mangled") {
         assertTrue(
           ImageTag.make("main-feat/x").isLeft,

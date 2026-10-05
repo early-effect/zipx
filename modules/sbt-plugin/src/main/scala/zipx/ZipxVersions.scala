@@ -34,22 +34,16 @@ import zipx.plugin.ZipxPlugin.autoImport.{
 
 val ZipxSelf = zipx.plugin.ZipxSelf
 
-/** Catalog a build writes under `project/` and extends. `.sbt` files get plugin autoImport; this package is what those
-  * Scala sources import.
+/** The catalog a build extends under `project/`. `.sbt` files get the plugin's autoImport; Scala sources import this.
   *
-  * Row collection (`coords` / `pins` / `actions` / `ships`) lives on [[Catalog]] in core so a process that is not the
-  * target session can compile this file. `settings` / `deps` / `library` stay here because they return sbt types.
-  *
-  * Drop `MyVersions.settings` at the top of `build.sbt`. Extra settings belong next to that call (`MyVersions.settings
-  * ++ …`).
+  * Row collection lives on [[Catalog]] in core so a process outside the target session can compile a catalog. Members
+  * here are the ones that return sbt types.
   */
 trait ZipxVersions extends Catalog:
-  /** Drop at the top of `build.sbt`. Bare `scalaVersion` (sbt 2 common setting, no `ThisBuild`) plus the zipx catalog
-    * keys generate and `zipxCheckDeps` read.
-    */
+  /** Drop at the top of `build.sbt`. A bare `scalaVersion` is common to every project, so no `ThisBuild`. */
   def settings: Seq[Setting[?]] = ZipxVersions.applySettings(sbt, scala, coords, pins, actions, ships)
 
-  /** Per-module `crossScalaVersions` from [[crossScala]]. Scala-3-only modules inherit [[settings]] and skip this. */
+  /** Per-module `crossScalaVersions` from [[crossScala]]; single-version modules skip this and inherit [[settings]]. */
   def cross: Seq[Setting[?]] = Seq(
     crossScalaVersions := crossScala.map(v => v: String)
   )

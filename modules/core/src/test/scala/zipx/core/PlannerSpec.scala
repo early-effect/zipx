@@ -28,10 +28,8 @@ object PlannerSpec extends ZIOSpecDefault:
     scope = CapabilityScope.Graph,
   )
 
-  /** The prod target's extra filter is a `vars` check rather than the `refIs("refs/heads/main")` this fixture used to
-    * carry: these capabilities are gated `OnReleaseTag`, so a branch-ref requirement on top made the job's `if:` never
-    * true, and the planner now refuses to generate that (#66). A `vars` check is the realistic shape anyway, and being
-    * outside the decidable subset it still exercises the ANDing.
+  /** A `vars` check, not a branch ref: these capabilities are gated `OnReleaseTag`, and the planner refuses a
+    * branch-ref condition on top as an `if:` that can never be true.
     */
   private val prodOnly: JobCondition = JobCondition.varNonEmpty("DEPLOY_PROD_ENABLED")
 
@@ -83,8 +81,6 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     suite("an if: that can never be true is rejected")(
-      // #66: `examples/monorepo` shipped `deploy-prod` gated on a release tag *and* on `refs/heads/main`. Both halves
-      // read as deliberate; only their conjunction is wrong, and it lived in two different files.
       test("a tag gate plus a branch-ref condition, naming the capability and both clauses") {
         val cap = Capability.publish.copy(
           gate = Gate.OnReleaseTag,
@@ -139,8 +135,7 @@ object PlannerSpec extends ZIOSpecDefault:
       },
     ),
     suite("but only the decidable subset is rejected")(
-      // An unsound rejection is worse than a missed one: a missed contradiction is the status quo, a wrong rejection is
-      // a build that cannot generate its CI and no way to argue. Each of these must keep planning.
+      // An unsound rejection is worse than a missed one: it leaves a build that cannot generate its CI at all.
       test("a disjunction, where one branch satisfies the gate") {
         val cap = Capability.publish.copy(
           gate = Gate.OnReleaseTag,
@@ -1192,8 +1187,7 @@ object PlannerSpec extends ZIOSpecDefault:
       )
     },
     test("skipMergedPrPush gates Graph Verify even when it is affected-gated") {
-      // Once `affected` itself no longer skips after a merged PR (Publish/Deploy read it), Graph Verify must
-      // carry its own gate clause. Skip-inheritance-through-affected is how production `fromJson("")` happened.
+      // `affected` still runs after a merged PR (Publish and Deploy read it), so Graph Verify needs its own gate.
       val graph = sampleGraph.mapNodes {
         case n if n.id.startsWith("service") => n.copy(docker = true)
         case n                               => n

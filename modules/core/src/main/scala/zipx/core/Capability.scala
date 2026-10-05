@@ -10,16 +10,8 @@ import zipx.workflow.JobService
 import zipx.workflow.Names
 import zipx.workflow.Step
 
-/** A capability's name, which is also the prefix of every job id it produces: `test` becomes the job `test`, or
-  * `test-<module>` under [[CapabilityScope.Graph]].
-  *
-  * Typed for the same reason [[ModuleId]] is, and against the same rule: a name reaches a `jobs.<job_id>` key, so a
-  * space or a `/` in one produced a workflow GitHub rejects on push. The planner noticed neither, because it assembled
-  * the id by interpolation. This catches it where the capability is declared.
-  *
-  * A `Subtype` rather than a `Newtype`, so `CapabilityName <: String`: `c.name == "test"` and
-  * `s"${capability.name} ${node.id}"` keep working, and only construction is checked. Its character set is also what
-  * lets the planner *build* a [[zipx.workflow.JobId]] rather than validate one; see `asJobId` below.
+/** A capability's name, which prefixes every job id it produces: `test` becomes the job `test`, or `test-<module>`
+  * under [[CapabilityScope.Graph]].
   */
 type CapabilityName = CapabilityName.Type
 object CapabilityName extends Subtype[String]:
@@ -31,28 +23,17 @@ object CapabilityName extends Subtype[String]:
         "contain only ASCII letters, digits, - or _"
 
   extension (name: CapabilityName)
-    /** This name as a job id in its own right, which is what a [[CapabilityScope.Once]] capability's job is called.
-      *
-      * Total, and `unsafeMake` only because neotype cannot see it: [[zipx.workflow.JobId]] validates the same two
-      * things this type does, [[zipx.workflow.Names.ActionsId]] and non-empty. That is not a coincidence, it is *why* a
-      * capability name is constrained.
-      */
+    /** A [[CapabilityScope.Once]] job's id. Total: [[zipx.workflow.JobId]] validates the same rule. */
     def asJobId: JobId = JobId.unsafeMake(name)
 
-    /** This name joined with the segments that distinguish one of its jobs from another, `-` between each.
-      *
-      * Also total: `-` is in [[zipx.workflow.Names.ActionsId]]'s trailing character set, and every caller passes
-      * segments drawn from it, a [[ModuleId]], a [[TargetName]] or `L<index>`. Restricted to this module so that stays
-      * true by inspection.
+    /** Total because `-` is legal after the first character and every caller passes `ActionsId` segments (a
+      * [[ModuleId]], a [[TargetName]], or `L<index>`). `private[core]` keeps that checkable by inspection.
       */
     private[core] def jobId(rest: String*): JobId = JobId.unsafeMake((name +: rest).mkString("-"))
   end extension
 end CapabilityName
 
-/** A target's name, the job-id suffix that keeps one destination's job distinct from another's.
-  *
-  * Same rule and same reason as [[CapabilityName]]: it lands in a `jobs.<job_id>` key, joined on with `-`.
-  */
+/** A target's name, the job-id suffix that keeps one destination's job distinct from another's. */
 type TargetName = TargetName.Type
 object TargetName extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -63,7 +44,7 @@ object TargetName extends Subtype[String]:
         "and contain only ASCII letters, digits, - or _"
 
   extension (name: TargetName)
-    /** Total for the reason [[ModuleId.asExprLiteral]] is: an Actions id is a subset of an expression literal. */
+    /** Total: an Actions id is a subset of an expression literal. */
     def asExprLiteral: ExprLiteral = ExprLiteral.unsafeMake(name)
 end TargetName
 
@@ -84,9 +65,8 @@ end TargetGroup
   * job-per-target.
   *
   * @param destinations
-  *   every target this one job serves, populated only under [[TargetFanOut.SharedJob]], where `target` is `None`
-  *   instead: there is no single target such a job belongs to. Steps read it to emit one login (or one push) per
-  *   destination, and [[Target.envKey]] gives them the `env:` key each destination's values landed under.
+  *   every target this job serves, populated only under [[TargetFanOut.SharedJob]] (where `target` is `None`).
+  *   [[Target.envKey]] names the `env:` key each destination's values land under.
   */
 final case class StepContext(
     node: ModuleNode,
@@ -115,20 +95,12 @@ enum Phase:
 enum Ordering:
   case ParallelWithUpstream, DependencyOrdered, Independent
 
-/** When a capability's jobs may run, ANDed with [[Capability.condition]], [[Target.condition]] and affected-gating.
+/** When a capability's jobs may run, ANDed with [[Capability.condition]], [[Target.condition]] and affected-gating. The
+  * planner rejects a gate/condition pair it can prove never true (see `Satisfiable`), such as `OnReleaseTag` with a
+  * `refs/heads/main` condition.
   *
-  * Because the conjunction spans three places nobody reads together, the planner rejects a gate/condition pair it can
-  * prove never true (see `Satisfiable`): a `OnReleaseTag` gate with a `refs/heads/main` condition is a job that looks
-  * deliberate and cannot run.
-  *
-  * [[Gate.AffectedOnly]] is a design seam, not a shipped feature: affected-gating is derived from the phase plus
-  * [[PlanConfig.affected]], [[PlanConfig.affectedPublish]] and [[PlanConfig.affectedDeploy]], never from `Gate`, so the
-  * planner rejects it with an explaining error rather than degrading silently to [[Gate.Always]]. A green, untested
-  * pipeline is the failure mode zipx exists to prevent.
-  *
-  * Which phases can be narrowed: [[Phase.Verify]] always, [[Phase.Publish]] under [[PlanConfig.affectedPublish]], and
-  * [[Phase.Deploy]] under [[PlanConfig.affectedDeploy]]. Verify is not opt-in and the other two are, because
-  * **under-verifying is silently unsafe** while **under-publishing is loudly broken**.
+  * [[Gate.AffectedOnly]] is reserved: affected-gating comes from the phase and the [[PlanConfig.affected]] flags, so
+  * the planner rejects it rather than degrading silently to [[Gate.Always]].
   */
 enum Gate:
   case Always, OnReleaseTag, AffectedOnly, OnDefaultPush
@@ -156,9 +128,8 @@ enum CapabilityScope:
   *     from a capability with no targets at all, and each destination's `env` lands under a
   *     [[Target.envPrefix]]-prefixed key.
   *
-  * The distinction is a cost, not a preference: `JobPerTarget` over 6 registries and 8 images is 48 jobs each
-  * rebuilding the same image, where `SharedJob` is 8, and only the second guarantees every registry holds identical
-  * bytes (#71).
+  * For registries it is a cost: `JobPerTarget` rebuilds the same image once per registry, and only `SharedJob`
+  * guarantees every registry holds identical bytes.
   *
   * `SharedJob` rejects a [[Target.condition]] and a [[Target.environment]] at generate time rather than dropping them:
   * a job has one `if:` and binds one Environment, so a per-destination one is a request for `JobPerTarget`.
@@ -197,83 +168,52 @@ final case class Target(
     stage: DeployStage = DeployStage.Production,
 ):
 
-  /** This target's `env:`-key prefix under [[TargetFanOut.SharedJob]]: `ZIPX_` then the name upper-cased with `-`
-    * turned into `_`, because a [[TargetName]] may contain `-` and an env name may not.
-    *
-    * The fixed `ZIPX_` is what makes [[envName]] total rather than an `Either`. Without it a target legitimately named
-    * `github` would derive `GITHUB_…`, which [[zipx.workflow.EnvName]] refuses because GitHub reserves that namespace.
+  /** `-` becomes `_` because an env name cannot contain `-`. The fixed `ZIPX_` keeps a target named `github` out of
+    * GitHub's reserved `GITHUB_` namespace, which is what makes [[envName]] total.
     */
   def envPrefix: String = s"ZIPX_${name.toUpperCase.replace('-', '_')}"
 
-  /** Where `key` from this target's [[env]] lands in a [[TargetFanOut.SharedJob]] job: `ZIPX_PROD_AWS_ROLE_TO_ASSUME`
-    * for target `prod` and key `AWS_ROLE_TO_ASSUME`. A step reads it back with [[envName]], so neither side spells the
-    * prefix out.
-    */
+  /** `ZIPX_PROD_AWS_ROLE_TO_ASSUME` for target `prod` and key `AWS_ROLE_TO_ASSUME`. */
   def envKey(key: String): String = s"${envPrefix}_$key"
 
-  /** [[envKey]] as an [[zipx.workflow.EnvName]], for a step building an `${{ env.… }}` reference to one destination's
-    * value.
-    *
-    * Total, and `unsafeMake` only because neotype cannot see it: [[envPrefix]] is `Z`-initial and drawn from
-    * `[A-Za-z0-9_]` (a [[TargetName]]'s character set with `-` mapped to `_`), and `key` is already an `EnvName`, so
-    * the result satisfies `Ident` and cannot be `GITHUB_`-prefixed.
-    */
+  /** `unsafeMake` is total: [[envPrefix]] is `Z`-initial over `[A-Za-z0-9_]` and `key` is already an `EnvName`. */
   def envName(key: EnvName): EnvName = EnvName.unsafeMake(envKey(key.unwrap))
 
-  /** This target's [[env]] under [[envKey]], the block a [[TargetFanOut.SharedJob]] job merges. */
   def prefixedEnv: Map[String, EnvValue] = env.map((k, v) => envKey(k) -> v)
 
 end Target
 
-/** A pipeline stage shaped by [[CapabilityScope]]: usually one or more sbt invocations, or action-only steps when
-  * [[command]] is empty.
+/** A pipeline stage shaped by [[CapabilityScope]]: usually one or more sbt invocations, or action-only steps. The
+  * planner derives `needs`, matrix and gating from the graph and scope.
   *
-  * This is what keeps zipx registry- and tool-agnostic: test, library publish and docker publish are all `Capability`
-  * values, and any sbt task becomes a stage. The planner derives `needs`, matrix and gating from the graph and scope.
-  *
-  * @param name
-  *   the job-id prefix: `"test"` becomes Aggregate job `test`, Graph job `test-<module>`.
   * @param ordering
-  *   applies to [[CapabilityScope.Graph]] only; ignored for the other scopes.
+  *   applies to [[CapabilityScope.Graph]] only.
   * @param command
-  *   the sbt command for one participating module, as an [[SbtCommand]] rather than a `String`: the combinators on its
-  *   companion build the `<module>/<task>` and `+<module>/<task>` shapes, and `SbtCommand.raw` takes command text zipx
-  *   did not build. Aggregate and Layer join these with `;`. `None` means an action-only job: checkout plus
-  *   [[extraSteps]] / [[postSteps]], with no JDK, sbt, cache, or command step.
+  *   Aggregate and Layer join per-module commands with `;`. [[CommandSource.ActionsOnly]] is an action-only job:
+  *   checkout plus [[extraSteps]] / [[postSteps]], with no JDK, sbt, cache, or command step.
   * @param matrixed
   *   expands a Graph job over Scala versions. Aggregate and Layer are never matrixed.
-  * @param targets
-  *   empty means no target fan-out.
   * @param targetFanOut
-  *   whether those targets each get a job ([[TargetFanOut.JobPerTarget]], the default) or share one
-  *   ([[TargetFanOut.SharedJob]]). Ignored when `targets` is empty.
-  * @param needsCapabilities
-  *   other capabilities whose jobs this one must also `needs`.
+  *   ignored when `targets` is empty.
   * @param extraSteps
-  *   steps injected before the command step. Prefer a [[Steps]] bundle over a bare lambda: it composes with `++`, gates
-  *   with `when`, carries a name into diagnostics, and can be published for reuse across repos.
+  *   steps before the command step. Prefer a [[Steps]] bundle over a bare lambda: it composes, gates with `when`, and
+  *   carries a name into diagnostics.
   * @param postSteps
-  *   steps injected after the command step.
+  *   steps after the command step.
   * @param container
-  *   runs every step of this capability's jobs inside this image, `Job.container`. The runner's own tools are then
-  *   absent, so `actions/setup-java` and `sbt/setup-sbt` install into the container rather than the host: an image with
-  *   no `tar`, `curl` or `git` fails in setup, not in the build. Prefer [[services]] plus the default runner unless the
-  *   *toolchain* is what has to differ, since zipx already pins the JDK and sbt.
+  *   `actions/setup-java` and `sbt/setup-sbt` then install into the container, so an image without `tar`, `curl` or
+  *   `git` fails in setup. Prefer [[services]] unless the toolchain itself must differ.
   * @param services
-  *   sidecar containers for this capability's jobs, `Job.services`. Reachable from a step at `localhost:<mapped port>`
-  *   (or at the service id, under [[container]]). GitHub starts them before the first step and gives no readiness
-  *   signal beyond a `--health-cmd` in `options`, so a test that needs one to be *ready* is often better off owning the
-  *   lifecycle itself; see the Testcontainers note in the docs.
+  *   reachable at `localhost:<mapped port>` (or the service id, under [[container]]). GitHub gives no readiness signal
+  *   beyond a `--health-cmd` in `options`.
   * @param nodeVersion
-  *   when set, an `actions/setup-node` step runs after the JDK setup, pinning Node for this capability's jobs. Off by
-  *   default because sbt-scalajs downloads its own Node for `jsEnv`, so a plain Scala.js test suite needs nothing here.
-  *   Set it when the version matters: a `jsEnv` requiring a specific Node, or a step running `npm ci` for a bundler.
+  *   adds an `actions/setup-node` step after the JDK. Off by default because sbt-scalajs downloads its own Node for
+  *   `jsEnv`; set it for a specific Node or a step running `npm ci`.
   * @param workflowCall
-  *   when set (typically on [[CapabilityScope.Once]]), emits a reusable-workflow job instead of sbt steps. Rejected
-  *   together with [[container]] or [[services]], which GitHub does not accept alongside `uses:`.
+  *   emits a reusable-workflow job instead of sbt steps. Rejected with [[container]] or [[services]], which GitHub does
+  *   not accept alongside `uses:`.
   * @param condition
-  *   ANDed into every job's `if`, after the [[Gate]] and affected clauses. Prefer [[withCondition]] on a built-in or
-  *   pack val; the factories below take it explicitly.
+  *   ANDed into every job's `if`, after the [[Gate]] and affected clauses.
   */
 final case class Capability(
     name: CapabilityName,
@@ -297,25 +237,19 @@ final case class Capability(
     nodeVersion: Option[NodeVersion] = None,
     workflowCall: Option[WorkflowCall] = None,
     condition: Option[JobCondition] = None,
-    /** When set, overrides [[PlanConfig.matrixCollapse]] for this capability (including explicit
-      * [[MatrixCollapse.Off]]). `None` inherits from the plan allowlist, else Off.
-      */
+    /** Overrides [[PlanConfig.matrixCollapse]]; `None` inherits the plan allowlist, else Off. */
     matrixCollapse: Option[MatrixCollapse] = None,
-    /** Build-wide command appended once after joined module commands. See [[thenOnce]]. */
+    /** Appended once after the joined module commands; see [[thenOnce]]. */
     sessionTail: Option[SbtCommand] = None,
-    /** What this capability's jobs do with the LocalDir build snapshot. Only the builtin test saves. */
     localCache: LocalCacheMode = LocalCacheMode.Restore,
-    /** A Once or Aggregate job runs only when one of these modules is affected. See [[withAffectedBy]]. */
     affectedBy: Option[ModuleNode => Boolean] = None,
 ):
   def withCondition(condition: JobCondition): Capability =
     copy(condition = Some(condition))
 
-  /** Under [[AffectedMode.AffectedOnPR]], run this Once or Aggregate job only when a module matching `modules` is
-    * affected, or when the diff could not narrow anything.
-    *
-    * For a job whose inputs the classpath graph cannot see, such as an integration test over images that
-    * `Docker/publishLocal` builds. A Graph capability is already gated per module and refuses this.
+  /** Under [[AffectedMode.AffectedOnPR]], runs this Once or Aggregate job only when a matching module is affected (or
+    * the diff could not narrow). For inputs the classpath graph cannot see, such as images that `Docker/publishLocal`
+    * builds. A Graph capability is already gated per module and refuses this.
     */
   def withAffectedBy(modules: ModuleNode => Boolean): Capability =
     copy(affectedBy = Some(modules))
@@ -329,31 +263,24 @@ final case class Capability(
   def withCondition(condition: Option[JobCondition]): Capability =
     copy(condition = condition)
 
-  /** ANDs `extra` onto any existing [[condition]]. Use this rather than [[withCondition]] when layering a filter onto a
-    * pack that already ships one, such as `ZipxDocs.pages`.
-    */
+  /** For layering a filter onto a pack that already ships a [[condition]], such as `ZipxDocs.pages`. */
   def andCondition(extra: JobCondition): Capability =
     copy(condition = Some(condition.fold(extra)(_ && extra)))
 
-  /** Opt into (or veto) matrix-collapse for this capability; see [[MatrixCollapse]]. */
   def withMatrixCollapse(mode: MatrixCollapse): Capability =
     copy(matrixCollapse = Some(mode))
 
-  /** Graph same-capability `needs`. */
   def withOrdering(ordering: Ordering): Capability =
     copy(ordering = ordering)
 
-  /** Graph jobs do not `needs` same-capability upstreams. The command still compiles `dependsOn` from the checkout. */
   def withoutUpstreamJobs: Capability =
     withOrdering(Ordering.Independent)
 
-  /** Replaces job `permissions`. Same bar as [[withEnv]]. */
   def withPermissions(permissions: Map[String, String]): Capability =
     copy(permissions = permissions)
 
-  /** A job that sets `permissions` loses every scope it does not name, and the metadata GET sends whatever credentials
-    * this job exports. GitHub Packages answers 401 to a missing `packages: read` and to a request that does not carry
-    * the token. Central's metadata is public, so that registry takes neither.
+  /** Lets this job read `registry`'s release metadata. GitHub Packages answers 401 without `packages: read` and the
+    * token; Central's metadata is public, so it gets neither.
     */
   def readingRelease(
       registry: ArtifactRegistry,
@@ -365,21 +292,20 @@ final case class Capability(
     if registry.usesGithubToken then authed.copy(permissions = authed.permissions + ("packages" -> "read"))
     else authed
 
-  /** Destinations that share **one** job: [[TargetFanOut.SharedJob]] plus the targets, set together because setting
-    * either alone is the mistake. The shape for registries; see [[TargetFanOut]].
+  /** Sets the targets and [[TargetFanOut.SharedJob]] together, since either alone is a mistake. The shape for
+    * registries.
     */
   def withSharedTargets(targets: ModuleNode => List[Target]): Capability =
     copy(targets = targets, targetFanOut = TargetFanOut.SharedJob)
 
-  /** The same for a target list that does not vary by module, which is the usual case for registries. */
   def withSharedTargets(targets: List[Target]): Capability =
     withSharedTargets(_ => targets)
 
-  /** Destinations that each get their own job, the default. The shape for deploy environments. */
+  /** One job per target. The shape for deploy environments. */
   def withTargets(targets: ModuleNode => List[Target]): Capability =
     copy(targets = targets, targetFanOut = TargetFanOut.JobPerTarget)
 
-  /** Adds one sidecar container, keeping any already declared. `id` is the hostname a step reaches it at.
+  /** `id` is the hostname a step reaches the sidecar at.
     *
     * {{{
     * Capability.testGraph.withService("postgres", JobService("postgres:17", ports = List("5432:5432")))
@@ -388,47 +314,36 @@ final case class Capability(
   def withService(id: String, service: JobService): Capability =
     copy(services = services + (id -> service))
 
-  /** Replaces the whole sidecar set. */
   def withServices(services: Map[String, JobService]): Capability =
     copy(services = services)
 
-  /** Runs every step of this capability's jobs in `image`; see [[Capability.container]] for what the runner stops
-    * providing when you do.
-    */
+  /** See [[Capability.container]] for what the runner stops providing. */
   def inContainer(image: String): Capability =
     copy(container = Some(image))
 
-  /** Pins Node for this capability's jobs with `actions/setup-node`; see [[Capability.nodeVersion]] for when it is
-    * needed, which is less often than a Scala.js build suggests.
-    *
-    * {{{
-    * Capability.testGraph.withNodeVersion(NodeVersion("22"))
-    * }}}
-    */
+  /** Rarely needed for Scala.js; see [[Capability.nodeVersion]]. */
   def withNodeVersion(version: NodeVersion): Capability =
     copy(nodeVersion = Some(version))
 
-  /** Fixed build-wide command ([[CommandSource.Fixed]]). */
   def running(command: SbtCommand): Capability =
     copy(command = CommandSource.Fixed(command))
 
-  /** Per participating module; zipx applies [[SbtCommand.module]]. */
+  /** `<module>/<task>` for each participating module. */
   def runningEach(task: SbtCommand): Capability =
     copy(command = CommandSource.PerModule(n => SbtCommand.module(n, task)))
 
-  /** Per participating module; zipx applies [[SbtCommand.crossModule]]. */
+  /** `+<module>/<task>` for each participating module. */
   def runningEachCross(task: SbtCommand): Capability =
     copy(command = CommandSource.PerModule(n => SbtCommand.crossModule(n, task)))
 
-  /** Per-module command with custom logic (rare). Prefer [[runningEach]] / [[runningEachCross]]. */
+  /** Prefer [[runningEach]] / [[runningEachCross]]. */
   def runningPerModule(build: ModuleNode => SbtCommand): Capability =
     copy(command = CommandSource.PerModule(build))
 
-  /** No sbt command ([[CommandSource.ActionsOnly]]). */
   def runningNothing: Capability =
     copy(command = CommandSource.ActionsOnly)
 
-  /** Appends `tail` after joined module commands. Accumulates when called twice. */
+  /** Runs `tail` once after the joined module commands. Repeated calls accumulate. */
   def thenOnce(tail: SbtCommand): Capability =
     copy(sessionTail = Some(sessionTail.fold(tail)(_.andThen(tail))))
 
@@ -459,11 +374,9 @@ final case class Capability(
   def dropPostSteps(name: String): Capability =
     copy(postSteps = Capability.asSteps(postSteps, "post").without(name))
 
-  /** Declared command names from the command source and the session tail. */
   def declaredNames: List[SbtCommandName] =
     command.declaredNames ++ sessionTail.toList.flatMap(_.declaredNames)
 
-  /** The command a job runs: `base` with [[sessionTail]] appended. */
   def sessionCommand(base: Option[SbtCommand]): Option[SbtCommand] =
     (base, sessionTail) match
       case (Some(b), Some(t)) => Some(b.andThen(t))
@@ -483,10 +396,7 @@ object Capability:
   /** Wire form for native-packager's `Docker / publish` until a build passes the real key via zipxTasks. */
   private val dockerPublish: SbtCommand = SbtCommand.unsafeTask("Docker/publish")
 
-  /** The names of the built-ins, and the default name of a [[deploy]]. Named because they are also what a build writes
-    * in `needsCapabilities` to depend on one, and a default argument cannot be a bare literal now that the parameter is
-    * a [[CapabilityName]].
-    */
+  /** Built-in names, which a build also writes in `needsCapabilities` to depend on one. */
   val TestName: CapabilityName          = CapabilityName("test")
   val PublishName: CapabilityName       = CapabilityName("publish")
   val DockerName: CapabilityName        = CapabilityName("docker")
@@ -535,9 +445,7 @@ object Capability:
     scope = scope,
   )
 
-  /** PR advisory merge gate. Once, Verify, `pull_request` only. The plugin injects this when `zipxPinFeeds` warrants
-    * it; scheduled apply and snapshot stay companion workflows.
-    */
+  /** PR advisory merge gate, injected by the plugin when `zipxPinFeeds` warrants it. */
   def pinCheck(command: SbtCommand = SbtCommand.unsafeTask("zipxPinCheckPr")): Capability =
     Capability.once(
       name = PinCheckName,
@@ -575,10 +483,7 @@ object Capability:
     )
 
   /** Publishes every unreleased row at `<row>-<sha>-SNAPSHOT` on a default-branch push, then the `<row>-SNAPSHOT`
-    * pointer.
-    *
-    * Does not name `test`. The planner needs the Verify roll-up, so a sibling Verify job blocks the publish, and
-    * `cache-rehydrate` when that job owns the merge-push save.
+    * pointer. Needs no `test`: the planner adds the Verify roll-up, and `cache-rehydrate` when it owns the save.
     */
   def snapshots(command: SbtCommand = SbtCommand.unsafeCommand("zipxSnapshotPublish")): Capability =
     Capability.once(
@@ -817,7 +722,7 @@ object Capability:
     )
 
   /** A single build-wide action-only job: checkout plus the given steps, with no sbt command and no JDK / sbt / cache
-    * toolchain. Same topology knobs as [[once]].
+    * toolchain.
     */
   def steps(
       name: CapabilityName,

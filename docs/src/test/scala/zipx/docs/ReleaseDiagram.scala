@@ -4,9 +4,7 @@ import ascent.*
 import ascent.ast.UI
 import ascent.dsl.*
 
-/** Column diagrams for the snapshot cycle. They are ordinary ascent trees, so they take the width of the prose column
-  * and wrap instead of painting a fixed scene.
-  */
+/** Snapshot-cycle diagrams as plain ascent trees, so they take the prose column's width and wrap. */
 object ReleaseDiagram:
 
   private enum Role:
@@ -95,7 +93,7 @@ object ReleaseDiagram:
         )
   end Styles
 
-  /** The words painted in `ui`, for a doc assertion. Reactive nodes contribute nothing. */
+  /** The static text painted in `ui`, for a doc assertion. */
   def prose(ui: UI[Any]): String =
     ui match
       case UI.Text(value)             => value

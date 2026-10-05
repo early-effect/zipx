@@ -6,9 +6,8 @@ import scala.collection.immutable.ListMap
 
 import ReleaseRequest.All
 
-/** `zipx-release.yml`, the only place a ship's catalog number is published. A tag releases that ship. A dispatch
-  * releases the ships named in `inputs.ships` (default `all`). Either way one sbt session and one deployment, plus
-  * unreleased in-repo upstreams.
+/** `zipx-release.yml`, the only place a catalog number is published. A tag releases its ship, a dispatch the ships in
+  * `inputs.ships`; either way one sbt session and one deployment, unreleased in-repo upstreams included.
   */
 final case class ReleaseWorkflow(
     registry: ArtifactRegistry,
@@ -25,8 +24,8 @@ object ReleaseWorkflow:
 
   val TagsFile: String = "target/zipx-release-tags.txt"
 
-  /** The Run workflow field's description. The input id is the literal `ships`: `InputName` and `Expr.input` need a
-    * compile-time string, and a reference to this val does not fold into one.
+  /** The input id stays the literal `ships`: `InputName` and `Expr.input` need a compile-time string, and a val
+    * reference does not fold into one.
     */
   val ShipsDescription: String = "all, or comma-separated ship names (client, libs)"
 
@@ -102,9 +101,8 @@ object ReleaseWorkflow:
       .build
   end onDefaultBranchStep
 
-  /** A dispatch passes `inputs.ships` through unchanged, including the empty string, which `zipxRelease` refuses. A tag
-    * push passes `github.ref`. An expression cannot do this: an empty string is falsy, so `inputs.ships || github.ref`
-    * would turn a cleared field into the branch ref and release every unreleased ship.
+  /** Shell, not an expression: an empty string is falsy, so `inputs.ships || github.ref` would turn a cleared field
+    * into the branch ref and release everything. `zipxRelease` refuses the empty string instead.
     */
   private val bindRefStep: Step =
     val write = (value: Word.Quotable) =>
@@ -168,7 +166,7 @@ object ReleaseWorkflow:
       .withEnv("GH_TOKEN", Expr.github("token"))
       .build
 
-  /** The release commit cannot contain the bump. Say so where the person who just released is looking. */
+  /** The release commit cannot contain the bump, so the step summary says so. */
   private val openCycleStep: Step =
     val summary                          = Word.vq("GITHUB_STEP_SUMMARY")
     inline def line(inline text: String) =
@@ -187,7 +185,6 @@ object ReleaseWorkflow:
       .build
   end openCycleStep
 
-  /** The bump is a new commit on a pull-request branch. The tag stays on the release commit. */
   private val bumpPrStep: Step =
     val opened = CompanionPr.open(
       branchPrefix = "zipx/modver-bump",

@@ -8,7 +8,6 @@ import zipx.shell.{Exec, Script, Word}
 import zipx.workflow.{Cron, DayOfWeek, Step}
 import zio.test.*
 
-/** Catalog bumps: scheduled PR from zipx-version-updates.yml, or the same apply locally. ZipxVersions is required. */
 object DependencyUpdates extends DocSpecSuite:
 
   def doc = page("Dependency updates")(

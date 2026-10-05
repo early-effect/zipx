@@ -31,7 +31,6 @@ object GitHubDeployments:
 
   type Post = (String, String, Map[String, String]) => Either[String, HttpLookupResult]
 
-  /** [[query]], sent to GitHub's GraphQL endpoint, then [[parse]]. */
   def lookup(
       repository: String,
       token: String,

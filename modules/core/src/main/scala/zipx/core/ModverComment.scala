@@ -1,6 +1,6 @@
 package zipx.core
 
-/** Sticky PR comment for suggested Ship edits. Tests assert the body; they never POST. */
+/** Sticky PR comment for suggested Ship edits. */
 object ModverComment:
 
   val Marker: String = "<!-- zipx-modver -->"

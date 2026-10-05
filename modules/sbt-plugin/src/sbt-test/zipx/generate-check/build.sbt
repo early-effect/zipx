@@ -1,11 +1,10 @@
-// Bare settings (sbt 2.0 common settings): apply to every module, overridable per module. No `ThisBuild /` needed.
+// Bare settings are common to every module and overridable per module, so no `ThisBuild /`.
 scalaVersion := "3.9.0"
 version      := "1.0.0-SNAPSHOT"
-// Keep Fixed so scripted asserts stay on a literal epoch (default is now GitTags at runtime).
+// Fixed so the asserts can name a literal epoch.
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
-// Scripted asserts name per-module jobs and literal module paths; keep Graph expanded here.
-// (Product default is MatrixCollapse.Auto; Auto is covered in core MatrixCollapseSpec.)
+// The asserts name per-module jobs, so collapse is off; core's MatrixCollapseSpec covers Auto.
 zipxMatrixCollapse := Map(
   Capability.TestName                 -> MatrixCollapse.Off,
   Capability.PublishName              -> MatrixCollapse.Off,
@@ -13,11 +12,8 @@ zipxMatrixCollapse := Map(
   CapabilityName("crossPublishCheck") -> MatrixCollapse.Off,
   CapabilityName("mixedCheck")        -> MatrixCollapse.Off,
 )
-// A build-wide default is now testFull from the plugin; client overrides back to plain `test`.
 zipxTestTask := zipxTasks.of(testFull)
 
-// A small cross-published monorepo: a models lib, an api that depends on it, and a client
-// that depends on api, plus a non-publishing service.
 lazy val schema = project
   .settings(crossScalaVersions := Seq("2.13.16", "3.9.0"))
 
@@ -29,27 +25,26 @@ lazy val client = project
   .dependsOn(api)
   .settings(
     crossScalaVersions := Seq("2.13.16", "3.9.0"),
-    zipxTestTask       := zipxTasks.of(test), // overrides the build-wide `testFull`
+    zipxTestTask       := zipxTasks.of(test),
   )
 
 lazy val service = project
   .dependsOn(api)
   .settings(
-    // Honor sbt's publish/skip (no zipxPublish := Some(false) required).
-    publish / skip := true // non-publishing → test job only, no publish job
+    // zipx honours sbt's publish / skip, so no zipxPublish is needed.
+    publish / skip := true
   )
 
 lazy val root = (project in file("."))
   .aggregate(schema, api, client, service)
   .settings(publish / skip := true)
 
-// A real build-wide task, referenced as a TYPED key (not a string) via zipxTasks.once, proving the typed,
-// IDE-friendly capability API renders to the same `<label>` command.
+// A typed key through zipxTasks.once renders its bare `<label>` command.
 val lintAll = taskKey[Unit]("a build-wide lint gate")
 lintAll := ()
 zipxCapabilities += zipxTasks.once(CapabilityName("lint"), lintAll)
 
-// A typed CONFIG-SCOPED key (`Compile / compile`), proving zipxTasks renders the config axis: <module>/Compile/compile.
+// A config-scoped typed key renders `<module>/Compile/compile`.
 zipxCapabilities += zipxTasks.custom(
   name = CapabilityName("compileCheck"),
   command = Compile / compile,
@@ -57,8 +52,7 @@ zipxCapabilities += zipxTasks.custom(
   gate = Gate.Always,
 )
 
-// The cmd"…" interpolator: literal command syntax (`+ `) + a typed key splice, module-scoped → +<module>/publish.
-// cmd produces a ModuleNode => SbtCommand, so it's passed to the core Capability.custom (which takes that function).
+// cmd"…" yields a `ModuleNode => SbtCommand`, so it goes to the core `Capability.custom`.
 zipxCapabilities += Capability.custom(
   name = CapabilityName("crossPublishCheck"),
   command = cmd"+ ${publish}",
@@ -66,7 +60,7 @@ zipxCapabilities += Capability.custom(
   gate = Gate.Always,
 )
 
-// MIXED splices (the macro's point): a String value AND a typed key in one command → `++2.13.16; <module>/publish`.
+// A String splice and a key splice in one command.
 val scalaSwitch = "2.13.16"
 zipxCapabilities += Capability.custom(
   name = CapabilityName("mixedCheck"),
@@ -75,8 +69,7 @@ zipxCapabilities += Capability.custom(
   gate = Gate.Always,
 )
 
-// A publish-style capability carrying typed secrets (M7), no raw "${{ secrets.X }}" strings.
-// Graph modes exercise affected / matrix / per-module needs (scripted asserts those shapes).
+// Graph-mode test and publish; publish carries typed secrets rather than raw `${{ secrets.X }}` strings.
 zipxCapabilities ++= Seq(
   Capability.testGraph,
   Capability.publishGraph
@@ -88,12 +81,10 @@ zipxCapabilities ++= Seq(
     ),
 )
 
-// Assertions run inside the scripted test.
 val assertGraph = taskKey[Unit]("assert the graph and generated workflow are correct")
 assertGraph := {
   val wf      = (LocalRootProject / baseDirectory).value / ".github" / "workflows" / "ci.yml"
   val content = IO.read(wf)
-  // Default Verify jobs run in parallel with Graph test (no needs between them).
   assert(content.contains("fmt:"), "missing fmt verify job")
   assert(content.contains("zipx: skipping fmt:"), "Skip fmt should still emit the job")
   assert(content.contains("workflow-check:"), "missing workflow-check job")
@@ -106,25 +97,20 @@ assertGraph := {
     content.contains("zipxAdvisoryCheck") || content.contains("zipxAdvisoryCheck'"),
     "advisories should run zipxAdvisoryCheck",
   )
-  // Test jobs for every real module; the aggregating root gets no job.
   assert(content.contains("test-schema:"), "missing test-schema job")
   assert(content.contains("test-service:"), "missing test-service job")
   assert(!content.contains("test-root:"), "the aggregating root must not get a test job")
-  // Publish jobs only for publishers, dependency-ordered; non-publishing service and root excluded.
   assert(content.contains("publish-schema:"), "missing publish-schema job")
   assert(!content.contains("publish-service:"), "service must not have a publish job")
   assert(!content.contains("publish-root:"), "aggregating root must not have a publish job")
-  // needs wiring derived from dependsOn.
   assert(content.contains("- test-schema"), "test-api should need test-schema")
   assert(content.contains("- publish-schema"), "publish-api should need publish-schema")
-  // Cross-scala matrix present for cross-built modules (zio-blocks quotes version-like scalars).
+  // zio-blocks quotes version-like scalars.
   assert(content.contains("\"2.13.16\""), "expected scala matrix entry")
-  // Propagate-down with override: service inherits the build-wide `testFull`; client overrides back to `test`.
   assert(content.contains("service/testFull"), "service should inherit the build-wide testFull task")
   assert(content.contains("schema/testFull"), "schema should inherit the build-wide testFull task")
   assert(content.contains("client/test'"), "client should override back to plain test")
   assert(!content.contains("client/testFull"), "client must NOT use the inherited testFull")
-  // LocalDir: epoch+run_id+job primary key lives in zipx-sbt-setup; the workflow only passes inputs.
   assert(content.contains("uses: ./.github/actions/zipx-sbt-setup"), "expected zipx-sbt-setup composite")
   assert(content.contains("cache-key-suffix: test-schema"), "cache-key-suffix should be the job id")
   assert(content.contains("cache-epoch: \"1.0.0-SNAPSHOT\""), "Fixed epoch should be passed into the composite")
@@ -153,7 +139,6 @@ assertGraph := {
   assert(setup.contains("name: Save sbt cache"), "the cold save step must exist")
   val awsLogin = (LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-aws-login"
   assert(!awsLogin.exists, "non-AWS consumer must not get zipx-aws-login")
-  // M3: affected-only setup job + gating on verify jobs (default AffectedOnPR).
   assert(content.contains("affected:"), "missing affected setup job")
   assert(content.contains("modules: ${{ steps.compute.outputs.modules }}"), "affected job should output modules")
   assert(content.contains("fetch-depth:"), "affected job should checkout full history")
@@ -166,21 +151,14 @@ assertGraph := {
     content.contains("needs.test-schema.result != 'failure'"),
     "downstream verify jobs must tolerate skipped upstreams",
   )
-  // Publish jobs are release-gated and NOT matrixed.
   assert(content.contains("startsWith(github.ref, 'refs/tags/v')"), "publish jobs should gate on a release tag")
   assert(!content.contains("++${{ matrix.scala }} +"), "publish must not combine matrix leg with +publish")
-  // No module here enables DockerPlugin, so no docker stage should leak in.
   assert(!content.contains("docker-"), "docker stage must be absent when no module opts in")
-  // The typed `zipxTasks.once(..., lintAll)` renders a single build-wide job running the key's label.
   assert(content.contains("lint:"), "typed once-capability should emit a build-wide `lint` job")
   assert(content.contains("sbt 'lintAll'"), "typed key should render to its bare label command")
-  // A config-scoped typed key renders the config axis: <module>/Compile/compile.
   assert(content.contains("sbt 'schema/Compile/compile'"), "typed config-scoped key should render its config axis")
-  // The cmd"…" interpolator: literal `+ ` syntax + a module-scoped typed key splice.
   assert(content.contains("sbt '+ schema/publish'"), "cmd interpolator should emit literal syntax + module-scoped key")
-  // Mixed splices: a String (scalaSwitch) and a typed key in one cmd → `++2.13.16; api/publish`.
   assert(content.contains("sbt '++2.13.16; api/publish'"), "cmd should mix a String splice with a module-scoped key")
-  // M7: typed secrets render into publish job env (capability.env).
   assert(
     content.contains("PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}"),
     "typed secret should render into publish env",
@@ -188,17 +166,14 @@ assertGraph := {
   assert(content.contains("SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}"), "Secret() helper should render")
 }
 
-// A broken diff must fail OPEN: emit the `["all"]` sentinel so every Verify job still runs.
-// Emitting `[]` instead would make every generated `contains(fromJson(...), '<id>')` gate false, skipping
-// all verification while the PR reports green. Scripted runs in a temp dir that is not a git repo, so any
-// base ref is genuinely undiffable here, no mocking needed.
+// `[]` would gate every Verify job out while the PR reports green. Scripted's temp dir is not a git repo, so no diff
+// can run here.
 val assertAffectedFailsOpen = taskKey[Unit]("a diff that cannot run emits the all-sentinel")
 assertAffectedFailsOpen := {
   val json = IO.read((LocalRootProject / baseDirectory).value / "target" / "zipx-affected.json").trim
   assert(json == """["all"]""", s"""expected ["all"] when the diff fails, got $json""")
 }
 
-// A diff that succeeds and finds nothing is NOT a failure: it stays empty and gates everything out.
 val assertAffectedEmptyStaysEmpty = taskKey[Unit]("a successful empty diff stays empty")
 assertAffectedEmptyStaysEmpty := {
   val json = IO.read((LocalRootProject / baseDirectory).value / "target" / "zipx-affected.json").trim

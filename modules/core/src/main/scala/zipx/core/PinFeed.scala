@@ -25,7 +25,6 @@ enum PinPrGate:
 enum BumpKind derives JsonCodec:
   case None, Patch, Minor, Major, PreRelease
 
-/** Whether catalog / pin lookup may list a pre-release as a bump. Default [[Skip]]. */
 enum PreRelease:
   case Skip, Include
 

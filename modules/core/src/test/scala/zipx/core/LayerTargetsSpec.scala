@@ -2,10 +2,6 @@ package zipx.core
 
 import zio.test.*
 
-/** Layer × target fan-out: Aggregate-by-target per toposort wave, plus SharedJob destinations on every wave.
-  *
-  * Arithmetic and within-target `needs` are the load-bearing properties; example tests pin field placement.
-  */
 object LayerTargetsSpec extends ZIOSpecDefault:
   import Fixtures.*
 
@@ -16,7 +12,7 @@ object LayerTargetsSpec extends ZIOSpecDefault:
     verifyCleanLabel = None,
   )
 
-  /** Three docker waves so within-target `needs` chaining is observable (sample services alone sit in one wave). */
+  /** Three docker waves, so within-target `needs` chaining is observable: the sample services sit in one wave. */
   private val dockerGraph = GraphFixture(
     List(
       ModuleNode(ModuleId("maple"), docker = true, crossScalaVersions = List(Fixtures.scala3)),

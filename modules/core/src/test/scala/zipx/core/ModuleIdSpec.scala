@@ -7,9 +7,7 @@ import zipx.workflow.Names
 
 object ModuleIdSpec extends ZIOSpecDefault:
 
-  /** The characters an sbt project id can contain, plus the ones GitHub rejects. Not the whole of Unicode: enough of it
-    * to cover each class the two rules disagree about.
-    */
+  /** Enough of each character class the sbt and GitHub id rules disagree about, not the whole of Unicode. */
   private val Alphabet: List[Char] =
     ('a' to 'z').toList ++ ('A' to 'Z').toList ++ ('0' to '9').toList ++
       List('_', '-', '.', '/', '@', '+', ':', ' ', '\'', '$', '{', '}', 'é', 'Ü', 'プ')
@@ -25,8 +23,7 @@ object ModuleIdSpec extends ZIOSpecDefault:
       )
     },
     test("rejects an sbt-legal Unicode id, which is the bug this newtype exists for") {
-      // sbt's own rule is `Character.isLetter` then `isLetterOrDigit || '-' || '_'`, so all four of these load fine and
-      // would previously have reached the planner and thrown mid-plan.
+      // sbt loads all four: its rule is `Character.isLetter`, then `isLetterOrDigit || '-' || '_'`.
       assertTrue(
         ModuleId.make("café").isLeft,
         ModuleId.make("プロジェクト").isLeft,
@@ -43,8 +40,6 @@ object ModuleIdSpec extends ZIOSpecDefault:
       )
     },
     test("asExprLiteral is total: every legal module id is a legal expression literal") {
-      // The claim `ModuleId.asExprLiteral` relies on, checked over the alphabet in both positions rather than trusted:
-      // a first character followed by each possible second character.
       val ids = for first <- Alphabet; second <- Alphabet yield s"$first$second"
       assertTrue(
         ids.filter(id => ModuleId.make(id).isRight).forall(id => ExprLiteral.make(id).isRight),
@@ -52,8 +47,6 @@ object ModuleIdSpec extends ZIOSpecDefault:
       )
     },
     test("the subset is strict, so the two rules are not interchangeable") {
-      // Each of these is a legal expression literal and an illegal module id. That asymmetry is why the conversion goes
-      // one way only, and why `ExprLiteral` cannot stand in for `ModuleId` at the graph boundary.
       assertTrue(
         List("1abc", "a.b", "a/b", "a@b", "a+b", "a:b")
           .forall(text => ExprLiteral.make(text).isRight && ModuleId.make(text).isLeft)
@@ -71,8 +64,7 @@ object ModuleIdSpec extends ZIOSpecDefault:
       )
     },
     test("the validator is the same rule the graph's job ids are held to") {
-      // `ModuleId` duplicates `Names.ActionsId` rather than deriving from `JobId`, so this pins the two together: if the
-      // job-id rule moves, this fails rather than the workflow silently becoming invalid.
+      // `ModuleId` duplicates the `Names.ActionsId` rule rather than deriving it, so this pins the two together.
       assertTrue(
         ModuleId.make("ok-1").isRight == "ok-1".matches(Names.ActionsId),
         ModuleId.make("no.1").isRight == "no.1".matches(Names.ActionsId),

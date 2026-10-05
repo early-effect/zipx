@@ -9,7 +9,7 @@ enum ReleaseBlocker:
 
 object ReleaseBlocker:
 
-  /** `None` when the revision is a release number. An in-repo module is filtered by the caller: it rides along. */
+  /** The caller filters out in-repo modules: they ride along. */
   def classify(group: String, artifact: String, revision: String): Option[ReleaseBlocker] =
     DepRevision.of(revision) match
       case DepRevision.Commit(pin)         => Some(ReleaseBlocker.CommitPin(group, artifact, pin))
@@ -31,7 +31,7 @@ final case class ShipGate(
 /** The text `zipxReleasePlan` prints. It uploads nothing. */
 object ReleaseReadiness:
 
-  /** `selected` empty means every unreleased ship (`all`). A name the catalog does not have is the command's error. */
+  /** `selected = None` means every unreleased ship (`all`). Reporting an unknown name is the command's job. */
   def render(unreleased: List[ShipGate], branch: String, selected: Option[List[String]]): String =
     val chosen = selected.fold(unreleased)(names => unreleased.filter(ship => names.contains(ship.identity)))
     if chosen.isEmpty then "every row's catalog number is already released"
@@ -49,7 +49,7 @@ object ReleaseReadiness:
     end if
   end render
 
-  /** The paragraph the release job writes after a deployment. One sentence per released line. */
+  /** The paragraph the release job writes after a deployment. */
   def shadowSentences(lines: List[ReleaseVersion]): String =
     lines
       .map { line =>
@@ -58,7 +58,7 @@ object ReleaseReadiness:
       }
       .mkString("\n")
 
-  /** `libs/v1.4.2` and `v1.4.2` both name `1.4.2`. */
+  /** `libs/v<n>` and `v<n>` both name `<n>`. */
   def versionOfTag(tag: String): Option[ReleaseVersion] =
     val raw = tag match
       case s"$_/v$version" => version

@@ -2,7 +2,7 @@ package zipx.core
 
 import zio.json.*
 
-/** Parse GitHub releases/tags/git-ref JSON for [[Action]] bumps. HTTP lives in [[GitHubActionLookup]]. */
+/** Parse GitHub releases/tags/git-ref JSON for [[Action]] bumps. */
 object GitHubActionMeta:
 
   final case class Release(tag: String, sha: Option[String])

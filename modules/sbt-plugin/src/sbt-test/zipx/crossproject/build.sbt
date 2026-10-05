@@ -1,15 +1,10 @@
-// A cross-built module: the case `baseDir` alone cannot answer for (#73).
-//
-// sbt 2 has `projectMatrix` built in, and it bases every platform row at a synthetic `.sbt/matrix/<id>`
-// rather than at `shared/`. So the only thing that can map `shared/src/main/scala/Foo.scala` back to a
-// module is `unmanagedSourceDirectories`, which is what `ModuleNode.sourcePaths` records. Asserted through
-// `target/zipx-affected.json`, the handoff CI actually reads, never by capturing sbt stdout.
+// `projectMatrix` bases each row at a synthetic `.sbt/matrix/<id>`, so only `unmanagedSourceDirectories` (what
+// `ModuleNode.sourcePaths` records) maps a source under `shared/` back to a module.
 scalaVersion   := "3.9.0"
 version        := "1.0.0-SNAPSHOT"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
-// Empty catalog: generate must still succeed. The JS row injects scalajs-library_2.13 /
-// scala3-library_sjs1_3 / scalajs-test-bridge_2.13, which are not Lib rows.
+// Empty catalog: generate must still succeed though the JS row injects Scala.js toolchain jars that are not Lib rows.
 zipxCheckDeps := true
 
 lazy val shared = (projectMatrix in file("shared"))
@@ -38,7 +33,6 @@ assertBothRowsGetJobs := {
     content.contains("contains(fromJson(needs.affected.outputs.modules), 'sharedJS')"),
     "the JS row must gate on its own module id",
   )
-  // Node is wired through zipx-sbt-setup (pin lives in the generated composite, not the job body).
   assert(content.contains("uses: ./.github/actions/zipx-sbt-setup"), "expected zipx-sbt-setup composite")
   assert(content.contains("node-version: \"22\""), "expected the node-version input on the composite")
   assert(!content.contains("actions/setup-node@"), "setup-node must not be inlined in the workflow")

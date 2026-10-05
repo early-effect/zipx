@@ -4,11 +4,8 @@ import zipx.workflow.{Step, StepBuilder}
 
 import scala.annotation.targetName
 
-/** A named, composable bundle of steps: the typed replacement for a bare `StepContext => List[Step]` lambda.
-  *
-  * `Steps` *extends* `StepContext => List[Step]`, so every field that took a lambda accepts one unchanged. What it adds
-  * is what a lambda cannot have: a name for diagnostics, `++` to compose, [[when]] to gate, and a stable identity,
-  * which makes an org's shared bundle an ordinary published Scala value:
+/** A named, composable bundle of steps. It extends `StepContext => List[Step]`, so every lambda field accepts it, and
+  * adds what a lambda lacks: a name for diagnostics, `++`, [[when]], and an identity an org can publish:
   *
   * {{{
   * // in a published pack
@@ -21,19 +18,16 @@ import scala.annotation.targetName
   * }}}
   *
   * @param name
-  *   names this bundle in the generate-time raw-fragment warning. Composition joins names with `+`, so a warning about
-  *   a composed bundle still says which part it came from.
+  *   names this bundle in the raw-fragment warning; `++` joins names with `+`.
   * @param rawFragments
-  *   escape-hatch text in this bundle's scripts, populated by [[Steps.built]]. A `Step` has no field to carry it, so
-  *   this type is where it survives long enough for `zipxWorkflowGenerate` to warn.
+  *   escape-hatch text from [[Steps.built]]. A `Step` cannot carry it, so it survives here until `zipxWorkflowGenerate`
+  *   warns.
   */
 final case class Steps(
     name: String,
     build: StepContext => List[Step],
     rawFragments: List[String] = Nil,
-    /** Leaf bundles in `++` order. Empty means this value is the leaf. `dropExtraSteps` matches these names, not the
-      * composed `a+b` string.
-      */
+    /** Leaf bundles in `++` order (empty: this is the leaf). `dropExtraSteps` matches these names, not `a+b`. */
     parts: List[Steps] = Nil,
 ) extends (StepContext => List[Step]):
 
@@ -52,13 +46,10 @@ final case class Steps(
         leaves ++ other.leaves,
       )
 
-  /** Appends an unnamed lambda, keeping this bundle's name. The lambda contributes no `rawFragments`, since it has
-    * nowhere to carry them, which is the practical reason to prefer a named [[Steps]] on both sides.
-    */
+  /** Keeps this bundle's name. The lambda contributes no `rawFragments`, so prefer a named [[Steps]]. */
   infix def ++(other: StepContext => List[Step]): Steps =
     copy(build = ctx => build(ctx) ++ other(ctx))
 
-  /** Drops leaves whose [[name]] equals `dropName`. Unknown names are a no-op. Empty result is [[Steps.empty]]. */
   def without(dropName: String): Steps =
     leaves.filterNot(_.name == dropName) match
       case Nil           => Steps.empty
@@ -67,9 +58,7 @@ final case class Steps(
 
   private def isVacuous: Boolean = this eq Steps.empty
 
-  /** ANDs `condition` into every step's `if:`, preserving any condition a step already has. GitHub has no bundle-level
-    * `if:`, so gating is per-step by necessity; doing it here means the caller writes the condition once.
-    */
+  /** GitHub has no bundle-level `if:`, so this ANDs `condition` into every step's own. */
   def when(condition: JobCondition): Steps =
     val gated = copy(build = ctx => build(ctx).map(Steps.gate(_, condition)))
     if parts.isEmpty then gated else gated.copy(parts = parts.map(_.when(condition)))
@@ -91,24 +80,18 @@ object Steps:
   /** The identity for [[Steps.++]]. */
   val empty: Steps = Steps("empty", _ => Nil)
 
-  /** `Steps("name")(ctx => …)`.
-    *
-    * @targetName
-    *   because currying does not survive erasure: this and the case class `apply` both erase to `(String, Function1)`.
-    */
+  /** Needs `@targetName`: this and the case class `apply` both erase to `(String, Function1)`. */
   @targetName("curried")
   def apply(name: String)(build: StepContext => List[Step]): Steps = Steps(name, build)
 
   def of(name: String)(steps: Step*): Steps = Steps(name, _ => steps.toList)
 
-  /** The form to prefer: the only one that collects the builders' `rawFragments`, so escape-hatch use in this bundle
-    * reaches the generate-time warning instead of going silent.
-    */
+  /** The form to prefer: the only one that collects the builders' `rawFragments` for the generate-time warning. */
   def built(name: String)(builders: StepBuilder*): Steps =
     Steps(name, _ => builders.toList.map(_.build), builders.toList.flatMap(_.rawFragments))
 
-  /** `rawFragments` cannot be collected here: the builders do not exist until a [[StepContext]] arrives, and the
-    * warning runs before any context does. Declare them with [[Steps.withRawFragments]] instead.
+  /** Collects no `rawFragments`: the builders do not exist until a [[StepContext]] arrives, after the warning runs.
+    * Declare them with [[Steps.withRawFragments]].
     */
   def buildingWith(name: String)(build: StepContext => List[StepBuilder]): Steps =
     Steps(name, ctx => build(ctx).map(_.build))
@@ -117,12 +100,7 @@ object Steps:
 
   def all(bundles: Steps*): Steps = bundles.foldLeft(empty)(_ ++ _)
 
-  /** One warning line per raw fragment across every bundle and every command a plan can reach.
-    *
-    * The `case s: Steps` match is what lambda compatibility costs: a field still accepts a bare function, and a bare
-    * function has nothing to report, so escape-hatch use inside a plain lambda is invisible here. That is the incentive
-    * to use [[Steps.built]].
-    */
+  /** A bare lambda has nothing to report, so escape hatches inside one are invisible here. */
   def rawWarnings(capabilities: List[Capability], config: PlanConfig): List[String] =
     val bundles        = capabilities.flatMap(c => List(c.extraSteps, c.postSteps)) :+ config.cacheRehydrateExtraSteps
     val bundleWarnings = bundles.collect { case s: Steps => s }.distinct.flatMap { s =>
@@ -130,11 +108,6 @@ object Steps:
     }
     bundleWarnings ++ commandWarnings(capabilities, config)
 
-  /** The same reporting for [[SbtStep.Raw]]: command text zipx was handed rather than built.
-    *
-    * [[CommandSource]] exposes [[CommandSource.rawFragments]] (Fixed exact; PerModule via [[ModuleNode.probe]]).
-    * Session tails are included so an unchecked tail cannot go unwarned.
-    */
   private def commandWarnings(capabilities: List[Capability], config: PlanConfig): List[String] =
     val capabilityFragments = capabilities.flatMap { c =>
       val fragments = c.command.rawFragments ++ c.sessionTail.toList.flatMap(_.rawFragments)
@@ -148,9 +121,7 @@ object Steps:
     )
   end commandWarnings
 
-  /** `unwrapped` rather than `render` because an `if:` is already an expression context: `${{ a }} && ${{ b }}` is a
-    * template string that evaluates to neither operand, where `a && b` is the conjunction the caller asked for.
-    */
+  /** `unwrapped`, not `render`: in an `if:`, `${{ a }} && ${{ b }}` is a template string, not the conjunction. */
   private def gate(step: Step, condition: JobCondition): Step =
     val added  = condition.expr.unwrapped
     val merged = step.`if` match
@@ -160,8 +131,7 @@ object Steps:
 
 end Steps
 
-/** An extension rather than a method on `StepBuilder`, because `JobCondition` lives here in `zipx-core` and
-  * `StepBuilder` a layer below in `zipx-workflow`. Top-level so it arrives with `import zipx.core.*`, which is what the
-  * sbt plugin's `autoImport` re-exports.
+/** An extension because `StepBuilder` lives a layer below, in `zipx-workflow`. Top-level so `import zipx.core.*` (what
+  * the plugin's `autoImport` re-exports) brings it.
   */
 extension (builder: StepBuilder) def when(condition: JobCondition): StepBuilder = builder.when(condition.expr)

@@ -2,9 +2,7 @@ package zipx.syntax
 
 import zipx.core.*
 
-/** Reads a catalog file's diff between two commits as `CatalogChange`s.
-  *
-  * Narrowing needs proof that nothing else moved. The parser sees constructors only, so a group edit such as adding a
+/** Narrowing needs proof that nothing else moved. The parser sees constructors only, so a group edit such as adding a
   * library to `def service = library(...)` changes which modules get a row without moving any constructor. The last
   * check therefore puts each moved row's base version back into the head text and requires the base file exactly;
   * anything short of that is `CatalogChange.BuildWide`.

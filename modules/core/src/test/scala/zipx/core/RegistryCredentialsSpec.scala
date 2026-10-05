@@ -4,8 +4,8 @@ import zio.test.*
 
 object RegistryCredentialsSpec extends ZIOSpecDefault:
 
-  /** `${{ github.token }}` is in the sbt process as `GITHUB_TOKEN`. The metadata lookup has to read that var: Packages
-    * answers 401 to a request that declares the token and then does not send it.
+  /** `${{ github.token }}` reaches sbt as `GITHUB_TOKEN`, and the lookup must send it: Packages answers 401 to a
+    * request that declares the token and then omits it.
     */
   private val packages =
     RegistryCredentials.UserPassword(EnvValue.plain("early-effect"), EnvValue.githubToken)

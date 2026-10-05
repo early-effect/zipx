@@ -30,10 +30,8 @@ object CatalogChange:
       case other => List(other)
     }.distinct
 
-  /** The modules `changes` seed, or `None` for build-wide.
-    *
-    * A moved library that no module declares is build-wide too: it is used somewhere the graph cannot see, such as the
-    * meta-build or a plugin's own dependencies.
+  /** `None` for build-wide, which includes a moved library no module declares: it is used somewhere the graph cannot
+    * see, such as the meta-build or a plugin's own dependencies.
     */
   def seeds(changes: List[CatalogChange], graph: ModuleGraph): Option[Set[String]] =
     changes.foldLeft(Option(Set.empty[String])) {
@@ -46,9 +44,7 @@ object CatalogChange:
     }
 end CatalogChange
 
-/** How a changed catalog file reads.
-  *
-  * @param path
+/** @param path
   *   repo-root-relative, as `git diff --name-only` reports it.
   */
 final case class CatalogEdit(path: String, changes: List[CatalogChange]):

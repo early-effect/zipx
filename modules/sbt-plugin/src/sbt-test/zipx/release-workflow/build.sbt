@@ -24,17 +24,16 @@ def usesClient = Seq(
   resolvers += "fixture" at released.toURI.toString,
 )
 
-// Does not publish, like a docs site.
 lazy val consumer = project
   .dependsOn(client)
   .settings(publish / skip := true, if (file("ext").exists) usesClient else Nil)
 
-// Publishes.
 lazy val downstream = project.dependsOn(client).settings(if (file("ext").exists) usesClient else Nil)
 
 lazy val root = (project in file(".")).aggregate(models, coreLib, client).settings(publish / skip := true)
 
-// Pins the models commit as every registry stores it (`<line>-<sha>-SNAPSHOT`). Not aggregated: its update is the proof.
+// Pins the models commit as every registry stores it (`<line>-<sha>-SNAPSHOT`). Not aggregated: its update is the
+// proof.
 lazy val pinned = project.settings(
   publish / skip := true,
   libraryDependencies ++= commitPins((LocalRootProject / baseDirectory).value),
@@ -240,7 +239,6 @@ assertDirtyLocal := Def.uncached {
   assert(!versionDirs("models_3").exists(_.contains("+")), versionDirs("models_3").toString)
 }
 
-/** Every metadata file sbt or a registry writes beside an artifact, `maven-metadata-local.xml` included. */
 def deleteMavenMetadata(dir: File): Unit =
   Option(dir.listFiles()).foreach(_.foreach { file =>
     if file.getName.startsWith("maven-metadata") then IO.delete(file)

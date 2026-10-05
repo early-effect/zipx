@@ -6,7 +6,6 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.*
 import zio.test.*
 
-/** Why CI-hydrated remote cache is a team win (beyond faster CI alone). */
 object RemoteCacheForTeams extends DocSpecSuite:
 
   def doc = page("Remote cache for teams")(

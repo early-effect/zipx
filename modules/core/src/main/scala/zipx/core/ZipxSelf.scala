@@ -1,7 +1,7 @@
 package zipx.core
 
-/** Resolve a loaded sbt plugin into a catalog [[Plugin]] row. Group and artifact are always written out; zipx never
-  * infers them from the session. Version is an explicit override, else `Implementation-Version` on `from`.
+/** A loaded sbt plugin as a catalog [[Plugin]] row. Group and artifact are always written out, never inferred from the
+  * session; version is the explicit override, else `Implementation-Version` on `from`.
   */
 object ZipxSelf:
 

@@ -2,7 +2,6 @@ package zipx.core
 
 import scala.annotation.tailrec
 
-/** The scope a POM gives a dependency. A consumer inherits compile and runtime dependencies, and nothing else. */
 enum PomScope:
   case Compile, Runtime, Provided, Optional, Test, Tool
 
@@ -10,24 +9,17 @@ enum PomScope:
     case Compile | Runtime                 => true
     case Provided | Optional | Test | Tool => false
 
-/** A dependency of one in-repo project on another, in the scope its POM records. */
+/** A dependency of one in-repo project on another. */
 final case class PomEdge(scope: PomScope, to: ResolvedModule)
 
-/** A library a project declares, in the scope its POM records, at the revision it states. */
 final case class PomDependency(scope: PomScope, module: ResolvedModule, revision: DepRevision)
 
-/** What a published POM keeps its libraries from bringing: the modules the project states itself.
-  *
-  * A consumer resolves every POM it meets together. A library built against an older commit of a module this project
-  * builds, or pins, names that commit, and nothing orders two commits for the consumer. Excluding the module from each
-  * library leaves the consumer one revision: the one this project was built with. A release is left to the consumer's
-  * own order, which is meaningful for releases.
+/** The modules this project builds or commit-pins, excluded from each library its POM names. Nothing orders two commits
+  * of one module for a consumer, so this leaves the one the project was built with. Release pins are left to the
+  * consumer's own ordering.
   */
 object PomExclusions:
 
-  /** The in-repo modules `project` reaches through edges a consumer inherits, and the commit pins it declares in such a
-    * scope. Never `project` itself.
-    */
   def of(
       project: ResolvedModule,
       inRepo: Map[ResolvedModule, List[PomEdge]],

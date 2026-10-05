@@ -56,7 +56,7 @@ object DepCleanup:
 
   def keyOf(group: String, artifact: String): String = s"$group:${FromGraph.artifactFamily(artifact)}"
 
-  /** Reachability after removing the whole redundant set together. `provided` is analyzed. */
+  /** A row is redundant only if it stays reachable once the whole redundant set is removed together. */
   def analyze(
       projectId: String,
       selected: List[SelectedLib],

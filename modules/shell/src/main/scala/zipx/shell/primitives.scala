@@ -2,22 +2,15 @@ package zipx.shell
 
 import neotype.*
 
-// Validated primitives. Every other type in this module holds these, not String. `ShText("echo hi")` validates the
-// literal at compile time; a runtime string goes through `ShText.make`, which returns an `Either` the caller carries to
-// the sbt boundary. neotype's throwing constructor is deliberately unused in main sources: nothing here raises, which
-// the ROADMAP's guardrail-5 grep enforces (so this comment names no throwing method either).
+// neotype's throwing constructor is deliberately unused in main sources, which the ROADMAP's guardrail-5 grep enforces
+// (so this comment names no throwing method either).
 //
 // Validators use only what neotype can evaluate at compile time: isEmpty, contains, startsWith, matches, length, Int
 // comparison. `exists` with a lambda is not, so character-class checks are regexes.
 
-/** Text safe inside a shell word: one line, no control characters, no leading tab. A tab elsewhere is allowed.
-  *
-  * These are [[ScriptLine]]'s rules exactly, which is deliberate: every rendered word can begin a physical line, so
-  * `ShText` being a subset of `ScriptLine` is what lets [[ShLines]] build a script with no revalidation and no partial
-  * conversion. The leading-tab rule is the only one a word does not need for its own sake.
-  *
-  * [[SquoteText]] and [[ParamText]] carry no such rule, and should not: they always render behind a `'` or a `${`, so
-  * the line they land on starts with that delimiter and never with their own first character.
+/** Exactly [[ScriptLine]]'s rules, deliberately: any word can begin a physical line, so [[ShLines]] builds a script
+  * without revalidating. [[SquoteText]] and [[ParamText]] skip the leading-tab rule: they always render behind a
+  * delimiter.
   */
 type ShText = ShText.Type
 object ShText extends Newtype[String]:
@@ -32,9 +25,7 @@ object ShText extends Newtype[String]:
   val empty: ShText = ShText("")
 end ShText
 
-/** Text for a single-quoted word. A single quote cannot be escaped inside `'…'`, so it is rejected outright: the
-  * alternative renders as `'\''` concatenation, which callers can build explicitly with [[Word.cat]].
-  */
+/** A `'` cannot be escaped inside `'…'`, so it is rejected; build the `'\''` form explicitly with [[Word.cat]]. */
 type SquoteText = SquoteText.Type
 object SquoteText extends Newtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -44,9 +35,7 @@ object SquoteText extends Newtype[String]:
     else if !input.matches(Patterns.NoControlChars) then "shell text must not contain control characters"
     else true
 
-/** Text appearing inside `${…}`, such as the default in `${VAR:-default}` or the pattern in `${VAR#prefix}`. `}` closes
-  * the expansion, so `${VAR:-a}b}` would silently mean a default of `a` followed by a literal `b}`.
-  */
+/** `}` closes the expansion, so `\${VAR:-a}b}` would silently mean a default of `a` followed by a literal `b}`. */
 type ParamText = ParamText.Type
 object ParamText extends Newtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -56,11 +45,9 @@ object ParamText extends Newtype[String]:
     else if !input.matches(Patterns.NoControlChars) then "shell text must not contain control characters"
     else true
 
-/** One physical line of a rendered script: [[ShText]]'s rules plus no leading tab.
-  *
-  * Both are YAML constraints rather than shell ones. Block scalar indentation must be spaces, and
-  * `YamlPrinter.needsQuoting` force-quotes any string holding `\r` or a control character, which would emit a
-  * multi-line program as one escaped scalar.
+/** The tab and control-character rules are YAML constraints: block scalar indentation must be spaces, and
+  * `YamlPrinter.needsQuoting` force-quotes a string holding `\r` or a control character, collapsing the script into one
+  * escaped scalar.
   */
 type ScriptLine = ScriptLine.Type
 object ScriptLine extends Newtype[String]:
@@ -76,7 +63,7 @@ object ScriptLine extends Newtype[String]:
   val empty: ScriptLine = ScriptLine("")
 end ScriptLine
 
-/** A shell variable name. POSIX name rules, which are also what GitHub Actions requires of `env:` keys. */
+/** POSIX name rules, which GitHub Actions also requires of `env:` keys. */
 type VarName = VarName.Type
 object VarName extends Newtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -84,7 +71,7 @@ object VarName extends Newtype[String]:
     else if input.matches(Patterns.Ident) then true
     else s"invalid shell variable name '$input': must match ${Patterns.Ident}"
 
-/** A glob pattern for `[[ … == pattern ]]`. Renders unquoted so the shell globs it, hence no whitespace or quotes. */
+/** Renders unquoted so the shell globs it, hence no whitespace or quotes. */
 type GlobPattern = GlobPattern.Type
 object GlobPattern extends Newtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -93,9 +80,7 @@ object GlobPattern extends Newtype[String]:
       s"invalid glob pattern '$input': it renders unquoted, so whitespace and quote characters are not allowed"
     else true
 
-/** A program name or subcommand in command position, so `Exec` is not a second splicing hole. Its arguments stay
-  * [[Word]]s that choose their own quoting.
-  */
+/** Validated so `Exec`'s command position is not a second splicing hole. */
 type ProgramName = ProgramName.Type
 object ProgramName extends Newtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -104,7 +89,7 @@ object ProgramName extends Newtype[String]:
       s"invalid program name '$input': allowed characters are letters, digits, and _ . / - +"
     else true
 
-/** A heredoc delimiter. Identifier-shaped so it needs no quoting. */
+/** Identifier-shaped so it needs no quoting. */
 type HeredocTag = HeredocTag.Type
 object HeredocTag extends Newtype[String]:
   override inline def validate(input: String): Boolean | String =
@@ -112,8 +97,7 @@ object HeredocTag extends Newtype[String]:
     else if input.matches(Patterns.Ident) then true
     else s"invalid heredoc delimiter '$input': must match ${Patterns.Ident}"
 
-/** A process exit status, 0 to 255. Outside that range the shell truncates modulo 256, so `exit 256` reports success.
-  */
+/** 0 to 255: the shell truncates modulo 256, so `exit 256` reports success. */
 type ExitCode = ExitCode.Type
 object ExitCode extends Newtype[Int]:
   override inline def validate(input: Int): Boolean | String =
@@ -124,9 +108,7 @@ object ExitCode extends Newtype[Int]:
   val Success: ExitCode = ExitCode(0)
   val Failure: ExitCode = ExitCode(1)
 
-/** A file descriptor for redirections. Only single digits are portable: `10>` is a valid fd in bash but ambiguous with
-  * `1` followed by `0>` in a POSIX shell.
-  */
+/** Only single digits are portable: `10>` is a valid fd in bash but ambiguous with `1` followed by `0>` in POSIX sh. */
 type FileDescriptor = FileDescriptor.Type
 object FileDescriptor extends Newtype[Int]:
   override inline def validate(input: Int): Boolean | String =

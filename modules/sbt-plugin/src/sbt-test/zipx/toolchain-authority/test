@@ -1,4 +1,4 @@
-# sbt-scala-native injects test-interface 0.5.12, and the test library names 0.5.10. The plugin's runtime wins with no
+# sbt-scala-native injects a newer test-interface than the test library names. The plugin's runtime wins with no
 # override in build.sbt, and update does not fail on the strict scheme test-interface publishes.
 > appNative/update
 > assertNativeRuntime

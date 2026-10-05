@@ -9,7 +9,6 @@ import zipx.shell.{Exec, Script}
 import zipx.workflow.Step
 import zio.test.*
 
-/** Built-in capabilities and how they compose. */
 object Capabilities extends DocSpecSuite:
 
   def doc = page("Capabilities")(

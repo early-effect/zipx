@@ -6,17 +6,15 @@ import dotty.tools.dotc.ast.untpd.*
 import dotty.tools.dotc.core.Constants
 import dotty.tools.dotc.core.Contexts.*
 
-/** Reads a root `build.sbt` diff statement by statement, for affected gating.
-  *
-  * sbt 2 records no usable source range for a setting inside `project.settings(...)` (a single line, offset from the
+/** sbt records no usable source range for a setting inside `project.settings(...)` (a single line, offset from the
   * block, and none at all for a multi-line one), so this compares the source instead. Each top-level definition is
   * matched by name between the two commits:
   *
   *   - a changed project definition affects that project's modules, and every other project whose definition names it,
   *     directly or through a helper value such as `val svcAJvm = LocalProject("svcA")`;
-  *   - a changed helper value or `def`, a changed bare setting or import (sbt 2 applies bare settings to every
-  *     project), a definition added or removed, a changed aggregator, or a bare setting that names a changed project,
-  *     affects every module.
+  *   - a changed helper value or `def`, a changed bare setting or import (sbt applies bare settings to every project),
+  *     a definition added or removed, a changed aggregator, or a bare setting that names a changed project, affects
+  *     every module.
   *
   * Comments and blank lines sit outside every statement, so editing them affects nothing.
   */
@@ -60,7 +58,7 @@ object BuildSbtDiff:
     end if
   end compare
 
-  /** The top-level statements of an sbt file, wrapped as an object body so bare settings parse. */
+  /** Wrapped as an object body so bare settings parse. */
   private def parse(source: String): Option[Stats] =
     given Context = ScalaParse.freshContext()
     val wrapped   = s"object ZipxBuildSbt {\n$source\n}\n"

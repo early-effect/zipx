@@ -9,20 +9,18 @@ import zio.*
 
 import java.time.Duration
 
-/** Config for the bazel-remote sidecar (saferis-style plain Testcontainers). */
 final case class BazelRemoteContainerConfig(
     image: String = RemoteCacheProof.image,
     grpcPort: Int = RemoteCacheProof.port,
     httpPort: Int = RemoteCacheProof.httpPort,
     maxSizeGb: Int = 1,
-    /** Shared Docker network alias so the sbt fixture reaches gRPC as `bazel-remote:9092`. */
+    /** The name the sbt fixture reaches gRPC under on the shared Docker network. */
     networkAlias: String = RemoteCacheProof.serviceName,
 )
 
 object BazelRemoteContainerConfig:
   val default: ULayer[BazelRemoteContainerConfig] = ZLayer.succeed(BazelRemoteContainerConfig())
 
-/** Long-lived bazel-remote container on a shared [[Network]], same shape as saferis' PostgresTestContainer. */
 final case class BazelRemoteTestContainer(
     config: BazelRemoteContainerConfig,
     network: Network,
@@ -58,7 +56,7 @@ final case class BazelRemoteTestContainer(
     ZIO.succeed:
       container.stop()
 
-  /** Host-mapped URI (for diagnostics from the test JVM). Fixture sbt uses [[RemoteCacheProof.grpcServiceUri]]. */
+  /** Host-mapped, for diagnostics from the test JVM; the fixture's sbt uses [[RemoteCacheProof.grpcServiceUri]]. */
   def grpcUri: String =
     val host = container.getHost
     val port = container.getMappedPort(config.grpcPort)
@@ -73,7 +71,6 @@ end BazelRemoteTestContainer
 
 object BazelRemoteTestContainer:
 
-  /** Shared Docker network + bazel-remote, acquire/release like saferis PostgresTestContainer. */
   val default: ZLayer[Any, Nothing, BazelRemoteTestContainer] =
     ZLayer.scoped:
       ZIO.acquireRelease(

@@ -6,9 +6,7 @@ import zio.test.*
 
 import java.net.HttpURLConnection
 
-/** Live remote-cache proof: plain Testcontainers (saferis-style) for bazel-remote, plus a one-shot sbt image container
-  * for the fixture. Docker is required; failure to start is a clear test failure.
-  */
+/** Needs Docker: bazel-remote and the sbt fixture each run in a Testcontainers container. */
 object RemoteCacheItSpec extends ZIOSpecDefault:
 
   private def require(cond: Boolean, msg: => String): Unit =

@@ -13,9 +13,8 @@ object AffectedSpec extends ZIOSpecDefault:
     )
   )
 
-  /** A `projectMatrix` build as sbt 2.0.5 actually resolves one: synthetic `.sbt/matrix/<id>` base dirs, with the real
-    * directories reaching zipx only through `unmanagedSourceDirectories`. Taken from `print coreJS/baseDirectory` and
-    * `print coreJS/Compile/unmanagedSourceDirectories` on a live build.
+  /** A `projectMatrix` build as sbt resolves one: synthetic `.sbt/matrix/<id>` base dirs, with the real directories
+    * reaching zipx only through `unmanagedSourceDirectories`.
     */
   private val matrix = GraphFixture(
     List(
@@ -210,7 +209,6 @@ object AffectedSpec extends ZIOSpecDefault:
       )
     },
     suite("cross-built modules (#73)")(
-      // A `projectMatrix` row's baseDir is a synthetic `.sbt/matrix/<id>`, so only sourcePaths can answer.
       test("shared sources affect every platform row; platform-specific sources affect one") {
         assertTrue(
           Affected.owningModules(matrix, "core/src/main/scala/Foo.scala") == Set("core", "coreJS"),
@@ -220,7 +218,6 @@ object AffectedSpec extends ZIOSpecDefault:
         )
       },
       test("sourcePaths are what answer: without them the synthetic base dir owns no source at all") {
-        // The defect, exactly. `.sbt/matrix/<id>` is a real directory git never sees a source file in.
         val basesOnly = GraphFixture(matrix.nodes.map(_.copy(sourcePaths = Nil)))
         assertTrue(
           Affected.owningModules(basesOnly, "core/src/main/scala/Foo.scala").isEmpty,
@@ -228,7 +225,6 @@ object AffectedSpec extends ZIOSpecDefault:
         )
       },
       test("a shared change reaches both rows' dependents, which is the bug this closes") {
-        // Under the old `Option` return this was Set("coreJS", "cli") or Set("core", "site"), never both.
         assertTrue(
           Affected.affectedModules(matrix, List("core/src/main/scala/Foo.scala")) ==
             Set("core", "coreJS", "site", "cli"),

@@ -3,13 +3,6 @@ package zipx.core
 import zio.test.*
 import zipx.workflow.{ActionRef, JobService, Render}
 
-/** `Capability.container` and `Capability.services`: a capability's own job runtime (#72).
-  *
-  * A suite of its own because the risk is not in the two fields, it is in the *five* places a [[Job]] is built. Before
-  * this, `services` came from one source (the cache backend) and every site wrote `cache.services` verbatim, so a site
-  * that keeps doing that silently drops a sidecar the build asked for. Every scope is therefore asserted separately
-  * rather than through one representative one.
-  */
 object CapabilityRuntimeSpec extends ZIOSpecDefault:
   import Fixtures.*
   import Rendered.yaml
@@ -29,7 +22,6 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
   private def plan(capability: Capability, cfg: PlanConfig = config) =
     Planner.plan(sampleGraph, List(capability), cfg)
 
-  /** The same runtime asked for on every scope, so each scope's assertion reads identically. */
   private def withRuntime(capability: Capability): Capability =
     capability.withService("postgres", postgres).inContainer(image).withMatrixCollapse(MatrixCollapse.Off)
 
@@ -94,8 +86,6 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
         )
       },
       test("the cache sidecar wins a colliding id, because the sbt invocation is configured to reach it") {
-        // A capability losing its own sidecar surfaces as a connection error in the test that wanted it. The cache
-        // sidecar losing would fail *every* job in the workflow on a name nobody chose deliberately.
         val cap = Capability.testGraph
           .withService(RemoteCacheProof.serviceName, postgres)
           .withMatrixCollapse(MatrixCollapse.Off)
@@ -107,8 +97,7 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
       },
     ),
     suite("what a capability cannot ask for")(
-      // GitHub rejects `container:` and `services:` beside `uses:`, and `onceJob`'s workflowCall branch has nowhere to
-      // put them. Dropping them silently would leave a job whose steps expect a sidecar that is not there.
+      // GitHub rejects `container:` and `services:` beside `uses:`, so a workflowCall job has nowhere to put them.
       test("services with workflowCall is refused, naming the field") {
         val cap = Capability
           .once(name = CapabilityName("pages"), command = SbtCommand.unsafeTask("noop"))
@@ -148,7 +137,6 @@ object CapabilityRuntimeSpec extends ZIOSpecDefault:
           out.contains(s"container: $image"),
           out.contains("postgres:"),
           out.contains("image: postgres:17"),
-          // Quoted by the renderer, since a bare `5432:5432` would read as a nested mapping key.
           out.contains("""- "5432:5432""""),
           out.contains("options: --health-cmd pg_isready"),
         )

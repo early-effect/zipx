@@ -2,7 +2,6 @@ package zipx.docs
 
 import zipx.core.*
 
-/** Small graphs for DocSpec planner examples (not the full core Fixtures monorepo). */
 object DocsFixtures:
 
   val config: PlanConfig =
@@ -11,8 +10,6 @@ object DocsFixtures:
       skipMergedPrPush = false,
       verifyCleanLabel = None,
       cachePurgeLabel = None,
-      // Doc fragments teach job ids and YAML shape; Auto collapse is covered on the Matrix collapse page.
-      // Capabilities that call `.withMatrixCollapse(...)` still win over this empty map via their own field.
     )
 
   val libGraph: ModuleGraph = GraphFixture(
@@ -36,7 +33,7 @@ object DocsFixtures:
     )
   )
 
-  /** Same as [[libGraph]] (service already has `docker = true`). Alias for deploy/docker recipes. */
+  /** An alias: `libGraph`'s `service` already sets `docker = true`. */
   val dockerLibGraph: ModuleGraph = libGraph
 
 end DocsFixtures

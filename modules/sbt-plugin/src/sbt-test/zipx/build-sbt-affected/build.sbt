@@ -12,7 +12,6 @@ lazy val root = (project in file("."))
   .aggregate(core, app, svc)
   .settings(publish / skip := true)
 
-// `assertAffected app` passes when the last zipxAffectedModules wrote exactly those module ids.
 val assertAffected = inputKey[Unit]("the last zipxAffectedModules run affected exactly these modules")
 assertAffected := {
   val expected = sbt.complete.DefaultParsers.spaceDelimited("<module>").parsed.toSet

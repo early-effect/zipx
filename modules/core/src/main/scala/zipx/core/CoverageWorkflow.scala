@@ -4,7 +4,6 @@ import zipx.shell.Script
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** What starts a [[CoverageWorkflow]] run. */
 enum CoverageTrigger:
   /** GitHub runs schedules on the default branch only. */
   case Scheduled(cron: Cron)
@@ -27,7 +26,7 @@ object CoverageTrigger:
   * never saves one. Nothing else joins this workflow, so no Publish or Deploy job can pick up an instrumented class.
   *
   * @param task
-  *   the root task to measure. sbt 2's root `test` is `testQuick`, hence `testFull`.
+  *   the root task to measure. Root `test` is `testQuick`, hence `testFull`.
   */
 final case class CoverageWorkflow(
     triggers: ::[CoverageTrigger],

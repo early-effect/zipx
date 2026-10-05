@@ -1,12 +1,9 @@
 package zipx.core
 
-/** Optional sbt clean step prepended to every Verify-phase command (Aggregate root, Layer waves, and Graph per-module
-  * jobs). Default is [[None]]: CI usually relies on a fresh runner + the action cache rather than cleaning.
-  */
+/** Prepended to every Verify-phase command. Off by default: CI relies on a fresh runner and the action cache. */
 enum VerifyClean:
   case None, Clean, CleanFull
 
-  /** Prepend this clean mode to an sbt command, e.g. `test` → `cleanFull; test`. */
   def prefixCommand(command: SbtCommand): SbtCommand = this match
     case VerifyClean.None      => command
     case VerifyClean.Clean     => VerifyClean.CleanCommand.andThen(command)
@@ -14,8 +11,7 @@ enum VerifyClean:
 end VerifyClean
 
 object VerifyClean:
-  /** Wire form: sbt's `clean` task. */
   private val CleanCommand: SbtCommand = SbtCommand.unsafeTask("clean")
 
-  /** Wire form: sbt's `cleanFull` command (declared name; generate-checked). */
+  /** A command, not a task, so generate checks the name. */
   private val CleanFullCommand: SbtCommand = SbtCommand.unsafeCommand("cleanFull")

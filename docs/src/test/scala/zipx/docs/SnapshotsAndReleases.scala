@@ -8,7 +8,6 @@ import zipx.docs.DocsFixtures.config
 import zipx.docs.DocsRender.yaml
 import zio.test.*
 
-/** Snapshots for iteration, releases on purpose. */
 object SnapshotsAndReleases extends DocSpecSuite:
 
   private val graph = GraphFixture(

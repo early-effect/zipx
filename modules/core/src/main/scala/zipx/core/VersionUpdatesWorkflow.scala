@@ -4,16 +4,12 @@ import zipx.shell.*
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** Scheduled catalog companion: cron + dispatch. Applies Lib / Plugin / Action rows via `zipx-cli` (above the target
-  * sbt), then `zipxPinUpdate` / `zipxCatalogGenerate` once the session can load, and opens a PR on
-  * `zipx/version-updates-$GITHUB_RUN_ID`.
+/** Scheduled catalog companion: applies rows via `zipx-cli` (above the target sbt), then `zipxPinUpdate` /
+  * `zipxCatalogGenerate` once the session can load, and opens a PR.
   *
-  * This workflow file is generated once and then left alone. Java and runner come from [[ZipxCiParams]]; java / sbt
-  * Action pins live in `zipx-sbt-setup`. Checkout is a major tag (`actions/checkout@v7`) because `uses:` cannot be an
-  * expression and `GITHUB_TOKEN` cannot push workflow SHA edits. [[CompanionAuth]] may mint an installation token
-  * before checkout when `ZIPX_APP_ID` / `ZIPX_APP_PRIVATE_KEY` are set; otherwise checkout and `gh` keep
-  * `GITHUB_TOKEN`. [[CompanionPr]] stages everything except repo-root `.github/workflows`. Nested trees such as
-  * `examples/monorepo/.github/workflows/` are committed when `zipxVersionUpdatesExtraSteps` regenerates them.
+  * Generated once, then left alone: Java and runner come from [[ZipxCiParams]] at runtime. Checkout is a major tag
+  * because `uses:` cannot be an expression and `GITHUB_TOKEN` cannot push workflow SHA edits. [[CompanionPr]] stages
+  * everything except repo-root `.github/workflows`.
   */
 object VersionUpdatesWorkflow:
 
@@ -23,7 +19,7 @@ object VersionUpdatesWorkflow:
 
   val UpdateBranch: String = "zipx/version-updates"
 
-  /** `actions/checkout@vN` from the catalog label (`v7.0.1` → `v7`), not the SHA pin. */
+  /** `actions/checkout@vN` from the major of the catalog label, not the SHA pin. */
   def checkoutMajor(pins: ActionPins): Either[String, ActionRef] =
     val ver   = pins.version(ActionPins.Field.Checkout).getOrElse("v5")
     val major =

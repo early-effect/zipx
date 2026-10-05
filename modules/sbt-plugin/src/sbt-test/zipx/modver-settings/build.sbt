@@ -46,13 +46,13 @@ assertLocalPom := {
   assert(xml.contains("<version>0.3.0-ci</version>"), s"client POM should name itself as built, got $xml")
 }
 
-/** Where sbt 2's publishLocal writes this fixture's organization. It ignores `ivyPaths`, so this is the machine's. */
+/** publishLocal ignores `ivyPaths`, so this fixture's organization lands in the machine's ivy repository. */
 def fixtureRepo: File = file(sys.props("user.home")) / ".ivy2" / "local" / "com.example.zipx.modver"
 
 def publishedModels(version: String): Array[Byte] =
   IO.readBytes(fixtureRepo / "models_3" / version / "jars" / "models_3.jar")
 
-// Each of these reads or writes outside sbt's view, so none may be served from sbt 2's task cache.
+// Each of these reads or writes outside sbt's view, so none may be served from sbt's task cache.
 val recordPublishedModels = taskKey[Unit]("Remember the models jar publishLocal wrote")
 recordPublishedModels := Def.uncached {
   IO.write(target.value / "published-models.sha", Hash.toHex(Hash(publishedModels((models / version).value))))

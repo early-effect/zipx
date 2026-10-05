@@ -57,7 +57,7 @@ object ZipxSettingsSpec extends ZIOSpecDefault:
           d.default match
             case SettingDefault.Value(_, _) => Left(d.name: String)
             case SettingDefault.Derived(_)  => Right(d.name: String)
-        case d => Right(d.name: String) // tasks / inputs use Derived("—")
+        case d => Right(d.name: String) // tasks and inputs carry a placeholder Derived default
       }
       assertTrue(
         values.contains("zipxCapabilities"),

@@ -6,7 +6,7 @@ import dotty.tools.dotc.ast.untpd.*
 import dotty.tools.dotc.core.Constants
 import dotty.tools.dotc.core.Contexts.*
 
-/** Constructors visible in a catalog source file. Used when the CLI cannot classload the catalog object. */
+/** Read from source for when the CLI cannot classload the catalog object. */
 final case class CatalogConstructors(
     libs: List[Lib],
     plugins: List[Plugin],
@@ -34,7 +34,6 @@ object CatalogSource:
     // Every Lib a val names so far, so `x.mod("b")` reads the row `x` names.
     val rows = _root_.scala.collection.mutable.Map.empty[String, Lib]
 
-    /** The row a val's right-hand side builds, read the way the DSL builds it. */
     def libOf(t: Tree): Option[Lib] =
       t match
         case Apply(fun, args) if isCtor(fun, "Lib") =>

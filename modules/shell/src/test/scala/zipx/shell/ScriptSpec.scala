@@ -402,8 +402,7 @@ object ScriptSpec extends ZIOSpecDefault:
           sh"$tag$tag".render == "\"$TAG\"\"$TAG\"",
         )
       },
-      // A multi-line literal part is a compile error rather than a runtime one, so the negative case is in
-      // `CompileTimeSpec`: there is no way to construct one here for a runtime assertion to catch.
+      // A multi-line literal part is a compile error, so that negative case lives in `CompileTimeSpec`.
       test("splices keep their own quoting; the interpolator adds none") {
         assertTrue(
           sh"${Word.squote("v*")}-${Word.v("x")}".render == "'v*'-$x",

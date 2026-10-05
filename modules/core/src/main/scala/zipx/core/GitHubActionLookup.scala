@@ -2,7 +2,7 @@ package zipx.core
 
 import java.time.Duration
 
-/** Latest GitHub Action release tag plus a peeled commit SHA. Tests inject [[fetch]]. */
+/** Latest GitHub Action release tag plus a peeled commit SHA. */
 final class GitHubActionLookup(
     fetch: String => Either[String, String] = GitHubActionLookup.httpGet
 ):

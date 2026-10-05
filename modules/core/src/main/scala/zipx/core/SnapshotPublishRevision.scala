@@ -1,9 +1,7 @@
 package zipx.core
 
-/** The revision a snapshot publish writes, from the JVM properties the command sets before `reload`.
-  *
-  * Compile stays on `<line>-ci`. These properties exist only for the publish session, because that session's `version`
-  * is the coordinate the repository stores.
+/** Read from JVM properties the publish command sets before `reload`. Only the publish session reads them, since its
+  * `version` is the stored coordinate; compile stays on `<line>-ci`.
   */
 object SnapshotPublishRevision:
   val ShaProperty: String     = "zipx.snapshot.sha"
@@ -11,9 +9,8 @@ object SnapshotPublishRevision:
   val PointerProperty: String = "zipx.snapshot.pointer"
   val LocalProperty: String   = "zipx.snapshot.local"
 
-  /** The coordinate this publish stores. A pointer is `<line>-SNAPSHOT` and names the sha in its POM. A clean commit is
-    * stored the same way on every registry, ivy-local included, so one pin works from either. Only a local publish
-    * takes a dirty or git-less id.
+  /** A clean commit is stored the same way on every registry, ivy-local included, so one pin works from either. Only a
+    * local publish takes a dirty or git-less id.
     */
   def revision(row: PublishedRow, props: collection.Map[String, String]): Either[SnapshotRevisionError, String] =
     if props.get(PointerProperty).contains("true") then Right(SnapshotPointer.pointerVersion(row.version))

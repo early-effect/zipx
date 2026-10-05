@@ -6,7 +6,7 @@ import zio.*
 
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 
-/** Docs-as-tests site builder (Test classpath; `docs/specularSite`). */
+/** The site `docs/specularSite` builds from the Test classpath. */
 object BuildSite extends DocsSite:
 
   def pages = Vector(

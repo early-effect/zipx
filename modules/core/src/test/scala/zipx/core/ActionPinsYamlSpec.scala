@@ -5,19 +5,12 @@ import zio.test.*
 import zipx.workflow.ActionRef
 import java.nio.file.Files
 
-/** Internal Action-pin YAML: jar resource, leftover-file parse, and `# vX.Y.Z` stamps on generated `uses:`.
-  *
-  * Not an editable source. Catalog [[Action]] vals are what you edit. This codec still has to refuse bad YAML *loudly*:
-  * before `parse` returned an `Either`, every case in `rejections` silently fell back to the jar bootstrap pin.
-  */
+/** The internal Action-pin YAML codec; a build edits catalog `Action` vals, never this file. */
 object ActionPinsYamlSpec extends ZIOSpecDefault:
 
   private val keys: List[String] = ActionPins.Field.values.toList.map(_.key)
 
-  /** `ActionRef("…")` only takes a literal, and every ref built here is assembled from a [[ActionPins.Field.prefix]]
-    * and a generated SHA. `make` rather than `unsafeMake`, so a generator that starts producing garbage fails here
-    * instead of quietly handing `parse` a ref no leftover YAML or jar resource could contain.
-    */
+  /** `make`, not `unsafeMake`, so a generator that produces garbage fails here instead of reaching `parse`. */
   private def ref(text: String): ActionRef =
     ActionRef.make(text).fold(error => throw AssertionError(s"test built an invalid ref: $error"), identity)
 
@@ -31,9 +24,7 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
       patch <- Gen.int(0, 99)
     yield s"v$major.$minor.$patch"
 
-  /** Valid pins by construction: every field gets its own prefix and a fresh SHA. Versions are all-or-nothing per
-    * render, matching `render`'s two branches.
-    */
+  /** Versions are all-or-nothing, matching `render`'s two branches. */
   private val gPins: Gen[Any, ActionPins] =
     for
       shas     <- Gen.listOfN(ActionPins.Field.values.length)(gSha)
@@ -46,10 +37,7 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
         withRefs.copy(versions = keys.zip(vs).toMap)
       }
 
-  /** The same, plus extra pins, which have their own `extra.<key>` version labels and their own render block. Keys are
-    * drawn from a fixed set rather than generated, so the property tests below say something about *sorting* the keys
-    * (which `render` must do, a `Map` having no order) rather than about which characters a key may contain.
-    */
+  /** A fixed pool, so the properties test key sorting (`render` must sort a `Map`), not key syntax. */
   private val extraKeyPool: List[String] = List("configure-aws-credentials", "org-action", "zz-last", "aa-first")
 
   private val gPinsWithExtra: Gen[Any, ActionPins] =
@@ -67,9 +55,7 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
   private val gIdentStart: Gen[Any, Char] = Gen.elements((('A' to 'Z') ++ ('a' to 'z') :+ '_')*)
   private val gIdentRest: Gen[Any, Char]  = Gen.elements((('A' to 'Z') ++ ('a' to 'z') ++ ('0' to '9') :+ '_')*)
 
-  /** Identifiers the `Line` regex accepts as a key but [[ActionPins.Field]] does not name, which is exactly the typo
-    * and wrong-case class: `setupJava2`, `Checkout`, `SETUPSBT`.
-    */
+  /** Keys the `Line` regex accepts but no [[ActionPins.Field]] names: the typo and wrong-case class. */
   private val gUnknownKey: Gen[Any, String] =
     (for
       head <- gIdentStart
@@ -81,28 +67,23 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
 
   private val goodPin: String = s"checkout: ${ActionPins.Defaults.checkout.unwrap} # v7.0.1"
 
-  /** Each entry is (why it is refused, the offending line). Every one of these is silently ignored or silently trusted
-    * before this change; the `describe` half is only there to name the case in the test report.
-    */
+  /** Pairs of (why it is refused, the offending line). */
   private val rejections: List[(String, String)] = List(
-    // Class A: no `Line` match at all, so the pin was dropped and the jar default used in its place.
+    // No `Line` match at all.
     "a typo'd key"               -> "setup-jav: actions/setup-java@abc123",
     "a stray indent"             -> "  checkout: actions/checkout@abc123",
     "a key with no value"        -> "checkout:",
     "a two-word version comment" -> "checkout: actions/checkout@abc123 # v1 v2",
-    // Class B: matches `Line`, so the parser accepted it and then dropped or trusted the result.
+    // Matches `Line`, but the key or the action it names is wrong.
     "an unknown key"              -> "setupJava2: actions/setup-java@abc123",
     "a wrong-case key"            -> "Checkout: actions/checkout@abc123",
     "a ref naming another action" -> "checkout: evil/malware@abc123",
-    // An invalid ref: rejected by `ActionRef` itself, which had no say before the fields were typed.
+    // Rejected by `ActionRef` itself.
     "an unpinned ref"        -> "checkout: actions/checkout",
     "an expression as a ref" -> "checkout: ${{ env.ACTION }}",
     "an empty @ref"          -> "checkout: actions/checkout@",
   )
 
-  /** Forms leftover YAML and the jar resource legitimately contain. Over-strictness would refuse a file generate is
-    * trying to diagnose, so these are as load-bearing as the negatives.
-    */
   private val acceptances: List[(String, String)] = List(
     "a comment and a blank line" -> s"# a note\n\n$goodPin\n",
     "no space after the colon"   -> "checkout:actions/checkout@abc123",
@@ -151,7 +132,6 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
         )
       },
       test("a field the YAML omits keeps the bootstrap pin rather than failing") {
-        // The one silent fallback that survives: an *absent* line is not an error, so partial leftover YAML is usable.
         val pins = ActionPinFile.parse("checkout: actions/checkout@abc123\n")
         assertTrue(
           pins.map(_.checkout) == Right(ActionRef("actions/checkout@abc123")),
@@ -171,17 +151,13 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
       test("every pathological line, with the line number in the message") {
         assertTrue(
           rejections.forall { case (_, line) => ActionPinFile.parse(line).isLeft },
-          // Line 1 for a one-line file, so a message that omits the number cannot pass by accident.
           rejections.forall { case (_, line) =>
             ActionPinFile.parse(line).swap.exists(_.contains(s"${ActionPinFile.DefaultPath}:1:"))
           },
-          // And the offending text is echoed, which is what makes the error actionable in an sbt log.
           rejections.forall { case (_, line) => ActionPinFile.parse(line).swap.exists(_.contains(line.trim)) },
         )
       },
       test("the reported line number is the bad line's, not the first line's") {
-        // Comments plus one good pin, then a typo. A fold that forgot to carry the index would report 1 here and
-        // still pass the single-line test above. Line count is derived so a Header edit cannot stale the number.
         val bad  = "setup-jav: actions/setup-java@abc123"
         val text = s"$header\n$goodPin\n$bad\n"
         val n    = text.linesIterator.toList.indexWhere(_ == bad) + 1
@@ -212,7 +188,6 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
         }
       },
       test("one malformed line refuses the whole YAML, whichever field it is") {
-        // #59's claim as a property: no field may fall back to the jar default because its line was unreadable.
         check(gPins, gField) { (pins, broken) =>
           val text = ActionPinFile
             .render(pins)
@@ -226,7 +201,6 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
         check(gField, gField, gSha) { (key, other, sha) =>
           val text   = s"${key.key}: ${other.prefix}@$sha"
           val parsed = ActionPinFile.parse(text)
-          // Same field is the legitimate case and must still parse; any other field is the wrong-action refusal.
           if key == other then assertTrue(parsed.map(_.field(key)) == Right(ref(s"${other.prefix}@$sha")))
           else assertTrue(parsed.isLeft, parsed.swap.exists(_.contains(key.prefix)))
         }
@@ -287,8 +261,6 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
         )
       },
       test("an extra key may name any action, since there is no prefix to check it against") {
-        // The documented weakening: `aws: totally/unrelated@sha` is legal where `checkout: totally/unrelated@sha`
-        // is not. Worth asserting so the asymmetry is deliberate rather than an oversight.
         val text = s"${ActionPins.ExtraPrefix}:\n  aws: totally/unrelated@abc123\n"
         assertTrue(
           ActionPinFile.parse(text).map(_.extraRef("aws")) == Right(Some(ActionRef("totally/unrelated@abc123")))
@@ -341,7 +313,6 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
         assertTrue(
           pulled.map(_.extraRef("aws")) == Right(Some(ActionRef("acme/thing@cafebabe"))),
           pulled.exists(_.extraVersion("aws").contains("v6.1.0")),
-          // No key exists for it, so guessing one would be worse than leaving it to whoever wrote the step.
           pulled.exists(p => p.extra.contains("aws") && !p.extra.contains("nobody/knows")),
         )
       },
@@ -369,7 +340,6 @@ object ActionPinsYamlSpec extends ZIOSpecDefault:
         assertTrue(ActionPinFile.pullFromWorkflow(yaml, ActionPins.Defaults) == Right(ActionPins.Defaults))
       },
       test("refuses a known action whose ref a rewrite left invalid") {
-        // The case a silent pull would launder into the YAML codec: the prefix is one zipx pins, the ref is not usable.
         val yaml = "      - uses: actions/checkout\n"
         assertTrue(
           ActionPinFile.pullFromWorkflow(yaml, ActionPins.Defaults).isLeft,

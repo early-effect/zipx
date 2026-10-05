@@ -1,8 +1,5 @@
-// Meta-build source mirror of shell → workflow → core → (central, aws) → plugin.
-// Compiles modules/*/src/main/scala into project/meta-* targets (no publishLocal for root dogfood).
-// After changing those sources: reload. Shared deps: project/Dependencies.scala
-// (on this classpath via project/project/build.sbt unmanagedSources). Typed catalog:
-// project/ZipxVersions.scala (main build only; zipx types are not on this layer).
+// Compiles modules/*/src/main/scala into project/meta-* so the root build dogfoods zipx without a publishLocal.
+// After changing those sources, reload.
 
 ThisBuild / scalaVersion := Dependencies.scala3Version
 

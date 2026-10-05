@@ -5,27 +5,16 @@ import zipx.shell.{Assign, Exec, Script, Word}
 import zipx.workflow.Step
 
 /** Post-steps on Aggregate `test`: publish the in-dev plugin locally, then prove `examples/monorepo` still generates
-  * the YAML committed beside it.
+  * the YAML committed beside it. Dogfood wiring for this repo, not published API.
   *
-  * The version-updates companion uses [[companionSteps]] to regenerate that example (including
-  * `examples/monorepo/.github/workflows/`) onto the catalog PR. Those files are not repo-root `.github/workflows/`, so
-  * `GITHUB_TOKEN` can commit them. Root `ci.yml` still needs a human `zipxWorkflowGenerate`.
-  *
-  * Lives in the meta-build because it is dogfood wiring for *this* repo, not published API. A consumer wanting the same
-  * shape writes the same thing in its own `project/`.
+  * [[companionSteps]] regenerates the example onto the catalog PR. Its nested `.github/workflows/` is not repo-root, so
+  * `GITHUB_TOKEN` can commit it; root `ci.yml` still needs a human `zipxWorkflowGenerate`.
   */
 object ExampleCheck:
 
-  /** Where the root build writes the version for the example to consume, relative to the repo root (which is every
-    * step's working directory unless it says otherwise).
-    *
-    * Read by `build.sbt`'s `zipxWriteVersion`, which writes the file. Example steps read it back as
-    * `../../target/zipx-version.txt`, since they run in [[ExampleDir]], two levels down.
-    *
-    * The script spells its path as a literal rather than deriving it from this `val`: neotype's validation needs a
-    * compile-time known `String`, and a reference to a `val` (or even an `inline val`) does not survive folding through
-    * `Word.quoted`. Drift between the two is not silent: the step's leading `test -f` fails the job naming the path it
-    * could not find.
+  /** Relative to the repo root; `build.sbt`'s `zipxWriteVersion` writes it. The scripts spell the path as a literal
+    * because neotype needs a compile-time `String` and a `val` does not fold through `Word.quoted`. Drift is not
+    * silent: the step's leading `test -f` fails naming the path.
     */
   val VersionFile: String = "target/zipx-version.txt"
 
@@ -44,8 +33,7 @@ object ExampleCheck:
     Step
       .run(
         Script.strict(
-          // `../../`, because this step's working-directory is the example: the publish step wrote the version file at
-          // the repo root, two levels up.
+          // The step runs in the example, two levels below the repo root where the version file is.
           Exec("test", Word.lit("-f"), Word.quoted("../../target/zipx-version.txt")),
           Assign("ZIPX_VERSION", Word.subst(Exec("cat", Word.quoted("../../target/zipx-version.txt")))),
           // `dquote` of a literal plus a var ref, not `quoted("… $ZIPX_VERSION")`: a literal escapes its `$`, which
@@ -64,16 +52,11 @@ object ExampleCheck:
     exampleRun(Word.lit("Generating examples/monorepo against zipx "), Word.squote("zipxWorkflowGenerate"))
       .named("Generate example workflow")
 
-  /** Regenerates the example with the in-dev plugin. Used by the version-updates companion so Action pin peels do not
-    * require a human to `publishLocal` locally. Nested `.github/workflows/` is committed; repo-root workflows are not.
-    */
+  /** Lets the version-updates companion regenerate the example with the in-dev plugin, with no human `publishLocal`. */
   val companionSteps: Seq[Step] = Seq(publishLocal.build, generateExample.build)
 
-  /** Publish the whole in-dev graph and export `ZIPX_CLI_VERSION` so Sunday `cs launch` can resolve zipx-cli plus
-    * zipx-core / zipx-syntax at the same version. `cli/publishLocal` alone is not enough.
-    *
-    * Do not bake the in-dev version into committed `zipx-ci.env`: that file is a `zipxWorkflowCheck` input, and the next
-    * row bump would fail it. `GITHUB_ENV` lasts for later steps in this job only.
+  /** Publishes the whole in-dev graph, not just `cli`, so `cs launch` resolves zipx-cli and its zipx deps at one
+    * version. The version goes to `GITHUB_ENV`, not the committed `zipx-ci.env` that `zipxWorkflowCheck` reads.
     */
   val companionPreSteps: Seq[Step] = Seq(
     Step
@@ -92,7 +75,6 @@ object ExampleCheck:
       .build
   )
 
-  /** Runs after `test` on the Aggregate test job. */
   val steps: Steps =
     Steps.built("publish-local")(publishLocal) ++ Steps.built("example-check")(checkExample)
 

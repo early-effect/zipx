@@ -2,7 +2,6 @@ package zipx.core
 
 import scala.math.Ordering.Implicits.infixOrderingOps
 
-/** Given current and candidate versions, what kind of bump this is, and which candidate is latest stable. */
 trait VersionStrategy:
   def classify(current: String, candidate: String): BumpKind
   def latestStable(candidates: List[String]): Option[String]

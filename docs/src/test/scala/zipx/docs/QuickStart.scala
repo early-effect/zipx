@@ -5,7 +5,6 @@ import specular.ziotest.DocSpecSuite
 import zipx.core.*
 import zio.test.*
 
-/** Install and generate. */
 object QuickStart extends DocSpecSuite:
 
   def doc = page("Quick start")(

@@ -6,7 +6,6 @@ import zipx.core.*
 import zipx.docs.DocsFixtures.config
 import zio.test.*
 
-/** Outbound Ship / ShipGroup rows: the next release number, snapshots until a deliberate release. */
 object IndependentVersions extends DocSpecSuite:
 
   private val graph = GraphFixture(

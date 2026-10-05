@@ -5,10 +5,8 @@ import zipx.workflow.*
 
 import scala.collection.immutable.ListMap
 
-/** Generated in-repo composite actions that factor repeated CI step bundles.
-  *
-  * Written next to `ci.yml` by `zipxWorkflowGenerate` / checked by `zipxWorkflowCheck`. Nested third-party actions stay
-  * SHA-pinned via [[ActionPins]]; the local `uses: ./.github/actions/…` refs need no pin.
+/** Generated in-repo composite actions. Nested third-party actions stay SHA-pinned via [[ActionPins]]; the local
+  * `uses: ./.github/actions/…` refs need no pin.
   */
 object ZipxComposites:
 
@@ -23,13 +21,10 @@ object ZipxComposites:
   val SbtSetupRef: ActionRef = ActionRef("./.github/actions/zipx-sbt-setup")
   val AwsLoginRef: ActionRef = ActionRef("./.github/actions/zipx-aws-login")
 
-  /** Input expression `${{ inputs.<name> }}` for composite `with:` / `run:` templates. */
   private def input(name: String): String = s"$${{ inputs.$name }}"
 
-  /** All composite `action.yml` files to write, relative to the build root.
-    *
-    * `zipx-aws-login` is included only when `includeAwsLogin` is true. Default off so a consumer that never selects
-    * ZipxAws does not have to commit an ECR login composite.
+  /** Paths are relative to the build root. `includeAwsLogin` defaults off so a build without ZipxAws commits no ECR
+    * login composite.
     */
   def artifacts(
       pins: ActionPins,
@@ -43,7 +38,6 @@ object ZipxComposites:
         else Right(ListMap(SbtSetupPath -> setup))
     yield files
 
-  /** True when a planned workflow step `uses` [[AwsLoginRef]] (ZipxAws extraSteps or an equivalent hand-built step). */
   def usesAwsLogin(wf: Workflow): Boolean =
     wf.jobs.values.exists(_.steps.exists(_.uses.contains(AwsLoginRef)))
 
@@ -56,11 +50,8 @@ object ZipxComposites:
   def renderAwsLogin(pins: ActionPins): Either[String, String] =
     Render.renderComposite(awsLogin(pins)).map(ActionPinFile.annotateUses(_, pins))
 
-  /** JDK + sbt (+ optional Node) + optional LocalDir cache, parameterized for every sbt job.
-    *
-    * Checkout is **not** inside this composite. GitHub Actions resolves `uses: ./.github/actions/…` from the workspace
-    * before the composite runs, so the planner must emit `actions/checkout` as a prior workflow step (see
-    * [[Planner.checkoutThenSbtSetup]]).
+  /** No checkout inside: GitHub resolves `uses: ./.github/actions/…` from the workspace before the composite runs, so
+    * checkout must be a prior workflow step ([[Planner.checkoutThenSbtSetup]]).
     */
   def sbtSetup(pins: ActionPins, cacheEpoch: CacheEpoch = CacheEpoch.GitTags()): CompositeAction =
     val resolveScript = cacheEpoch match
@@ -79,12 +70,11 @@ object ZipxComposites:
     val keySuffix  = input("cache-key-suffix")
     val runId      = "${{ github.run_id }}"
 
-    // Only `build` snapshots are ever saved, so a restore can never pick up another job's partial one. Save and restore
-    // share keys: an earlier Layer wave's save warms the next wave through the same-run key.
+    // Only `build` snapshots are saved, so a restore never picks up another job's partial one. Save and restore share
+    // keys, so an earlier Layer wave's save warms the next wave through the same-run key.
     //
-    // `purge` is the cold path. The primary key already includes the run id, so a save with no restore-keys misses
-    // and the action's post step still writes the fresh snapshot. A restore job does not run its cache step at all,
-    // so it cannot pull the old entry while that save is in flight.
+    // Under `purge` the primary key includes the run id, so a save with no restore-keys misses and still writes a fresh
+    // snapshot. A restore job skips its cache step, so it cannot pull the old entry while that save is in flight.
     def cacheStep(mode: LocalCacheMode, resolved: Boolean, purge: Boolean): Step =
       val epoch = if resolved then epochOut else fixedEpoch
       val build = s"$prefix$epoch-build-"
@@ -188,7 +178,6 @@ object ZipxComposites:
     )
   end sbtSetup
 
-  /** OIDC assume-role plus optional ECR docker login, reading role/region/account from job env (or alternate keys). */
   def awsLogin(pins: ActionPins): CompositeAction =
     val credentials = pins.extraByPrefix(CredentialsPinKey).getOrElse(DefaultCredentials)
     val ecrLogin    = pins.extraByPrefix(EcrLoginPinKey).getOrElse(DefaultEcrLogin)
@@ -236,7 +225,6 @@ object ZipxComposites:
   private val DefaultCoursierSetup: ActionRef =
     ActionRef("coursier/setup-action@9b7939bf01fd1185ce2babe16135168361bf2c62")
 
-  /** One workflow step that invokes [[SbtSetupRef]] with the planner's LocalDir (or no-cache) settings. */
   def sbtSetupStep(
       config: PlanConfig,
       jobSuffix: JobId,
@@ -269,7 +257,7 @@ object ZipxComposites:
       .build
   end sbtSetupStep
 
-  /** The workflow-level `purge` input. Omitted when this job has no LocalDir restore to skip. */
+  /** Omitted when this job has no LocalDir restore to skip. */
   private def cachePurgeInput(config: PlanConfig, cacheMode: LocalCacheMode): Option[String] =
     config.cachePurgeLabel match
       case Some(label) if config.cache == CacheBackend.LocalDir && cacheMode != LocalCacheMode.Off =>
@@ -277,7 +265,6 @@ object ZipxComposites:
       case _ =>
         None
 
-  /** One workflow step that invokes [[AwsLoginRef]]. */
   def awsLoginStep(
       roleEnv: String = "AWS_ROLE_TO_ASSUME",
       regionEnv: String = "AWS_REGION",

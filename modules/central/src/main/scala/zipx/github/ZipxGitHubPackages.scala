@@ -3,24 +3,12 @@ package zipx.github
 import zipx.core.*
 import zipx.core.EnvValue.{plain, secret}
 
-/** GitHub Packages paved path for zipx.
+/** [[releases]] is the Ship path: snapshots and releases at one `maven.pkg.github.com/<owner>/<repo>` root, unsigned,
+  * with `owner` as the username and the token as the password.
   *
-  * [[releases]] is the Ship path: `zipxReleaseWorkflow` publishes to `maven.pkg.github.com/<owner>/<repo>`, snapshots
-  * and releases at that same root, unsigned. The token is the password and `owner` is the username.
-  *
-  * [[sameRepo]] and [[sharedRegistry]] stay CI wiring for a build that publishes without ships. The build keeps
-  * `publishTo` and Credentials on that path. What they generate is `packages: write`, a token in `GITHUB_TOKEN`, and
-  * [[PublishFlagEnv]].
-  *
-  * The default capability name differs from [[zipx.central.ZipxCentral.release]]'s `publish`, so the two coexist rather
-  * than one replacing the other by name.
-  *
-  * {{{
-  * zipxCapabilities ++= Seq(
-  *   ZipxCentral.release,
-  *   ZipxGitHubPackages.sameRepo(condition = Some(JobCondition.repositoryIs("acme/my-fork"))),
-  * )
-  * }}}
+  * [[sameRepo]] and [[sharedRegistry]] are CI wiring for a build that publishes without ships and keeps its own
+  * `publishTo` and credentials. Their default name differs from [[zipx.central.ZipxCentral.release]]'s `publish`, so
+  * the two coexist rather than one replacing the other.
   */
 object ZipxGitHubPackages:
 
@@ -31,15 +19,7 @@ object ZipxGitHubPackages:
 
   val PublishFlagEnv: String = "PUBLISH_GITHUB_PACKAGES"
 
-  /** Ship rows. The token is exported under its own name. Lookup and publish both authenticate with it. The username
-    * sent to Packages is `owner`.
-    *
-    * {{{
-    * zipxReleaseWorkflow := Some(
-    *   ZipxGitHubPackages.releases("iterable", "maven-packages", token = secret"GH_PACKAGES_TOKEN")
-    * )
-    * }}}
-    */
+  /** The token is exported under its own name; lookup and publish both authenticate with it. */
   def releases(
       owner: String,
       repo: String,
@@ -50,9 +30,7 @@ object ZipxGitHubPackages:
       credentials = RegistryCredentials.UserPassword(EnvValue.plain(owner), token),
     )
 
-  /** Publishes to this repository's own Packages registry, using the workflow's injected token. A fork gate is a
-    * [[zipx.core.JobCondition]] like any other: `condition = Some(JobCondition.repositoryIs("acme/my-fork"))`.
-    */
+  /** Publishes to this repository's own Packages registry with the workflow's injected token. */
   def sameRepo(
       name: CapabilityName = DefaultName,
       scope: CapabilityScope = CapabilityScope.Aggregate,
@@ -66,9 +44,7 @@ object ZipxGitHubPackages:
       extraEnv = Map.empty,
     )
 
-  /** Publishes to another repository's or org's registry. `token` is an [[zipx.core.EnvValue]] rather than a secret
-    * name, so the name is validated where it is written: `secret"GH_PACKAGES_TOKEN"` does not compile if malformed.
-    */
+  /** Publishes to another repository's or org's registry. */
   def sharedRegistry(
       token: EnvValue = secret"GH_PACKAGES_TOKEN",
       name: CapabilityName = DefaultName,

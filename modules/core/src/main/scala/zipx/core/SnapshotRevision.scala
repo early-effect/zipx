@@ -8,7 +8,7 @@ object AbbrevSha:
   private def lowerHex(c: Char): Boolean =
     c.isDigit || (c >= 'a' && c <= 'f')
 
-  /** The first 12 characters of a full sha, lowercased. A [[GitSha]] is 40 hex, so this cannot fail. */
+  /** Total: a [[GitSha]] is 40 hex. */
   def fromFull(full: GitSha): AbbrevSha =
     AbbrevSha(full.take(12).toLowerCase)
 
@@ -61,13 +61,11 @@ enum SnapshotRevisionError:
       s"$id is a local build. Commit the tree, or publish it with zipxSnapshotPublish local."
 end SnapshotRevisionError
 
-/** The identity of an unreleased build.
+/** The identity of an unreleased build: the next release line plus the commit. Dirty and git-less trees are local
+  * publishes with dynver's `+YYYYMMDD-HHmm` mark, never uploaded.
   *
-  * The catalog line is the next release number. A clean commit names that line plus the commit. A dirty tree and a tree
-  * with no git are local publishes: dynver's `+YYYYMMDD-HHmm` mark, and not a registry upload.
-  *
-  * `-SNAPSHOT` is not part of the id. Every registry stores a clean commit as the id plus `-SNAPSHOT` (Central and
-  * snapshot-policy repositories refuse anything else), and that stored revision is also what a downstream catalog pins.
+  * `-SNAPSHOT` is not part of the id. Registries store a clean commit as id plus `-SNAPSHOT` (snapshot-policy
+  * repositories refuse anything else), and that stored revision is what a downstream catalog pins.
   */
 enum SnapshotRevision:
   case Commit(line: ReleaseVersion, abbrev: AbbrevSha, full: Option[GitSha])
@@ -79,12 +77,10 @@ enum SnapshotRevision:
     case Dirty(line, abbrev, at) => s"$line-$abbrev+$at"
     case NoGit(at)               => s"HEAD+$at"
 
-  /** A clean commit can be published and pinned. A dirty or git-less id cannot. */
   def stable: Boolean = this match
     case _: Commit           => true
     case _: Dirty | _: NoGit => false
 
-  /** The revision every registry stores. A dirty or git-less id is never uploaded. */
   def stored: Either[SnapshotRevisionError, String] = this match
     case commit: Commit      => Right(commit.storedId)
     case _: Dirty | _: NoGit => Left(SnapshotRevisionError.Unstable(id))

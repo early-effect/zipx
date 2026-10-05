@@ -1,6 +1,5 @@
 package zipx.core
 
-/** Unwraps a render result in a test that is not about failure. */
 object Rendered:
 
   extension (result: Either[String, String])

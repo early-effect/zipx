@@ -5,7 +5,7 @@ package zipx.core
   */
 final case class ProbeModule(organization: String, name: String, revision: String)
 
-/** Fill [[Lib.fromGraph]] revisions from a probe graph. No I/O. */
+/** Fill [[Lib.fromGraph]] revisions from a probe graph. */
 object FromGraph:
 
   final case class Request(lib: Lib, resolvedName: String)
@@ -46,7 +46,7 @@ object FromGraph:
     end if
   end revisions
 
-  /** Strip a trailing `_2.13` / `_3` / `_sjs1_3` family suffix for family matching. */
+  /** Strips the Scala cross suffix (`_<scala>` or `_sjs<n>_<scala>`). */
   def artifactFamily(resolvedName: String): String =
     val sjs = "_sjs"
     val n   = resolvedName.indexOf(sjs)

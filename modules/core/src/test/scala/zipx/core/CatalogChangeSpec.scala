@@ -10,7 +10,6 @@ object CatalogChangeSpec extends ZIOSpecDefault:
   private val fansi   = coord("fansi")
   private val upickle = coord("upickle")
 
-  /** `models` ← `svcB`, and only `svcB` declares fansi; `models` declares upickle. */
   private val graph = GraphFixture(
     List(
       ModuleNode(ModuleId("models"), baseDir = "models", libraries = Set(upickle)),

@@ -6,15 +6,10 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import scala.util.matching.Regex
 
-/** Internal YAML codec for [[ActionPins]]: jar resource in, leftover `.github/zipx/action-pins.yml` out as an error,
-  * `# vX.Y.Z` stamps on generated `uses:` lines. Flat `key: owner/action@sha # vX.Y.Z` plus an indented `extra:` block.
+/** Internal YAML codec for [[ActionPins]], not an editable source: catalog [[Action]] rows in ZipxVersions are.
   *
-  * Not an editable source. Catalog [[Action]] rows in ZipxVersions are what you edit.
-  *
-  * This is the boundary where a pin becomes an [[zipx.workflow.ActionRef]], so [[parse]] returns an `Either` rather
-  * than silently keeping whatever it managed to read. A line it cannot use is a *reported* failure, because the
-  * alternative is worse than a missing pin: every field it failed to read would fall back to the jar-baked bootstrap
-  * value, silently reverting a pin a repo deliberately held back.
+  * An unusable line is a reported failure, not skipped: a skipped field would fall back to the bootstrap pin and
+  * silently revert a pin the repo deliberately held back.
   */
 object ActionPinFile:
 
@@ -31,14 +26,10 @@ object ActionPinFile:
   private val Line: Regex =
     raw"""^([A-Za-z][A-Za-z0-9_]*)\s*:\s*(\S+?)(?:\s+#\s*(\S+))?\s*$$""".r
 
-  /** The one line that opens the `extra:` block: a bare key with no value. Distinguishable from a `key with no value`
-    * rejection only because `extra` is not a [[ActionPins.Field]] key, so nothing else can take this shape legally.
-    */
+  /** Unambiguous only because `extra` is not an [[ActionPins.Field]] key. */
   private val ExtraBlockOpen: Regex = raw"""^${ActionPins.ExtraPrefix}\s*:\s*$$""".r
 
-  /** An indented pin inside the `extra:` block. Keys are catalog Action names (`owner/repo`, with `-` and `/`), not
-    * camelCase field keys.
-    */
+  /** Keys are catalog Action names (`owner/repo`), not camelCase field keys. */
   private val ExtraLine: Regex =
     raw"""^\s+([A-Za-z][A-Za-z0-9_.+/-]*)\s*:\s*(\S+?)(?:\s+#\s*(\S+))?\s*$$""".r
 
@@ -51,47 +42,21 @@ object ActionPinFile:
   private val legalKeys: String =
     (ActionPins.Field.values.map(_.key) :+ s"${ActionPins.ExtraPrefix}:").mkString(", ")
 
-  /** What one line of the file contributed. An enum rather than an `Option[(…)]` because the `extra:` block gives the
-    * parser three outcomes beyond a field pin: opening the block, a pin inside it, and nothing at all.
-    */
   private enum Entry:
     case Nothing
     case OpenExtra
     case FieldPin(field: ActionPins.Field, ref: ActionRef, version: Option[String])
     case ExtraPin(key: String, ref: ActionRef, version: Option[String])
 
-  /** A blank line or a `#` comment, both of which the committed file legitimately contains. */
   private def isIgnorable(line: String): Boolean =
     val trimmed = line.trim
     trimmed.isEmpty || trimmed.startsWith("#")
 
-  /** Whether `ref` is the action this field pins, whatever it says after the `@`.
-    *
-    * The prefix must be followed by `@` or nothing, not merely be a prefix: `actions/cache/restore@v4` is a *different*
-    * action from `actions/cache`, so a bare `startsWith` would file a subpath action under the wrong pin. Allowing the
-    * bare prefix is what lets [[pullFromWorkflow]] see that `uses: actions/checkout` is the checkout pin gone unpinned,
-    * rather than an unrelated action to skip.
-    */
   private def namesAction(ref: String, field: ActionPins.Field): Boolean =
     ActionPins.namesPrefix(ref, field.prefix)
 
-  /** Every line must be a pin, the `extra:` block header, a comment, or blank. The five ways a line is rejected, in the
-    * order they are checked:
-    *
-    *   1. it does not have the `key: value` shape at all (a stray indent, a missing value, a two-word version comment)
-    *   1. it is indented but no `extra:` block is open, so its indentation means nothing
-    *   1. its key is not one of [[ActionPins.Field]] (a typo, or the wrong case)
-    *   1. its ref is not a valid [[zipx.workflow.ActionRef]] (unpinned, or an expression)
-    *   1. its ref is valid but names a different action than the key does
-    *
-    * The last is the one a shape check alone would miss: `checkout: evil/malware@<sha>` is a perfectly well-formed
-    * action ref, so only the key's own [[ActionPins.Field.prefix]] can tell it is the wrong action. It is the same
-    * predicate [[pullFromWorkflow]] uses to decide which field a `uses:` line belongs to. It is also the check an
-    * `extra:` pin cannot get, having no prefix to check against, which is the reason `extra` is a separate block rather
-    * than a relaxation of the top-level keys.
-    *
-    * Reports the first failure rather than collecting all of them, as [[zipx.workflow.Render]] does with step problems:
-    * the file is small and hand-edited, so the first line named is the line to fix.
+  /** A well-formed ref under the wrong key (`checkout: evil/malware@<sha>`) is refused by the field's prefix. `extra:`
+    * pins have no prefix to check, which is why they live in a separate block.
     */
   def parse(text: String): Either[String, ActionPins] =
     val pinned = text.linesIterator.zipWithIndex.foldLeft[Either[String, Parsed]](Right(Parsed.empty)) {
@@ -100,15 +65,10 @@ object ActionPinFile:
     }
     pinned.map(_.toPins(ActionPins.Bootstrap, ActionPins.BootstrapVersions))
 
-  /** `inExtra` is what makes indentation meaningful: the same indented line is a pin inside an open `extra:` block and
-    * a stray indent outside one. Carried by [[Parsed]] rather than by a separate accumulator so a `Left` short-circuits
-    * the whole fold as before.
-    */
   private def parseLine(line: String, lineNo: Int, inExtra: Boolean): Either[String, Entry] =
     def refuse(reason: String): Either[String, Nothing] =
       Left(s"$DefaultPath:$lineNo: $reason\n  $line")
 
-    /** Pinned-ness is all an extra key can be checked for: with no prefix there is no action it must name. */
     def extraPin(key: String, refRaw: String, ver: String): Either[String, Entry] =
       val ref = stripComment(refRaw)
       ActionRef.make(ref) match
@@ -140,10 +100,6 @@ object ActionPinFile:
     end if
   end parseLine
 
-  /** Pins read so far, as fields rather than raw keys where a field exists: an unknown top-level key is refused by
-    * [[parseLine]], so by here every one has resolved to a [[ActionPins.Field]] and nothing can be silently dropped
-    * later. Extra pins stay keyed by their raw string, which is all they have.
-    */
   private final case class Parsed(
       refs: Map[ActionPins.Field, ActionRef],
       versions: Map[ActionPins.Field, String],
@@ -169,15 +125,8 @@ object ActionPinFile:
           extraVersions = version.fold(extraVersions)(v => extraVersions.updated(key, v)),
         )
 
-    /** Layered onto `base`: a field this saw wins, a field it did not keeps whatever `base` had. For [[parse]] that
-      * base is the bootstrap pins, so an absent line still yields a usable pin; for [[pullFromWorkflow]] it is the
-      * caller's current pins, so a pull only moves what the workflow actually mentioned.
-      *
-      * A field's version label comes from the same line its ref did. A line with no `# vX.Y.Z` therefore means the
-      * label is *unknown*, not whatever the base carried: keeping the base's label would let [[annotateUses]] stamp
-      * `# v7.0.1` onto a SHA that is not v7.0.1, which is the same false-assurance defect as an unpinned ref. Only a
-      * field the file never mentioned keeps the base's label, since it keeps the base's ref too. Extra pins follow the
-      * same rule under their `extra.<key>` labels.
+    /** Seen pins override `base`; unseen ones keep base's ref and label. A seen pin with no `# vX.Y.Z` drops the label:
+      * keeping base's would let [[annotateUses]] stamp a version onto a SHA that is not that version.
       */
     def toPins(base: ActionPins, baseVersions: Map[String, String]): ActionPins =
       val pins       = refs.foldLeft(base) { case (acc, (field, ref)) => acc.withField(field, ref) }
@@ -194,17 +143,11 @@ object ActionPinFile:
   def load(path: Path): Either[String, ActionPins] =
     parse(Files.readString(path, StandardCharsets.UTF_8))
 
-  /** `None` when there is no file, `Some(Left(...))` when there is one that cannot be read as pins. Keeping those
-    * distinct is what lets a caller fall back to [[ActionPins.Defaults]] for the former and fail for the latter.
-    */
   def loadOption(path: Path): Option[Either[String, ActionPins]] =
     if Files.isRegularFile(path) then Some(load(path)) else None
 
-  /** `None` when the resource is absent, which is how [[ActionPins.Defaults]] falls back to its bootstrap pins.
-    *
-    * A resource that is present but unparseable is also `None`: it is generated from this repo's ZipxVersions Action
-    * rows by `resourceGenerators`, so a failure here is a zipx build defect, not a user's to report, and the bootstrap
-    * pins are a truthful answer either way.
+  /** Unparseable is also `None`: the resource is generated from zipx's own Action rows, so a failure is a zipx build
+    * defect and the bootstrap pins are still a truthful answer.
     */
   def loadResource(
       name: String = ResourceName,
@@ -217,9 +160,6 @@ object ActionPinFile:
       }
       .flatMap(_.toOption)
 
-  /** `extra` is emitted last and sorted by key, since a `Map` has no order of its own and the file is committed: an
-    * iteration-order-dependent render would produce a spurious diff on every generate.
-    */
   def render(pins: ActionPins): String =
     def pin(key: String, ref: String, version: Option[String], indent: String): String =
       version match
@@ -244,17 +184,10 @@ object ActionPinFile:
 
   /** Pull known action pins from a generated (or Dependabot-edited) workflow YAML.
     *
-    * An `Either` for the same reason [[parse]] is: a Dependabot commit that rewrote a `uses:` into something that is
-    * not a valid ref is exactly the case a silent pull would launder into the pin file. Only lines whose ref already
-    * matches a known [[ActionPins.Field.prefix]], or the action of an extra pin `base` already carries, are considered,
-    * so an unrelated third-party action in the workflow is ignored rather than refused.
-    *
-    * An extra pin has no prefix, so a *new* extra action cannot be recognised here: pinning one is a deliberate act by
-    * whoever wrote the step, and inventing a key for it would be a guess. Once the key exists, Dependabot bumps flow
-    * through like any other pin.
+    * Only `uses:` lines naming a field prefix, or the action of an extra pin `base` already carries, are read; other
+    * actions are ignored. A new extra action is never inferred, since it has no key to file it under.
     */
   def pullFromWorkflow(workflowYaml: String, base: ActionPins = ActionPins.Defaults): Either[String, ActionPins] =
-    /** The action an extra pin names, `owner/action`, which is the only handle a keyed pin gives for matching. */
     val extraByAction: Map[String, String] =
       base.extra.map { case (key, ref) => actionOf(ref.unwrap) -> key }
 
@@ -290,16 +223,10 @@ object ActionPinFile:
     found.map(_.toPins(base, base.versions))
   end pullFromWorkflow
 
-  /** `owner/action` from a ref, dropping whatever follows the `@`. Refs with no `@` (an unpinned `uses:`) come back
-    * unchanged, so a matched-but-unpinned line still reaches `ActionRef.make` and is refused there.
-    */
+  /** A ref with no `@` comes back whole, so an unpinned `uses:` still reaches `ActionRef.make` and is refused. */
   private def actionOf(ref: String): String = ref.takeWhile(_ != '@')
 
-  /** Append `# vX.Y.Z` comments to `uses:` lines for pins that carry a version label.
-    *
-    * Matching is by exact ref rather than by prefix, so an extra pin needs no prefix to be annotated: the ref written
-    * into the step and the ref in the pin file are the same string or the pin does not apply.
-    */
+  /** Appends `# vX.Y.Z` to `uses:` lines whose exact ref has a version label. */
   def annotateUses(yaml: String, pins: ActionPins): String =
     val labelled: List[(String, String)] =
       ActionPins.Field.values.toList.flatMap(f => pins.version(f).map(pins.field(f).unwrap -> _)) ++

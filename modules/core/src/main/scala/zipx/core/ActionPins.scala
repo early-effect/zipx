@@ -14,32 +14,19 @@ import zipx.workflow.ActionRef
   * )
   * }}}
   *
-  * Fields are [[zipx.workflow.ActionRef]], so a literal is checked while the build compiles. A pin therefore reaches
-  * `Step.uses` with nothing left to validate, which is what makes an unpinned `uses:` unrepresentable rather than
-  * merely rejected.
-  *
-  * @param checkout
-  *   `actions/checkout` pin (`owner/action@sha`).
-  * @param setupJava
-  *   `actions/setup-java` pin.
-  * @param setupSbt
-  *   `sbt/setup-sbt` pin.
   * @param setupNode
-  *   `actions/setup-node` pin, emitted only for a capability that asks for a Node version
-  *   ([[Capability.withNodeVersion]]).
+  *   emitted only for a capability that asks for a Node version ([[Capability.withNodeVersion]]).
   * @param cache
-  *   `actions/cache` pin for [[CacheBackend.LocalDir]].
+  *   used by [[CacheBackend.LocalDir]].
   * @param uploadArtifact
-  *   `actions/upload-artifact` pin (Central staging share).
+  *   Central staging share.
   * @param downloadArtifact
-  *   `actions/download-artifact` pin (Central staging reassembly).
+  *   Central staging reassembly.
   * @param versions
-  *   Optional semver labels (`v7.0.1`) keyed by field name for `# vX.Y.Z` comments on generated `uses:` lines. An extra
-  *   pin's label is keyed `extra.<key>`, which no [[ActionPins.Field.key]] can collide with because a field key has no
-  *   dot in it.
+  *   `# vX.Y.Z` labels keyed by [[ActionPins.Field.key]]. An extra pin's label is keyed `extra.<key>`, which cannot
+  *   collide because a field key has no dot.
   * @param extra
-  *   Pins for actions zipx does not emit itself, keyed by the action name (`owner/repo`). Packs look up by prefix
-  *   ([[extraByPrefix]]), not a YAML `extra:` key.
+  *   pins for actions zipx does not emit itself, keyed by action name (`owner/repo`).
   */
 final case class ActionPins(
     checkout: ActionRef = ActionPins.BootstrapCheckout,
@@ -74,19 +61,14 @@ final case class ActionPins(
 
   def version(f: Field): Option[String] = versions.get(f.key)
 
-  /** `actions/cache/restore` at the [[cache]] pin's own ref, so the restore-only half can never drift from it.
-    *
-    * `unsafeMake` because inserting a path segment before `@` keeps every shape [[zipx.workflow.ActionRef]] accepts
-    * valid.
+  /** Derived from [[cache]] so the restore-only half cannot drift. `unsafeMake` is safe: inserting a path segment
+    * before `@` keeps the ref valid.
     */
   def cacheRestore: ActionRef =
     val (action, ref) = cache.unwrap.span(_ != '@')
     ActionRef.unsafeMake(s"$action/restore$ref")
 
-  /** Pins an action zipx does not emit, for a step a consumer or a pack writes.
-    *
-    * `version` is the `# vX.Y.Z` label. Key is the action name (`owner/repo`) so [[extraByPrefix]] can find it.
-    */
+  /** `key` is the action name (`owner/repo`), which [[extraByPrefix]] matches on. */
   def withExtra(key: String, ref: ActionRef, version: Option[String] = None): ActionPins =
     copy(
       extra = extra.updated(key, ref),
@@ -99,7 +81,6 @@ final case class ActionPins(
 
   def extraVersion(key: String): Option[String] = versions.get(ActionPins.extraVersionKey(key))
 
-  /** The extra pin whose key or ref names `prefix` (`owner/repo`). */
   def extraByPrefix(prefix: String): Option[ActionRef] =
     extra.collectFirst {
       case (key, ref) if key == prefix || ActionPins.namesPrefix(ref.unwrap, prefix) => ref
@@ -109,20 +90,17 @@ end ActionPins
 
 object ActionPins:
 
-  /** The `versions` key an extra pin's label lives under. The `extra.` prefix is what keeps one namespace safe for
-    * both: a [[Field.key]] is a bare identifier, so it can never contain a dot.
-    */
   private[core] def extraVersionKey(key: String): String = s"$ExtraPrefix.$key"
 
-  /** The pin-file block name for [[ActionPins.extra]], and the prefix of its `versions` keys. */
   private[core] val ExtraPrefix: String = "extra"
 
+  /** `prefix` must be followed by `@` or nothing: `actions/cache/restore@v4` is a different action from
+    * `actions/cache`. The bare form matches so an unpinned `uses: actions/checkout` is refused, not skipped.
+    */
   def namesPrefix(refOrName: String, prefix: String): Boolean =
     refOrName == prefix || refOrName.startsWith(prefix + "@")
 
-  /** Overlay catalog [[Action]] rows onto jar defaults. Field prefixes update typed fields; anything else is extra
-    * keyed by name. Duplicate name or duplicate field prefix is Left.
-    */
+  /** Rows naming a field prefix update that field; any other row becomes an extra pin keyed by name. */
   def overlay(base: ActionPins, rows: Seq[Action]): Either[String, ActionPins] =
     val dupNames = rows.groupBy(_.name).collect { case (n, xs) if xs.size > 1 => n }.toList.sorted
     if dupNames.nonEmpty then
@@ -149,11 +127,7 @@ object ActionPins:
           Right(pins.withExtra(action.name, ref, Some(action.version: String)))
     }
 
-  /** The pins, enumerated: one case per field of [[ActionPins]].
-    *
-    * Declaration order is the line order of rendered `zipx/action-pins.yml`, since [[ActionPinFile.render]] folds over
-    * `Field.values`.
-    */
+  /** Declaration order is the line order of the rendered `zipx/action-pins.yml`. */
   enum Field(val key: String, val prefix: String):
     case Checkout         extends Field("checkout", "actions/checkout")
     case SetupJava        extends Field("setupJava", "actions/setup-java")
@@ -163,8 +137,7 @@ object ActionPins:
     case UploadArtifact   extends Field("uploadArtifact", "actions/upload-artifact")
     case DownloadArtifact extends Field("downloadArtifact", "actions/download-artifact")
 
-  // Bootstrap fallbacks. Used only when the classpath resource is missing. Prefer [[ActionPins.Defaults]] from the
-  // embedded pin file. Literals, so each one's shape is checked while this file compiles.
+  // Fallbacks for when the classpath pin resource is missing.
   private[core] val BootstrapCheckout: ActionRef =
     ActionRef("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1")
   private[core] val BootstrapSetupJava: ActionRef =
@@ -201,11 +174,9 @@ object ActionPins:
     BootstrapVersions,
   )
 
-  /** Current zipx defaults, loaded from classpath `zipx/action-pins.yml` when present. */
   lazy val Defaults: ActionPins =
     ActionPinFile.loadResource().getOrElse(Bootstrap)
 
-  /** Convenience aliases matching older call sites / docs. */
   def Checkout: ActionRef         = Defaults.checkout
   def SetupJava: ActionRef        = Defaults.setupJava
   def SetupSbt: ActionRef         = Defaults.setupSbt

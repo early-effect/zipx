@@ -5,15 +5,12 @@ import zio.blocks.schema.*
 import zio.blocks.schema.yaml.*
 import scala.collection.immutable.ListMap
 
-/** Renders a [[Workflow]] to deterministic GitHub Actions YAML.
+/** Only the top-level `Workflow` is hand-encoded, so `on:` keeps underscore keys and `jobs:` keeps `ListMap` order.
+  * Derivation ignores custom nested codecs, so that override must live at the level owning the key, not in a `given` on
+  * `Triggers`.
   *
-  * Jobs and steps go through zio-blocks' derived codecs; only the top-level `Workflow` is hand-encoded, so that the
-  * `on:` block can emit underscore event keys the kebab-casing deriver cannot produce and `jobs:` keeps its `ListMap`
-  * order. Derivation is purely structural and ignores custom nested codecs, so that override has to live at the level
-  * owning the key: a `YamlCodec[Workflow]`, not a `given` on `Triggers`.
-  *
-  * The fragment helpers share [[render]]'s encode + prune + print pipeline, which is what makes a doc snippet or unit
-  * test byte-comparable with the committed `ci.yml`.
+  * The fragment helpers share [[render]]'s encode, prune and print pipeline, which keeps a doc snippet or test
+  * byte-comparable with the committed `ci.yml`.
   */
 object Render:
 
@@ -28,7 +25,6 @@ object Render:
   def renderBody(wf: Workflow): Either[String, String] =
     checked(wf.jobs.values.toList.flatMap(_.steps), workflowYaml(wf))
 
-  /** One job as the mapping fragment it would be under `jobs:`. */
   def renderJob(id: String, job: Job): Either[String, String] =
     renderJobs(ListMap(id -> job))
 
@@ -38,10 +34,8 @@ object Render:
   def renderSteps(steps: List[Step]): Either[String, String] =
     checked(steps, Yaml.Sequence(Chunk.from(steps.map(encodeStep))))
 
-  /** The single funnel for both layers' render-time rules: [[Step.problem]] is GitHub's step shape, which the case
-    * class cannot encode, and [[YamlPrinter.problem]] is content that would print as YAML GitHub cannot parse. The
-    * failure is a value, and nothing reaches disk when either fires, because the caller decides what a bad workflow
-    * means: `zipxWorkflowGenerate` makes it a build failure, a test asserts on it.
+  /** The single funnel for [[Step.problem]] and [[YamlPrinter.problem]]. The failure is a value because the caller
+    * decides what a bad workflow means: `zipxWorkflowGenerate` fails the build, a test asserts on it.
     */
   private def checked(steps: List[Step], yaml: => Yaml): Either[String, String] =
     steps.flatMap(Step.problem).headOption match
@@ -53,7 +47,7 @@ object Render:
   private def encodeStep(step: Step): Yaml =
     prune(stepCodec.encodeValue(step))
 
-  /** A `permissions:`, `env:` or `with:` block on its own. Empty renders as the empty string. */
+  /** Empty renders as the empty string. */
   def renderMapping(entries: Map[String, String]): Either[String, String] =
     if entries.isEmpty then Right("")
     else print(Yaml.Mapping(Chunk.from(entries.map((k, v) => (Yaml.Scalar(k), Yaml.Scalar(v))))))
@@ -230,9 +224,7 @@ object Render:
     Yaml.Mapping.fromStringKeys(entries*)
   end compositeYaml
 
-  /** The derived codec renders `runsOn: List[String]` as a sequence, but GitHub's convention for a single label is a
-    * scalar. Multi-label runners stay a sequence.
-    */
+  /** GitHub's convention for a single runner label is a scalar; the derived codec always emits a sequence. */
   private def collapseSingletonRunsOn(job: Yaml): Yaml = job match
     case Yaml.Mapping(entries) =>
       Yaml.Mapping(entries.map {
@@ -248,9 +240,8 @@ object Render:
   private def seqEntry(k: String, xs: List[String]): Seq[(String, Yaml)] =
     if xs.isEmpty then Nil else Seq(k -> Yaml.Sequence(Chunk.from(xs.map(Yaml.Scalar(_)))))
 
-  /** Drops empty mappings and sequences, so an absent collection does not render as `{}` or `[]`. Explicit `null`
-    * survives. Applied to the fully-assembled tree, which is what also cleans up the derived codecs' `env: {}` and
-    * `needs: []`.
+  /** Drops empty mappings and sequences so an absent collection does not render as `{}` or `[]`; explicit `null`
+    * survives.
     */
   def prune(y: Yaml): Yaml = y match
     case Yaml.Mapping(entries) =>

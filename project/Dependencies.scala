@@ -1,10 +1,8 @@
 import sbt.*
 
-/** ModuleIDs for the meta-build dogfood mirror. The .sbt files in project/ cannot import zipx types (Lib / Plugin), so
-  * this file stays zipx-free and is pulled onto that classpath via project/project/build.sbt unmanagedSources.
+/** ModuleIDs for the meta-build dogfood mirror, zipx-free because project/ .sbt files cannot import zipx types.
   *
-  * Version literals here must match project/ZipxVersions.scala. zipxDepUpdate rewrites the catalog; copy those literals
-  * here when a dogfood dep moves. Docs-only deps stay in build.sbt.
+  * Versions must match project/ZipxVersions.scala: zipxDepUpdate rewrites only the catalog, so copy moved literals.
   */
 object Dependencies:
 
@@ -48,11 +46,8 @@ object Dependencies:
     "io.github.kitlangton" %% "neotype" % neotypeVersion
   )
 
-  /** Bundled so consumers need one `addSbtPlugin` line for zipx.
-    *
-    * The `org.scala-sbt` transitives are dropped because the published POM re-lists `sbt` itself as a compile
-    * dependency, which drags `compiler-interface` into every consumer meta-build and collides with zinc 1.x schemas
-    * from other plugins. Host sbt already provides that stack.
+  /** Bundled so consumers need one `addSbtPlugin` line. Its POM lists `sbt` itself as a compile dependency, whose
+    * `compiler-interface` collides with other plugins' zinc in a consumer meta-build; the host sbt provides that stack.
     */
   val remoteCachePlugin: ModuleID =
     ("org.scala-sbt" % "sbt-remote-cache" % remoteCacheVersion)

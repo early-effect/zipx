@@ -1,6 +1,5 @@
 import zipx.*
 
-// A release row, a commit pin the app compiles against, and a commit pin only its tests use.
 object MyVersions extends ZipxVersions:
   val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
   val scala: ScalaVersion = ScalaVersion("3.9.0")

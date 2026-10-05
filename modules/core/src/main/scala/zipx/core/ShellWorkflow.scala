@@ -4,11 +4,8 @@ import zipx.workflow.*
 
 import scala.collection.immutable.ListMap
 
-/** A `workflow_dispatch` workflow whose job checks the repo out and installs the sbt toolchain, then runs `steps`.
-  *
-  * The toolchain is the same step `ci.yml` uses (`zipx-sbt-setup` from [[PlanConfig]]): JDK, sbt, and the LocalDir
-  * cache mode. The build supplies the steps that run after that. There is no sbt command unless one of those steps runs
-  * `sbt` itself.
+/** A `workflow_dispatch` workflow: checkout and the same `zipx-sbt-setup` as `ci.yml`, then `steps`. No sbt command
+  * runs unless a step runs `sbt` itself.
   *
   * {{{
   * zipxShellWorkflows += ShellWorkflow(
