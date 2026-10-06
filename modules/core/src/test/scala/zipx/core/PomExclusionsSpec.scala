@@ -58,6 +58,14 @@ object PomExclusionsSpec extends ZIOSpecDefault:
         )
       }
     },
+    test("a resolved module that names more than one project is refused") {
+      val edge = PomEdge(PomScope.Compile, module(1))
+      assertTrue(
+        PomExclusions.graph(List(root -> Nil, module(1) -> List(edge))) ==
+          Right(Map(root -> Nil, module(1) -> List(edge))),
+        PomExclusions.graph(List(root -> List(edge), root -> Nil)) == Left(DuplicateModule(root)),
+      )
+    },
     test("compile and runtime chains count; test, provided, optional, and tool edges do not") {
       val (a, b, t, p, o) = (module(1), module(2), module(3), module(4), module(5))
       val graph           = Map(

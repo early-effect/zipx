@@ -14,11 +14,32 @@ final case class PomEdge(scope: PomScope, to: ResolvedModule)
 
 final case class PomDependency(scope: PomScope, module: ResolvedModule, revision: DepRevision)
 
+/** Two projects in one build resolved as the same module. Keeping either edge list would under-exclude. */
+final case class DuplicateModule(module: ResolvedModule):
+  def message: String = s"${module.render} is more than one project"
+
 /** The modules this project builds or commit-pins, excluded from each library its POM names. Nothing orders two commits
   * of one module for a consumer, so this leaves the one the project was built with. Release pins are left to the
   * consumer's own ordering.
   */
 object PomExclusions:
+
+  def graph(
+      edges: List[(ResolvedModule, List[PomEdge])]
+  ): Either[DuplicateModule, Map[ResolvedModule, List[PomEdge]]] =
+    @tailrec
+    def loop(
+        rest: List[(ResolvedModule, List[PomEdge])],
+        acc: Map[ResolvedModule, List[PomEdge]],
+    ): Either[DuplicateModule, Map[ResolvedModule, List[PomEdge]]] =
+      rest match
+        case Nil                    => Right(acc)
+        case (module, next) :: tail =>
+          acc.get(module) match
+            case Some(_) => Left(DuplicateModule(module))
+            case None    => loop(tail, acc.updated(module, next))
+    loop(edges, Map.empty)
+  end graph
 
   def of(
       project: ResolvedModule,
