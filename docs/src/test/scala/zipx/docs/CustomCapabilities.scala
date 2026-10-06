@@ -264,6 +264,10 @@ command = cmd"++$${scalaVersion.value}; $${publish}" // String + key
 
 The interpolator produces the `command` function for `Capability.custom` / `.deploy` / `.once`. Key splices are
 module-scoped.
+
+`++` switches each project whose `crossScalaVersions` contains that version and leaves the others. The task then
+resolves the selected module and the projects on its classpath. A project outside that closure is not evaluated, so a
+sibling left on another Scala version does not fail the command.
 """
     ),
   )

@@ -687,11 +687,13 @@ object ZipxPlugin extends AutoPlugin:
       CatalogResolution.of(zipxResolvedModule.value) -> PomAuthority.edges(projectDependencies.value, crossing.value)
     },
     zipxPomExclusions := Def.uncached {
-      PomExclusions.of(
-        CatalogResolution.of(zipxResolvedModule.value),
-        zipxPomEdges.all(ScopeFilter(inAnyProject)).value.toMap,
-        PomAuthority.declared(libraryDependencies.value, crossing.value),
-      )
+      val self     = CatalogResolution.of(zipxResolvedModule.value)
+      val declared = PomAuthority.declared(libraryDependencies.value, crossing.value)
+      // A `++` session does not switch every project, and `projectDependencies` refuses a Scala mismatch.
+      val edges = zipxPomEdges.all(ScopeFilter(inDependencies(ThisProject))).value.toList
+      PomExclusions.graph(edges) match
+        case Right(graph) => PomExclusions.of(self, graph, declared)
+        case Left(dup)    => sys.error(s"zipx: ${dup.message}")
     },
     // Each library is kept from bringing what this project states itself, so a consumer resolves the revision this
     // project was built with. Resolution here, the POM, and ivy.xml all read this one list.

@@ -1,0 +1,8 @@
+> ++2.13.16
+> legacy/update
+> legacy/publishLocal
+> assertLegacy lib_2.13 models_2.13
+> ++3.9.0
+> app/update
+> app/publishLocal
+> assertApp lib_3 models_3

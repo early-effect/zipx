@@ -669,6 +669,8 @@ So a published POM keeps each of its libraries from bringing what the project st
   `provided`, or `optional` dependency is not inherited, so it is not excluded.
 - every commit pin the project declares in a scope a consumer inherits.
 
+Those edges are the classpath closure of the project being published. A sibling it does not depend on is not an input.
+
 The consumer resolves one revision, the one the project was built with. A release is left to the consumer's own order,
 which is meaningful for releases. Resolution in this build reads the same list, so what it compiles and what it
 publishes agree. Toolchain dependencies (the Scala, Scala.js, and Native libraries) carry no exclusions.
@@ -694,8 +696,10 @@ publishes agree. Toolchain dependencies (the Scala, Scala.js, and Native librari
       exampleValue {
         val client               = ResolvedModule("com.example", "client_3")
         def module(name: String) = ResolvedModule("com.example", name)
+        val sibling              = module("legacy_2.13")
         val inRepo               = Map(
-          client -> List(PomEdge(PomScope.Compile, module("models_3")), PomEdge(PomScope.Test, module("testkit_3")))
+          client  -> List(PomEdge(PomScope.Compile, module("models_3")), PomEdge(PomScope.Test, module("testkit_3"))),
+          sibling -> List(PomEdge(PomScope.Compile, module("other_2.13"))),
         )
         val declared = List(
           PomDependency(PomScope.Compile, module("widgets_3"), DepRevision.of("1.4.2-1234abcd5678-SNAPSHOT")),
