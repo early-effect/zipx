@@ -10,7 +10,7 @@ object ZipxVersions extends zipx.ZipxVersions:
   val scala: ScalaVersion = ScalaVersion("3.9.0")
 
   val zipx: ShipGroup =
-    ShipGroup("zipx", "0.18.0")("shell", "workflow", "core", "syntax", "cli", "central", "aws", "plugin")
+    ShipGroup("zipx", "0.18.1")("shell", "workflow", "core", "syntax", "cli", "central", "aws", "plugin")
 
   val zio: Lib            = Lib("dev.zio", "zio", "2.1.26")
   val zioTest: Lib        = zio.mod("zio-test").test
