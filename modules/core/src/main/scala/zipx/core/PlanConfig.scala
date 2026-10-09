@@ -61,8 +61,9 @@ end PlanText
 /** What the planner needs that the module graph cannot supply: triggers, matrix axes, cache choice, action pins.
   *
   * @param affectedOnPush
-  *   gates pushes on affected modules by diffing against `before`. Off by default: a force-push or a branch's first
-  *   push has a bad `before` and would silently under-build. Tags always build all.
+  *   gates pushes on affected modules by diffing against the head of this workflow's last successful push run on the
+  *   branch, not `before`: a cancelled, failed, or unapproved run ships nothing, so its changes stay affected. No such
+  *   run, or one a force-push dropped, builds all. Tags always build all.
   * @param affectedPublish
   *   affected-gates [[Phase.Publish]] Graph jobs. Separate from [[affected]] because under-verifying is silently unsafe
   *   while under-publishing fails loudly. A release tag always publishes everything.
