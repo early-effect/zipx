@@ -475,7 +475,9 @@ object ZipxSettings:
     SettingDef.setting(
       SettingName("zipxAffectedOnPush"),
       false,
-      SettingPurpose("Also restrict pushes to affected modules via the before-sha diff (default false)."),
+      SettingPurpose(
+        "Also restrict pushes to modules changed since this workflow's last successful push run on the branch (default false)."
+      ),
       Build,
     )
 

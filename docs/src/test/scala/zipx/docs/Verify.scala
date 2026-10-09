@@ -244,7 +244,9 @@ flowchart TD
       ),
       md"""
 Changed files → owning module (longest base-dir prefix) → reverse-dependency closure. A `.sbt` change or anything under
-`project/` forces a full build. On push/tag everything builds unless `zipxAffectedOnPush` is enabled. If the diff
+`project/` forces a full build. On push/tag everything builds unless `zipxAffectedOnPush` is enabled, which diffs a
+push against the head of this workflow's last successful push run on the branch. A cancelled or unapproved run ships
+nothing, so diffing against the previous push would drop what it changed. If the diff
 **cannot run**, zipx emits `["all"]` (fail open) so a bad base ref never reports a green, untested PR.
 """,
     ),

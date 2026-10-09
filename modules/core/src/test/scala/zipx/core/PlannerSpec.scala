@@ -430,8 +430,9 @@ object PlannerSpec extends ZIOSpecDefault:
       val script = wf.jobs("affected").steps.find(_.id.contains("compute")).flatMap(_.run).getOrElse("")
       assertTrue(
         script.contains("pull_request"),
-        !script.contains("github.event.before"),
+        !script.contains("gh api"),
         script.contains("""modules='["all"]'"""),
+        wf.jobs("affected").permissions.isEmpty,
       )
     },
     test("affected script never captures sbt stdout into modules (GITHUB_OUTPUT-safe)") {
@@ -444,19 +445,25 @@ object PlannerSpec extends ZIOSpecDefault:
         wf.jobs("affected").steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
       )
     },
-    test("affectedOnPush adds a guarded before-sha diff for pushes") {
+    test("affectedOnPush diffs a push against the last green push run, which the job may read") {
       val wf = Planner.plan(
         sampleGraph,
         List(Capability.testGraph),
         config.copy(affected = AffectedMode.AffectedOnPR, affectedOnPush = true),
       )
-      val script = wf.jobs("affected").steps.find(_.id.contains("compute")).flatMap(_.run).getOrElse("")
+      val job     = wf.jobs("affected")
+      val compute = job.steps.find(_.id.contains("compute"))
+      val script  = compute.flatMap(_.run).getOrElse("")
       assertTrue(
-        script.contains("github.event.before"),
+        !script.contains("github.event.before"),
+        script.contains("status=success"),
+        script.contains("git merge-base --is-ancestor \"$shipped\" HEAD"),
         script.contains("zipxAffectedModules $BASE"),
         script.contains("modules=$(cat target/zipx-affected.json)"),
         !script.contains("modules=$(sbt"),
-        script.contains("0000000000000000000000000000000000000000"),
+        job.permissions.get("actions").contains("read"),
+        job.permissions.get("contents").contains("read"),
+        compute.exists(_.env.get("GH_TOKEN").contains("${{ github.token }}")),
       )
     },
     test("Always mode emits no affected job and no affected gating") {

@@ -97,13 +97,17 @@ object ScriptRenderSpec extends ZIOSpecDefault:
             |  sbt -batch --error "zipxAffectedModules $BASE"
             |  modules=$(cat target/zipx-affected.json)
             |elif [ "${{ github.event_name }}" = "push" ]; then
-            |  before="${{ github.event.before }}"
-            |  if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
-            |    modules='["all"]'
-            |  else
-            |    BASE="$before"
+            |  # Diff against the last push this workflow finished green on, not the previous push: a cancelled
+            |  # or unapproved run ships nothing, so what it changed has to stay affected until a run ships it.
+            |  workflow=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq .workflow_id)
+            |  shipped=$(gh api "repos/${{ github.repository }}/actions/workflows/$workflow/runs?branch=${{ github.ref_name }}&event=push&status=success&per_page=1" \
+            |    --jq '.workflow_runs[0].head_sha // ""')
+            |  if [ -n "$shipped" ] && git merge-base --is-ancestor "$shipped" HEAD; then
+            |    BASE="$shipped"
             |    sbt -batch --error "zipxAffectedModules $BASE"
             |    modules=$(cat target/zipx-affected.json)
+            |  else
+            |    modules='["all"]'
             |  fi
             |else
             |  modules='["all"]'

@@ -661,19 +661,21 @@ object Planner:
   private def affectedSetupJob(config: PlanConfig, usesVerifyGate: Boolean, runsWhenVerifySkips: Boolean): Job =
     val (needs, cond) =
       applyVerifyGate(Nil, None, Phase.Verify, usesVerifyGate, excludeTagsAndDispatch = !runsWhenVerifySkips)
+    val compute = Step
+      .run(affectedScript(config.affectedOnPush))
+      .withId("compute")
+      .named("Compute affected modules")
     Job(
       name = Some("affected"),
       runsOn = List(config.runnerOs),
       needs = needs,
       `if` = cond,
+      permissions =
+        if config.affectedOnPush then ListMap("actions" -> "read", "contents" -> "read") else ListMap.empty,
       env = EnvValue.renderAll(config.env),
       outputs = ListMap("modules" -> Expr.stepOutput("compute", "modules").render),
       steps = checkoutThenSbtSetup(config, affectedJobId, nodeVersion = None, LocalCacheMode.Off) ++ List(
-        Step
-          .run(affectedScript(config.affectedOnPush))
-          .withId("compute")
-          .named("Compute affected modules")
-          .build
+        (if config.affectedOnPush then compute.withEnv("GH_TOKEN", Expr.githubToken) else compute).build
       ),
     )
   end affectedSetupJob
@@ -691,18 +693,59 @@ object Planner:
     )
     val buildEverything = Assign("modules", Word.squote("[\"all\"]"))
 
+    val repo         = Expr.github("repository").asWord
+    val thisWorkflow = Assign(
+      "workflow",
+      Word.subst(
+        Exec(
+          "gh",
+          Word.lit("api"),
+          Word.dquote(Word.lit("repos/"), repo, Word.lit("/actions/runs/"), Expr.github("run_id").asWord),
+          Word.lit("--jq"),
+          Word.lit(".workflow_id"),
+        )
+      ),
+    )
+    val lastShipped = Assign(
+      "shipped",
+      Word.subst(
+        Continued(
+          "gh",
+          List(
+            List(
+              Word.lit("api"),
+              Word.dquote(
+                Word.lit("repos/"),
+                repo,
+                Word.lit("/actions/workflows/"),
+                Word.v("workflow"),
+                Word.lit("/runs?branch="),
+                Expr.github("ref_name").asWord,
+                Word.lit("&event=push&status=success&per_page=1"),
+              ),
+            ),
+            List(Word.lit("--jq"), Word.squote(""".workflow_runs[0].head_sha // """"")),
+          ),
+        )
+      ),
+    )
     val pushBranch =
       if !affectedOnPush then Nil
       else
         List(
           eventIs("push") -> Block(
-            Assign("before", Word.dquote(Expr.github("event.before").asWord)),
-            // A force-push or a branch-create reports this all-zero sha, which no diff can be taken against.
+            Comment("Diff against the last push this workflow finished green on, not the previous push: a cancelled"),
+            Comment("or unapproved run ships nothing, so what it changed has to stay affected until a run ships it."),
+            thisWorkflow,
+            lastShipped,
+            // No green run yet, or one whose commit a force-push dropped, leaves nothing to diff against.
             If(
-              ShTest.varEmpty("before") ||
-                ShTest.varEquals("before", "0000000000000000000000000000000000000000"),
-              Block(buildEverything),
-              elseDo = Some(Block(Assign("BASE", Word.vq("before")), runAffected.commands)),
+              ShTest.varNonEmpty("shipped") &&
+                ShTest.succeeds(
+                  Exec("git", Word.lit("merge-base"), Word.lit("--is-ancestor"), Word.vq("shipped"), Word.lit("HEAD"))
+                ),
+              Block(Assign("BASE", Word.vq("shipped")), runAffected.commands),
+              elseDo = Some(Block(buildEverything)),
             ),
           )
         )
