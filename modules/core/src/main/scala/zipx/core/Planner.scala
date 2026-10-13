@@ -868,7 +868,8 @@ object Planner:
   private val syntheticNode = ModuleNode(id = ModuleId("_build"))
 
   /** A release-tag Publish skips the roll-up because Verify never runs on a tag. `cache-rehydrate` is the roll-up's
-    * sibling, not its need, so a merge-push publish names it to wait for the save.
+    * sibling, not its need, so a merge-push publish names it to wait for the save, unless it restores
+    * [[SnapshotSource.Prior]].
     */
   private def phaseNeeds(capability: Capability, config: PlanConfig, usesVerifyRollup: Boolean): List[JobId] =
     if !usesVerifyRollup || capability.phase != Phase.Publish then Nil
@@ -877,7 +878,7 @@ object Planner:
         case Gate.Always | Gate.OnDefaultPush =>
           val cache =
             Option
-              .when(emitsCacheRehydrate(config, hasVerify = true) && restoresBuildSnapshot(capability))(
+              .when(emitsCacheRehydrate(config, hasVerify = true) && awaitsThisRunSnapshot(capability))(
                 cacheRehydrateJobId
               )
               .toList
@@ -887,8 +888,9 @@ object Planner:
   private def emitsCacheRehydrate(config: PlanConfig, hasVerify: Boolean): Boolean =
     config.skipMergedPrPush && hasVerify && config.cacheRehydrateOnMerge && config.cache == CacheBackend.LocalDir
 
-  private def restoresBuildSnapshot(capability: Capability): Boolean =
-    capability.workflowCall.isEmpty && capability.command.runsSbt && capability.localCache != LocalCacheMode.Off
+  private def awaitsThisRunSnapshot(capability: Capability): Boolean =
+    capability.workflowCall.isEmpty && capability.command.runsSbt && capability.localCache != LocalCacheMode.Off &&
+      capability.snapshotSource == SnapshotSource.ThisRun
 
   private def emitsJobs(capability: Capability, graph: ModuleGraph): Boolean =
     capability.scope match

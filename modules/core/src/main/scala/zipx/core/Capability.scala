@@ -242,6 +242,7 @@ final case class Capability(
     /** Appended once after the joined module commands; see [[thenOnce]]. */
     sessionTail: Option[SbtCommand] = None,
     localCache: LocalCacheMode = LocalCacheMode.Restore,
+    snapshotSource: SnapshotSource = SnapshotSource.ThisRun,
     affectedBy: Option[ModuleNode => Boolean] = None,
 ):
   def withCondition(condition: JobCondition): Capability =
@@ -259,6 +260,9 @@ final case class Capability(
     */
   def withLocalCache(mode: LocalCacheMode): Capability =
     copy(localCache = mode)
+
+  def withSnapshotSource(source: SnapshotSource): Capability =
+    copy(snapshotSource = source)
 
   def withCondition(condition: Option[JobCondition]): Capability =
     copy(condition = condition)
