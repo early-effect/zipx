@@ -21,6 +21,8 @@ object ZipxPlugin extends AutoPlugin:
     val CacheEpoch = zipx.core.CacheEpoch
     type LocalCacheMode = zipx.core.LocalCacheMode
     val LocalCacheMode = zipx.core.LocalCacheMode
+    type SnapshotSource = zipx.core.SnapshotSource
+    val SnapshotSource = zipx.core.SnapshotSource
     type ActionPins = zipx.core.ActionPins
     val ActionPins = zipx.core.ActionPins
     type Cron = zipx.workflow.Cron

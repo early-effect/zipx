@@ -57,3 +57,16 @@ enum LocalCacheMode:
     case Restore => "restore"
     case Off     => "off"
 end LocalCacheMode
+
+/** Which [[CacheBackend.LocalDir]] build snapshot a restoring Publish job starts from on a merge push, where
+  * `cache-rehydrate` owns the save.
+  */
+enum SnapshotSource:
+  /** Wait for `cache-rehydrate` and restore this run's save. The default: a job that only packages compiles nothing. */
+  case ThisRun
+
+  /** Start beside `cache-rehydrate` and restore the newest earlier save. For jobs that compile their own slice anyway,
+    * such as a docker image matrix, where waiting costs more wall clock than the warmer snapshot saves.
+    */
+  case Prior
+end SnapshotSource

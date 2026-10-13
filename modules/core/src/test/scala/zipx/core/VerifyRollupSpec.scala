@@ -28,6 +28,8 @@ object VerifyRollupSpec extends ZIOSpecDefault:
 
   private val rehydrate = config.copy(skipMergedPrPush = true, cacheRehydrateOnMerge = true)
 
+  private val images = sampleGraph.mapNodes(n => n.copy(docker = n.id.startsWith("service")))
+
   def spec = suite("Verify roll-up")(
     test("snapshots needs the roll-up, and the roll-up needs every Verify job") {
       val wf        = plan(List(Capability.test, testJs, Capability.snapshots()))
@@ -143,6 +145,23 @@ object VerifyRollupSpec extends ZIOSpecDefault:
       val publish = Capability.publish.copy(gate = Gate.Always)
       val job     = plan(List(Capability.test, publish), rehydrate).jobs("publish")
       assertTrue(job.needs.contains("verify"), job.needs.contains("cache-rehydrate"))
+    },
+    test("a Graph docker publish waits on cache-rehydrate unless it restores the prior snapshot") {
+      def dockerJobs(source: SnapshotSource) =
+        val docker = Capability.dockerGraph.copy(gate = Gate.Always).withSnapshotSource(source)
+        Planner.plan(images, List(Capability.test, docker), rehydrate).jobs.collect {
+          case (id, job) if id.startsWith("docker") => job
+        }
+      val thisRun = dockerJobs(SnapshotSource.ThisRun)
+      val prior   = dockerJobs(SnapshotSource.Prior)
+      assertTrue(
+        thisRun.nonEmpty,
+        thisRun.forall(_.needs.contains("cache-rehydrate")),
+        prior.nonEmpty,
+        prior.forall(_.needs.contains("verify")),
+        prior.forall(!_.needs.contains("cache-rehydrate")),
+        prior.forall(!_.`if`.exists(_.contains("cache-rehydrate"))),
+      )
     },
     test("a capability named verify is refused") {
       val cap     = Capability.once(CapabilityName("verify"), SbtCommand.unsafeTask("say"))

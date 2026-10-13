@@ -155,7 +155,9 @@ and direct pushes, and `cache-rehydrate` owns it on a merge push, where Verify i
 wave, so each wave warms the next through the same-run key. Graph test jobs, coverage, publish, docker, and deploy
 jobs restore through `actions/cache/restore` and never save. The `snapshots` job waits on `verify` (every Verify job,
 including the cache owner) and, on a merge push, on `cache-rehydrate`, which owns that push's save. It restores this
-run's save and only packages and uploads. A `zipx-release.yml` job restores
+run's save and only packages and uploads. Every other sbt Publish job waits on `cache-rehydrate` the same way, unless
+it takes `SnapshotSource.Prior`: then it starts beside `cache-rehydrate` and restores the newest earlier save. That
+suits a docker image matrix, whose jobs compile their own modules anyway. A `zipx-release.yml` job restores
 and never saves: its jars carry release numbers, which no PR build would hit.
 
 A pinned snapshot keeps the cache honest without making it cold. Only projects that depend on a `-SNAPSHOT` re-resolve
@@ -163,9 +165,10 @@ each session. Every generated sbt job also sets `COURSIER_TTL: 0s`, which revali
 other `update` and every content-addressed compile still hits. See **Snapshots and releases**.
 
 ```scala
-Capability.test                              // LocalCacheMode.Save: the default owner
-Capability.testGraph                         // Restore: its jobs compile disjoint slices of the build
-myCheck.withLocalCache(LocalCacheMode.Save)  // take ownership in place of the builtin test
+Capability.test                                                  // LocalCacheMode.Save: the default owner
+Capability.testGraph                                             // Restore: its jobs compile disjoint slices
+myCheck.withLocalCache(LocalCacheMode.Save)                      // take ownership in place of the builtin test
+Capability.dockerGraph.withSnapshotSource(SnapshotSource.Prior)  // on a merge push, start beside cache-rehydrate
 ```
 
 A capability that replaces the builtin `test` by name decides for itself. Coverage never saves, because an
