@@ -15,7 +15,7 @@ object CatalogOpsSpec extends ZIOSpecDefault:
 
   private val header =
     """object MyVersions:
-      |  val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
+      |  val sbt: SbtVersion     = SbtVersion("2.1.0-RC1")
       |  val scala: ScalaVersion = ScalaVersion("3.9.0")
       |""".stripMargin
 

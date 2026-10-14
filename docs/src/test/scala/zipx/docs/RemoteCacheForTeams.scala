@@ -32,7 +32,7 @@ Honest boundaries help you trust the path:
 
 | Claim | Status |
 |---|---|
-| Content-addressed reuse of compile/test across machines | Yes (sbt 2 + Bazel-compat gRPC) |
+| Content-addressed reuse of compile/test across machines | Yes (sbt 2 + Bazel-compat gRPC or HTTP) |
 | CI hydrates; developers and later jobs Get | Yes (ManagedRemote / long-lived sidecar) |
 | JDK/OS partitioned via `cacheVersion` | Yes (zipx wiring) |
 | Sandboxed hermetic builds / remote **execution** | No (use Graph for job fan-out) |
@@ -92,7 +92,7 @@ reuse completed work; when cold, the machine that scheduled the task still runs 
 | | Remote **cache** | Remote **execution** |
 |---|---|---|
 | Question | Has this digest been done? | Run this action on a worker pool |
-| sbt 2 / zipx | Yes (Bazel-compat gRPC) | Not pursued; use Graph for job fan-out |
+| sbt 2 / zipx | Yes (Bazel-compat gRPC or HTTP) | Not pursued; use Graph for job fan-out |
 | Team win | CI hydrates; everyone skips redo | Wall-clock via many workers |
 
 If wall clock is still bound by *many independent misses* on a huge PR, prefer **Graph** (more runners, path-based
@@ -110,6 +110,8 @@ zipxCache := CacheBackend.managedRemote("grpcs://cache.example", "CACHE_KEY")
 zipxCache := RemoteCacheProof.sidecar
 ```
 
+`managedRemote` takes `grpc://`, `grpcs://`, `http://`, or `https://` and writes that URI unchanged. The sidecar is
+the gRPC service. Plaintext `grpc://` and `http://` warn on sbt 2.1. That warning is the scheme, not a failed cache.
 Then regenerate the workflow, add the repository secret, and confirm CI exports `ZIPX_REMOTE_CACHE`. For a
 zero-infra start, keep **LocalDir** and graduate to ManagedRemote when the team wants laptop reuse of CI digests.
 """,
@@ -118,15 +120,21 @@ zero-infra start, keep **LocalDir** and graduate to ManagedRemote when the team 
           libGraph,
           config.copy(cache = CacheBackend.managedRemote("grpcs://cache.example", "CACHE_KEY")),
         )
+        val http = DocsRender.job("test")(Capability.test)(using
+          libGraph,
+          config.copy(cache = CacheBackend.managedRemote("http://cache.example:8080", "CACHE_KEY")),
+        )
         val sidecar = DocsRender.job("test")(Capability.test)(using
           libGraph,
           config.copy(cache = RemoteCacheProof.sidecar),
         )
-        managed + "\n---\n" + sidecar
+        managed + "\n---\n" + http + "\n---\n" + sidecar
       }.assert(yaml =>
         assertTrue(
           yaml.contains(s"${RemoteCacheProof.envUri}: grpcs://cache.example") ||
             yaml.contains(s"${RemoteCacheProof.envUri}: \"grpcs://cache.example\""),
+          yaml.contains(s"${RemoteCacheProof.envUri}: http://cache.example:8080") ||
+            yaml.contains(s"${RemoteCacheProof.envUri}: \"http://cache.example:8080\""),
           RemoteCacheProof.sidecarYamlMustContain.forall(yaml.contains),
           yaml.contains(RemoteCacheProof.envHeader) || yaml.contains("secrets.CACHE_KEY"),
         )

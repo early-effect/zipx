@@ -34,7 +34,8 @@ flowchart TD
 ```
 
 Miss path (amber → red) pays compile/test and writes digests; hit path (green) reuses them. Both land in the same
-backend: `LocalDir` via `actions/cache` inside `zipx-sbt-setup`, or a remote gRPC store. The restore key is the
+backend: `LocalDir` via `actions/cache` inside `zipx-sbt-setup`, or a remote action cache (`grpc`, `grpcs`, `http`, or
+`https`). The restore key is the
 commit-stable epoch
 (`zipxCacheEpoch`), so PR pushes share hits and a release tag rolls a fresh namespace.
 
@@ -103,15 +104,19 @@ zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUD
   branch**. With `zipxSkipMergedPrPush`, Verify does not run on the merge push, so by default a minimal
   `cache-rehydrate` job recreates a main-scoped save (see **Verify**). You cannot copy a PR cache onto main via the
   API.
-- **BazelRemoteSidecar**: pinned `buchgr/bazel-remote-cache` as a job service; shared across the run via Bazel gRPC.
+- **BazelRemoteSidecar**: pinned `buchgr/bazel-remote-cache` as a job service. The published port is gRPC.
   Proof pins live in `RemoteCacheProof` (docs, planner tests, and `RemoteCacheItSpec` share them).
-- **ManagedRemote**: point sbt at BuildBuddy / EngFlow / NativeLink; auth header from a named repository secret.
-  This is the path for **CI-hydrated caches that developers reuse** (see **Remote cache for teams**).
+- **ManagedRemote**: any remote URI. `grpc` and `grpcs` use sbt's gRPC store. `http` and `https` use bazel's HTTP API
+  (`/ac/<hash>`, `/cas/<hash>`). The URI is written into `ZIPX_REMOTE_CACHE` unchanged. BuildBuddy, EngFlow, and
+  NativeLink are the usual `grpcs` endpoints; auth is a named repository secret. Plaintext `grpc://` and `http://`
+  warn on sbt 2.1. That warning is the scheme, not a failed cache. `grpcs://` and `https://` do not warn. TLS
+  certificate files are for gRPC: `https` plus `remoteCacheTls*` is an sbt error. This is the path for
+  **CI-hydrated caches that developers reuse** (see **Remote cache for teams**).
 
 The remote-cache transport is bundled with zipx. For remote backends zipx also sets `Global / cacheVersion` from
 `(JDK, OS)` so heterogeneous runners cannot poison the shared cache. **`CacheEpoch.ShipCatalog` does not fold the Ship
 hash into that value.** A bump already changes that module's `version`, which is a digest input, so only that module's
-remote entries miss. Remote backends pass `cache-mode: off` to `zipx-sbt-setup` (the gRPC store is the persistence);
+remote entries miss. Remote backends pass `cache-mode: off` to `zipx-sbt-setup` (the remote store is the persistence);
 LocalDir passes `save` or `restore`, so the composite runs epoch-keyed `actions/cache` or `actions/cache/restore`.
 """,
       exampleValue {
@@ -192,9 +197,13 @@ about 3 GB, and a single wave of four PRs evicted the default branch's snapshot.
     ),
     section("Skipping a bad restore")(
       md"""
-`cleanFull` deletes sbt's output directory and, when a snapshot is pinned, sbt's in-memory resolution cache. It does
-not delete `~/.cache/coursier`, `~/.cache/sbt`, or `~/.sbt`. Those directories are what `actions/cache` restores
-before sbt starts, and they are what the save owner writes back. Rolling `zipxCacheEpoch` does not drop them either:
+`cleanFull` deletes declared outputs, `target/out`, and the disk action cache (`~/Library/Caches/sbt/v2` on macOS,
+`~/.cache/sbt/v2` on Linux). It does not delete `~/.cache/coursier` or `~/.sbt`. Do not chmod that cache: its blobs
+are mode `0444`, and `cleanFull` deletes the directory from a writable parent. When a catalog snapshot is pinned, the
+`clean` inside `cleanFull` also clears sbt's in-memory resolution cache. A qualifier snapshot is `forceUpdatePeriod`,
+not that hook (see **Snapshots and releases**). `actions/cache` still restores `~/.sbt`, `~/.cache/coursier`,
+`~/.cache/sbt`, and `target` before sbt starts, and the save owner writes them back. Rolling `zipxCacheEpoch` does
+not drop them either:
 a baked epoch's last restore-key is the OS+JDK prefix with no epoch in it, so a miss restores the newest entry under
 that prefix.
 

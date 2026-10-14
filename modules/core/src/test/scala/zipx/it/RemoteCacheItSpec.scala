@@ -29,9 +29,13 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
       conn.disconnect()
   end httpGet
 
-  private def runFixture(bazel: BazelRemoteTestContainer, script: String): FixtureRunner.RunResult =
+  private def runFixture(
+      bazel: BazelRemoteTestContainer,
+      script: String,
+      cacheUri: String = RemoteCacheProof.grpcServiceUri,
+  ): FixtureRunner.RunResult =
     val fixture = FixtureRunner.materializeFixture()
-    try FixtureRunner.runSbt(bazel.network, fixture, script)
+    try FixtureRunner.runSbt(bazel.network, fixture, script, cacheUri)
     finally FixtureRunner.deleteTree(fixture)
 
   private def remoteHitHint(out: String): Boolean =
@@ -49,6 +53,8 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
           c.config.grpcPort == RemoteCacheProof.port,
           c.grpcUri.startsWith("grpc://"),
           RemoteCacheProof.grpcServiceUri == s"grpc://${RemoteCacheProof.serviceName}:${RemoteCacheProof.port}",
+          RemoteCacheProof.httpServiceUri == s"http://${RemoteCacheProof.serviceName}:${RemoteCacheProof.httpPort}",
+          c.httpBase.startsWith("http://"),
           RemoteCacheProof.sbtFixtureImage.nonEmpty,
         )
       } @@ TestAspect.timeout(30.seconds) @@ TestAspect.timed,
@@ -91,6 +97,38 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
           )
           assertTrue(run.ok)
       } @@ TestAspect.timeout(10.minutes) @@ TestAspect.timed,
+      test("Put then Get over HTTP against the same container") {
+        for
+          c           <- ZIO.service[BazelRemoteTestContainer]
+          (wall, run) <- ZIO.attemptBlockingInterrupt {
+            runFixture(
+              c,
+              script = "itStamp; compile; test; wipeItCaches; itStamp; compile; test; itStamp",
+              cacheUri = RemoteCacheProof.httpServiceUri,
+            )
+          }.timed
+          _ <- ZIO.succeed(run.ok).debug("http put/get ok")
+          phases = run.phaseMs
+          _ <- ZIO
+            .succeed(
+              phases match
+                case Some((putMs, getMs)) =>
+                  s"wall=${wall.toMillis}ms put=${putMs}ms get=${getMs}ms"
+                case None => s"wall=${wall.toMillis}ms (no itStamp phases)\n${run.out.takeRight(2500)}"
+            )
+            .debug("http put/get")
+          after   = run.afterWipe
+          hitHint = remoteHitHint(after)
+          putMs   = phases.map(_._1).getOrElse(0L)
+          getMs   = phases.map(_._2).getOrElse(Long.MaxValue)
+        yield
+          require(run.ok, s"HTTP Put/Get script failed (exit=${run.exitCode}):\n${run.out}")
+          require(
+            hitHint || getMs <= putMs * 2,
+            s"Expected remote reuse signal or non-regressing time; put=${putMs}ms get=${getMs}ms\n$after",
+          )
+          assertTrue(run.ok)
+      } @@ TestAspect.timeout(10.minutes) @@ TestAspect.timed,
       test("different cacheVersion does not false-hit") {
         for
           c           <- ZIO.service[BazelRemoteTestContainer]
@@ -126,7 +164,7 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
     ).provideShared(BazelRemoteTestContainer.default) @@
       TestAspect.sequential @@
       TestAspect.withLiveClock @@
-      TestAspect.timeout(15.minutes) @@
+      TestAspect.timeout(30.minutes) @@
       TestAspect.timed
 
 end RemoteCacheItSpec

@@ -77,7 +77,8 @@ nothing.
 
 **Remote-cache live proof** lives in `core` tests (`zipx.it.RemoteCacheItSpec`): plain Testcontainers for bazel-remote
 plus an sbt fixture image (Docker required; failure is a clear test failure). It runs under Aggregate Verify / `sbt
-core/testFull`. Pins and Put/Get are documented under **Remote cache for teams** / `RemoteCacheProof`.
+core/testFull`, and it Put/Gets on both `grpc://` and `http://` against that one container. Pins are documented under
+**Remote cache for teams** / `RemoteCacheProof`.
 """
     ),
     section("Docs site")(
@@ -101,7 +102,7 @@ snapshot coordinates.
       md"""
 See [ROADMAP.md](https://github.com/early-effect/zipx/blob/main/ROADMAP.md) and
 [AGENTS.md](https://github.com/early-effect/zipx/blob/main/AGENTS.md) (verification blast radius for agents).
-The plugin targets sbt 2.x / Scala 3.9.0. License: Apache-2.0.
+The plugin targets sbt 2.1 / Scala 3.9.0. A plugin built on 2.1 does not load on sbt 2.0. License: Apache-2.0.
 """
     ),
   )

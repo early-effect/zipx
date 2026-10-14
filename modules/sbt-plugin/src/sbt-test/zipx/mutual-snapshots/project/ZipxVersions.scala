@@ -2,7 +2,7 @@ import zipx.*
 
 // The heddle and docs-framework rows are placeholders until `use-heddle` and `use-docs-framework` put them in use.
 object MyVersions extends ZipxVersions:
-  val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
+  val sbt: SbtVersion     = SbtVersion("2.1.0-RC1")
   val scala: ScalaVersion = ScalaVersion("3.9.0")
   val dom                 = ShipGroup("dom", "0.10.0")("domFacadeJS")
   val jsShip              = Ship("jsJS", "0.10.0")

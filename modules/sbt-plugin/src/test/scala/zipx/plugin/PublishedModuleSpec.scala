@@ -1,6 +1,7 @@
 package zipx.plugin
 
 import sbt.librarymanagement.{CrossVersion, ModuleID, ScalaModuleInfo}
+import zipx.core.{CatalogCrossing, Lib, Plugin, PublishedNames}
 import zio.test.*
 
 object PublishedModuleSpec extends ZIOSpecDefault:
@@ -41,6 +42,24 @@ object PublishedModuleSpec extends ZIOSpecDefault:
     test("an sbt 2 plugin keeps the sbt cross prefix") {
       val plugin = module("sbt-ascent-preview", "jvm").cross(CrossVersion.binaryWith("sbt2_", ""))
       assertTrue(PublishedModule.artifactId(plugin, Some(scala3)) == "sbt-ascent-preview_sbt2_3")
+    },
+    test("PublishedNames matches CrossVersion for JVM, Scala.js, Native, and an sbt plugin") {
+      val crossing = CatalogCrossing.of("3.9.0", "2.1.0-RC1")
+      val lib      = Lib("rocks.earlyeffect", "heddle", "0.1.0")
+      val fromSbt  = List("jvm", "sjs1", "native0.5").map { platform =>
+        val id = ModuleID("rocks.earlyeffect", "heddle", "0.1.0")
+          .withCrossVersion(CrossVersion.binary)
+          .withPlatformOpt(Some(platform))
+        PublishedModule.artifactId(id, Some(scala3))
+      }
+      val plugin   = Plugin("rocks.earlyeffect", "sbt-heddle", "0.1.0")
+      val pluginId = ModuleID("rocks.earlyeffect", "sbt-heddle", "0.1.0")
+        .withCrossVersion(CrossVersion.binaryWith("sbt2_", ""))
+        .withPlatformOpt(Some("jvm"))
+      assertTrue(
+        PublishedNames.of(lib, crossing) == fromSbt,
+        PublishedNames.of(plugin, crossing) == List(PublishedModule.artifactId(pluginId, Some(scala3))),
+      )
     },
     test("a disabled cross version, or no Scala at all, publishes the module name") {
       val plain = ModuleID("rocks.earlyeffect", "plain", "1.0.0").withCrossVersion(CrossVersion.disabled)

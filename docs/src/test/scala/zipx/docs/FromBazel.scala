@@ -28,7 +28,7 @@ We speak Bazel-fluent on purpose. The mapping helps you translate without re-lit
 |---|---|
 | Action | Task (executable step with digests) |
 | Target | Project / module |
-| Remote cache | sbt 2 action cache over Bazel-compat gRPC |
+| Remote cache | sbt 2 action cache over Bazel-compat gRPC or HTTP |
 | Remote execution | Out of scope; use Graph for more runners |
 | `maven_install` / `MODULE.bazel` version strings | `Lib` / `Plugin` vals (collected, not listed twice); constructor rewrite; generate owns `plugins.sbt` |
 

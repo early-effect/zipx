@@ -1,7 +1,7 @@
 import zipx.*
 
 object MyVersions extends ZipxVersions:
-  val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
+  val sbt: SbtVersion     = SbtVersion("2.1.0-RC1")
   val scala: ScalaVersion = ScalaVersion("3.9.0")
   // Not `<line>-SNAPSHOT`: that coordinate is the pointer and `update` refuses it.
   val upstream            = Lib("com.example.zipx.pins", "upstream", "1.0.0-RC1-SNAPSHOT")
