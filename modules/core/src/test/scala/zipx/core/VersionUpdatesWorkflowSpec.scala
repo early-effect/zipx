@@ -118,5 +118,26 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         yaml.contains("zipxCatalogGenerate"),
       )
     },
+    test("the job carries the release registry's lookup secret beside the companion token") {
+      val lookup =
+        RegistryCredentials.UserPassword(EnvValue.plain("iterable"), EnvValue.secret("GH_PACKAGES_TOKEN"))
+      val job =
+        VersionUpdatesWorkflow.plan(ActionRef("actions/checkout@v7"), lookup = lookup).jobs.get("version-updates")
+      assertTrue(
+        job.flatMap(_.env.get("GH_PACKAGES_TOKEN")).contains("${{ secrets.GH_PACKAGES_TOKEN }}"),
+        job.flatMap(_.env.get("GITHUB_TOKEN")).contains("${{ secrets.GITHUB_TOKEN }}"),
+        job.exists(_.env.values.forall(_ != "iterable")),
+      )
+    },
+    test("a lookup credential named GITHUB_TOKEN does not displace the companion token") {
+      val lookup = RegistryCredentials.Bearer(EnvValue.githubToken)
+      val job    =
+        VersionUpdatesWorkflow.plan(ActionRef("actions/checkout@v7"), lookup = lookup).jobs.get("version-updates")
+      assertTrue(job.flatMap(_.env.get("GITHUB_TOKEN")).contains("${{ secrets.GITHUB_TOKEN }}"))
+    },
+    test("an anonymous lookup leaves the job env at the TTL and the companion token") {
+      val job = VersionUpdatesWorkflow.plan(ActionRef("actions/checkout@v7")).jobs.get("version-updates")
+      assertTrue(job.map(_.env.keySet).contains(Set("COURSIER_TTL", "GITHUB_TOKEN")))
+    },
   )
 end VersionUpdatesWorkflowSpec

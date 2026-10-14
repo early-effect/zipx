@@ -132,5 +132,20 @@ object ReleaseWorkflowSpec extends ZIOSpecDefault:
         ReleaseWorkflow.render(central, config, TagScheme.PerRow, Some(docs)).exists(_.contains("name: zipx release"))
       )
     },
+    test("a lookup authenticates only where the registry is private") {
+      val sonatype =
+        RegistryCredentials.UserPassword(EnvValue.secret("SONATYPE_USERNAME"), EnvValue.secret("SONATYPE_PASSWORD"))
+      val packages =
+        RegistryCredentials.UserPassword(EnvValue.plain("iterable"), EnvValue.secret("GH_PACKAGES_TOKEN"))
+      assertTrue(
+        central.copy(credentials = sonatype).lookupCredentials == RegistryCredentials.Anonymous,
+        ReleaseWorkflow(ArtifactRegistry.Url("file:///tmp/zipx-repo"), credentials = packages).lookupCredentials ==
+          RegistryCredentials.Anonymous,
+        ReleaseWorkflow(
+          ArtifactRegistry.GitHubPackages("iterable", "maven-packages"),
+          credentials = packages,
+        ).lookupCredentials == packages,
+      )
+    },
   )
 end ReleaseWorkflowSpec
