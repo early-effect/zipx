@@ -114,7 +114,7 @@ wait on a human `v*` tag. That loop, the graphs, and the fail-closed gate are **
 import zipx.*
 
 object MyVersions extends ZipxVersions:
-  val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
+  val sbt: SbtVersion     = SbtVersion("2.1.0-RC1")
   val scala: ScalaVersion = ScalaVersion("3.9.0")
   val zio                 = Lib("dev.zio", "zio", "2.1.26")
   val slf4j               = Lib("org.slf4j", "slf4j-simple", "2.0.18").java
@@ -135,7 +135,7 @@ The trait is the extension point: another plugin that sits on zipx adds members.
 run `zipxDepUpdate` locally. See **Dependency updates**.
 """
     ),
-    section("Bare settings (sbt 2.0)")(
+    section("Bare settings")(
       md"""
 zipx reads these settings from the **root** project, so write them without a `ThisBuild /` prefix. That is an sbt 2
 habit, not a zipx quirk.

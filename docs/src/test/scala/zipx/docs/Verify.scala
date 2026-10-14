@@ -47,8 +47,9 @@ zipxVerifyClean := VerifyClean.CleanFull   // None (default) | Clean | CleanFull
 ```
 
 For a one-off `cleanFull` without making it permanent, leave `zipxVerifyClean` at `None` (default) and add the
-GitHub PR label **`clean`**. Verify then runs `cleanFull; <task>` only on that PR. That deletes sbt's output
-directory. It does not skip the LocalDir restore of `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, and `target`.
+GitHub PR label **`clean`**. Verify then runs `cleanFull; <task>` only on that PR. `cleanFull` deletes declared
+outputs, `target/out`, and the disk action cache (`~/.cache/sbt/v2` on the runner). It does not delete
+`~/.cache/coursier` or `~/.sbt`, and it does not skip the LocalDir restore of those directories or of `target`.
 The version-updates and pin-updates companions always add that label. Override the label name with
 `zipxVerifyCleanLabel`, or set it to `None` to disable. To skip that restore and save a fresh snapshot, use the
 **`purge`** label (see **Caching**).
@@ -78,9 +79,20 @@ zipxVerifyCleanLabel := Some("clean")  // default
         )
       ),
     ),
+    section("Test topology stays in the build")(
+      md"""
+zipx does not assign `testTopology`, `workerMaxInstances`, `Test / fork`, `testForkedParallel`, or
+`parallelExecution`. `testFull` reads the values in `build.sbt`.
+
+sbt's four topologies are `TestTopology.Default` (the default), `ClassParallel`, `SubprojectExclusive`, and
+`SubprojectSplit(n)`. Default and ClassParallel ask for a split of 2, Exclusive asks for 1, and `SubprojectSplit(n)`
+asks for `n`. The split runs only when `fork`, `parallelExecution`, and `testForkedParallel` are all on. Fork left off
+is one group, which is what a zipx build does until the build itself turns fork on.
+"""
+    ),
     section("Coverage (and why `test` is the wrong task here)")(
       md"""
-On sbt 2.0 plain **`test` is `testQuick`**. It skips tests it deems unaffected and prints `No tests to run`, which reads
+On sbt 2 plain **`test` is `testQuick`**. It skips tests it deems unaffected and prints `No tests to run`, which reads
 like success. zipx's Verify default is **`testFull`** so CI cannot skip suites. Under **coverage that skip is a silent
 wrong answer**: the hand-rolled alias everyone writes,
 

@@ -2,8 +2,9 @@ package zipx.core
 
 import zipx.workflow.SecretName
 
-/** How CI caches sbt's build state: persist sbt's on-disk action cache between runs, or point sbt at a Bazel-gRPC
-  * endpoint.
+/** How CI caches sbt's build state: persist sbt's on-disk action cache between runs, or point sbt at a remote action
+  * cache. `http` and `https` use bazel's HTTP API. Any other scheme, including `grpc` and `grpcs`, uses gRPC. The URI
+  * is passed through.
   */
 enum CacheBackend:
   /** Persists sbt's and coursier's caches plus `target/` with `actions/cache`; only one owner saves
@@ -12,10 +13,11 @@ enum CacheBackend:
     */
   case LocalDir
 
-  /** Runs a `buchgr/bazel-remote` gRPC server as a workflow service, for one run only. */
+  /** Runs a `buchgr/bazel-remote` server as a workflow service, for one run only. The published port is gRPC. */
   case BazelRemoteSidecar(image: String, port: Int)
 
-  /** A managed gRPC backend: BuildBuddy, EngFlow, NativeLink.
+  /** A managed remote cache. The URI may be `grpc`, `grpcs`, `http`, or `https`. BuildBuddy, EngFlow, and NativeLink
+    * are the usual `grpcs` endpoints.
     *
     * @param headerSecret
     *   the *name* of the secret whose value becomes the auth header.

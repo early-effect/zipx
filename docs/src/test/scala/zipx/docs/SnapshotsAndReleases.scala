@@ -449,7 +449,7 @@ deletes snapshots after 90 days.
         val repo: ReleaseLookup =
           (_, artifact) => Right(Option.when(artifact == "zipx-core_3")(List("0.15.0", "0.15.1")))
         val bumps = ZipxCatalog
-          .outdated(List(pin), CatalogCrossing.of("3.9.0", "2.1.0-M3"), repo)
+          .outdated(List(pin), CatalogCrossing.of("3.9.0", "2.1.0-RC1"), repo)
           .map(_.bumps.map(b => s"${b.from} -> ${b.to}"))
         val advice = SnapshotPinAdvice.message("zipx-core", pin.version, Some("0.15.1")).getOrElse("")
         s"$bumps\n$advice"

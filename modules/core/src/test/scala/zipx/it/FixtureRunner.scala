@@ -45,6 +45,7 @@ object FixtureRunner:
       network: Network,
       fixtureDir: Path,
       script: String,
+      cacheUri: String = RemoteCacheProof.grpcServiceUri,
   ): RunResult =
     val logs                   = new ToStringConsumer
     val c: GenericContainer[?] =
@@ -56,7 +57,7 @@ object FixtureRunner:
       FixtureMount,
     )
     c.withWorkingDirectory(FixtureMount)
-    c.withEnv(RemoteCacheProof.envUri, RemoteCacheProof.grpcServiceUri)
+    c.withEnv(RemoteCacheProof.envUri, cacheUri)
     c.withEnv("HOME", "/tmp/sbt-home")
     c.withEnv("SBT_OPTS", "-Xmx512m")
     // Foreground server: thin client reuses a background server across fixtures and breaks isolation.

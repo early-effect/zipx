@@ -48,7 +48,7 @@ Metals format while editing. Before every PR, drop sbt caches and run every suit
 sbt "scalafmtAll; cleanFull; testFull"
 ```
 
-`scalafmtAll` is the CI formatter, not Metals. `cleanFull` is sbt 2's cache clear (`clean` is outputs only). A focused `core/testFull` is iteration, not PR proof.
+`scalafmtAll` is the CI formatter, not Metals. `clean` deletes declared outputs and invalidates that scope. `cleanFull` also deletes `target/out` and the disk action cache (`~/Library/Caches/sbt/v2` on macOS, `~/.cache/sbt/v2` on Linux). It does not delete `~/.cache/coursier` or `~/.sbt`. A focused `core/testFull` is iteration, not PR proof.
 
 `plugin/scripted` and `zipxWorkflowCheck` stay extra when emission or generated `.github/**` change; they are not inside `testFull`. See the blast-radius table.
 

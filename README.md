@@ -5,7 +5,7 @@
 [![Maven Central](https://img.shields.io/maven-central/v/rocks.earlyeffect/sbt-zipx_sbt2_3?logo=apachemaven)](https://central.sonatype.com/artifact/rocks.earlyeffect/sbt-zipx_sbt2_3)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**The build describes its own CI.** zipx is an sbt 2.x plugin (Scala 3). You keep writing `build.sbt`. zipx generates a GitHub Actions workflow from that graph, so you do not maintain a second copy in YAML: no hand-maintained job lists, no module names to copy-paste.
+**The build describes its own CI.** zipx is an sbt 2.1 plugin (Scala 3.9). A build on sbt 2.0 cannot load it. You keep writing `build.sbt`. zipx generates a GitHub Actions workflow from that graph, so you do not maintain a second copy in YAML: no hand-maintained job lists, no module names to copy-paste.
 
 You declare modules and `dependsOn` once. zipx emits a workflow that:
 
@@ -62,7 +62,7 @@ over the build. Other plugins extend the same trait. Full guide: **Versions** on
 ```scala
 import zipx.*
 object MyVersions extends ZipxVersions:
-  val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
+  val sbt: SbtVersion     = SbtVersion("2.1.0-RC1")
   val scala: ScalaVersion = ScalaVersion("3.9.0")
   val zio                 = Lib("dev.zio", "zio", "2.1.26")
   val slf4j               = Lib("org.slf4j", "slf4j-simple", "2.0.18").java

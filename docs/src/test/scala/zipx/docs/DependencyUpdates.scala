@@ -194,7 +194,7 @@ and `zipxDepUpdate` read rows the same way, from the catalog source or the loade
           "ascent-css_sjs1_3" -> List("0.7.1", "0.9.0"),
         )
         val lookup: ReleaseLookup = (_, artifact) => Right(repo.get(artifact))
-        ZipxCatalog.outdated(List(js, css), CatalogCrossing.of("3.9.0", "2.1.0-M3"), lookup).map { updates =>
+        ZipxCatalog.outdated(List(js, css), CatalogCrossing.of("3.9.0", "2.1.0-RC1"), lookup).map { updates =>
           (ZipxCatalog.formatBumps(updates.bumps) :: updates.held.map(_.message)).mkString("\n")
         }
       }.assert(text =>

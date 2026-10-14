@@ -520,6 +520,19 @@ object PlannerSpec extends ZIOSpecDefault:
         job.env.get(RemoteCacheProof.envHeader).exists(_.contains("secrets.BUILDBUDDY_KEY")),
       )
     },
+    test("ManagedRemote keeps an http URI unchanged") {
+      val uri = "http://cache.example:8080"
+      val wf  = Planner.plan(
+        sampleGraph,
+        List(Capability.testGraph),
+        config.copy(cache = CacheBackend.managedRemote(uri, "CACHE_KEY")),
+      )
+      val job = wf.jobs("test-core")
+      assertTrue(
+        job.services.isEmpty,
+        job.env.get(RemoteCacheProof.envUri).contains(uri),
+      )
+    },
     test("docker capability emits release-gated Docker/publish jobs only for docker-enabled modules") {
       val withDocker = sampleGraph.mapNodes {
         case n if n.id == "serviceA" || n.id == "serviceB" => n.copy(docker = true)
