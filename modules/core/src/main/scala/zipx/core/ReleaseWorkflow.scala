@@ -15,7 +15,15 @@ final case class ReleaseWorkflow(
     steps: Steps = Steps.empty,
     environment: Option[String] = Some(ReleaseWorkflow.DefaultEnvironment),
     credentials: RegistryCredentials = RegistryCredentials.Anonymous,
-)
+):
+
+  /** What a registry lookup sends. Central's public repo and a `file:` registry read anonymously, so their publish
+    * secrets stay out of jobs that only look versions up.
+    */
+  def lookupCredentials: RegistryCredentials =
+    if registry == ArtifactRegistry.MavenCentral || registry.credentialHost.isEmpty then RegistryCredentials.Anonymous
+    else credentials
+end ReleaseWorkflow
 
 object ReleaseWorkflow:
 

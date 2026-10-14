@@ -33,6 +33,7 @@ object VersionUpdatesWorkflow:
       schedule: Cron = DefaultSchedule,
       extraSteps: List[Step] = Nil,
       preSteps: List[Step] = Nil,
+      lookup: RegistryCredentials = RegistryCredentials.Anonymous,
   ): Workflow =
     val checkoutStep = Step(
       uses = Some(checkout),
@@ -71,7 +72,8 @@ object VersionUpdatesWorkflow:
         "version-updates" -> Job(
           name = Some("Catalog version updates"),
           runsOn = List("ubuntu-latest"),
-          env = EnvValue.renderAll(SnapshotPins.ciEnv(Map.empty)) ++ ListMap(
+          // `zipxSnapshotAdvance` looks pins up in the release registry. GITHUB_TOKEN is last: the PR step pushes with it.
+          env = EnvValue.renderAll(SnapshotPins.ciEnv(lookup.env)) ++ ListMap(
             "GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}"
           ),
           steps =
@@ -88,8 +90,9 @@ object VersionUpdatesWorkflow:
       schedule: Cron = DefaultSchedule,
       extraSteps: List[Step] = Nil,
       preSteps: List[Step] = Nil,
+      lookup: RegistryCredentials = RegistryCredentials.Anonymous,
   ): Either[String, String] =
-    checkoutMajor(pins).flatMap(ref => Render.render(plan(ref, schedule, extraSteps, preSteps)))
+    checkoutMajor(pins).flatMap(ref => Render.render(plan(ref, schedule, extraSteps, preSteps, lookup)))
 
   private def loadParams: Script =
     Script

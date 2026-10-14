@@ -1237,7 +1237,7 @@ object ZipxPlugin extends AutoPlugin:
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
       val extra    = readBuildSetting(extracted, zipxVersionUpdatesExtraSteps, Seq.empty).toList
       val pre      = readBuildSetting(extracted, zipxVersionUpdatesPreSteps, Seq.empty).toList
-      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre))
+      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre, releaseLookup(extracted)))
       writeCompanion(root, rel, body, log)
     else if file.exists then
       IO.delete(file)
@@ -1252,7 +1252,7 @@ object ZipxPlugin extends AutoPlugin:
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
       val extra    = readBuildSetting(extracted, zipxVersionUpdatesExtraSteps, Seq.empty).toList
       val pre      = readBuildSetting(extracted, zipxVersionUpdatesPreSteps, Seq.empty).toList
-      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre))
+      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre, releaseLookup(extracted)))
       checkCompanion(root, rel, expected, log)
     else if file.exists then
       sys.error(
@@ -2997,6 +2997,9 @@ object ZipxPlugin extends AutoPlugin:
   private def releaseWorkflow(extracted: Extracted): Either[String, ReleaseWorkflow] =
     readBuildSetting(extracted, zipxReleaseWorkflow, None).toRight(NoReleaseWorkflow)
 
+  private def releaseLookup(extracted: Extracted): RegistryCredentials =
+    releaseWorkflow(extracted).fold(_ => RegistryCredentials.Anonymous, _.lookupCredentials)
+
   private def lastReleases(
       extracted: Extracted,
       graph: ModuleGraph,
@@ -3029,25 +3032,20 @@ object ZipxPlugin extends AutoPlugin:
     * anonymous GET that a registry answers with 404 must not read as "not released".
     */
   private def registryHeaders(release: ReleaseWorkflow): Either[String, Map[String, String]] =
-    val public =
-      release.registry == ArtifactRegistry.MavenCentral || release.registry.credentialHost.isEmpty
-    if public then Right(Map.empty)
-    else
-      release.credentials match
-        case RegistryCredentials.Anonymous     => Right(Map.empty)
-        case RegistryCredentials.Bearer(token) =>
-          RegistryCredentials
-            .read(token, sys.env)
-            .map(value => Map("Authorization" -> s"Bearer $value"))
-            .toRight(missingCredentials(release))
-        case RegistryCredentials.UserPassword(user, pass) =>
-          (RegistryCredentials.read(user, sys.env), RegistryCredentials.read(pass, sys.env)) match
-            case (Some(u), Some(p)) =>
-              val raw = java.util.Base64.getEncoder
-                .encodeToString(s"$u:$p".getBytes(java.nio.charset.StandardCharsets.UTF_8))
-              Right(Map("Authorization" -> s"Basic $raw"))
-            case _ => Left(missingCredentials(release))
-    end if
+    release.lookupCredentials match
+      case RegistryCredentials.Anonymous     => Right(Map.empty)
+      case RegistryCredentials.Bearer(token) =>
+        RegistryCredentials
+          .read(token, sys.env)
+          .map(value => Map("Authorization" -> s"Bearer $value"))
+          .toRight(missingCredentials(release))
+      case RegistryCredentials.UserPassword(user, pass) =>
+        (RegistryCredentials.read(user, sys.env), RegistryCredentials.read(pass, sys.env)) match
+          case (Some(u), Some(p)) =>
+            val raw = java.util.Base64.getEncoder
+              .encodeToString(s"$u:$p".getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            Right(Map("Authorization" -> s"Basic $raw"))
+          case _ => Left(missingCredentials(release))
   end registryHeaders
 
   private def missingCredentials(release: ReleaseWorkflow): String =
