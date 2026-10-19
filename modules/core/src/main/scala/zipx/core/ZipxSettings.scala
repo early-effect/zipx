@@ -154,7 +154,7 @@ object ZipxSettings:
       SettingName("zipxVersionUpdates"),
       true,
       SettingPurpose(
-        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, cs launch zipx-cli catalog update --yes --verify-load, then zipxPinUpdate / zipxCatalogGenerate, opens zipx/version-updates-$GITHUB_RUN_ID labeled clean. Commits everything except repo-root .github/workflows. Nested extra generate is zipxVersionUpdatesExtraSteps. Default true. false deletes the companion."
+        "Emit .github/workflows/zipx-version-updates.yml: schedule plus dispatch, cs launch zipx-cli catalog update --yes --verify-load, then zipxPinUpdate / zipxAgentEnvGenerate / zipxCatalogGenerate, opens zipx/version-updates-$GITHUB_RUN_ID labeled clean. Commits everything except repo-root .github/workflows. Nested extra generate is zipxVersionUpdatesExtraSteps. Default true. false deletes the companion."
       ),
       Build,
     )
@@ -557,6 +557,16 @@ object ZipxSettings:
       Build,
     )
 
+  val agentEnv: SettingDef[CloudAgent] =
+    SettingDef.setting(
+      SettingName("zipxAgentEnv"),
+      CloudAgent.Off,
+      SettingPurpose(
+        "Render a Cursor cloud agent environment from this build (default off). ZipxAgentEnv.cursor(docker = true) installs and starts Docker. Writes .cursor/environment.json, .cursor/Dockerfile, and .github/zipx-agent/install.sh. JDK, sbt runner, secrets, and the rehydrate command come from the settings CI already uses."
+      ),
+      Build,
+    )
+
   val cancelSupersededRuns: SettingDef[Boolean] =
     SettingDef.setting(
       SettingName("zipxCancelSupersededRuns"),
@@ -714,6 +724,14 @@ object ZipxSettings:
       SettingPurpose("Verify the checked-in workflow matches what the build would generate."),
     )
 
+  val agentEnvGenerate: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxAgentEnvGenerate"),
+      SettingPurpose(
+        "Write the cloud agent environment, or delete it when zipxAgentEnv is off. zipxWorkflowGenerate does this too. The version-updates companion runs it after zipxPinUpdate so a pin bump refreshes the Dockerfile without rewriting ci.yml."
+      ),
+    )
+
   val advisoryCheck: SettingDef[Unit] =
     SettingDef.task(
       SettingName("zipxAdvisoryCheck"),
@@ -852,6 +870,7 @@ object ZipxSettings:
     cacheRehydrateExtraSteps,
     cacheRehydrateEnv,
     env,
+    agentEnv,
     cancelSupersededRuns,
     checkCommandNames,
     verifyClean,
@@ -874,6 +893,7 @@ object ZipxSettings:
     catalogGenerate,
     workflowGenerate,
     workflowCheck,
+    agentEnvGenerate,
     advisoryCheck,
     graph,
     depCleanup,

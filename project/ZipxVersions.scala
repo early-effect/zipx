@@ -10,7 +10,7 @@ object ZipxVersions extends zipx.ZipxVersions:
   val scala: ScalaVersion = ScalaVersion("3.9.0")
 
   val zipx: ShipGroup =
-    ShipGroup("zipx", "0.20.1")("shell", "workflow", "core", "syntax", "cli", "central", "aws", "plugin")
+    ShipGroup("zipx", "0.20.1")("shell", "workflow", "core", "syntax", "cli", "central", "aws", "agent", "plugin")
 
   val zio: Lib            = Lib("dev.zio", "zio", "2.1.26")
   val zioTest: Lib        = zio.mod("zio-test").test
@@ -66,6 +66,10 @@ object ZipxVersions extends zipx.ZipxVersions:
     Action("aws-actions/amazon-ecr-login", "v2.1.7", sha = "03f1aad4c6c7ffd436567f42f9384779290529bd")
   val setupCoursier: Action =
     Action("coursier/setup-action", "v3.0.2", sha = "9b7939bf01fd1185ce2babe16135168361bf2c62")
+
+  val ubuntu: Pin   = Pin("agent-base", "ubuntu", "sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac")
+  val dockerCe: Pin = Pin("agent-docker", "docker-ce", "5:28.5.2-1~ubuntu.24.04~noble")
+  val sbtRunner: Pin = Pin("agent-sbt", "sbt-runner", "2.0.7")
 
   val commonScalacOptions: Seq[String] = Seq(
     "-deprecation",

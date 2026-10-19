@@ -11,6 +11,7 @@ import zipx.docs.DocsFixtures.*
 import zipx.docs.DocsRender.yaml
 import zipx.github.ZipxGitHubPackages
 import zipx.maven.ZipxMaven
+import zipx.agent.{AgentEnv, AgentPins, CursorEnv}
 import zipx.specular.ZipxDocs
 import zio.test.*
 
@@ -375,6 +376,53 @@ val ecrLogin = Action("aws-actions/amazon-ecr-login", "v2.1.6", sha = "<40-hex>"
 `zipxActionUpdate` bumps them like any other Action. Overlay keys extra by `owner/repo`, and the pack looks up by that
 prefix.
 """,
+    ),
+    section("Cloud agent")(
+      md"""
+`zipxAgentEnv` renders the Cursor cloud agent from the same toolchain CI already uses. Default off. `docker` is
+explicit.
+
+```scala
+zipxAgentEnv := ZipxAgentEnv.cursor(docker = true)
+```
+
+`zipxWorkflowGenerate` writes `.cursor/environment.json`, `.cursor/Dockerfile`, and `.github/zipx-agent/install.sh`.
+The Dockerfile and `environment.json` are the only files under `.cursor/`. Ignore the rest of that directory so local
+rules and MCP stay untracked:
+
+```
+.cursor/*
+!.cursor/environment.json
+!.cursor/Dockerfile
+```
+
+The JDK comes from `project/zipx-ci.env` at install time, not from the image. The sbt runner reads
+`project/build.properties`. Secret *names* from `zipxEnv` are checked before anything resolves. The warm command is
+`zipxCacheRehydrateTask`, run as `sbt --server --batch`. Ubuntu, Docker CE 28, and the sbt runner are catalog `Pin`
+vals (`agent-base`, `agent-docker`, `agent-sbt`) so `zipxPinUpdate` can move them. Docker 29 is refused.
+""",
+      exampleValue {
+        CursorEnv
+          .render(
+            AgentEnv(
+              docker = true,
+              rehydrate = SbtCommand.unsafeTask("Test/compile"),
+              secretEnv = List("REGISTRY_TOKEN"),
+              pins = AgentPins(AgentPins.DefaultBase, AgentPins.DefaultDocker, AgentPins.DefaultSbtRunner),
+            )
+          )
+          .fold(identity, files => files.environmentJson + files.dockerfile)
+      }.assert { rendered =>
+        assertTrue(
+          !rendered.contains("context"),
+          rendered.contains(""""dockerfile": "Dockerfile""""),
+          rendered.contains("bash .github/zipx-agent/install.sh"),
+          rendered.contains("sudo service docker start"),
+          rendered.contains("fuse-overlayfs"),
+          rendered.contains(AgentPins.DefaultDocker),
+          !rendered.contains("x86_64"),
+        )
+      },
     ),
   )
 end Packs

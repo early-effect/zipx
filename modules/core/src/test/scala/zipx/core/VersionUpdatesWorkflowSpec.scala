@@ -42,7 +42,8 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
       val setupAt    = yaml.indexOf("./.github/actions/zipx-sbt-setup")
       val csAt       = yaml.indexOf("cs launch")
       val pinAt      = yaml.indexOf("zipxPinUpdate yes")
-      val genAt      = yaml.indexOf("zipxCatalogGenerate", pinAt)
+      val agentAt    = yaml.indexOf("zipxAgentEnvGenerate", pinAt)
+      val genAt      = yaml.indexOf("zipxCatalogGenerate", agentAt)
       val advanceAt  = yaml.indexOf("zipxSnapshotAdvance", genAt)
       val applyAt    = yaml.indexOf("Apply catalog updates")
       val openAt     = yaml.indexOf("Open update PR")
@@ -91,7 +92,8 @@ object VersionUpdatesWorkflowSpec extends ZIOSpecDefault:
         setupAt > loadAt,
         csAt > setupAt,
         pinAt > csAt,
-        genAt > pinAt,
+        agentAt > pinAt,
+        genAt > agentAt,
         applyAt >= 0,
         openAt > applyAt,
         addAt > openAt,

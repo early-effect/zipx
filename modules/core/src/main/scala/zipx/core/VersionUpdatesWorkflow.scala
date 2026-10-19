@@ -138,6 +138,7 @@ object VersionUpdatesWorkflow:
           Word.lit("--verify-load"),
         ),
         Exec("sbt", Word.quoted("zipxPinUpdate yes")),
+        Exec("sbt", Word.lit("zipxAgentEnvGenerate")),
         Exec("sbt", Word.lit("zipxCatalogGenerate")),
         Exec("sbt", Word.lit("zipxSnapshotAdvance")),
       )

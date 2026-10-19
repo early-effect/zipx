@@ -78,6 +78,7 @@ jobs:
           fi
           cs launch --ttl Inf --repository m2Local --repository ivy2Local --repository central "rocks.earlyeffect:zipx-cli_3:$ZIPX_CLI_VERSION" -- catalog update --yes --verify-load
           sbt "zipxPinUpdate yes"
+          sbt zipxAgentEnvGenerate
           sbt zipxCatalogGenerate
           sbt zipxSnapshotAdvance
 

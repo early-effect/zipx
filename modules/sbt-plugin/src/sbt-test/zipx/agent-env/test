@@ -1,0 +1,17 @@
+# Generated files must be tracked. A blanket .cursor/ ignore hides them from the companion's git add.
+> zipxWorkflowGenerate
+> assertAgentEnv
+-> zipxWorkflowCheck
+
+$ exec git init -q .
+$ exec git config user.email scripted@example.com
+$ exec git config user.name scripted
+$ exec git config commit.gpgsign false
+$ exec git add .
+$ exec git commit -q -m fixture
+> zipxWorkflowCheck
+
+$ copy-file changes/gitignore-all .gitignore
+$ exec git add .gitignore
+$ exec git commit -q -m ignore-cursor
+-> zipxWorkflowCheck
