@@ -1,0 +1,7 @@
+{
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "bash .github/zipx-agent/install.sh",
+  "start": "sudo service docker start"
+}

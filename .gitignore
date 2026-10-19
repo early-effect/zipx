@@ -36,7 +36,9 @@ build.sbt.semanticdb
 
 .mcp.json
 .claude/
-.cursor/
+.cursor/*
+!.cursor/environment.json
+!.cursor/Dockerfile
 
 # Playwright MCP scratch: local browsing only, not a project dependency
 .playwright-mcp/

@@ -276,6 +276,10 @@ object ZipxPlugin extends AutoPlugin:
       def DocsName         = zipx.specular.ZipxDocs.DocsName
     end ZipxDocs
 
+    val ZipxAgentEnv = zipx.agent.ZipxAgentEnv
+    type CloudAgent = zipx.core.CloudAgent
+    val CloudAgent = zipx.core.CloudAgent
+
     object ZipxGitHubPackages:
       def sameRepo(
           name: CapabilityName = zipx.github.ZipxGitHubPackages.DefaultName,
@@ -422,6 +426,7 @@ object ZipxPlugin extends AutoPlugin:
       settingKey[StepContext => List[Step]](ZipxSettings.cacheRehydrateExtraSteps.description)
     val zipxCacheRehydrateEnv    = settingKey[Map[String, EnvValue]](ZipxSettings.cacheRehydrateEnv.description)
     val zipxEnv                  = settingKey[Map[String, EnvValue]](ZipxSettings.env.description)
+    val zipxAgentEnv             = settingKey[CloudAgent](ZipxSettings.agentEnv.description)
     val zipxCancelSupersededRuns = settingKey[Boolean](ZipxSettings.cancelSupersededRuns.description)
     val zipxCheckCommandNames    = settingKey[Boolean](ZipxSettings.checkCommandNames.description)
     val zipxPinFeeds             = settingKey[Seq[PinFeed]](ZipxSettings.pinFeeds.description)
@@ -453,6 +458,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxCatalogGenerate  = taskKey[Unit](ZipxSettings.catalogGenerate.description)
     val zipxWorkflowGenerate = taskKey[Unit](ZipxSettings.workflowGenerate.description)
     val zipxWorkflowCheck    = taskKey[Unit](ZipxSettings.workflowCheck.description)
+    val zipxAgentEnvGenerate = taskKey[Unit](ZipxSettings.agentEnvGenerate.description)
     val zipxAdvisoryCheck    = taskKey[Unit](ZipxSettings.advisoryCheck.description)
     val zipxAffectedModules  = inputKey[Unit](ZipxSettings.affectedModules.description)
     val zipxPinCheck         = taskKey[Unit](ZipxSettings.pinCheck.description)
@@ -511,6 +517,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxCacheRehydrateExtraSteps := (_ => Nil),
     zipxCacheRehydrateEnv        := Map.empty,
     zipxEnv                      := Map.empty,
+    zipxAgentEnv                 := zipx.core.CloudAgent.Off,
     zipxCancelSupersededRuns     := true,
     zipxCheckCommandNames        := true,
     zipxVerifyClean              := VerifyClean.None,
@@ -609,6 +616,7 @@ object ZipxPlugin extends AutoPlugin:
         .value
     },
     zipxWorkflowCheck               := checkTask.value,
+    zipxAgentEnvGenerate            := Def.uncached { writeAgentEnv.value },
     zipxAdvisoryCheck               := Def.uncached { advisoryCheckTask.value },
     zipxAffectedModules             := affectedModulesTask.evaluated,
     zipxDeployPlan                  := Def.uncached { deployPlanTask.value },
@@ -1136,6 +1144,7 @@ object ZipxPlugin extends AutoPlugin:
     writeShellWorkflows.value
     writeDeployWorkflow.value
     writeReleaseWorkflow.value
+    writeAgentEnv.value
   }
 
   private def writeCiParams: Def.Initialize[Task[Unit]] = Def.task {
@@ -1146,6 +1155,101 @@ object ZipxPlugin extends AutoPlugin:
     IO.write(file, ZipxCiParams.render(cfg.javaVersion, cfg.runnerOs, cliVersion(extracted)))
     streams.value.log.info(s"zipx wrote ${file.getPath}")
   }
+
+  private def pinFeeds(extracted: Extracted): Seq[PinFeed] =
+    ZipxAgentEnv.withFeeds(
+      readBuildSetting(extracted, zipxPinFeeds, Seq.empty),
+      readBuildSetting(extracted, zipxPins, Seq.empty),
+      readBuildSetting(extracted, zipxAgentEnv, zipx.core.CloudAgent.Off) match
+        case zipx.core.CloudAgent.Off   => false
+        case zipx.core.CloudAgent.On(_) => true,
+    )
+
+  private def writeAgentEnv: Def.Initialize[Task[Unit]] = Def.task {
+    val root      = (LocalRootProject / baseDirectory).value
+    val extracted = Project.extract(state.value)
+    val log       = streams.value.log
+    val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
+    readBuildSetting(extracted, zipxAgentEnv, zipx.core.CloudAgent.Off) match
+      case zipx.core.CloudAgent.Off =>
+        ZipxAgentEnv.paths.foreach { rel =>
+          val file = root / rel
+          if file.exists && generatedAgentFile(rel, IO.read(file)) then
+            IO.delete(file)
+            log.info(s"zipx deleted ${file.getPath}")
+        }
+      case agent: zipx.core.CloudAgent.On =>
+        val cfg      = planConfig.value
+        val rendered = orFail(
+          ZipxAgentEnv.files(agent, cfg.cacheRehydrateTask, cfg.env ++ cfg.cacheRehydrateEnv, pins)
+        )
+        List(
+          ZipxAgentEnv.EnvironmentRel -> rendered.environmentJson,
+          ZipxAgentEnv.DockerfileRel  -> rendered.dockerfile,
+          ZipxAgentEnv.InstallRel     -> rendered.installSh,
+        ).foreach { (rel, body) =>
+          val file = root / rel
+          IO.createDirectory(file.getParentFile)
+          IO.write(file, body)
+          log.info(s"zipx wrote ${file.getPath}")
+        }
+    end match
+  }
+
+  private def checkAgentEnv(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
+    val pins = readBuildSetting(extracted, zipxPins, Seq.empty)
+    readBuildSetting(extracted, zipxAgentEnv, zipx.core.CloudAgent.Off) match
+      case zipx.core.CloudAgent.Off =>
+        ZipxAgentEnv.paths.foreach { rel =>
+          val file = root / rel
+          if file.exists && generatedAgentFile(rel, IO.read(file)) then
+            sys.error(
+              s"zipx: $rel is leftover. Clear zipxAgentEnv or delete $rel, then sbt zipxWorkflowGenerate."
+            )
+        }
+      case agent: zipx.core.CloudAgent.On =>
+        val rendered = orFail(
+          ZipxAgentEnv.files(agent, cfg.cacheRehydrateTask, cfg.env ++ cfg.cacheRehydrateEnv, pins)
+        )
+        List(
+          ZipxAgentEnv.EnvironmentRel -> rendered.environmentJson,
+          ZipxAgentEnv.DockerfileRel  -> rendered.dockerfile,
+          ZipxAgentEnv.InstallRel     -> rendered.installSh,
+        ).foreach { (rel, expected) =>
+          val file   = root / rel
+          val actual = if file.exists then IO.read(file) else ""
+          if actual != expected then
+            sys.error(s"${file.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result.")
+          if rel != ZipxAgentEnv.InstallRel then requireTrackedCursorFile(root, rel)
+          log.info(s"zipx: ${file.getPath} is up to date.")
+        }
+    end match
+  end checkAgentEnv
+
+  private def generatedAgentFile(rel: String, body: String): Boolean =
+    rel == ZipxAgentEnv.InstallRel && body.startsWith(ZipxCatalog.GeneratedHeader) ||
+      rel == ZipxAgentEnv.DockerfileRel && body.startsWith(ZipxCatalog.GeneratedHeader) ||
+      rel == ZipxAgentEnv.EnvironmentRel && body.contains(ZipxAgentEnv.InstallRel)
+
+  private def requireTrackedCursorFile(root: File, rel: String): Unit =
+    gitExitCode(root, "check-ignore", "-q", "--no-index", "--", rel) match
+      case 0 =>
+        sys.error(
+          s"""zipx: $rel is gitignored. Track only the generated Cursor files:
+             |.cursor/*
+             |!.cursor/environment.json
+             |!.cursor/Dockerfile""".stripMargin
+        )
+      case 1 =>
+        if gitExitCode(root, "ls-files", "--error-unmatch", "--", rel) != 0 then
+          sys.error(s"zipx: $rel is untracked. Run 'sbt zipxWorkflowGenerate' and commit it.")
+      case code =>
+        sys.error(s"zipx: $rel must be committed, and 'git check-ignore' failed (exit $code).")
+
+  private def gitExitCode(root: File, args: String*): Int =
+    scala.sys.process
+      .Process(Seq("git") ++ args, root)
+      .!(scala.sys.process.ProcessLogger(_ => (), _ => ()))
 
   private def writeCompositeActions: Def.Initialize[Task[Unit]] = Def.task {
     val log        = streams.value.log
@@ -1193,7 +1297,7 @@ object ZipxPlugin extends AutoPlugin:
 
   private def writePinWorkflowsIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
-    val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val feeds     = pinFeeds(extracted)
     if PinFeeds.emitCompanions(feeds) then
       val cfg       = planConfig.value
       val root      = (LocalRootProject / baseDirectory).value
@@ -1211,7 +1315,7 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   private def checkPinWorkflows(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
-    val feeds = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val feeds = pinFeeds(extracted)
     if PinFeeds.emitCompanions(feeds) then
       val expectedCheck = orFail(
         PinCheckWorkflow.render(cfg.actions, cfg.javaVersion, cfg.runnerOs, PinFeeds.hasUpdate(feeds))
@@ -1778,7 +1882,7 @@ object ZipxPlugin extends AutoPlugin:
 
   private def pinInventoryTask: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
-    val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val feeds     = pinFeeds(extracted)
     val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
     val root      = (LocalRootProject / baseDirectory).value
     val file      = root / PinInventory.RelPath
@@ -1788,7 +1892,7 @@ object ZipxPlugin extends AutoPlugin:
 
   private def pinCheckTask: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
-    val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val feeds     = pinFeeds(extracted)
     val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
     val report    = orFail(PinEngine.scheduled(feeds, pins, OsvAdvisorySource()))
     streams.value.log.info(PinEngine.summary(report))
@@ -1802,7 +1906,7 @@ object ZipxPlugin extends AutoPlugin:
 
   private def pinCheckPrTask: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
-    val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val feeds     = pinFeeds(extracted)
     val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
     val gate      = readBuildSetting(extracted, zipxPinPrGate, PinPrGate.All)
     val root      = (LocalRootProject / baseDirectory).value
@@ -1821,7 +1925,7 @@ object ZipxPlugin extends AutoPlugin:
     Def.inputTask {
       val arg        = sbt.complete.DefaultParsers.trimmed(sbt.complete.DefaultParsers.any.*.string).parsed.trim
       val extracted  = Project.extract(state.value)
-      val feeds      = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+      val feeds      = pinFeeds(extracted)
       val pins       = readBuildSetting(extracted, zipxPins, Seq.empty)
       val log        = streams.value.log
       val preRelease = readBuildSetting(extracted, zipxPreRelease, PreRelease.Skip)
@@ -1873,7 +1977,7 @@ object ZipxPlugin extends AutoPlugin:
 
   private def pinSubmitTask: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
-    val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty).filter(_.submitSnapshot)
+    val feeds     = pinFeeds(extracted).filter(_.submitSnapshot)
     val pins      = readBuildSetting(extracted, zipxPins, Seq.empty)
     if feeds.isEmpty then streams.value.log.info("zipx: no pin feeds opted into snapshot submit")
     else
@@ -2027,6 +2131,7 @@ object ZipxPlugin extends AutoPlugin:
     validateCatalog(extracted, buildGraph.value, streams.value.log)
     checkCatalog(root, extracted, streams.value.log)
     checkCiParams(root, cfg, extracted, streams.value.log)
+    checkAgentEnv(root, cfg, extracted, streams.value.log)
   }
 
   private def checkCiParams(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
@@ -2048,7 +2153,7 @@ object ZipxPlugin extends AutoPlugin:
 
   private def validateCatalog(extracted: Extracted, graph: ModuleGraph, log: Logger): Unit =
     val pins = readBuildSetting(extracted, zipxPins, Seq.empty)
-    ZipxCatalog.unknownPinFeeds(readBuildSetting(extracted, zipxPinFeeds, Seq.empty), pins).foreach(sys.error)
+    ZipxCatalog.unknownPinFeeds(pinFeeds(extracted), pins).foreach(sys.error)
     val coords = readBuildSetting(extracted, zipxVersions, Seq.empty)
     val ships  = readBuildSetting(extracted, zipxShips, Seq.empty)
     val check  = readBuildSetting(extracted, zipxCheckDeps, false)
@@ -2579,7 +2684,7 @@ object ZipxPlugin extends AutoPlugin:
     val osv       = OsvAdvisorySource()
     val coords    = readBuildSetting(extracted, zipxVersions, Seq.empty)
     val pins      = resolveActionPins(extracted, (LocalRootProject / baseDirectory).value)
-    val feeds     = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val feeds     = pinFeeds(extracted)
     val pinRows   = readBuildSetting(extracted, zipxPins, Seq.empty)
     val gate      = readBuildSetting(extracted, zipxPinPrGate, PinPrGate.All)
     val findings  = List.newBuilder[String]

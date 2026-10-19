@@ -40,7 +40,7 @@ val commonSettings = Seq(
 lazy val zipxWriteVersion = taskKey[File]("Write the build version to target/zipx-version.txt for the example check")
 
 lazy val root = (project in file("."))
-  .aggregate(shell, workflow, core, syntax, cli, central, aws, plugin, docs, docsJS)
+  .aggregate(shell, workflow, core, syntax, cli, central, aws, agent, plugin, docs, docsJS)
   .settings(
     name           := "zipx",
     publish / skip := true,
@@ -76,6 +76,7 @@ lazy val root = (project in file("."))
       )
     },
     zipxJavaVersion                := JdkVersion("25"),
+    zipxAgentEnv                   := ZipxAgentEnv.cursor(docker = true),
     zipxWorkflowDispatch           := true,
     zipxEmitSelf                   := false,
     zipxVersionUpdatesPreSteps     := zipx.ExampleCheck.companionPreSteps,
@@ -156,10 +157,18 @@ lazy val aws = (project in file("modules/aws"))
     description := "zipx capability pack for AWS: OIDC login, ECR registries, image tags",
   )
 
+lazy val agent = (project in file("modules/agent"))
+  .dependsOn(shell, core % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(
+    name        := "zipx-agent",
+    description := "zipx pack that renders a cloud agent environment from the build",
+  )
+
 // The only module that touches sbt.*. The root build dogfoods it through project/dogfood.sbt's source mirror.
 lazy val plugin = (project in file("modules/sbt-plugin"))
   .enablePlugins(SbtPlugin)
-  .dependsOn(core, syntax, central, aws)
+  .dependsOn(core, syntax, central, aws, agent)
   .settings(
     name        := "sbt-zipx",
     description := "sbt 2 AutoPlugin: the build describes its own GitHub Actions CI",
@@ -220,7 +229,7 @@ lazy val docsJS = project
 
 lazy val docs = project
   .in(file("docs"))
-  .dependsOn(core, central, aws)
+  .dependsOn(core, central, aws, agent)
   .enablePlugins(SpecularPlugin)
   .settings(
     name            := "zipx-docs",
