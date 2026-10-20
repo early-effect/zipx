@@ -150,6 +150,7 @@ object SbtImageSpec extends ZIOSpecDefault:
       assertTrue(
         wf.jobs.contains(SbtImageWorkflow.EnvImageJob),
         wf.jobs(SbtImageWorkflow.EnvImageJob).permissions.get("packages").contains("write"),
+        wf.jobs(SbtImageWorkflow.EnvImageJob).env.get("GITHUB_TOKEN").contains("${{ github.token }}"),
         wf.jobs("test").needs.contains(SbtImageWorkflow.EnvImageJob),
         wf.jobs("test").container.exists(_.contains("needs.zipx-env-image.outputs.image")),
         wf.jobs("test").containerOptions.isEmpty,

@@ -99,6 +99,7 @@ object SbtImageWorkflow:
       name = Some("Publish zipx env image"),
       runsOn = List(runnerOs),
       permissions = ListMap("contents" -> "read", "packages" -> "write"),
+      env = ListMap("GITHUB_TOKEN" -> "${{ github.token }}"),
       outputs = ListMap("image" -> s"$${{ steps.$EnvImageStep.outputs.image }}"),
       steps = List(
         Step(uses = Some(checkout)),
