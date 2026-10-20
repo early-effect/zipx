@@ -41,18 +41,23 @@ object ShellWorkflow:
     for
       id <- jobId(spec.path)
       cacheMode = if config.cache == CacheBackend.LocalDir then LocalCacheMode.Restore else LocalCacheMode.Off
-      workflow  = Workflow(
-        name = spec.name,
-        on = Triggers(workflowDispatch = Some(WorkflowDispatch())),
-        permissions = spec.permissions,
-        jobs = ListMap(
-          (id: String) -> Job(
-            name = Some(spec.name),
-            runsOn = List(config.runnerOs),
-            env = EnvValue.renderAll(config.env ++ spec.env),
-            steps = Planner.checkoutThenSbtSetup(config, id, None, cacheMode) ++ spec.steps(config.actions),
-          )
+      workflow  = SbtImageWorkflow.use(
+        Workflow(
+          name = spec.name,
+          on = Triggers(workflowDispatch = Some(WorkflowDispatch())),
+          permissions = spec.permissions,
+          jobs = ListMap(
+            (id: String) -> Job(
+              name = Some(spec.name),
+              runsOn = List(config.runnerOs),
+              env = EnvValue.renderAll(config.env ++ spec.env),
+              steps = Planner.checkoutThenSbtSetup(config, id, None, cacheMode) ++ spec.steps(config.actions),
+            )
+          ),
         ),
+        config.sbtImage,
+        config.actions.checkout,
+        config.runnerOs,
       )
       body <- Render.render(workflow)
     yield ActionPinFile.annotateUses(body, config.actions)

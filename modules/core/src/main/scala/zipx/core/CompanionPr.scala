@@ -85,7 +85,7 @@ object CompanionPr:
           runBranch(branchPrefix),
           Word.lit("--label"),
           Word.lit("clean"),
-        ) || Exec("true"),
+        ),
       ),
       trailingNewline = true,
     )

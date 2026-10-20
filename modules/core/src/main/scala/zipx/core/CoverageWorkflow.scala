@@ -45,32 +45,37 @@ object CoverageWorkflow:
     val labels    = triggers.collect { case CoverageTrigger.PrLabel(label) => label }
     val cacheMode =
       if config.cache == CacheBackend.LocalDir then LocalCacheMode.Restore else LocalCacheMode.Off
-    Workflow(
-      name = "zipx coverage",
-      on = Triggers(
-        pullRequest = Option.when(labels.nonEmpty)(PullRequestTrigger(types = labelActivities)),
-        workflowDispatch = Option.when(triggers.contains(CoverageTrigger.Dispatch))(WorkflowDispatch()),
-        schedule = triggers.collect { case CoverageTrigger.Scheduled(cron) => cron },
+    SbtImageWorkflow.use(
+      Workflow(
+        name = "zipx coverage",
+        on = Triggers(
+          pullRequest = Option.when(labels.nonEmpty)(PullRequestTrigger(types = labelActivities)),
+          workflowDispatch = Option.when(triggers.contains(CoverageTrigger.Dispatch))(WorkflowDispatch()),
+          schedule = triggers.collect { case CoverageTrigger.Scheduled(cron) => cron },
+        ),
+        permissions = ListMap("contents" -> "read"),
+        concurrency = Some(
+          Concurrency(
+            group = (Expr.lit("zipx-coverage-") ++ Expr.github("ref")).render,
+            cancelInProgress = CancelInProgress.Always,
+          )
+        ),
+        jobs = ListMap(
+          jobId -> Job(
+            name = Some(Coverage.Name),
+            runsOn = List(config.runnerOs),
+            `if` = labelGate(labels).map(_.unwrapped),
+            env = EnvValue.renderAll(config.env),
+            steps = Planner.checkoutThenSbtSetup(config, jobId, nodeVersion = None, cacheMode) ++ List(
+              Step.run(Script(coverage.command.render)).named(Coverage.Name).build,
+              Coverage.uploadStep(config.actions, Coverage.DefaultArtifact),
+            ),
+          )
+        ),
       ),
-      permissions = ListMap("contents" -> "read"),
-      concurrency = Some(
-        Concurrency(
-          group = (Expr.lit("zipx-coverage-") ++ Expr.github("ref")).render,
-          cancelInProgress = CancelInProgress.Always,
-        )
-      ),
-      jobs = ListMap(
-        jobId -> Job(
-          name = Some(Coverage.Name),
-          runsOn = List(config.runnerOs),
-          `if` = labelGate(labels).map(_.unwrapped),
-          env = EnvValue.renderAll(config.env),
-          steps = Planner.checkoutThenSbtSetup(config, jobId, nodeVersion = None, cacheMode) ++ List(
-            Step.run(Script(coverage.command.render)).named(Coverage.Name).build,
-            Coverage.uploadStep(config.actions, Coverage.DefaultArtifact),
-          ),
-        )
-      ),
+      config.sbtImage,
+      config.actions.checkout,
+      config.runnerOs,
     )
   end plan
 

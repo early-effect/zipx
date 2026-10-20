@@ -75,15 +75,25 @@ object ZipxComposites:
     //
     // Under `purge` the primary key includes the run id, so a save with no restore-keys misses and still writes a fresh
     // snapshot. A restore job skips its cache step, so it cannot pull the old entry while that save is in flight.
-    def cacheStep(mode: LocalCacheMode, resolved: Boolean, purge: Boolean): Step =
+    def cacheStep(mode: LocalCacheMode, resolved: Boolean, purge: Boolean, home: Boolean): Step =
       val epoch = if resolved then epochOut else fixedEpoch
       val build = s"$prefix$epoch-build-"
       // A Fixed epoch is baked at generate time, so there is no runtime release output to fall back to.
       val older     = if resolved then List(s"$prefix$releaseOut-build-", prefix) else List(prefix)
       val whenPurge = if purge then "inputs.purge == 'true'" else "inputs.purge != 'true'"
       val epochOp   = if resolved then "==" else "!="
-      val cached    = ListMap(
-        "path" -> cachePaths,
+      val where     = if home then "inputs.cache-home != ''" else "inputs.cache-home == ''"
+      val paths     =
+        if home then
+          List(
+            "${{ inputs.cache-home }}/.sbt",
+            "${{ inputs.cache-home }}/.cache/sbt",
+            "${{ inputs.cache-home }}/.cache/coursier",
+            "target",
+          ).mkString("\n")
+        else cachePaths
+      val cached = ListMap(
+        "path" -> paths,
         "key"  -> s"$build$runId-$keySuffix",
       )
       Step(
@@ -92,7 +102,9 @@ object ZipxComposites:
           else if mode == LocalCacheMode.Save then "Cache sbt"
           else "Restore sbt cache"
         ),
-        `if` = Some(s"inputs.cache-mode == '${mode.input}' && $whenPurge && inputs.cache-epoch $epochOp ''"),
+        `if` = Some(
+          s"$where && inputs.cache-mode == '${mode.input}' && $whenPurge && inputs.cache-epoch $epochOp ''"
+        ),
         uses = Some(if mode == LocalCacheMode.Save then pins.cache else pins.cacheRestore),
         `with` =
           if purge then cached
@@ -100,9 +112,21 @@ object ZipxComposites:
       )
     end cacheStep
 
+    val hostToolchain = "inputs.baked-toolchain != 'true'"
+    val cacheModes    = List(false, true).flatMap { home =>
+      List(
+        cacheStep(LocalCacheMode.Save, resolved = true, purge = false, home = home),
+        cacheStep(LocalCacheMode.Save, resolved = false, purge = false, home = home),
+        cacheStep(LocalCacheMode.Save, resolved = true, purge = true, home = home),
+        cacheStep(LocalCacheMode.Save, resolved = false, purge = true, home = home),
+        cacheStep(LocalCacheMode.Restore, resolved = true, purge = false, home = home),
+        cacheStep(LocalCacheMode.Restore, resolved = false, purge = false, home = home),
+      )
+    }
     val steps: List[Step] = List(
       Step(
         name = Some("Setup JDK"),
+        `if` = Some(hostToolchain),
         uses = Some(pins.setupJava),
         `with` = ListMap(
           "distribution" -> "temurin",
@@ -110,18 +134,19 @@ object ZipxComposites:
         ),
       ),
       Step(
+        `if` = Some(hostToolchain),
         uses = Some(pins.setupSbt),
         `with` = ListMap("disk-cache" -> input("sbt-disk-cache")),
       ),
       Step(
         name = Some("Setup Coursier"),
-        `if` = Some("inputs.coursier == 'true'"),
+        `if` = Some(s"$hostToolchain && inputs.coursier == 'true'"),
         uses = Some(pins.extraByPrefix(CoursierSetupPinKey).getOrElse(DefaultCoursierSetup)),
         `with` = ListMap("apps" -> "cs"),
       ),
       Step(
         name = Some("Setup Node"),
-        `if` = Some("inputs.node-version != ''"),
+        `if` = Some(s"$hostToolchain && inputs.node-version != ''"),
         uses = Some(pins.setupNode),
         `with` = ListMap("node-version" -> input("node-version")),
       ),
@@ -136,13 +161,7 @@ object ZipxComposites:
         run = Some(resolveScript),
         shell = Some("bash"),
       ),
-      cacheStep(LocalCacheMode.Save, resolved = true, purge = false),
-      cacheStep(LocalCacheMode.Save, resolved = false, purge = false),
-      cacheStep(LocalCacheMode.Save, resolved = true, purge = true),
-      cacheStep(LocalCacheMode.Save, resolved = false, purge = true),
-      cacheStep(LocalCacheMode.Restore, resolved = true, purge = false),
-      cacheStep(LocalCacheMode.Restore, resolved = false, purge = false),
-    )
+    ) ++ cacheModes
 
     CompositeAction(
       name = "zipx sbt setup",
@@ -172,6 +191,14 @@ object ZipxComposites:
         "coursier" -> CompositeInput(
           "When true, install cs via coursier/setup-action so the job can launch zipx-cli",
           default = Some("false"),
+        ),
+        "baked-toolchain" -> CompositeInput(
+          "When true, JDK, sbt, Node, and cs are already in the job container",
+          default = Some("false"),
+        ),
+        "cache-home" -> CompositeInput(
+          "Absolute home for the LocalDir snapshot. Empty uses ~/.sbt and ~/.cache on the runner",
+          default = Some(""),
         ),
       ),
       steps = steps,
@@ -252,7 +279,14 @@ object ZipxComposites:
           "cache-mode"       -> cacheMode.input,
         ) ++ purge.fold(ListMap.empty[String, String])(value => ListMap("purge" -> value)) ++ ListMap(
           "cache-epoch" -> fixedEpoch
-        )
+        ) ++ config.sbtImage.fold(ListMap.empty[String, String]) { plan =>
+          ListMap(
+            "baked-toolchain" -> "true",
+            "cache-home"      -> plan.cacheHome,
+            "node-version"    -> "",
+            "coursier"        -> "false",
+          )
+        }
       )
       .build
   end sbtSetupStep

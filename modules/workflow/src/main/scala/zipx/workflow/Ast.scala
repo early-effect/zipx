@@ -129,6 +129,8 @@ final case class Job(
     permissions: Map[String, String] = ListMap.empty,
     strategy: Option[Strategy] = None,
     container: Option[String] = None,
+    /** Folded into `container.options` by [[Render]]. Absent, `container` stays a scalar. */
+    containerOptions: Option[String] = None,
     services: Map[String, JobService] = ListMap.empty,
     env: Map[String, String] = ListMap.empty,
     outputs: Map[String, String] = ListMap.empty,

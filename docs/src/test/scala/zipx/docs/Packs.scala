@@ -397,9 +397,19 @@ rules and MCP stay untracked:
 ```
 
 The JDK comes from `project/zipx-ci.env` at install time, not from the image. The sbt runner reads
-`project/build.properties`. Secret *names* from `zipxEnv` are checked before anything resolves. The warm command is
-`zipxCacheRehydrateTask`, run as `sbt --server --batch`. Ubuntu, Docker CE 28, and the sbt runner are catalog `Pin`
-vals (`agent-base`, `agent-docker`, `agent-sbt`) so `zipxPinUpdate` can move them. Docker 29 is refused.
+`project/build.properties`. Secret *names* from `zipxEnv` are checked before anything resolves. So is the release
+lookup credential: `GITHUB_TOKEN` when the registry reads GitHub's token, otherwise the secret's env name. `install.sh`
+fails if any of those variables is empty, and the message says to set each as a Cursor **Runtime Secret**. A Build
+Secret is present only while the image is built. `repositoryDependencies` widens the git token. Neither one
+authenticates Maven. The warm command is `zipxCacheRehydrateTask`, run as `sbt --server --batch`. Ubuntu, Docker CE
+28, and the sbt runner are catalog `Pin` vals (`agent-base`, `agent-docker`, `agent-sbt`) so `zipxPinUpdate` can move
+them. Docker 29 is refused.
+
+`zipxSbtImage` replaces that Ubuntu base with the shared sbt image (see **Caching**). With `docker = false`,
+`environment.json` sets `image` to the shared ref and `install.sh` does not download a JDK. With `docker = true`,
+the Dockerfile is `FROM` that ref and then installs Docker CE. The agent starts the daemon. The shared image has no
+dockerd. Caches and tokens stay out of both images. The agent's warm disk is still the install step, not
+`actions/cache`.
 """,
       exampleValue {
         CursorEnv
@@ -411,7 +421,7 @@ vals (`agent-base`, `agent-docker`, `agent-sbt`) so `zipxPinUpdate` can move the
               pins = AgentPins(AgentPins.DefaultBase, AgentPins.DefaultDocker, AgentPins.DefaultSbtRunner),
             )
           )
-          .fold(identity, files => files.environmentJson + files.dockerfile)
+          .fold(identity, files => files.environmentJson + files.dockerfile.getOrElse(""))
       }.assert { rendered =>
         assertTrue(
           !rendered.contains("context"),
@@ -421,6 +431,29 @@ vals (`agent-base`, `agent-docker`, `agent-sbt`) so `zipxPinUpdate` can move the
           rendered.contains("fuse-overlayfs"),
           rendered.contains(AgentPins.DefaultDocker),
           !rendered.contains("x86_64"),
+        )
+      },
+      exampleValue {
+        val image = "sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x@sha256:" + ("ab" * 32)
+        CursorEnv
+          .render(
+            AgentEnv(
+              docker = true,
+              rehydrate = SbtCommand.unsafeTask("Test/compile"),
+              secretEnv = List("GITHUB_TOKEN"),
+              pins = AgentPins(AgentPins.DefaultBase, AgentPins.DefaultDocker, AgentPins.DefaultSbtRunner),
+              toolchain = Some(image),
+            )
+          )
+          .fold(identity, files => files.environmentJson + files.dockerfile.getOrElse("") + files.installSh)
+      }.assert { rendered =>
+        assertTrue(
+          rendered.contains("FROM sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x@sha256:" + ("ab" * 32)),
+          rendered.contains("service docker start"),
+          !rendered.contains("sudo service docker start"),
+          rendered.contains("Cursor Runtime Secret"),
+          rendered.contains("GITHUB_TOKEN"),
+          !rendered.contains("openjdk"),
         )
       },
     ),

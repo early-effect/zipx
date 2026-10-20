@@ -23,13 +23,10 @@ object PinCheckWorkflow:
       runnerOs: String,
       hasUpdate: Boolean,
       schedule: Cron = DefaultSchedule,
+      lookup: RegistryCredentials = RegistryCredentials.Anonymous,
+      readPackages: Boolean = false,
+      sbtImage: Option[SbtImagePlan] = None,
   ): Workflow =
-    val setupJava = Step(
-      name = Some("Setup JDK"),
-      uses = Some(pins.setupJava),
-      `with` = ListMap("distribution" -> "temurin", "java-version" -> javaVersion),
-    )
-    val setupSbt = Step(uses = Some(pins.setupSbt))
     val checkout =
       if hasUpdate then
         Step(
@@ -37,32 +34,44 @@ object PinCheckWorkflow:
           `with` = CompanionAuth.checkoutWith,
         )
       else Step(uses = Some(pins.checkout))
-    val check = Step(name = Some("Check pin feeds"), run = Some("sbt zipxPinCheck"))
+    val setup   = SbtImageWorkflow.toolchain(pins, javaVersion, runnerOs, "pin-check", sbtImage)
+    val check   = Step(name = Some("Check pin feeds"), run = Some("sbt zipxPinCheck"))
+    val refresh = Step(
+      name = Some("Refresh generated env"),
+      run = Some("sbt \"zipxAgentEnvGenerate; zipxSbtEnvGenerate\""),
+    )
     val steps =
       if hasUpdate then
-        CompanionAuth.steps ++ List(
-          checkout,
-          setupJava,
-          setupSbt,
+        CompanionAuth.steps ++ List(checkout) ++ setup ++ List(
           check,
+          refresh,
           Step.run(updatePrScript).named("Open update PR").build,
         )
-      else List(checkout, setupJava, setupSbt, check)
+      else List(checkout) ++ setup ++ List(check)
+    val packages    = if readPackages then ListMap("packages" -> "read") else ListMap.empty
     val permissions =
-      if hasUpdate then ListMap("contents" -> "write", "pull-requests" -> "write", "issues" -> "write")
-      else ListMap("contents"              -> "read")
-    Workflow(
-      name = "zipx pin check",
-      on = Triggers(schedule = List(schedule), workflowDispatch = Some(WorkflowDispatch())),
-      permissions = permissions,
-      jobs = ListMap(
-        "pin-check" -> Job(
-          name = Some("Check pin feeds"),
-          runsOn = List(runnerOs),
-          env = EnvValue.renderAll(SnapshotPins.ciEnv(Map.empty)),
-          steps = steps,
-        )
+      if hasUpdate then ListMap("contents" -> "write", "pull-requests" -> "write", "issues" -> "write") ++ packages
+      else ListMap("contents" -> "read") ++ packages
+    val token =
+      if hasUpdate then ListMap("GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}")
+      else ListMap.empty
+    SbtImageWorkflow.use(
+      Workflow(
+        name = "zipx pin check",
+        on = Triggers(schedule = List(schedule), workflowDispatch = Some(WorkflowDispatch())),
+        permissions = permissions,
+        jobs = ListMap(
+          "pin-check" -> Job(
+            name = Some("Check pin feeds"),
+            runsOn = List(runnerOs),
+            env = EnvValue.renderAll(SnapshotPins.ciEnv(lookup.env)) ++ token,
+            steps = steps,
+          )
+        ),
       ),
+      sbtImage,
+      pins.checkout,
+      runnerOs,
     )
   end plan
 
@@ -72,8 +81,13 @@ object PinCheckWorkflow:
       runnerOs: String,
       hasUpdate: Boolean,
       schedule: Cron = DefaultSchedule,
+      lookup: RegistryCredentials = RegistryCredentials.Anonymous,
+      readPackages: Boolean = false,
+      sbtImage: Option[SbtImagePlan] = None,
   ): Either[String, String] =
-    Render.render(plan(pins, javaVersion, runnerOs, hasUpdate, schedule)).map(ActionPinFile.annotateUses(_, pins))
+    Render
+      .render(plan(pins, javaVersion, runnerOs, hasUpdate, schedule, lookup, readPackages, sbtImage))
+      .map(ActionPinFile.annotateUses(_, pins))
 
   private def updatePrScript: Script =
     CompanionPr.open(

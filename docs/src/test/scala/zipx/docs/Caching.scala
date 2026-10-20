@@ -242,6 +242,63 @@ entry. Other branches keep restoring `main` until a main-scoped save writes a ne
         )
       },
     ),
+    section("Sbt image")(
+      md"""
+`zipxSbtImage := true` runs every sbt job in one pinned image. Default off. The first run in the image misses every
+cache entry that was saved under `/home/runner`.
+
+The pin is the light `sbtscala/scala-sbt` tag for the major in `zipxJavaVersion`. The version string is the tag and
+the multi-arch manifest digest, so a JDK patch and a digest move are both updates:
+
+```scala
+Pin(
+  "sbt-image",
+  "sbtscala/scala-sbt",
+  "eclipse-temurin-21.0.12_8_2.x@sha256:<manifest>",
+)
+```
+
+A fat tag (`<jdk>_<sbt>_<scala>`) is not the pin. It warms one Scala compiler into the image, and
+`project/build.properties` still picks sbt. The image is the toolchain: JDK, sbt, `curl`, `git`, `tar`. It does not
+contain `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, `target`, or a token. Those stay the LocalDir snapshot,
+restored into `/home/sbtuser`. Jobs set `HOME` and `-Duser.home` there. Actions overrides `HOME`, so a `~` path is
+not that directory and the cache paths are absolute. `setup-sbt`'s own disk cache stays off.
+
+`actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`, and `coursier/setup-action` are omitted on those jobs.
+The composite still restores and saves the snapshot.
+
+When a capability sets `withNodeVersion`, version updates are on (they need `cs`), or a job publishes images (it
+needs the Docker client), zipx writes `.github/zipx-env/Dockerfile` `FROM` that pin and bakes only those tools. The
+published tag is `ghcr.io/<owner>/<repo>/zipx-env:df-<hash of the Dockerfile>`. A `zipx-env-image` job builds and
+pushes only when the tag is missing. The hash moves when the sbt pin, the Node pin, or the `cs` pin moves. `latest`
+and `lts` are not baked: pin `Pin("sbt-image", "node", "<x.y.z>")`. Two capabilities asking for two Node versions is
+a generate error. A docker job mounts the runner socket. The image has the client, not a daemon. `inContainer` is
+refused while this setting is on: the shared image is already the container.
+""",
+      exampleValue {
+        val digest  = "ab" * 32
+        val version = s"eclipse-temurin-21.0.12_8_2.x@sha256:$digest"
+        val pin     = Pin(
+          PinFeedName.unsafeMake("sbt-image"),
+          SbtImage.ImageId,
+          DepVersion.unsafeMake(version),
+          None,
+          None,
+        )
+        SbtImage.resolve(config.javaVersion, Seq(pin), Nil, coursier = false, docker = false) match
+          case Left(message) => message
+          case Right(plan)   =>
+            DocsRender.job("test")(Capability.test)(using libGraph, config.copy(sbtImage = Some(plan)))
+      }.assert { yaml =>
+        assertTrue(
+          yaml.contains("sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x@sha256:"),
+          yaml.contains("baked-toolchain: \"true\""),
+          yaml.contains("cache-home: /home/sbtuser"),
+          yaml.contains("HOME: /home/sbtuser"),
+          !yaml.contains("actions/setup-java"),
+        )
+      },
+    ),
     section("Action pins")(
       md"""
 Generated workflows use **commit-SHA pins** (not floating `@v4` tags), with `# vX.Y.Z` comments for readability.

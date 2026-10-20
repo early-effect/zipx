@@ -43,6 +43,22 @@ object AgentPinSpec extends ZIOSpecDefault:
         DockerCe.newest(docker28, docker28) == Right(Some(AgentPins.DefaultDocker)),
       )
     },
+    test("docker-cli stays on the newest 28 published for both architectures") {
+      val body =
+        """Package: docker-ce-cli
+          |Version: 5:28.5.1-1~ubuntu.24.04~noble
+          |
+          |Package: docker-ce-cli
+          |Version: 5:28.5.2-1~ubuntu.24.04~noble
+          |
+          |Package: docker-ce-cli
+          |Version: 5:29.1.0-1~ubuntu.24.04~noble
+          |""".stripMargin
+      assertTrue(
+        DockerCe.newestCli(body, body) == Right(Some("28.5.2")),
+        DockerCe.newestCli(body, dockerArmMissingLatest).isLeft,
+      )
+    },
     test("an already current docker pin is not a bump") {
       assertTrue(DockerCe.candidate(AgentPins.DefaultDocker, docker28, docker28) == Right(None))
     },

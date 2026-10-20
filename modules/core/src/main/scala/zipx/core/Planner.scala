@@ -155,6 +155,20 @@ object Planner:
     capabilities.filter(Coverage.instruments).foreach(validateCoverage)
     validateLocalCacheOwner(capabilities, graph)
     capabilities.foreach(c => c.affectedBy.foreach(validateAffectedBy(c, _, graph)))
+    config.sbtImage.foreach { _ =>
+      capabilities.filter(_.container.isDefined) match
+        case Nil => ()
+        case bad =>
+          sys.error(
+            s"zipx: zipxSbtImage is on, so these capabilities cannot also call inContainer: " +
+              bad.map(_.name).mkString(", ")
+          )
+    }
+    if config.sbtImage.exists(_.dockerfile.isDefined) then
+      capabilities.filter(c => (c.name: String) == SbtImageWorkflow.EnvImageJob) match
+        case Nil => ()
+        case _   =>
+          sys.error(s"zipx: capability name '${SbtImageWorkflow.EnvImageJob}' is reserved for the env image job")
   end validateCapabilities
 
   private def validateAffectedBy(capability: Capability, modules: ModuleNode => Boolean, graph: ModuleGraph): Unit =
@@ -447,11 +461,16 @@ object Planner:
 
     val jobs = ListMap.from[String, Job](leading ++ rolled)
 
-    Workflow(
-      name = config.workflowName,
-      on = triggersFor(config, capabilities),
-      jobs = jobs,
-      concurrency = Option.when(config.cancelSupersededRuns)(concurrencyFor(config)),
+    SbtImageWorkflow.use(
+      Workflow(
+        name = config.workflowName,
+        on = triggersFor(config, capabilities),
+        jobs = jobs,
+        concurrency = Option.when(config.cancelSupersededRuns)(concurrencyFor(config)),
+      ),
+      config.sbtImage,
+      config.actions.checkout,
+      config.runnerOs,
     )
   end plan
 

@@ -115,7 +115,7 @@ jobs:
           cat > /tmp/zipx-pr-body.md <<'EOF'
           The release tag stays on the release commit. This branch opens the next catalog line with sbt zipxModverBump.
           EOF
-          gh pr create --title "Open the next snapshot line" --body-file /tmp/zipx-pr-body.md --head "zipx/modver-bump-${GITHUB_RUN_ID}" --label clean || true
+          gh pr create --title "Open the next snapshot line" --body-file /tmp/zipx-pr-body.md --head "zipx/modver-bump-${GITHUB_RUN_ID}" --label clean
 
         env:
           GH_TOKEN: ${{ github.token }}
