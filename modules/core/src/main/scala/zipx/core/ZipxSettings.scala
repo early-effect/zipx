@@ -577,6 +577,16 @@ object ZipxSettings:
       Build,
     )
 
+  val sbtImageLayers: SettingDef[Seq[SbtImageLayer]] =
+    SettingDef.setting(
+      SettingName("zipxSbtImageLayers"),
+      Seq.empty[SbtImageLayer],
+      SettingPurpose(
+        "Steps and ENV appended to the derived sbt image (default empty). Each entry is a Pin(\"sbt-image\", id, \"x.y.z\") plus a pure install function of that version and the CPU architecture. Paths stay off /home/sbtuser. zipx does not bake a tool it has not been given. Refused while zipxSbtImage is false."
+      ),
+      Build,
+    )
+
   val cancelSupersededRuns: SettingDef[Boolean] =
     SettingDef.setting(
       SettingName("zipxCancelSupersededRuns"),
@@ -890,6 +900,7 @@ object ZipxSettings:
     env,
     agentEnv,
     sbtImage,
+    sbtImageLayers,
     cancelSupersededRuns,
     checkCommandNames,
     verifyClean,
