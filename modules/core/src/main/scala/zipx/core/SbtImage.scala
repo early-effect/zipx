@@ -271,9 +271,9 @@ object SbtImage:
        |      arm64) node_arch=arm64 ;; \\
        |      *) echo "zipx: unsupported architecture $$arch" >&2; exit 1 ;; \\
        |    esac; \\
-       |    curl -fsSL -o /tmp/node.tar.xz "https://nodejs.org/dist/v$version/node-v$version-linux-$${node_arch}.tar.xz"; \\
-       |    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1; \\
-       |    rm /tmp/node.tar.xz""".stripMargin
+       |    curl -fsSL -o /tmp/node.tar.gz "https://nodejs.org/dist/v$version/node-v$version-linux-$${node_arch}.tar.gz"; \\
+       |    tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1; \\
+       |    rm /tmp/node.tar.gz""".stripMargin
 
   private def csInstall(version: String): String =
     s"""RUN set -eux; \\

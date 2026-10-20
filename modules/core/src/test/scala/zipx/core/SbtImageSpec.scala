@@ -73,6 +73,8 @@ object SbtImageSpec extends ZIOSpecDefault:
         plan.exists(_.derivedTag.exists(_.startsWith("df-"))),
         body.contains(s"FROM sbtscala/scala-sbt:$pin"),
         body.contains("node-v22.14.0-linux-"),
+        body.contains("node.tar.gz"),
+        !body.contains("tar.xz"),
         body.contains("coursier/releases/download/v2.1.24/cs-"),
         body.contains("docker-28.5.2.tgz"),
         !body.contains("TOKEN"),
