@@ -153,7 +153,15 @@ object SbtImage:
         case None                                       => current + (key -> flag)
         case Some(value) if value.contains("user.home") => current
         case Some(value)                                => current + (key -> s"$value $flag")
-    add("SBT_OPTS", add("JAVA_OPTS", withHome))
+    val opts = add("SBT_OPTS", add("JAVA_OPTS", withHome))
+    if opts.contains("GIT_CONFIG_COUNT") then opts
+    else
+      opts ++ Map(
+        "GIT_CONFIG_COUNT"   -> "1",
+        "GIT_CONFIG_KEY_0"   -> "safe.directory",
+        "GIT_CONFIG_VALUE_0" -> "*",
+      )
+  end homeEnv
 
   def envImageScript(tag: String): String =
     s"""repo=$$(printf '%s' "$$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')

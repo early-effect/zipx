@@ -261,7 +261,8 @@ Pin(
 A fat tag (`<jdk>_<sbt>_<scala>`) is not the pin. It warms one Scala compiler into the image, and
 `project/build.properties` still picks sbt. The image is the toolchain: JDK, sbt, `curl`, `git`, `tar`. It does not
 contain `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, `target`, or a token. Those stay the LocalDir snapshot,
-restored into `/home/sbtuser`. Jobs set `HOME` and `-Duser.home` there. Actions overrides `HOME`, so a `~` path is
+restored into `/home/sbtuser`. Jobs set `HOME` and `-Duser.home` there, and mark every directory git-safe, because
+that `HOME` is not the one `actions/checkout` configured. Actions overrides `HOME`, so a `~` path is
 not that directory and the cache paths are absolute. `setup-sbt`'s own disk cache stays off.
 
 `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`, and `coursier/setup-action` are omitted on those jobs.
@@ -273,7 +274,8 @@ published tag is `ghcr.io/<owner>/<repo>/zipx-env:df-<hash of the Dockerfile>`. 
 pushes only when the tag is missing. The hash moves when the sbt pin, the Node pin, or the `cs` pin moves. `latest`
 and `lts` are not baked: pin `Pin("sbt-image", "node", "<x.y.z>")`. Two capabilities asking for two Node versions is
 a generate error. A docker job mounts the runner socket. The image has the client, not a daemon. `inContainer` is
-refused while this setting is on: the shared image is already the container.
+refused while this setting is on: the shared image is already the container. A job that sets its own `permissions`
+also gets `packages: read`, because that block does not inherit the token that can pull a private env image.
 """,
       exampleValue {
         val digest  = "ab" * 32

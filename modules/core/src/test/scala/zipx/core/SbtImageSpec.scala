@@ -116,6 +116,8 @@ object SbtImageSpec extends ZIOSpecDefault:
         test.containerOptions.isEmpty,
         test.env.get("HOME").contains(SbtImage.CacheHome),
         test.env.get("JAVA_OPTS").exists(_.contains(s"-Duser.home=${SbtImage.CacheHome}")),
+        test.env.get("GIT_CONFIG_VALUE_0").contains("*"),
+        test.permissions.isEmpty,
         setup.exists(_.`with`.get("baked-toolchain").contains("true")),
         setup.exists(_.`with`.get("cache-home").contains(SbtImage.CacheHome)),
         setup.exists(_.`with`.get("node-version").contains("")),
@@ -186,6 +188,26 @@ object SbtImageSpec extends ZIOSpecDefault:
       assertTrue(
         wf.jobs("image").containerOptions.contains(SbtImage.SocketOptions),
         wf.jobs("test").containerOptions.isEmpty,
+      )
+    },
+    test("a permissions block gains packages read so it can pull the env image") {
+      val pins = Seq(imagePin(pin), Pin("sbt-image", "cs", "2.1.26"))
+      val plan = SbtImage
+        .resolve(JdkVersion("21"), pins, Nil, coursier = true, docker = false)
+        .fold(err => throw AssertionError(err), identity)
+      val wf = Planner.plan(
+        GraphFixture(List(ModuleNode(ModuleId("core")))),
+        List(Capability.test.copy(permissions = Map("contents" -> "read"))),
+        PlanConfig(
+          sbtImage = Some(plan),
+          skipMergedPrPush = false,
+          verifyCleanLabel = None,
+          affected = AffectedMode.Always,
+        ),
+      )
+      assertTrue(
+        wf.jobs("test").permissions.get("contents").contains("read"),
+        wf.jobs("test").permissions.get("packages").contains("read"),
       )
     },
     test("inContainer is refused while the shared image is on") {

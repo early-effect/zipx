@@ -82,9 +82,17 @@ object SbtImageWorkflow:
       container = job.container.orElse(Some(image)),
       containerOptions = job.containerOptions.orElse(Option.when(socket)(SbtImage.SocketOptions)),
       needs = needs,
+      permissions = pullPermissions(job.permissions, plan.dockerfile.isDefined),
       env = SbtImage.homeEnv(job.env, plan.cacheHome),
     )
   end decorate
+
+  /** A job that already sets permissions does not inherit the repo token, so a private env image is denied. A job with
+    * no permissions block keeps inheriting that token.
+    */
+  private def pullPermissions(permissions: Map[String, String], derived: Boolean): Map[String, String] =
+    if !derived || permissions.isEmpty || permissions.contains("packages") then permissions
+    else permissions + ("packages" -> "read")
 
   private def publishesImages(job: Job): Boolean =
     val name = job.name.getOrElse("")
