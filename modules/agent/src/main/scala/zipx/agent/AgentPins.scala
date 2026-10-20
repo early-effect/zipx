@@ -29,6 +29,14 @@ object AgentPins:
 
   val feedNames: Set[PinFeedName] = Set(BaseFeed, DockerFeed, SbtFeed)
 
+  /** Rows the sbt-image agent does not read. Generate warns and still succeeds. */
+  def unusedWhileSbtImage(pins: Seq[Pin]): List[String] =
+    pins.iterator
+      .filter(pin => feedNames.contains(pin.feed))
+      .map(pin => s"""Pin("${pin.feed}", "${pin.id}", "${pin.current}")""")
+      .toList
+      .sorted
+
   def resolve(pins: Seq[Pin]): Either[String, AgentPins] =
     val wanted = List(
       (BaseFeed, UbuntuId, DefaultBase),

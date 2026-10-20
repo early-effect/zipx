@@ -276,7 +276,7 @@ object SbtImageSpec extends ZIOSpecDefault:
         catch case e: RuntimeException => Some(e.getMessage)
       assertTrue(failed.exists(_.contains("inContainer")))
     },
-    test("a GitHub origin names the agent image") {
+    test("a GitHub remote names the published env image") {
       assertTrue(
         SbtImage.githubRepository("git@github.com:early-effect/zipx-ci-lab.git").contains("early-effect/zipx-ci-lab"),
         SbtImage.githubRepository("https://github.com/Early-Effect/Zipx.git").contains("Early-Effect/Zipx"),
@@ -462,8 +462,7 @@ object SbtImageSpec extends ZIOSpecDefault:
         wf.jobs.contains(SbtImageWorkflow.EnvImageJob),
         wf.jobs("test").env.get("WIDGET_PATH").contains("/opt/widgets"),
         wf.jobs("test").env.get("HOME").contains(SbtImage.CacheHome),
-        plan.agentImage(Some("early-effect/zipx")).exists(_.contains("/zipx-env:df-")),
-        plan.agentImage(None).isLeft,
+        plan.derivedTag.exists(_.startsWith("df-")),
         clashed.exists(_.contains("WIDGET_PATH")),
       )
     },

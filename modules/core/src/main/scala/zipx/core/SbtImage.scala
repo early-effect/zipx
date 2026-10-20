@@ -139,6 +139,9 @@ object SbtImage:
 
   def contentTag(body: String): String = "df-" + sha256(body)
 
+  /** One `ENV` line. The agent module is outside `zipx.core`, so this is the public wrapper. */
+  def envLine(key: String, value: String): String = SbtImageLayer.envLine(key, value)
+
   /** Job env so the JVM and the cache step share [[CacheHome]]. Existing keys win; a flag is appended when the value
     * does not already set `user.home`.
     */
@@ -344,14 +347,4 @@ final case class SbtImagePlan(
     dockerSocket: Boolean,
     cacheHome: String,
     layerEnv: Map[String, String] = Map.empty,
-):
-  def agentImage(repository: Option[String]): Either[String, String] =
-    derivedTag match
-      case None      => Right(upstream)
-      case Some(tag) =>
-        repository
-          .map(SbtImage.ghcrImage(_, tag))
-          .toRight(
-            "zipx: the cloud agent needs a GitHub origin (git@github.com:owner/repo) to name ghcr.io/<owner>/<repo>/zipx-env"
-          )
-end SbtImagePlan
+)

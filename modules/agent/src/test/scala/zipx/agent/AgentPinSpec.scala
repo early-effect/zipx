@@ -93,6 +93,51 @@ object AgentPinSpec extends ZIOSpecDefault:
         missing.left.exists(_.contains("agent-docker")),
       )
     },
+    test("debian order puts a tilde before the release and keeps resolute ahead of noble") {
+      assertTrue(
+        DebianVersion.compare("1.0~rc1", "1.0") < 0,
+        DebianVersion.compare("~~", "~~a") < 0,
+        DebianVersion.compare("~~a", "~") < 0,
+        DebianVersion.compare("~", "a") < 0,
+        DebianVersion.compare("1.13-1", "1.14-1build2") < 0,
+        DebianVersion.compare("1.8.10-3ubuntu2", "1.8.11-2ubuntu3") < 0,
+        DebianVersion.compare("1:1.0", "2.0") > 0,
+        DebianVersion.compare(AgentDaemon.DefaultFuse, AgentDaemon.DefaultFuse) == 0,
+      )
+    },
+    test("an apt pin matches the package name and both architectures") {
+      val body =
+        """Package: fuse-overlayfs
+          |Version: 1.13-1
+          |
+          |Package: fuse-overlayfs-dbgsym
+          |Version: 9.9.9
+          |
+          |Package: fuse-overlayfs
+          |Version: 1.14-1build2
+          |""".stripMargin
+      val older =
+        """Package: fuse-overlayfs
+          |Version: 1.13-1
+          |""".stripMargin
+      assertTrue(
+        AgentDaemon.versions(body, "fuse-overlayfs") == List("1.13-1", "1.14-1build2"),
+        AgentDaemon.newest("1.13-1", body, body, "fuse-overlayfs") == Right(Some("1.14-1build2")),
+        AgentDaemon.newest("1.14-1build2", body, body, "fuse-overlayfs") == Right(None),
+        AgentDaemon.newest("1.13-1", body, older, "fuse-overlayfs") == Right(None),
+      )
+    },
+    test("the sbt-image daemon names its own pins and does not accept a slash in an apt version") {
+      val missing = AgentDaemon.resolve(Seq(Pin("sbt-image", "docker-cli", "28.5.2")))
+      val bad     = AgentDaemon.validateApt("1.14-1 build2")
+      assertTrue(
+        missing.left.exists(_.contains("fuse-overlayfs")),
+        missing.left.exists(_.contains("ubuntu-suite")),
+        bad.isLeft,
+        AgentDaemon.validateSuite("Resolute").isLeft,
+        AgentDaemon.validateCli("28.5").isLeft,
+      )
+    },
     test("resolve accepts the three catalog pins") {
       val pins = Seq(
         Pin("agent-base", "ubuntu", "sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"),

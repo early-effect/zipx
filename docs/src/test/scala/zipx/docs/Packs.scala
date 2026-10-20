@@ -11,7 +11,7 @@ import zipx.docs.DocsFixtures.*
 import zipx.docs.DocsRender.yaml
 import zipx.github.ZipxGitHubPackages
 import zipx.maven.ZipxMaven
-import zipx.agent.{AgentEnv, AgentPins, CursorEnv}
+import zipx.agent.{AgentDaemon, AgentEnv, AgentImage, AgentPins, CursorEnv}
 import zipx.specular.ZipxDocs
 import zio.test.*
 
@@ -396,20 +396,27 @@ rules and MCP stay untracked:
 !.cursor/Dockerfile
 ```
 
-The JDK comes from `project/zipx-ci.env` at install time, not from the image. The sbt runner reads
-`project/build.properties`. Secret *names* from `zipxEnv` are checked before anything resolves. So is the release
+Secret *names* from `zipxEnv` are checked before anything resolves. So is the release
 lookup credential: `GITHUB_TOKEN` when the registry reads GitHub's token, otherwise the secret's env name. `install.sh`
 fails if any of those variables is empty, and the message says to set each as a Cursor **Runtime Secret**. A Build
 Secret is present only while the image is built. `repositoryDependencies` widens the git token. Neither one
-authenticates Maven. The warm command is `zipxCacheRehydrateTask`, run as `sbt --server --batch`. Ubuntu, Docker CE
-28, and the sbt runner are catalog `Pin` vals (`agent-base`, `agent-docker`, `agent-sbt`) so `zipxPinUpdate` can move
-them. Docker 29 is refused.
+authenticates Maven. The warm command is `zipxCacheRehydrateTask`, run as `sbt --server --batch`. Caches and tokens
+stay out of the image. The agent's warm disk is the install step, not `actions/cache`.
 
-`zipxSbtImage` replaces that Ubuntu base with the shared sbt image (see **Caching**). With `docker = false`,
-`environment.json` sets `image` to the shared ref and `install.sh` does not download a JDK. With `docker = true`,
-the Dockerfile is `FROM` that ref and then installs Docker CE. The agent starts the daemon. The shared image has no
-dockerd. Caches and tokens stay out of both images. The agent's warm disk is still the install step, not
-`actions/cache`.
+With `zipxSbtImage` off, the Dockerfile is Ubuntu. The JDK comes from `project/zipx-ci.env` at install time. The sbt
+runner reads `project/build.properties`. Ubuntu, Docker CE 28, and the sbt runner are catalog `Pin` vals
+(`agent-base`, `agent-docker`, `agent-sbt`) so `zipxPinUpdate` can move them. Docker 29 is refused. `docker = true`
+installs Docker CE from apt and starts it with `sudo service docker start`.
+
+With `zipxSbtImage` on, those three pins are unused. Delete them. The agent Dockerfile is the public
+`sbtscala/scala-sbt` pin, then the same `RUN` lines the env image publishes, then a daemon when `docker = true`. It
+does not `FROM` `ghcr.io/<owner>/<repo>/zipx-env`. Cursor cannot pull that tag. The daemon is the static `dockerd`
+from the `docker-cli` pin, plus exact `fuse-overlayfs` and `iptables` pins on feed `agent-daemon` (`ubuntu-suite`,
+`fuse-overlayfs`, `iptables`). `ubuntu-suite` names the Ubuntu release those package versions belong to. Apt installs
+them from the image's own archives, so a suite that image does not have fails the image build. `start` is
+`/usr/local/bin/zipx-dockerd`. With `docker = false` and no derived Dockerfile, `environment.json` sets `image` to
+the public pin. With a derived Dockerfile, the agent builds that text. Plain job env (`HOME`, `-Duser.home`, git
+`safe.directory`, `COURSIER_TTL`) is written into that Dockerfile. Secrets are not.
 """,
       exampleValue {
         CursorEnv
@@ -418,7 +425,7 @@ dockerd. Caches and tokens stay out of both images. The agent's warm disk is sti
               docker = true,
               rehydrate = SbtCommand.unsafeTask("Test/compile"),
               secretEnv = List("REGISTRY_TOKEN"),
-              pins = AgentPins(AgentPins.DefaultBase, AgentPins.DefaultDocker, AgentPins.DefaultSbtRunner),
+              pins = Some(AgentPins(AgentPins.DefaultBase, AgentPins.DefaultDocker, AgentPins.DefaultSbtRunner)),
             )
           )
           .fold(identity, files => files.environmentJson + files.dockerfile.getOrElse(""))
@@ -441,18 +448,31 @@ dockerd. Caches and tokens stay out of both images. The agent's warm disk is sti
               docker = true,
               rehydrate = SbtCommand.unsafeTask("Test/compile"),
               secretEnv = List("GITHUB_TOKEN"),
-              pins = AgentPins(AgentPins.DefaultBase, AgentPins.DefaultDocker, AgentPins.DefaultSbtRunner),
-              toolchain = Some(image),
+              toolchain = Some(
+                AgentImage(
+                  upstream = image,
+                  baked = None,
+                  dockerCli = Some("28.5.2"),
+                  fuseOverlayfs = Some(AgentDaemon.DefaultFuse),
+                  iptables = Some(AgentDaemon.DefaultIptables),
+                  env = Map("HOME" -> "/home/sbtuser", "COURSIER_TTL" -> "0s"),
+                )
+              ),
             )
           )
           .fold(identity, files => files.environmentJson + files.dockerfile.getOrElse("") + files.installSh)
       }.assert { rendered =>
         assertTrue(
           rendered.contains("FROM sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x@sha256:" + ("ab" * 32)),
-          rendered.contains("service docker start"),
-          !rendered.contains("sudo service docker start"),
+          rendered.contains("/usr/local/bin/zipx-dockerd"),
+          rendered.contains("docker-28.5.2.tgz"),
+          rendered.contains("fuse-overlayfs=1.14-1build2"),
+          !rendered.contains("ghcr.io"),
+          !rendered.contains("gpg"),
+          !rendered.contains("service docker start"),
           rendered.contains("Cursor Runtime Secret"),
           rendered.contains("GITHUB_TOKEN"),
+          !rendered.contains("export COURSIER_TTL=0s"),
           !rendered.contains("openjdk"),
         )
       },
