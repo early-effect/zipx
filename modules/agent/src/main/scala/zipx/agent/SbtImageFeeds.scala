@@ -1,6 +1,6 @@
 package zipx.agent
 
-import zipx.core.{HttpLookup, Pin, PinAction, PinCandidate, PinFeed, SbtImage, VersionStrategy}
+import zipx.core.{HttpLookup, Pin, PinAction, PinCandidate, PinFeed, SbtImage, SbtImageLayer, VersionStrategy}
 
 /** Lookup for the `sbt-image` pins. Registered while `zipxSbtImage` is on, or while the catalog already has one of
   * these pins, so `zipxPinUpdate` can rewrite them.
@@ -20,16 +20,17 @@ object SbtImageFeeds:
   private val Next    = """"next"\s*:\s*"([^"]+)"""".r
   private val Token   = """"token"\s*:\s*"([^"]+)"""".r
 
-  def all: Seq[PinFeed] = Seq(feed)
-
-  def withUser(user: Seq[PinFeed], pins: Seq[Pin], enabled: Boolean): Seq[PinFeed] =
-    val wanted = enabled || pins.exists(_.feed == SbtImage.Feed)
+  def withUser(
+      user: Seq[PinFeed],
+      pins: Seq[Pin],
+      enabled: Boolean,
+      layers: Seq[SbtImageLayer] = Nil,
+  ): Seq[PinFeed] =
+    val wanted = enabled || layers.nonEmpty || pins.exists(_.feed == SbtImage.Feed)
     if !wanted then user
-    else
-      val have = user.map(_.name).toSet
-      user ++ all.filterNot(row => have.contains(row.name))
+    else user.filterNot(_.name == SbtImage.Feed) :+ feed(layers)
 
-  val feed: PinFeed = PinFeed(
+  def feed(layers: Seq[SbtImageLayer]): PinFeed = PinFeed(
     name = SbtImage.Feed,
     classify = VersionStrategy.exact,
     lookup = pin =>
@@ -38,11 +39,23 @@ object SbtImageFeeds:
         case SbtImage.NodeId      => numbered(pin.current, NodeIndex, SbtImage.nodeVersions, "node")
         case SbtImage.CsId        => numbered(pin.current, CoursierReleases, SbtImage.releases, "cs")
         case SbtImage.DockerCliId => dockerCli(pin.current)
-        case _                    => Right(None)
+        case other                => layerLookup(layers, pin, other)
     ,
     outdated = PinAction.Update,
     advisory = PinAction.Ignore,
   )
+
+  private def layerLookup(layers: Seq[SbtImageLayer], pin: Pin, id: String): Either[String, Option[PinCandidate]] =
+    layers.find(_.id == id) match
+      case None        => Right(None)
+      case Some(layer) =>
+        layer.lookup(pin).flatMap {
+          case None       => Right(None)
+          case Some(cand) =>
+            SbtImage.layerCandidate(id, pin.current, cand.version) match
+              case Left(err)   => Left(err.message)
+              case Right(next) => Right(next.map(version => cand.copy(version = version)))
+        }
 
   private def imageCandidate(current: String): Either[String, Option[PinCandidate]] =
     SbtImage.parse(current).flatMap { ref =>

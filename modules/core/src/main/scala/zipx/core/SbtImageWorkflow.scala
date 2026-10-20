@@ -83,7 +83,10 @@ object SbtImageWorkflow:
       containerOptions = job.containerOptions.orElse(Option.when(socket)(SbtImage.SocketOptions)),
       needs = needs,
       permissions = pullPermissions(job.permissions, plan.dockerfile.isDefined),
-      env = SbtImage.homeEnv(job.env, plan.cacheHome),
+      env = SbtImage.homeEnv(
+        SbtImage.overlayEnv(job.env, plan.layerEnv).fold(err => sys.error(err.message), identity),
+        plan.cacheHome,
+      ),
     )
   end decorate
 

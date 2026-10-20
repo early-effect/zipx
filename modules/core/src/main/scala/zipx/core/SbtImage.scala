@@ -179,71 +179,105 @@ object SbtImage:
       nodeVersions: List[NodeVersion],
       coursier: Boolean,
       docker: Boolean,
-  ): Either[String, SbtImagePlan] =
+      layers: Seq[SbtImageLayer] = Nil,
+  ): Either[SbtImageError, SbtImagePlan] =
     for
-      major <- javaMajor(javaVersion)
+      major <- javaMajor(javaVersion).left.map(_ => SbtImageError.BadJavaVersion(javaVersion))
       raw   <- imagePin(pins)
-      ref   <- parse(raw)
-      _     <- Either.cond(
-        ref.major == major,
-        (),
-        s"zipx: sbt image pin is Temurin ${ref.major} and zipxJavaVersion is $javaVersion",
-      )
-      node <- oneNode(nodeVersions.map(version => version: String), pinVersion(pins, NodeId))
-      cs   <- toolPin(coursier, pinVersion(pins, CsId), CsId, "version updates")
-      cli  <- toolPin(docker, pinVersion(pins, DockerCliId), DockerCliId, "image publishes")
-    yield planOf(ref, node, cs, cli)
+      ref   <- parse(raw).left.map(_ => SbtImageError.BadImagePin(raw))
+      _     <- Either.cond(ref.major == major, (), SbtImageError.JdkMismatch(ref.major, javaVersion))
+      node  <- oneNode(nodeVersions.map(version => version: String), pinVersion(pins, NodeId))
+      cs    <- toolPin(coursier, pinVersion(pins, CsId), CsId, "version updates")
+      cli   <- toolPin(docker, pinVersion(pins, DockerCliId), DockerCliId, "image publishes")
+      baked <- SbtImageLayer.assemble(pins, layers)
+    yield planOf(ref, node, cs, cli, baked)
 
-  private def planOf(ref: Ref, node: Option[String], cs: Option[String], cli: Option[String]): SbtImagePlan =
-    val body = renderDockerfile(ref.reference, node, cs, cli)
+  /** Layers are the derived image. An empty list while the setting is off is the default. */
+  def layersRequireImage(enabled: Boolean, layers: Seq[SbtImageLayer]): Option[SbtImageError] =
+    Option.when(!enabled && layers.nonEmpty)(SbtImageError.LayersWhileImageOff)
+
+  /** zipx owns the `sbt-image` feed. A caller-supplied feed of that name would drop layer lookup. */
+  def shadowedFeed(feeds: Seq[PinFeed], pins: Seq[Pin], enabled: Boolean): Option[SbtImageError] =
+    val active = enabled || pins.exists(_.feed == Feed)
+    Option.when(active && feeds.exists(_.name == Feed))(SbtImageError.FeedShadowed)
+
+  /** Same-major concrete `x.y.z`, or a refusal. `None` means the candidate is not newer. */
+  def layerCandidate(id: String, current: String, proposed: String): Either[SbtImageError, Option[String]] =
+    (parseRelease(current), parseRelease(proposed)) match
+      case (None, _) =>
+        Left(SbtImageError.LayerPinNotConcrete(id, current))
+      case (_, None) =>
+        Left(SbtImageError.BadCandidate(id, proposed))
+      case (Some(cur), Some(next)) if next.major != cur.major =>
+        Left(SbtImageError.CandidateMajor(id, proposed, cur.major))
+      case _ =>
+        numberedCandidate(current, List(current, proposed)) match
+          case Right(next) => Right(next)
+          case Left(_)     => Left(SbtImageError.BadCandidate(id, proposed))
+
+  /** Layer env fills keys the job does not already set. A different value is a generate error. */
+  def overlayEnv(job: Map[String, String], layer: Map[String, String]): Either[SbtImageError, Map[String, String]] =
+    layer.foldLeft[Either[SbtImageError, Map[String, String]]](Right(job)) { case (acc, (key, value)) =>
+      acc.flatMap { env =>
+        env.get(key) match
+          case Some(existing) if existing != value => Left(SbtImageError.EnvClash(key, existing, value))
+          case Some(_)                             => Right(env)
+          case None                                => Right(env + (key -> value))
+      }
+    }
+
+  private def planOf(
+      ref: Ref,
+      node: Option[String],
+      cs: Option[String],
+      cli: Option[String],
+      baked: SbtImageLayer.Rendered,
+  ): SbtImagePlan =
+    val body = renderDockerfile(ref.reference, node, cs, cli, baked.runs, baked.env)
     SbtImagePlan(
       upstream = ref.reference,
       derivedTag = body.map(contentTag),
       dockerfile = body,
       dockerSocket = cli.isDefined,
       cacheHome = CacheHome,
+      layerEnv = baked.env,
     )
+  end planOf
 
-  private def imagePin(pins: Seq[Pin]): Either[String, String] =
-    pinVersion(pins, ImageId).toRight(
-      s"""zipx: zipxSbtImage needs Pin("${Feed: String}", "$ImageId", "eclipse-temurin-<jdk>_<build>_2.x@sha256:<digest>")"""
-    )
+  private def imagePin(pins: Seq[Pin]): Either[SbtImageError, String] =
+    pinVersion(pins, ImageId).toRight(SbtImageError.MissingImagePin)
 
   private def pinVersion(pins: Seq[Pin], id: String): Option[String] =
     pins.find(pin => pin.feed == Feed && pin.id == id).map(_.current)
 
-  private def oneNode(asked: List[String], pinned: Option[String]): Either[String, Option[String]] =
+  private def oneNode(asked: List[String], pinned: Option[String]): Either[SbtImageError, Option[String]] =
     asked.distinct match
       case Nil        => Right(None)
       case one :: Nil =>
         if isConcrete(one) then
           pinned match
-            case Some(pin) if pin != one => Left(s"zipx: Node pin is $pin and a capability asks for $one")
+            case Some(pin) if pin != one => Left(SbtImageError.NodeMismatch(pin, one))
             case _                       => Right(Some(one))
         else
           pinned match
             case Some(pin) if isConcrete(pin) => Right(Some(pin))
-            case Some(pin)                    => Left(s"zipx: Node pin '$pin' is not a concrete x.y.z")
-            case None                         =>
-              Left(
-                s"""zipx: Node version '$one' is not a concrete x.y.z. Pin("${Feed: String}", "$NodeId", "<x.y.z>") so the pin companion can move it"""
-              )
+            case Some(pin)                    => Left(SbtImageError.NodePinNotConcrete(pin))
+            case None                         => Left(SbtImageError.NodeAliasUnpinned(one))
       case many =>
-        Left(s"zipx: zipxSbtImage needs one Node version; capabilities asked for ${many.mkString(", ")}")
+        Left(SbtImageError.ManyNodeVersions(many))
 
   private def toolPin(
       wanted: Boolean,
       pinned: Option[String],
       id: String,
       why: String,
-  ): Either[String, Option[String]] =
+  ): Either[SbtImageError, Option[String]] =
     if !wanted then Right(None)
     else
       pinned match
         case Some(pin) if isConcrete(pin) => Right(Some(pin))
-        case Some(pin)                    => Left(s"zipx: $id pin '$pin' is not a concrete x.y.z")
-        case None                         =>
-          Left(s"""zipx: zipxSbtImage with $why needs Pin("${Feed: String}", "$id", "<x.y.z>")""")
+        case Some(pin)                    => Left(SbtImageError.ToolPinNotConcrete(id, pin))
+        case None                         => Left(SbtImageError.MissingToolPin(id, why))
 
   /** None when the upstream image already has every tool. The hash of this text is the published tag. */
   def renderDockerfile(
@@ -251,12 +285,16 @@ object SbtImage:
       node: Option[String],
       cs: Option[String],
       dockerCli: Option[String],
+      layerRuns: List[String] = Nil,
+      layerEnv: Map[String, String] = Map.empty,
   ): Option[String] =
-    if node.isEmpty && cs.isEmpty && dockerCli.isEmpty then None
+    if node.isEmpty && cs.isEmpty && dockerCli.isEmpty && layerRuns.isEmpty && layerEnv.isEmpty then None
     else
-      val installs = node.toList.map(nodeInstall) ++ cs.toList.map(csInstall) ++ dockerCli.toList.map(dockerInstall)
+      val installs =
+        node.toList.map(nodeInstall) ++ cs.toList.map(csInstall) ++ dockerCli.toList.map(dockerInstall) ++ layerRuns
+      val envLines = layerEnv.toList.sortBy(_._1).map((key, value) => SbtImageLayer.envLine(key, value))
       Some(
-        (List(ZipxCatalog.GeneratedHeader, s"FROM $base", "USER root") ++ installs ++ List("WORKDIR /root"))
+        (List(ZipxCatalog.GeneratedHeader, s"FROM $base", "USER root") ++ installs ++ envLines ++ List("WORKDIR /root"))
           .mkString("\n") + "\n"
       )
 
@@ -305,6 +343,7 @@ final case class SbtImagePlan(
     dockerfile: Option[String],
     dockerSocket: Boolean,
     cacheHome: String,
+    layerEnv: Map[String, String] = Map.empty,
 ):
   def agentImage(repository: Option[String]): Either[String, String] =
     derivedTag match

@@ -275,15 +275,24 @@ not that directory and the cache paths are absolute. `setup-sbt`'s own disk cach
 The composite still restores and saves the snapshot.
 
 When a capability sets `withNodeVersion`, version updates are on (they need `cs`), or a job publishes images (it
-needs the Docker client), zipx writes `.github/zipx-env/Dockerfile` `FROM` that pin and bakes only those tools. A
-tool that is not an sbt output, such as a Playwright browser, belongs in that image too, so the Dockerfile hash
-moves when the tool moves. That bake is not generated yet. The
+needs the Docker client), zipx writes `.github/zipx-env/Dockerfile` `FROM` that pin and bakes only those tools. The
 published tag is `ghcr.io/<owner>/<repo>/zipx-env:df-<hash of the Dockerfile>`. A `zipx-env-image` job builds and
 pushes only when the tag is missing. The hash moves when the sbt pin, the Node pin, or the `cs` pin moves. `latest`
 and `lts` are not baked: pin `Pin("sbt-image", "node", "<x.y.z>")`. Two capabilities asking for two Node versions is
 a generate error. A docker job mounts the runner socket. The image has the client, not a daemon. `inContainer` is
 refused while this setting is on: the shared image is already the container. A job that sets its own `permissions`
 also gets `packages: read`, because that block does not inherit the token that can pull a private env image.
+
+A tool that is not an sbt output (a browser, a codegen CLI, a C toolchain) is a `zipxSbtImageLayers` entry, not a
+file under `target/` and not a path under `/home/sbtuser`. The snapshot does not keep `target/`, and the cache mount
+hides `/home/sbtuser`. One layer is a `Pin("sbt-image", "<id>", "<x.y.z>")` plus a function of that version and the
+CPU architecture. The function returns download and `apt` steps. zipx writes every `RUN`. There is no shell hook, and
+the URL does not have to contain the version text: a browser revision in the path is enough, as long as the function
+actually uses the version so a bump changes the Dockerfile. An `apt` step names an exact package version.
+`apt-get update` is the one line that is not a function of that text. The tag freezes the first push, so a later run
+with the same Dockerfile does not rebuild. An unpinned `apt-get install` cannot be expressed. The same `ENV` map is
+written into the image and onto each sbt job, so the cloud agent and CI share the path. A second `PinFeed` named
+`sbt-image` is a generate error. The layer carries its own lookup, and that lookup is what moves the pin.
 """,
       exampleValue {
         val digest  = "ab" * 32
@@ -296,8 +305,8 @@ also gets `packages: read`, because that block does not inherit the token that c
           None,
         )
         SbtImage.resolve(config.javaVersion, Seq(pin), Nil, coursier = false, docker = false) match
-          case Left(message) => message
-          case Right(plan)   =>
+          case Left(err)   => err.message
+          case Right(plan) =>
             DocsRender.job("test")(Capability.test)(using libGraph, config.copy(sbtImage = Some(plan)))
       }.assert { yaml =>
         assertTrue(
@@ -306,6 +315,50 @@ also gets `packages: read`, because that block does not inherit the token that c
           yaml.contains("cache-home: /home/sbtuser"),
           yaml.contains("HOME: /home/sbtuser"),
           !yaml.contains("actions/setup-java"),
+        )
+      },
+      exampleValue {
+        val digest  = "ab" * 32
+        val version = s"eclipse-temurin-21.0.12_8_2.x@sha256:$digest"
+        val base    = Pin(
+          PinFeedName.unsafeMake("sbt-image"),
+          SbtImage.ImageId,
+          DepVersion.unsafeMake(version),
+          None,
+          None,
+        )
+        val widget = Pin(PinFeedName.unsafeMake("sbt-image"), "widgets", DepVersion.unsafeMake("1.2.3"), None, None)
+        val layer  = SbtImageLayer("widgets", _ => Right(None))
+          .install { (pinned, arch) =>
+            val name = arch match
+              case CpuArch.Amd64 => "x86_64"
+              case CpuArch.Arm64 => "aarch64"
+            List(
+              ImageStep.Tree(
+                url = s"https://example.test/widgets/$pinned/widgets-$name.tar.gz",
+                dest = "/opt/widgets",
+                format = ArchiveFormat.TarGz,
+                strip = 1,
+              ),
+              ImageStep.EmptyFile("/opt/widgets/READY"),
+              ImageStep.Apt("libwidgets", "1.2.3-1"),
+            )
+          }
+          .withEnv("WIDGET_PATH" -> "/opt/widgets")
+        SbtImage.resolve(config.javaVersion, Seq(base, widget), Nil, coursier = false, docker = false, Seq(layer)) match
+          case Left(err)   => err.message
+          case Right(plan) =>
+            plan.dockerfile.getOrElse("") + "\n" +
+              DocsRender.job("test")(Capability.test)(using libGraph, config.copy(sbtImage = Some(plan)))
+      }.assert { text =>
+        assertTrue(
+          text.contains("https://example.test/widgets/1.2.3/widgets-x86_64.tar.gz"),
+          text.contains("https://example.test/widgets/1.2.3/widgets-aarch64.tar.gz"),
+          text.contains("/opt/widgets"),
+          text.contains("libwidgets=1.2.3-1"),
+          text.contains("rm -rf /var/lib/apt/lists/*"),
+          text.contains("WIDGET_PATH"),
+          !text.contains("nodejs.org"),
         )
       },
     ),

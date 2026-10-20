@@ -147,6 +147,19 @@ object ZipxPlugin extends AutoPlugin:
     type NodeVersion = zipx.core.NodeVersion
     val NodeVersion = zipx.core.NodeVersion
 
+    type SbtImageLayer = zipx.core.SbtImageLayer
+    val SbtImageLayer = zipx.core.SbtImageLayer
+    type ImageStep = zipx.core.ImageStep
+    val ImageStep = zipx.core.ImageStep
+    type FileSource = zipx.core.FileSource
+    val FileSource = zipx.core.FileSource
+    type FileMode = zipx.core.FileMode
+    val FileMode = zipx.core.FileMode
+    type ArchiveFormat = zipx.core.ArchiveFormat
+    val ArchiveFormat = zipx.core.ArchiveFormat
+    type CpuArch = zipx.core.CpuArch
+    val CpuArch = zipx.core.CpuArch
+
     /** Not exported as `Command`, which is sbt's own name in a `build.sbt`. */
     type SbtCommand = zipx.core.SbtCommand
     val SbtCommand = zipx.core.SbtCommand
@@ -428,6 +441,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxEnv                  = settingKey[Map[String, EnvValue]](ZipxSettings.env.description)
     val zipxAgentEnv             = settingKey[CloudAgent](ZipxSettings.agentEnv.description)
     val zipxSbtImage             = settingKey[Boolean](ZipxSettings.sbtImage.description)
+    val zipxSbtImageLayers       = settingKey[Seq[SbtImageLayer]](ZipxSettings.sbtImageLayers.description)
     val zipxCancelSupersededRuns = settingKey[Boolean](ZipxSettings.cancelSupersededRuns.description)
     val zipxCheckCommandNames    = settingKey[Boolean](ZipxSettings.checkCommandNames.description)
     val zipxPinFeeds             = settingKey[Seq[PinFeed]](ZipxSettings.pinFeeds.description)
@@ -521,6 +535,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxEnv                      := Map.empty,
     zipxAgentEnv                 := zipx.core.CloudAgent.Off,
     zipxSbtImage                 := false,
+    zipxSbtImageLayers           := Seq.empty[SbtImageLayer],
     zipxCancelSupersededRuns     := true,
     zipxCheckCommandNames        := true,
     zipxVerifyClean              := VerifyClean.None,
@@ -933,20 +948,26 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   private def sbtImagePlan(extracted: Extracted): Option[SbtImagePlan] =
-    if !readBuildSetting(extracted, zipxSbtImage, false) then None
+    val layers  = readBuildSetting(extracted, zipxSbtImageLayers, Seq.empty[SbtImageLayer])
+    val enabled = readBuildSetting(extracted, zipxSbtImage, false)
+    SbtImage.layersRequireImage(enabled, layers).foreach(err => sys.error(err.message))
+    if !enabled then None
     else
       val caps = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
       Some(
-        orFail(
-          SbtImage.resolve(
+        SbtImage
+          .resolve(
             readBuildSetting(extracted, zipxJavaVersion, PlanConfig.DefaultJdkVersion),
             readBuildSetting(extracted, zipxPins, Seq.empty),
             caps.flatMap(_.nodeVersion).toList,
             readBuildSetting(extracted, zipxVersionUpdates, true),
             caps.exists(c => c.name == Capability.DockerName || c.needsCapabilities.contains(Capability.DockerName)),
+            layers,
           )
-        )
+          .fold(err => sys.error(err.message), identity)
       )
+    end if
+  end sbtImagePlan
 
   /** A committed pin YAML is leftover input and always fails, even when `zipxActions` is set. */
   private def resolveActionPins(extracted: Extracted, root: File): ActionPins =
@@ -1179,15 +1200,19 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   private def pinFeeds(extracted: Extracted): Seq[PinFeed] =
-    val pins  = readBuildSetting(extracted, zipxPins, Seq.empty)
+    val pins    = readBuildSetting(extracted, zipxPins, Seq.empty)
+    val user    = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val enabled = readBuildSetting(extracted, zipxSbtImage, false)
+    val layers  = readBuildSetting(extracted, zipxSbtImageLayers, Seq.empty[SbtImageLayer])
+    SbtImage.shadowedFeed(user, pins, enabled).foreach(err => sys.error(err.message))
     val agent = ZipxAgentEnv.withFeeds(
-      readBuildSetting(extracted, zipxPinFeeds, Seq.empty),
+      user,
       pins,
       readBuildSetting(extracted, zipxAgentEnv, zipx.core.CloudAgent.Off) match
         case zipx.core.CloudAgent.Off   => false
         case zipx.core.CloudAgent.On(_) => true,
     )
-    zipx.agent.SbtImageFeeds.withUser(agent, pins, readBuildSetting(extracted, zipxSbtImage, false))
+    zipx.agent.SbtImageFeeds.withUser(agent, pins, enabled, layers)
   end pinFeeds
 
   private def agentFiles(
