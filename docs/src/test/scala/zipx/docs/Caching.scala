@@ -208,6 +208,10 @@ not drop them either:
 a baked epoch's last restore-key is the OS+JDK prefix with no epoch in it, so a miss restores the newest entry under
 that prefix.
 
+A warm rerun of one commit in zipx-ci-lab, on that snapshot, compiled nothing in the `test` job. Its compiled list
+was empty, and Greeter, Name, svc-a, svc-b, worker-a, and worker-b still ran. A job that compiles a module the cache
+owner never compiled still compiles that module.
+
 A PR labeled **`purge`** skips that restore for the run. The save owner still saves when the job succeeds, and the
 save has no restore-keys: the primary key includes the run id, so the lookup misses, and the cache action's post
 step writes the fresh snapshot. Restore-only jobs in the same run skip the cache step, so they do not pull the old
