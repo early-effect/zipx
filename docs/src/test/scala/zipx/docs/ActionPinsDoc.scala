@@ -143,9 +143,11 @@ workflow only when a capability asks for a Node version:
 zipxCapabilities += Capability.testGraph.withNodeVersion(NodeVersion("22"))
 ```
 
-Off by default, and for a Scala.js build that is usually right: sbt-scalajs downloads its own Node for `jsEnv`, so a
-plain `.jsPlatform` test suite needs nothing here. Ask for it when the version matters, which is narrower than "the
-build has JS in it": a `jsEnv` requiring a specific Node, or a step running `npm ci` for a bundler.
+Off by default. A GitHub-hosted runner already has Node, so a Scala.js suite passes there without this.
+sbt-scalajs does not download Node. `zipxSbtImage` skips setup-node, so a `.jsPlatform` test in that image
+fails with `failed to start node` until the capability that runs it asks for a version and
+`Pin("sbt-image", "node", "<x.y.z>")` bakes that version in. Ask for a version on the host runner too when
+the suite needs a specific Node, or a step runs `npm ci`.
 
 The version is a `NodeVersion` newtype, so every form `setup-node` accepts (`22`, `22.11.0`, `latest`, `lts/jod`,
 `lts/*`) is checked while your `build.sbt` compiles, and a value that would break the YAML is a compile error rather

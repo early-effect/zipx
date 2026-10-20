@@ -275,8 +275,9 @@ not that directory and the cache paths are absolute. `setup-sbt`'s own disk cach
 The composite still restores and saves the snapshot.
 
 When a capability sets `withNodeVersion`, version updates are on (they need `cs`), or a job publishes images (it
-needs the Docker client), zipx writes `.github/zipx-env/Dockerfile` `FROM` that pin and bakes only those tools. The
-published tag is `ghcr.io/<owner>/<repo>/zipx-env:df-<hash of the Dockerfile>`. A `zipx-env-image` job builds and
+needs the Docker client), zipx writes `.github/zipx-env/Dockerfile` `FROM` that pin and bakes only those tools.
+sbt-scalajs does not fetch Node. Without `withNodeVersion` the image has none, and a `.jsPlatform` test fails
+to start `node`. The published tag is `ghcr.io/<owner>/<repo>/zipx-env:df-<hash of the Dockerfile>`. A `zipx-env-image` job builds and
 pushes only when the tag is missing. The hash moves when the sbt pin, the Node pin, or the `cs` pin moves. `latest`
 and `lts` are not baked: pin `Pin("sbt-image", "node", "<x.y.z>")`. Two capabilities asking for two Node versions is
 a generate error. Every Linux job container already receives `/var/run/docker.sock` from the runner. A job that
