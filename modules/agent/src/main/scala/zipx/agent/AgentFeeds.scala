@@ -1,6 +1,6 @@
 package zipx.agent
 
-import zipx.core.{HttpLookup, Pin, PinAction, PinCandidate, PinFeed, VersionStrategy}
+import zipx.core.{CloudAgent, HttpLookup, Pin, PinAction, PinCandidate, PinFeed, VersionStrategy}
 
 /** Lookups for the agent pins. Registered while `zipxAgentEnv` is set, or while the catalog already has one of these
   * pins, so `zipxPinUpdate` can rewrite them.
@@ -16,12 +16,26 @@ object AgentFeeds:
 
   def all: Seq[PinFeed] = Seq(base, docker, sbtRunner)
 
-  def withUser(user: Seq[PinFeed], pins: Seq[Pin], enabled: Boolean): Seq[PinFeed] =
-    val wanted = enabled || pins.exists(pin => AgentPins.feedNames.contains(pin.feed))
-    if !wanted then user
-    else
-      val have = user.map(_.name).toSet
-      user ++ all.filterNot(feed => have.contains(feed.name))
+  /** Ubuntu feeds stay off while `zipxSbtImage` is on, even if those pins are still in the catalog. The daemon feed is
+    * the sbt-image agent's apt pins.
+    */
+  def withUser(user: Seq[PinFeed], pins: Seq[Pin], agent: CloudAgent, sbtImage: Boolean): Seq[PinFeed] =
+    val enabled = agent match
+      case CloudAgent.Off   => false
+      case CloudAgent.On(_) => true
+    val ubuntu =
+      if sbtImage then user
+      else if enabled || pins.exists(pin => AgentPins.feedNames.contains(pin.feed)) then
+        val have = user.map(_.name).toSet
+        user ++ all.filterNot(feed => have.contains(feed.name))
+      else user
+    val docker = agent match
+      case CloudAgent.On(true) => true
+      case _                   => false
+    val wantDaemon = sbtImage && (docker || pins.exists(_.feed == AgentDaemon.Feed))
+    if !wantDaemon || ubuntu.exists(_.name == AgentDaemon.Feed) then ubuntu
+    else ubuntu :+ AgentDaemon.feed(pins)
+  end withUser
 
   val base: PinFeed = PinFeed(
     name = AgentPins.BaseFeed,

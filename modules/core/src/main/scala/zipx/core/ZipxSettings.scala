@@ -562,7 +562,7 @@ object ZipxSettings:
       SettingName("zipxAgentEnv"),
       CloudAgent.Off,
       SettingPurpose(
-        "Render a Cursor cloud agent environment from this build (default off). ZipxAgentEnv.cursor(docker = true) installs and starts Docker. Writes .cursor/environment.json, .cursor/Dockerfile, and .github/zipx-agent/install.sh. JDK, sbt runner, secrets, and the rehydrate command come from the settings CI already uses. Secret checks are Cursor Runtime Secrets: a Build Secret is not visible to sbt."
+        "Render a Cursor cloud agent environment from this build (default off). ZipxAgentEnv.cursor(docker = true) installs and starts Docker. Writes .cursor/environment.json, .cursor/Dockerfile, and .github/zipx-agent/install.sh. With zipxSbtImage the Dockerfile is the public sbt image plus a static dockerd, and the Ubuntu agent pins are unused. Without it the Dockerfile is Ubuntu and Docker CE comes from apt. Secret checks are Cursor Runtime Secrets: a Build Secret is not visible to sbt."
       ),
       Build,
     )
@@ -572,7 +572,7 @@ object ZipxSettings:
       SettingName("zipxSbtImage"),
       false,
       SettingPurpose(
-        "Run sbt jobs and the cloud agent in the pinned sbtscala/scala-sbt light image (default false). The sbt-image feed moves the JDK-qualified tag and its manifest digest. Node, cs, and the Docker CLI are baked into ghcr.io/<owner>/<repo>/zipx-env when the build asks for them. LocalDir actions/cache stays outside the image. Opt in after the first containerized run, which misses every cache entry saved under /home/runner."
+        "Run sbt jobs in the pinned sbtscala/scala-sbt light image (default false). The cloud agent builds from that public pin and does not pull the published ghcr.io tag. The sbt-image feed moves the JDK-qualified tag and its manifest digest. Node, cs, and the Docker CLI are baked into ghcr.io/<owner>/<repo>/zipx-env when CI needs them. LocalDir actions/cache stays outside the image. Opt in after the first containerized run, which misses every cache entry saved under /home/runner."
       ),
       Build,
     )

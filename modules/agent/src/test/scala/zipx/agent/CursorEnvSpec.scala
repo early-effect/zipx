@@ -1,19 +1,22 @@
 package zipx.agent
 
 import zipx.core.EnvValue.secret
-import zipx.core.{EnvValue, SbtCommand}
+import zipx.core.{CloudAgent, DepVersion, EnvValue, JdkVersion, Pin, PinFeedName, SbtCommand, SbtImage}
 import zio.test.*
 
 object CursorEnvSpec extends ZIOSpecDefault:
 
   private val pins = AgentPins(AgentPins.DefaultBase, AgentPins.DefaultDocker, AgentPins.DefaultSbtRunner)
 
+  private def pin(feed: String, id: String, version: String): Pin =
+    Pin(PinFeedName.unsafeMake(feed), id, DepVersion.unsafeMake(version), None, None)
+
   private def env(docker: Boolean, secrets: List[String]) =
     AgentEnv(
       docker = docker,
       rehydrate = SbtCommand.unsafeTask("Test/compile"),
       secretEnv = secrets,
-      pins = pins,
+      pins = Some(pins),
     )
 
   private def files(docker: Boolean, secrets: List[String] = List("REGISTRY_TOKEN")) =
@@ -54,28 +57,115 @@ object CursorEnvSpec extends ZIOSpecDefault:
         docker.contains(s"sbt-${AgentPins.DefaultSbtRunner}.zip"),
         docker.contains("dpkg --print-architecture"),
         docker.contains("printf '%s\\n'"),
+        docker.contains("set -eux"),
+        docker.contains("if ! id -u ubuntu"),
         !docker.contains("x86_64"),
         !docker.toLowerCase.contains("temurin"),
         !docker.contains("COPY "),
         !docker.contains("openjdk"),
       )
     },
-    test("a shared sbt image is the agent image, and a daemon is FROM that image") {
-      val image  = "sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x@sha256:" + ("ab" * 32)
-      val plain  = CursorEnv.render(env(docker = false, List("GITHUB_TOKEN")).copy(toolchain = Some(image)))
-      val daemon = CursorEnv.render(env(docker = true, List("GITHUB_TOKEN")).copy(toolchain = Some(image)))
+    test("an upstream sbt image is the image field, and a baked file is built without a daemon") {
+      val upstream = "sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x@sha256:" + ("ab" * 32)
+      val baked    =
+        s"${zipx.core.ZipxCatalog.GeneratedHeader}\nFROM $upstream\nUSER root\nENV WIDGET_PATH=\"/opt/widgets\"\nWORKDIR /root\n"
+      val plain = CursorEnv.render(
+        env(docker = false, List("GITHUB_TOKEN")).copy(
+          pins = None,
+          toolchain =
+            Some(AgentImage(upstream, None, None, None, None, Map("COURSIER_TTL" -> "0s", "HOME" -> "/home/sbtuser"))),
+        )
+      )
+      val derived = CursorEnv.render(
+        env(docker = false, List("GITHUB_TOKEN")).copy(
+          pins = None,
+          toolchain = Some(
+            AgentImage(
+              upstream,
+              Some(baked),
+              None,
+              None,
+              None,
+              Map("COURSIER_TTL" -> "0s", "HOME" -> "/home/sbtuser", "WIDGET_PATH" -> "/opt/widgets"),
+            )
+          ),
+        )
+      )
       assertTrue(
         plain.exists { files =>
-          files.environmentJson.contains(s""""image": "$image"""") &&
+          files.environmentJson.contains(s""""image": "$upstream"""") &&
           files.dockerfile.isEmpty &&
+          files.installSh.contains("export COURSIER_TTL=0s") &&
           files.installSh.contains("Cursor Runtime Secret") &&
           files.installSh.contains("GITHUB_TOKEN") &&
           !files.installSh.contains("openjdk")
         },
-        daemon.exists { files =>
-          files.dockerfile.exists(_.contains(s"FROM $image")) &&
-          files.environmentJson.contains(""""start": "service docker start"""")
+        derived.exists { files =>
+          files.dockerfile.exists { text =>
+            text.contains(s"FROM $upstream") &&
+            text.contains("""ENV HOME="/home/sbtuser"""") &&
+            text.contains("""ENV COURSIER_TTL="0s"""") &&
+            text.split("ENV WIDGET_PATH=").length == 2
+          } &&
+          !files.environmentJson.contains("\"image\"") &&
+          !files.installSh.contains("export COURSIER_TTL=0s") &&
+          !files.environmentJson.contains("start")
         },
+      )
+    },
+    test("sbt-image docker installs static dockerd from the public base") {
+      val upstream = "sbtscala/scala-sbt:eclipse-temurin-25.0.4_7_2.x@sha256:" + ("ab" * 32)
+      val baked    =
+        s"${zipx.core.ZipxCatalog.GeneratedHeader}\nFROM $upstream\nUSER root\nRUN echo cs\nWORKDIR /root\n"
+      val rendered = CursorEnv.render(
+        env(docker = true, List("GITHUB_TOKEN")).copy(
+          pins = None,
+          toolchain = Some(
+            AgentImage(
+              upstream,
+              Some(baked),
+              Some("28.5.2"),
+              Some(AgentDaemon.DefaultFuse),
+              Some(AgentDaemon.DefaultIptables),
+              Map(
+                "HOME"               -> "/home/sbtuser",
+                "JAVA_OPTS"          -> "-Duser.home=/home/sbtuser",
+                "SBT_OPTS"           -> "-Duser.home=/home/sbtuser",
+                "GIT_CONFIG_COUNT"   -> "1",
+                "GIT_CONFIG_KEY_0"   -> "safe.directory",
+                "GIT_CONFIG_VALUE_0" -> "*",
+                "COURSIER_TTL"       -> "0s",
+              ),
+            )
+          ),
+        )
+      )
+      assertTrue(
+        rendered.exists { files =>
+          val docker = files.dockerfile.getOrElse("")
+          docker.contains(s"FROM $upstream") &&
+          docker.contains("RUN echo cs") &&
+          docker.contains("fuse-overlayfs=1.14-1build2") &&
+          docker.contains("iptables=1.8.11-2ubuntu3") &&
+          docker.contains("docker-28.5.2.tgz") &&
+          docker.contains("/usr/local/bin/zipx-dockerd") &&
+          docker.contains("setsid dockerd") &&
+          docker.contains(""""storage-driver": "fuse-overlayfs"""") &&
+          docker.contains("""ENV HOME="/home/sbtuser"""") &&
+          docker.contains("""ENV JAVA_OPTS="-Duser.home=/home/sbtuser"""") &&
+          docker.contains("""ENV GIT_CONFIG_KEY_0="safe.directory"""") &&
+          docker.contains("""ENV COURSIER_TTL="0s"""") &&
+          !docker.contains("ghcr.io") &&
+          !docker.contains("gpg") &&
+          !docker.contains("useradd") &&
+          !docker.contains("GITHUB_TOKEN") &&
+          !docker.contains("COPY ") &&
+          !docker.contains("containerd-snapshotter") &&
+          files.environmentJson.contains(""""start": "/usr/local/bin/zipx-dockerd"""") &&
+          !files.environmentJson.contains("service docker start") &&
+          files.installSh.contains("GITHUB_TOKEN") &&
+          !files.installSh.contains("export COURSIER_TTL=0s")
+        }
       )
     },
     test("install reads the JDK from zipx-ci.env, names secret env, and warms with a private sbt server") {
@@ -108,6 +198,86 @@ object CursorEnvSpec extends ZIOSpecDefault:
     test("a secret env name that is not a shell identifier is refused") {
       val names = ZipxAgentEnv.secretNames(Map("not-a-name" -> secret"NOT_A_NAME"))
       assertTrue(names.left.exists(_.contains("not-a-name")))
+    },
+    test("sbt image files ignore leftover Ubuntu pins and still require the daemon pins") {
+      val digest   = "ab" * 32
+      val version  = s"eclipse-temurin-21.0.12_8_2.x@sha256:$digest"
+      val image    = pin("sbt-image", "sbtscala/scala-sbt", version)
+      val cli      = pin("sbt-image", "docker-cli", "28.5.2")
+      val cs       = pin("sbt-image", "cs", "2.1.26")
+      val fuse     = pin("agent-daemon", "fuse-overlayfs", AgentDaemon.DefaultFuse)
+      val ipt      = pin("agent-daemon", "iptables", AgentDaemon.DefaultIptables)
+      val suite    = pin("agent-daemon", "ubuntu-suite", AgentDaemon.DefaultSuite)
+      val leftover = pin("agent-base", "ubuntu", AgentPins.DefaultBase)
+      val plan     = SbtImage
+        .resolve(JdkVersion("21"), Seq(image, cli, cs), Nil, coursier = true, docker = true)
+        .left
+        .map(_.message)
+      val env = Map(
+        "COURSIER_TTL" -> EnvValue.plain("0s"),
+        "GITHUB_TOKEN" -> EnvValue.githubToken,
+      )
+      val missing = plan.flatMap { resolved =>
+        ZipxAgentEnv.files(
+          CloudAgent.On(true),
+          SbtCommand.unsafeTask("Test/compile"),
+          env,
+          Seq(image, cli, cs, leftover),
+          Some(resolved),
+        )
+      }
+      val rendered = plan.flatMap { resolved =>
+        ZipxAgentEnv.files(
+          CloudAgent.On(true),
+          SbtCommand.unsafeTask("Test/compile"),
+          env,
+          Seq(image, cli, cs, fuse, ipt, suite, leftover),
+          Some(resolved),
+        )
+      }
+      val upstreamOnly = SbtImage
+        .resolve(JdkVersion("21"), Seq(image), Nil, coursier = false, docker = false)
+        .left
+        .map(_.message)
+        .flatMap { resolved =>
+          ZipxAgentEnv.files(
+            CloudAgent.On(false),
+            SbtCommand.unsafeTask("Test/compile"),
+            env,
+            Seq(leftover),
+            Some(resolved),
+          )
+        }
+      assertTrue(
+        missing.left.exists(_.contains("fuse-overlayfs")),
+        rendered.exists { files =>
+          val docker = files.dockerfile.getOrElse("")
+          docker.startsWith("# Generated by zipx.") &&
+          docker.contains(s"FROM sbtscala/scala-sbt:$version") &&
+          docker.contains("docker-28.5.2.tgz") &&
+          docker.contains("/usr/local/bin/zipx-dockerd") &&
+          !docker.contains("ghcr.io") &&
+          files.installSh.contains("GITHUB_TOKEN") &&
+          !files.installSh.contains("export COURSIER_TTL")
+        },
+        upstreamOnly.exists { files =>
+          files.environmentJson.contains(s""""image": "sbtscala/scala-sbt:$version"""") &&
+          files.dockerfile.isEmpty
+        },
+        AgentPins.unusedWhileSbtImage(Seq(leftover, cli)).exists(_.contains("agent-base")),
+      )
+    },
+    test("sbt image does not register the Ubuntu feeds") {
+      val leftover = pin("agent-base", "ubuntu", AgentPins.DefaultBase)
+      val onImage  = AgentFeeds.withUser(Nil, Seq(leftover), CloudAgent.On(true), sbtImage = true)
+      val ubuntu   = AgentFeeds.withUser(Nil, Nil, CloudAgent.On(true), sbtImage = false)
+      assertTrue(
+        !onImage.exists(_.name == AgentPins.BaseFeed),
+        !onImage.exists(_.name == AgentPins.DockerFeed),
+        onImage.exists(_.name == AgentDaemon.Feed),
+        ubuntu.exists(_.name == AgentPins.BaseFeed),
+        !ubuntu.exists(_.name == AgentDaemon.Feed),
+      )
     },
   )
 end CursorEnvSpec

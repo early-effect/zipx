@@ -13,27 +13,28 @@ RUN curl -fsSL -o /tmp/sbt.zip "https://github.com/sbt/sbt/releases/download/v2.
     && unzip -o /tmp/sbt.zip -d /opt \
     && ln -sfn /opt/sbt/bin/sbt /usr/local/bin/sbt \
     && rm /tmp/sbt.zip
-RUN install -m 0755 -d /etc/apt/keyrings \
-    && curl --retry 3 --retry-delay 5 -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
-    && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
+RUN set -eux; \
+    install -m 0755 -d /etc/apt/keyrings; \
+    curl --retry 3 --retry-delay 5 -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg; \
+    chmod a+r /etc/apt/keyrings/docker.gpg; \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
     docker-ce=5:28.5.2-1~ubuntu.24.04~noble \
     docker-ce-cli=5:28.5.2-1~ubuntu.24.04~noble \
     containerd.io \
     docker-buildx-plugin \
     docker-compose-plugin \
     fuse-overlayfs \
-    iptables \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /etc/docker \
-    && printf '%s\n' '{' '  "storage-driver": "fuse-overlayfs"' '}' > /etc/docker/daemon.json \
-    && update-alternatives --set iptables /usr/sbin/iptables-legacy \
-    && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy \
-    && groupadd -f docker \
-    && id -u ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu \
-    && usermod -aG docker ubuntu
+    iptables; \
+    rm -rf /var/lib/apt/lists/*; \
+    mkdir -p /etc/docker; \
+    printf '%s\n' '{' '  "storage-driver": "fuse-overlayfs"' '}' > /etc/docker/daemon.json; \
+    update-alternatives --set iptables /usr/sbin/iptables-legacy; \
+    update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy; \
+    groupadd -f docker; \
+    if ! id -u ubuntu >/dev/null 2>&1; then useradd -m -s /bin/bash ubuntu; fi; \
+    usermod -aG docker ubuntu
 
 RUN id -u ubuntu >/dev/null 2>&1 || useradd -m -s /bin/bash ubuntu \
     && echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu \

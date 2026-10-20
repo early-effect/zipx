@@ -1208,9 +1208,8 @@ object ZipxPlugin extends AutoPlugin:
     val agent = ZipxAgentEnv.withFeeds(
       user,
       pins,
-      readBuildSetting(extracted, zipxAgentEnv, zipx.core.CloudAgent.Off) match
-        case zipx.core.CloudAgent.Off   => false
-        case zipx.core.CloudAgent.On(_) => true,
+      readBuildSetting(extracted, zipxAgentEnv, zipx.core.CloudAgent.Off),
+      enabled,
     )
     zipx.agent.SbtImageFeeds.withUser(agent, pins, enabled, layers)
   end pinFeeds
@@ -1219,26 +1218,15 @@ object ZipxPlugin extends AutoPlugin:
       agent: zipx.core.CloudAgent.On,
       cfg: PlanConfig,
       pins: Seq[Pin],
-      root: File,
       extracted: Extracted,
   ): Either[String, zipx.agent.AgentFiles] =
-    val repo = cfg.sbtImage.filter(_.dockerfile.isDefined).flatMap(_ => originRepository(root))
     ZipxAgentEnv.files(
       agent,
       cfg.cacheRehydrateTask,
       cfg.env ++ cfg.cacheRehydrateEnv ++ releaseLookup(extracted).env,
       pins,
       cfg.sbtImage,
-      repo,
     )
-  end agentFiles
-
-  private def originRepository(root: File): Option[String] =
-    val out  = new StringBuilder
-    val code = scala.sys.process
-      .Process(Seq("git", "remote", "get-url", "origin"), root)
-      .!(scala.sys.process.ProcessLogger(line => out.append(line), _ => ()))
-    if code == 0 then SbtImage.githubRepository(out.toString) else None
 
   private def deleteGenerated(root: File, rel: String, log: Logger): Unit =
     val file = root / rel
@@ -1283,8 +1271,9 @@ object ZipxPlugin extends AutoPlugin:
             log.info(s"zipx deleted ${file.getPath}")
         }
       case agent: zipx.core.CloudAgent.On =>
-        val cfg      = planConfig.value
-        val rendered = orFail(agentFiles(agent, cfg, pins, root, extracted))
+        val cfg = planConfig.value
+        warnUnusedAgentPins(cfg.sbtImage.isDefined, pins, log)
+        val rendered = orFail(agentFiles(agent, cfg, pins, extracted))
         val written  = List(
           Some(ZipxAgentEnv.EnvironmentRel -> rendered.environmentJson),
           rendered.dockerfile.map(ZipxAgentEnv.DockerfileRel -> _),
@@ -1312,7 +1301,8 @@ object ZipxPlugin extends AutoPlugin:
             )
         }
       case agent: zipx.core.CloudAgent.On =>
-        val rendered = orFail(agentFiles(agent, cfg, pins, root, extracted))
+        warnUnusedAgentPins(cfg.sbtImage.isDefined, pins, log)
+        val rendered = orFail(agentFiles(agent, cfg, pins, extracted))
         val expected = List(
           Some(ZipxAgentEnv.EnvironmentRel -> rendered.environmentJson),
           rendered.dockerfile.map(ZipxAgentEnv.DockerfileRel -> _),
@@ -1334,6 +1324,12 @@ object ZipxPlugin extends AutoPlugin:
             )
     end match
   end checkAgentEnv
+
+  private def warnUnusedAgentPins(sbtImage: Boolean, pins: Seq[Pin], log: Logger): Unit =
+    if sbtImage then
+      zipx.agent.AgentPins.unusedWhileSbtImage(pins).foreach { shown =>
+        log.warn(s"zipx: $shown is unused while zipxSbtImage is on. Delete it.")
+      }
 
   private def generatedAgentFile(rel: String, body: String): Boolean =
     rel == ZipxAgentEnv.InstallRel && body.startsWith(ZipxCatalog.GeneratedHeader) ||

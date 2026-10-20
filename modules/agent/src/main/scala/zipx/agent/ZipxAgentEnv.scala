@@ -1,6 +1,6 @@
 package zipx.agent
 
-import zipx.core.{CloudAgent, EnvValue, Pin, PinFeed, SbtCommand, SbtImagePlan}
+import zipx.core.{CloudAgent, EnvValue, Pin, PinFeed, SbtCommand, SbtImage, SbtImagePlan}
 
 /** `zipxAgentEnv := ZipxAgentEnv.cursor(docker = true)`. Cursor is the first renderer. The data it draws from is the
   * build's JDK file, rehydrate command, secret env names, and the agent catalog pins.
@@ -15,8 +15,8 @@ object ZipxAgentEnv:
 
   val paths: List[String] = List(EnvironmentRel, DockerfileRel, InstallRel)
 
-  def withFeeds(user: Seq[PinFeed], pins: Seq[Pin], enabled: Boolean): Seq[PinFeed] =
-    AgentFeeds.withUser(user, pins, enabled)
+  def withFeeds(user: Seq[PinFeed], pins: Seq[Pin], agent: CloudAgent, sbtImage: Boolean): Seq[PinFeed] =
+    AgentFeeds.withUser(user, pins, agent, sbtImage)
 
   def files(
       agent: CloudAgent.On,
@@ -24,14 +24,43 @@ object ZipxAgentEnv:
       env: Map[String, EnvValue],
       pins: Seq[Pin],
       image: Option[SbtImagePlan] = None,
-      repository: Option[String] = None,
   ): Either[String, AgentFiles] =
     for
-      resolved  <- AgentPins.resolve(pins)
-      secrets   <- secretNames(env)
-      toolchain <- image.fold[Either[String, Option[String]]](Right(None))(_.agentImage(repository).map(Some(_)))
-      rendered  <- CursorEnv.render(AgentEnv(agent.docker, rehydrate, secrets, resolved, toolchain))
+      secrets  <- secretNames(env)
+      rendered <- image match
+        case Some(plan) =>
+          for
+            toolchain <- agentImage(plan, env, pins, agent.docker)
+            files     <- CursorEnv.render(AgentEnv(agent.docker, rehydrate, secrets, None, Some(toolchain)))
+          yield files
+        case None =>
+          for
+            resolved <- AgentPins.resolve(pins)
+            files    <- CursorEnv.render(AgentEnv(agent.docker, rehydrate, secrets, Some(resolved), None))
+          yield files
     yield rendered
+
+  /** Plain job env, then layer env, then the home and git env CI jobs already set. Secrets stay out. */
+  def agentImage(
+      plan: SbtImagePlan,
+      env: Map[String, EnvValue],
+      pins: Seq[Pin],
+      docker: Boolean,
+  ): Either[String, AgentImage] =
+    for
+      daemon <- if docker then AgentDaemon.resolve(pins).map(Some(_)) else Right(None)
+      merged <- SbtImage.overlayEnv(plainEnv(env), plan.layerEnv).left.map(_.message)
+    yield AgentImage(
+      upstream = plan.upstream,
+      baked = plan.dockerfile,
+      dockerCli = daemon.map(_.dockerCli),
+      fuseOverlayfs = daemon.map(_.fuseOverlayfs),
+      iptables = daemon.map(_.iptables),
+      env = SbtImage.homeEnv(merged, plan.cacheHome),
+    )
+
+  private def plainEnv(env: Map[String, EnvValue]): Map[String, String] =
+    env.collect { case (key, EnvValue.Plain(value)) => key -> value }
 
   /** Env names sbt reads from the process. Plain values such as `COURSIER_TTL` are not secrets. `GITHUB_TOKEN` is a
     * Cursor Runtime Secret: a Build Secret is mounted only for `docker build` and is gone before `sbt test`.

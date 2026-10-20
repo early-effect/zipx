@@ -6,8 +6,8 @@ package zipx.core
   * returns data. It is called at generate for the catalog pin and both CPU arches. It does not run in the image build
   * and it does not hit the network. [[lookup]] is only for the pin companion.
   *
-  * Paths are absolute and stay off [[SbtImage.CacheHome]], which the LocalDir snapshot mounts over. `ENV` uses the same
-  * map as the job `env`, so the cloud agent and CI name the same path.
+  * Paths are absolute and stay off [[SbtImage.CacheHome]], which the LocalDir snapshot mounts over. `ENV` is written
+  * into the derived image and onto each sbt job. The cloud agent copies the plain keys when it builds a Dockerfile.
   */
 final case class SbtImageLayer(
     id: String,
