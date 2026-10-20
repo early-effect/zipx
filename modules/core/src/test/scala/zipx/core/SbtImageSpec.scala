@@ -92,6 +92,33 @@ object SbtImageSpec extends ZIOSpecDefault:
         SbtImage.numberedCandidate("latest", listed).isLeft,
       )
     },
+    test("a gh pin bakes the official client, and a push without the pin is refused") {
+      val baked = resolve(List(toolPin(SbtImage.GhId, "2.102.0")), Nil)
+      val body  = baked.toOption.flatMap(_.dockerfile).getOrElse("")
+      val plain = resolve(Nil, Nil)
+      assertTrue(
+        body.contains("https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_${gh_arch}.tar.gz"),
+        body.contains("""mv "/tmp/gh_2.102.0_linux_${gh_arch}/bin/gh" /usr/local/bin/gh"""),
+        body.contains("dpkg --print-architecture"),
+        !body.contains("$${"),
+        baked.map(_.dockerSocket) == Right(false),
+        baked.exists(_.derivedTag.exists(_.startsWith("df-"))),
+        plain.map(_.dockerfile) == Right(None),
+        resolve(List(toolPin(SbtImage.GhId, "latest")), Nil) == Left(
+          SbtImageError.ToolPinNotConcrete(SbtImage.GhId, "latest")
+        ),
+        SbtImage.missingPushClient(onPush = true, Seq(imagePin(pin))) == Some(
+          SbtImageError.MissingToolPin(SbtImage.GhId, "testAffected(onPush = true)")
+        ),
+        SbtImage.missingPushClient(onPush = false, Seq(imagePin(pin))) == None,
+        SbtImage.missingPushClient(onPush = true, Seq(imagePin(pin), toolPin(SbtImage.GhId, "2.102.0"))) == None,
+        SbtImage.missingPushClient(onPush = true, Seq(toolPin(SbtImage.GhId, "latest"))) == None,
+        resolve(
+          List(toolPin(SbtImage.GhId, "2.102.0")),
+          List(SbtImageLayer(SbtImage.GhId, noLookup).install(widgetSteps)),
+        ) == Left(SbtImageError.ReservedLayerId(SbtImage.GhId)),
+      )
+    },
     test("the upstream image is used when no extra tool is declared") {
       val plan = SbtImage.resolve(JdkVersion("21"), Seq(imagePin(pin)), Nil, coursier = false, docker = false)
       assertTrue(

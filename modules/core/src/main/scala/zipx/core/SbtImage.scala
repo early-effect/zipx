@@ -21,6 +21,7 @@ object SbtImage:
   val NodeId: String      = "node"
   val CsId: String        = "cs"
   val DockerCliId: String = "docker-cli"
+  val GhId: String        = "gh"
 
   val DockerfileRel: String = ".github/zipx-env/Dockerfile"
   val CacheHome: String     = "/home/sbtuser"
@@ -192,8 +193,9 @@ object SbtImage:
       node  <- oneNode(nodeVersions.map(version => version: String), pinVersion(pins, NodeId))
       cs    <- toolPin(coursier, pinVersion(pins, CsId), CsId, "version updates")
       cli   <- toolPin(docker, pinVersion(pins, DockerCliId), DockerCliId, "image publishes")
+      gh    <- optionalTool(pinVersion(pins, GhId), GhId)
       baked <- SbtImageLayer.assemble(pins, layers)
-    yield planOf(ref, node, cs, cli, baked)
+    yield planOf(ref, node, cs, cli, gh, baked)
 
   /** Layers are the derived image. An empty list while the setting is off is the default. */
   def layersRequireImage(enabled: Boolean, layers: Seq[SbtImageLayer]): Option[SbtImageError] =
@@ -234,9 +236,10 @@ object SbtImage:
       node: Option[String],
       cs: Option[String],
       cli: Option[String],
+      gh: Option[String],
       baked: SbtImageLayer.Rendered,
   ): SbtImagePlan =
-    val body = renderDockerfile(ref.reference, node, cs, cli, baked.runs, baked.env)
+    val body = renderDockerfile(ref.reference, node, cs, cli, gh.toList.map(ghInstall) ++ baked.runs, baked.env)
     SbtImagePlan(
       upstream = ref.reference,
       derivedTag = body.map(contentTag),
@@ -281,6 +284,20 @@ object SbtImage:
         case Some(pin) if isConcrete(pin) => Right(Some(pin))
         case Some(pin)                    => Left(SbtImageError.ToolPinNotConcrete(id, pin))
         case None                         => Left(SbtImageError.MissingToolPin(id, why))
+
+  /** A present pin is baked. Absence is not an error: [[missingPushClient]] requires the pin when a job calls `gh`. */
+  private def optionalTool(pinned: Option[String], id: String): Either[SbtImageError, Option[String]] =
+    pinned match
+      case None                         => Right(None)
+      case Some(pin) if isConcrete(pin) => Right(Some(pin))
+      case Some(pin)                    => Left(SbtImageError.ToolPinNotConcrete(id, pin))
+
+  /** The push affected script calls `gh`. The runner image has that client. This image does not, unless the pin bakes
+    * it. Absence is fine when that push branch is off.
+    */
+  def missingPushClient(onPush: Boolean, pins: Seq[Pin]): Option[SbtImageError] =
+    val pinned = pins.exists(pin => pin.feed == Feed && pin.id == GhId)
+    Option.when(onPush && !pinned)(SbtImageError.MissingToolPin(GhId, "testAffected(onPush = true)"))
 
   /** None when the upstream image already has every tool. The hash of this text is the published tag. */
   def renderDockerfile(
@@ -334,6 +351,19 @@ object SbtImage:
        |    tar -xzf /tmp/docker.tgz -C /tmp; \\
        |    mv /tmp/docker/docker /usr/local/bin/docker; \\
        |    rm -rf /tmp/docker /tmp/docker.tgz""".stripMargin
+
+  /** Official `cli/cli` tarball. Asset names use dpkg's `amd64` and `arm64`, not `uname -m`. */
+  private def ghInstall(version: String): String =
+    s"""RUN set -eux; \\
+       |    arch="$$(dpkg --print-architecture)"; \\
+       |    case "$$arch" in \\
+       |      amd64|arm64) gh_arch="$$arch" ;; \\
+       |      *) echo "zipx: unsupported architecture $$arch" >&2; exit 1 ;; \\
+       |    esac; \\
+       |    curl -fsSL -o /tmp/gh.tgz "https://github.com/cli/cli/releases/download/v$version/gh_${version}_linux_$${gh_arch}.tar.gz"; \\
+       |    tar -xzf /tmp/gh.tgz -C /tmp; \\
+       |    mv "/tmp/gh_${version}_linux_$${gh_arch}/bin/gh" /usr/local/bin/gh; \\
+       |    rm -rf /tmp/gh.tgz "/tmp/gh_${version}_linux_$${gh_arch}"""".stripMargin
 
 end SbtImage
 
