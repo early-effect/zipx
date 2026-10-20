@@ -562,7 +562,17 @@ object ZipxSettings:
       SettingName("zipxAgentEnv"),
       CloudAgent.Off,
       SettingPurpose(
-        "Render a Cursor cloud agent environment from this build (default off). ZipxAgentEnv.cursor(docker = true) installs and starts Docker. Writes .cursor/environment.json, .cursor/Dockerfile, and .github/zipx-agent/install.sh. JDK, sbt runner, secrets, and the rehydrate command come from the settings CI already uses."
+        "Render a Cursor cloud agent environment from this build (default off). ZipxAgentEnv.cursor(docker = true) installs and starts Docker. Writes .cursor/environment.json, .cursor/Dockerfile, and .github/zipx-agent/install.sh. JDK, sbt runner, secrets, and the rehydrate command come from the settings CI already uses. Secret checks are Cursor Runtime Secrets: a Build Secret is not visible to sbt."
+      ),
+      Build,
+    )
+
+  val sbtImage: SettingDef[Boolean] =
+    SettingDef.setting(
+      SettingName("zipxSbtImage"),
+      false,
+      SettingPurpose(
+        "Run sbt jobs and the cloud agent in the pinned sbtscala/scala-sbt light image (default false). The sbt-image feed moves the JDK-qualified tag and its manifest digest. Node, cs, and the Docker CLI are baked into ghcr.io/<owner>/<repo>/zipx-env when the build asks for them. LocalDir actions/cache stays outside the image. Opt in after the first containerized run, which misses every cache entry saved under /home/runner."
       ),
       Build,
     )
@@ -732,6 +742,14 @@ object ZipxSettings:
       ),
     )
 
+  val sbtEnvGenerate: SettingDef[Unit] =
+    SettingDef.task(
+      SettingName("zipxSbtEnvGenerate"),
+      SettingPurpose(
+        "Write .github/zipx-env/Dockerfile when zipxSbtImage bakes tools, or delete a generated Dockerfile when the upstream image is enough. zipxWorkflowGenerate does this too. The pin companions run it after applying pins. ci.yml still needs a human zipxWorkflowGenerate: the companion does not push repo-root workflow YAML."
+      ),
+    )
+
   val advisoryCheck: SettingDef[Unit] =
     SettingDef.task(
       SettingName("zipxAdvisoryCheck"),
@@ -871,6 +889,7 @@ object ZipxSettings:
     cacheRehydrateEnv,
     env,
     agentEnv,
+    sbtImage,
     cancelSupersededRuns,
     checkCommandNames,
     verifyClean,
@@ -894,6 +913,7 @@ object ZipxSettings:
     workflowGenerate,
     workflowCheck,
     agentEnvGenerate,
+    sbtEnvGenerate,
     advisoryCheck,
     graph,
     depCleanup,

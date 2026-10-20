@@ -13,29 +13,27 @@ object PinSnapshotWorkflow:
       javaVersion: String,
       runnerOs: String,
       pushBranches: List[String],
+      sbtImage: Option[SbtImagePlan] = None,
   ): Workflow =
-    val setupJava = Step(
-      name = Some("Setup JDK"),
-      uses = Some(pins.setupJava),
-      `with` = ListMap("distribution" -> "temurin", "java-version" -> javaVersion),
-    )
-    Workflow(
-      name = "zipx pin snapshot",
-      on = Triggers(push = Some(BranchFilter(branches = pushBranches))),
-      permissions = ListMap("contents" -> "write"),
-      jobs = ListMap(
-        "pin-snapshot" -> Job(
-          name = Some("Submit pin snapshot"),
-          runsOn = List(runnerOs),
-          env = EnvValue.renderAll(SnapshotPins.ciEnv(Map.empty)),
-          steps = List(
-            Step(uses = Some(pins.checkout)),
-            setupJava,
-            Step(uses = Some(pins.setupSbt)),
-            Step(name = Some("Submit dependency snapshot"), run = Some("sbt zipxPinSubmit")),
-          ),
-        )
+    SbtImageWorkflow.use(
+      Workflow(
+        name = "zipx pin snapshot",
+        on = Triggers(push = Some(BranchFilter(branches = pushBranches))),
+        permissions = ListMap("contents" -> "write"),
+        jobs = ListMap(
+          "pin-snapshot" -> Job(
+            name = Some("Submit pin snapshot"),
+            runsOn = List(runnerOs),
+            env = EnvValue.renderAll(SnapshotPins.ciEnv(Map.empty)),
+            steps = List(Step(uses = Some(pins.checkout))) ++
+              SbtImageWorkflow.toolchain(pins, javaVersion, runnerOs, "pin-snapshot", sbtImage) ++
+              List(Step(name = Some("Submit dependency snapshot"), run = Some("sbt zipxPinSubmit"))),
+          )
+        ),
       ),
+      sbtImage,
+      pins.checkout,
+      runnerOs,
     )
   end plan
 
@@ -44,6 +42,9 @@ object PinSnapshotWorkflow:
       javaVersion: String,
       runnerOs: String,
       pushBranches: List[String],
+      sbtImage: Option[SbtImagePlan] = None,
   ): Either[String, String] =
-    Render.render(plan(pins, javaVersion, runnerOs, pushBranches)).map(ActionPinFile.annotateUses(_, pins))
+    Render
+      .render(plan(pins, javaVersion, runnerOs, pushBranches, sbtImage))
+      .map(ActionPinFile.annotateUses(_, pins))
 end PinSnapshotWorkflow

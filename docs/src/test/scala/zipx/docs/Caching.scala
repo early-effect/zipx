@@ -95,7 +95,7 @@ zipxCache := CacheBackend.BazelRemoteSidecar(RemoteCacheProof.image, RemoteCache
 zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
 ```
 
-- **LocalDir**: persist local cache dirs and `target/` with `actions/cache` inside the generated `zipx-sbt-setup`
+- **LocalDir**: persist `~/.sbt`, `~/.cache/sbt`, and `~/.cache/coursier` with `actions/cache` inside the generated `zipx-sbt-setup`
   composite. One job owns the **build snapshot** and saves it; every other sbt job restores it and saves nothing (see
   **Who saves** below). Keys are OS + JDK + epoch + `build` + run id + job id; restore-keys prefer this run's build
   saves, then the epoch's latest build save, then (GitTags/Script) the release epoch's
@@ -202,10 +202,15 @@ about 3 GB, and a single wave of four PRs evicted the default branch's snapshot.
 are mode `0444`, and `cleanFull` deletes the directory from a writable parent. When a catalog snapshot is pinned, the
 `clean` inside `cleanFull` also clears sbt's in-memory resolution cache. A qualifier snapshot is `forceUpdatePeriod`,
 not that hook (see **Snapshots and releases**). `actions/cache` still restores `~/.sbt`, `~/.cache/coursier`,
-`~/.cache/sbt`, and `target` before sbt starts, and the save owner writes them back. Rolling `zipxCacheEpoch` does
+and `~/.cache/sbt` before sbt starts, and the save owner writes them back. `target/` is not in that snapshot: sbt
+replays products from the action cache. Rolling `zipxCacheEpoch` does
 not drop them either:
 a baked epoch's last restore-key is the OS+JDK prefix with no epoch in it, so a miss restores the newest entry under
 that prefix.
+
+A warm rerun of one commit in zipx-ci-lab, on that snapshot, compiled nothing in the `test` job. Its compiled list
+was empty, and Greeter, Name, svc-a, svc-b, worker-a, and worker-b still ran. A job that compiles a module the cache
+owner never compiled still compiles that module.
 
 A PR labeled **`purge`** skips that restore for the run. The save owner still saves when the job succeeds, and the
 save has no restore-keys: the primary key includes the run id, so the lookup misses, and the cache action's post
@@ -239,6 +244,68 @@ entry. Other branches keep restoring `main` until a main-scoped save writes a ne
           yaml.contains("cache-mode: restore"),
           yaml.contains("cache-rehydrate:"),
           yaml.split(java.util.regex.Pattern.quote(needle), -1).length - 1 == 3,
+        )
+      },
+    ),
+    section("Sbt image")(
+      md"""
+`zipxSbtImage := true` runs every sbt job in one pinned image. Default off. The first run in the image misses every
+cache entry that was saved under `/home/runner`.
+
+The pin is the light `sbtscala/scala-sbt` tag for the major in `zipxJavaVersion`. The version string is the tag and
+the multi-arch manifest digest, so a JDK patch and a digest move are both updates:
+
+```scala
+Pin(
+  "sbt-image",
+  "sbtscala/scala-sbt",
+  "eclipse-temurin-21.0.12_8_2.x@sha256:<manifest>",
+)
+```
+
+A fat tag (`<jdk>_<sbt>_<scala>`) is not the pin. It warms one Scala compiler into the image, and
+`project/build.properties` still picks sbt. The image is the toolchain: JDK, sbt, `curl`, `git`, `tar`. It does not
+contain `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, or a token. Those stay the LocalDir snapshot,
+restored into `/home/sbtuser`. `target/` is not in the image and not in the snapshot. Jobs set `HOME` and
+`-Duser.home` there, and mark every directory git-safe, because
+that `HOME` is not the one `actions/checkout` configured. Actions overrides `HOME`, so a `~` path is
+not that directory and the cache paths are absolute. `setup-sbt`'s own disk cache stays off.
+
+`actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`, and `coursier/setup-action` are omitted on those jobs.
+The composite still restores and saves the snapshot.
+
+When a capability sets `withNodeVersion`, version updates are on (they need `cs`), or a job publishes images (it
+needs the Docker client), zipx writes `.github/zipx-env/Dockerfile` `FROM` that pin and bakes only those tools. A
+tool that is not an sbt output, such as a Playwright browser, belongs in that image too, so the Dockerfile hash
+moves when the tool moves. That bake is not generated yet. The
+published tag is `ghcr.io/<owner>/<repo>/zipx-env:df-<hash of the Dockerfile>`. A `zipx-env-image` job builds and
+pushes only when the tag is missing. The hash moves when the sbt pin, the Node pin, or the `cs` pin moves. `latest`
+and `lts` are not baked: pin `Pin("sbt-image", "node", "<x.y.z>")`. Two capabilities asking for two Node versions is
+a generate error. A docker job mounts the runner socket. The image has the client, not a daemon. `inContainer` is
+refused while this setting is on: the shared image is already the container. A job that sets its own `permissions`
+also gets `packages: read`, because that block does not inherit the token that can pull a private env image.
+""",
+      exampleValue {
+        val digest  = "ab" * 32
+        val version = s"eclipse-temurin-21.0.12_8_2.x@sha256:$digest"
+        val pin     = Pin(
+          PinFeedName.unsafeMake("sbt-image"),
+          SbtImage.ImageId,
+          DepVersion.unsafeMake(version),
+          None,
+          None,
+        )
+        SbtImage.resolve(config.javaVersion, Seq(pin), Nil, coursier = false, docker = false) match
+          case Left(message) => message
+          case Right(plan)   =>
+            DocsRender.job("test")(Capability.test)(using libGraph, config.copy(sbtImage = Some(plan)))
+      }.assert { yaml =>
+        assertTrue(
+          yaml.contains("sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x@sha256:"),
+          yaml.contains("baked-toolchain: \"true\""),
+          yaml.contains("cache-home: /home/sbtuser"),
+          yaml.contains("HOME: /home/sbtuser"),
+          !yaml.contains("actions/setup-java"),
         )
       },
     ),

@@ -34,6 +34,7 @@ object VersionUpdatesWorkflow:
       extraSteps: List[Step] = Nil,
       preSteps: List[Step] = Nil,
       lookup: RegistryCredentials = RegistryCredentials.Anonymous,
+      sbtImage: Option[SbtImagePlan] = None,
   ): Workflow =
     val checkoutStep = Step(
       uses = Some(checkout),
@@ -55,8 +56,10 @@ object VersionUpdatesWorkflow:
           "node-version"     -> "",
           "sbt-disk-cache"   -> "false",
           "cache-mode"       -> LocalCacheMode.Restore.input,
-          "coursier"         -> "true",
-        )
+          "coursier"         -> (if sbtImage.isDefined then "false" else "true"),
+        ) ++ sbtImage.fold(ListMap.empty[String, String]) { plan =>
+          ListMap("baked-toolchain" -> "true", "cache-home" -> plan.cacheHome)
+        }
       )
       .build
     val apply = Step
@@ -64,24 +67,29 @@ object VersionUpdatesWorkflow:
       .named("Apply catalog updates")
       .build
     val openPr = Step.run(updatePrScript).named("Open update PR").build
-    Workflow(
-      name = "zipx version updates",
-      on = Triggers(schedule = List(schedule), workflowDispatch = Some(WorkflowDispatch())),
-      permissions = ListMap("contents" -> "write", "pull-requests" -> "write", "issues" -> "write"),
-      jobs = ListMap(
-        "version-updates" -> Job(
-          name = Some("Catalog version updates"),
-          runsOn = List("ubuntu-latest"),
-          // `zipxSnapshotAdvance` looks pins up in the release registry. GITHUB_TOKEN is last: the PR step pushes with it.
-          env = EnvValue.renderAll(SnapshotPins.ciEnv(lookup.env)) ++ ListMap(
-            "GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}"
-          ),
-          steps =
-            CompanionAuth.steps ++ List(checkoutStep, load, setup) ++ preSteps ++ List(apply) ++ extraSteps ++ List(
-              openPr
+    SbtImageWorkflow.use(
+      Workflow(
+        name = "zipx version updates",
+        on = Triggers(schedule = List(schedule), workflowDispatch = Some(WorkflowDispatch())),
+        permissions = ListMap("contents" -> "write", "pull-requests" -> "write", "issues" -> "write"),
+        jobs = ListMap(
+          "version-updates" -> Job(
+            name = Some("Catalog version updates"),
+            runsOn = List("ubuntu-latest"),
+            // `zipxSnapshotAdvance` looks pins up in the release registry. GITHUB_TOKEN is last: the PR step pushes with it.
+            env = EnvValue.renderAll(SnapshotPins.ciEnv(lookup.env)) ++ ListMap(
+              "GITHUB_TOKEN" -> "${{ secrets.GITHUB_TOKEN }}"
             ),
-        )
+            steps =
+              CompanionAuth.steps ++ List(checkoutStep, load, setup) ++ preSteps ++ List(apply) ++ extraSteps ++ List(
+                openPr
+              ),
+          )
+        ),
       ),
+      sbtImage,
+      checkout,
+      "ubuntu-latest",
     )
   end plan
 
@@ -91,8 +99,9 @@ object VersionUpdatesWorkflow:
       extraSteps: List[Step] = Nil,
       preSteps: List[Step] = Nil,
       lookup: RegistryCredentials = RegistryCredentials.Anonymous,
+      sbtImage: Option[SbtImagePlan] = None,
   ): Either[String, String] =
-    checkoutMajor(pins).flatMap(ref => Render.render(plan(ref, schedule, extraSteps, preSteps, lookup)))
+    checkoutMajor(pins).flatMap(ref => Render.render(plan(ref, schedule, extraSteps, preSteps, lookup, sbtImage)))
 
   private def loadParams: Script =
     Script
@@ -139,6 +148,7 @@ object VersionUpdatesWorkflow:
         ),
         Exec("sbt", Word.quoted("zipxPinUpdate yes")),
         Exec("sbt", Word.lit("zipxAgentEnvGenerate")),
+        Exec("sbt", Word.lit("zipxSbtEnvGenerate")),
         Exec("sbt", Word.lit("zipxCatalogGenerate")),
         Exec("sbt", Word.lit("zipxSnapshotAdvance")),
       )

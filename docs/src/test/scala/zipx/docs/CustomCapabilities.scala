@@ -180,10 +180,11 @@ scope, so a `Capability.once` integration job and a per-module `Capability.testG
 zipxCapabilities += Capability.testGraph.inContainer("ghcr.io/acme/build-base:1")
 ```
 
-Reach for it only when the **toolchain** is what has to differ. zipx already pins the JDK and sbt, and inside a container
-the runner's own tooling is gone: `actions/setup-java` and `sbt/setup-sbt` install into the container, so an image
-without `tar`, `curl` or `git` fails during setup rather than during your build. A sidecar plus the default runner covers
-almost every case.
+Reach for it only when one capability's toolchain has to differ from the rest. The shared toolchain is
+`zipxSbtImage` (see **Caching**): every sbt job uses that image, and `inContainer` is a generate error while it is
+on. Inside a one-off container the runner's own tooling is gone: `actions/setup-java` and `sbt/setup-sbt` install
+into the container, so an image without `tar`, `curl` or `git` fails during setup rather than during your build. A
+sidecar plus the default runner covers almost every case.
 """,
       exampleValue {
         DocsRender.job("test-service")(

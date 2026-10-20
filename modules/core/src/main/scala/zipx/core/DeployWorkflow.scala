@@ -281,11 +281,16 @@ object DeployWorkflow:
         val byTarget =
           if choices.isEmpty then Expr.lit("zipx-deploy") else Expr.lit("zipx-deploy-") ++ Expr.Input(TargetInput)
         (Triggers(workflowDispatch = Some(dispatch)), byTarget)
-    Workflow(
-      name = "zipx deploy",
-      on = on,
-      concurrency = Some(Concurrency(group.render, CancelInProgress.Never)),
-      jobs = ListMap.from[String, Job]((ResolveJobId -> resolveJob(config, choices.nonEmpty, trigger)) :: jobs),
+    SbtImageWorkflow.use(
+      Workflow(
+        name = "zipx deploy",
+        on = on,
+        concurrency = Some(Concurrency(group.render, CancelInProgress.Never)),
+        jobs = ListMap.from[String, Job]((ResolveJobId -> resolveJob(config, choices.nonEmpty, trigger)) :: jobs),
+      ),
+      config.sbtImage,
+      config.actions.checkout,
+      config.runnerOs,
     )
   end plan
 

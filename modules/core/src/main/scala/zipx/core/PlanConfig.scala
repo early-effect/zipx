@@ -133,6 +133,8 @@ final case class PlanConfig(
     defaultMatrixCollapse: MatrixCollapse = MatrixCollapse.Auto,
     /** SHA-256 prefix baked into LocalDir keys when [[cacheEpoch]] is [[CacheEpoch.ShipCatalog]]. */
     shipEpochHash: Option[String] = None,
+    /** Set when `zipxSbtImage` is on. Jobs run in this image and skip the host JDK and sbt installers. */
+    sbtImage: Option[SbtImagePlan] = None,
 )
 
 object PlanConfig:

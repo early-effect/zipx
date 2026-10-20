@@ -47,4 +47,11 @@ object DockerCe:
 
   def candidate(current: String, amd64: String, arm64: String): Either[String, Option[String]] =
     newest(amd64, arm64).map(_.filter(_ != current))
+
+  /** Newest 28.x `docker-ce-cli` present on both architectures, as `major.minor.patch` for the static client. */
+  def newestCli(amd64: String, arm64: String): Either[String, Option[String]] =
+    val both = packageVersions(amd64, "docker-ce-cli").toSet.intersect(packageVersions(arm64, "docker-ce-cli").toSet)
+    val held = both.flatMap(parse).filter(_.major == HeldMajor)
+    if held.isEmpty then Left(s"zipx: no docker-ce-cli ${HeldMajor}.x is published for both amd64 and arm64")
+    else Right(held.maxOption.map(apt => s"${apt.major}.${apt.minor}.${apt.patch}"))
 end DockerCe

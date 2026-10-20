@@ -79,6 +79,7 @@ jobs:
           cs launch --ttl Inf --repository m2Local --repository ivy2Local --repository central "rocks.earlyeffect:zipx-cli_3:$ZIPX_CLI_VERSION" -- catalog update --yes --verify-load
           sbt "zipxPinUpdate yes"
           sbt zipxAgentEnvGenerate
+          sbt zipxSbtEnvGenerate
           sbt zipxCatalogGenerate
           sbt zipxSnapshotAdvance
 
@@ -119,5 +120,5 @@ jobs:
 
           The PR branch is zipx/version-updates-${GITHUB_RUN_ID}.
           EOF
-          gh pr create --title "ci: zipx version updates" --body-file /tmp/zipx-pr-body.md --head "zipx/version-updates-${GITHUB_RUN_ID}" --label clean || true
+          gh pr create --title "ci: zipx version updates" --body-file /tmp/zipx-pr-body.md --head "zipx/version-updates-${GITHUB_RUN_ID}" --label clean
 

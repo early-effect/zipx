@@ -1,6 +1,6 @@
 package zipx.agent
 
-import zipx.core.{CloudAgent, EnvValue, Pin, PinFeed, SbtCommand}
+import zipx.core.{CloudAgent, EnvValue, Pin, PinFeed, SbtCommand, SbtImagePlan}
 
 /** `zipxAgentEnv := ZipxAgentEnv.cursor(docker = true)`. Cursor is the first renderer. The data it draws from is the
   * build's JDK file, rehydrate command, secret env names, and the agent catalog pins.
@@ -23,20 +23,33 @@ object ZipxAgentEnv:
       rehydrate: SbtCommand,
       env: Map[String, EnvValue],
       pins: Seq[Pin],
+      image: Option[SbtImagePlan] = None,
+      repository: Option[String] = None,
   ): Either[String, AgentFiles] =
     for
-      resolved <- AgentPins.resolve(pins)
-      secrets  <- secretNames(env)
-      rendered <- CursorEnv.render(AgentEnv(agent.docker, rehydrate, secrets, resolved))
+      resolved  <- AgentPins.resolve(pins)
+      secrets   <- secretNames(env)
+      toolchain <- image.fold[Either[String, Option[String]]](Right(None))(_.agentImage(repository).map(Some(_)))
+      rendered  <- CursorEnv.render(AgentEnv(agent.docker, rehydrate, secrets, resolved, toolchain))
     yield rendered
 
-  /** Env names the build reads from a secret. Plain values such as `COURSIER_TTL` are not secrets. */
+  /** Env names sbt reads from the process. Plain values such as `COURSIER_TTL` are not secrets. `GITHUB_TOKEN` is a
+    * Cursor Runtime Secret: a Build Secret is mounted only for `docker build` and is gone before `sbt test`.
+    */
   def secretNames(env: Map[String, EnvValue]): Either[String, List[String]] =
-    val names = env.collect { case (name, EnvValue.FromSecret(_)) => name }.toList.sorted
+    val names = env
+      .collect {
+        case (name, EnvValue.FromSecret(_))                 => name
+        case (name, value) if value == EnvValue.githubToken => name
+      }
+      .toList
+      .distinct
+      .sorted
     names.foldLeft[Either[String, List[String]]](Right(Nil)) { (acc, name) =>
       acc.flatMap { found =>
         if name.matches("[A-Za-z_][A-Za-z0-9_]*") then Right(found :+ name)
         else Left(s"zipx: secret-backed env name '$name' is not a shell identifier")
       }
     }
+  end secretNames
 end ZipxAgentEnv

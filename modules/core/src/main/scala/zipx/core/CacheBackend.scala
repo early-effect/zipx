@@ -7,7 +7,7 @@ import zipx.workflow.SecretName
   * is passed through.
   */
 enum CacheBackend:
-  /** Persists sbt's and coursier's caches plus `target/` with `actions/cache`; only one owner saves
+  /** Persists `~/.sbt`, sbt's disk action cache, and coursier with `actions/cache`; only one owner saves
     * ([[LocalCacheMode.Save]]). Disables setup-sbt's `disk-cache` and setup-java's `cache: sbt`, which would key the
     * same directories on `hashFiles` and race this.
     */

@@ -185,9 +185,14 @@ Public-ecosystem PURLs (`pkg:npm/...`, `pkg:maven/...`) are the ones the gate is
 When some feed uses `Update`, the companion is `contents: write`, `pull-requests: write`, and `issues: write`, checks out
 with `GITHUB_TOKEN` (or a GitHub App installation token when `ZIPX_APP_ID` / `ZIPX_APP_PRIVATE_KEY` are set; same
 secrets as the version-updates companion), rewrites `Pin(...)` in the catalog, runs optional `materialize`, and
-`gh pr create`s `zipx/pin-updates-${'$'}GITHUB_RUN_ID` (labeled `clean`). App secrets skip the **Approve workflows to
-run** banner on that PR; unset secrets keep `github-actions[bot]` and GitHub holds CI. That PR does not rewrite
-`.github/workflows/` (`GITHUB_TOKEN` has no `workflows` permission; do not grant the App that either).
+`gh pr create`s `zipx/pin-updates-${'$'}GITHUB_RUN_ID` (labeled `clean`). A failed `gh pr create` fails the job.
+App secrets skip the **Approve workflows to run** banner on that PR; unset secrets keep `github-actions[bot]` and
+GitHub holds CI. The job env is the release lookup credentials (the same ones version updates use), and
+`packages: read` when that registry is GitHub Packages. After the catalog rewrite the job runs
+`sbt "zipxAgentEnvGenerate; zipxSbtEnvGenerate"` so agent files and `.github/zipx-env/Dockerfile` match the new pins.
+That PR does not rewrite `.github/workflows/` (`GITHUB_TOKEN` has no `workflows` permission; do not grant the App
+that either). An `sbt-image` bump changes the digest inside `ci.yml` (and the `df-` tag when a derived image is
+baked). `zipxWorkflowCheck` stays red until a human runs `zipxWorkflowGenerate` and commits that YAML.
 Alert-only stays `contents: read` and never opens a PR. The `pin-check` capability never applies.
 
 **Required repo/org setting** (only needed for `Update`): [Allow GitHub Actions to create and
@@ -205,6 +210,8 @@ Do not loosen **Fork pull request workflows** to skip the banner.
           yaml.contains("pull-requests: write") || yaml.contains("pull-requests:write"),
           yaml.contains("issues: write") || yaml.contains("issues:write"),
           yaml.contains("--label clean"),
+          yaml.contains("""sbt "zipxAgentEnvGenerate; zipxSbtEnvGenerate""""),
+          !yaml.linesIterator.exists(line => line.contains("gh pr create") && line.contains("|| true")),
           yaml.contains("Detect GitHub App credentials"),
           yaml.contains("actions/create-github-app-token@v3"),
           yaml.indexOf("Detect GitHub App credentials") < yaml.indexOf(ActionPins.Defaults.checkout.unwrap),

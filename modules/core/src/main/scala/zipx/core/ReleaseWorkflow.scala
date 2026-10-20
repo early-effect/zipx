@@ -61,15 +61,20 @@ object ReleaseWorkflow:
         List(bindRefStep, releaseStep, githubReleasesStep, openCycleStep, bumpPrStep),
     )
     val packages = if release.registry.usesGithubToken then ListMap("packages" -> "write") else ListMap.empty
-    Workflow(
-      name = "zipx release",
-      on = Triggers(
-        push = Some(BranchFilter(tags = List(tags.pattern))),
-        workflowDispatch = Some(shipsDispatch),
+    SbtImageWorkflow.use(
+      Workflow(
+        name = "zipx release",
+        on = Triggers(
+          push = Some(BranchFilter(tags = List(tags.pattern))),
+          workflowDispatch = Some(shipsDispatch),
+        ),
+        permissions = ListMap("contents" -> "write", "pull-requests" -> "write") ++ packages,
+        concurrency = Some(Concurrency(group = "zipx-release", cancelInProgress = CancelInProgress.Never)),
+        jobs = ListMap[String, Job](jobId -> job) ++ docs.flatMap(docsJob(_, tags)),
       ),
-      permissions = ListMap("contents" -> "write", "pull-requests" -> "write") ++ packages,
-      concurrency = Some(Concurrency(group = "zipx-release", cancelInProgress = CancelInProgress.Never)),
-      jobs = ListMap[String, Job](jobId -> job) ++ docs.flatMap(docsJob(_, tags)),
+      config.sbtImage,
+      config.actions.checkout,
+      config.runnerOs,
     )
   end plan
 

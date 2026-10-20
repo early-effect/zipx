@@ -201,8 +201,9 @@ end Target
   * @param postSteps
   *   steps after the command step.
   * @param container
-  *   `actions/setup-java` and `sbt/setup-sbt` then install into the container, so an image without `tar`, `curl` or
-  *   `git` fails in setup. Prefer [[services]] unless the toolchain itself must differ.
+  *   one job's image. `actions/setup-java` and `sbt/setup-sbt` then install into it, so an image without `tar`, `curl`
+  *   or `git` fails in setup. A shared sbt image is `zipxSbtImage`, not this. Prefer [[services]] unless the toolchain
+  *   itself must differ.
   * @param services
   *   reachable at `localhost:<mapped port>` (or the service id, under [[container]]). GitHub gives no readiness signal
   *   beyond a `--health-cmd` in `options`.

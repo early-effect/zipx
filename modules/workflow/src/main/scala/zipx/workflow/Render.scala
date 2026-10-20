@@ -146,7 +146,34 @@ object Render:
     )
 
   private def encodeJob(job: Job): Yaml =
-    nestMatrixInclude(collapseNameOnlyEnvironment(collapseSingletonRunsOn(prune(jobCodec.encodeValue(job)))))
+    foldContainerOptions(
+      nestMatrixInclude(collapseNameOnlyEnvironment(collapseSingletonRunsOn(prune(jobCodec.encodeValue(job)))))
+    )
+
+  /** `container` plus `container-options` is GitHub's mapping form. Image alone stays the scalar docs already lock. */
+  private def foldContainerOptions(job: Yaml): Yaml = job match
+    case Yaml.Mapping(entries) =>
+      val options = entries.collectFirst { case (Yaml.Scalar("container-options", _), Yaml.Scalar(value, _)) =>
+        value
+      }
+      val folded = entries.flatMap {
+        case (Yaml.Scalar("container-options", _), _)                   => Chunk.empty
+        case (key @ Yaml.Scalar("container", _), Yaml.Scalar(image, _)) =>
+          options match
+            case None       => Chunk(key -> Yaml.Scalar(image))
+            case Some(opts) =>
+              Chunk(
+                key -> Yaml.Mapping(
+                  Chunk(
+                    Yaml.Scalar("image")   -> Yaml.Scalar(image),
+                    Yaml.Scalar("options") -> Yaml.Scalar(opts),
+                  )
+                )
+              )
+        case other => Chunk(other)
+      }
+      Yaml.Mapping(folded)
+    case other => other
 
   /** `environment: {name: x}` as `environment: x`, the form GitHub documents first. */
   private def collapseNameOnlyEnvironment(job: Yaml): Yaml = job match

@@ -32,9 +32,11 @@ final case class AgentEnv(
     rehydrate: SbtCommand,
     secretEnv: List[String],
     pins: AgentPins,
+    /** Upstream or derived sbt image. None keeps the Ubuntu Dockerfile that installs a JDK at startup. */
+    toolchain: Option[String] = None,
 )
 
-final case class AgentFiles(environmentJson: String, dockerfile: String, installSh: String)
+final case class AgentFiles(environmentJson: String, dockerfile: Option[String], installSh: String)
 
 /** Cursor cloud agent files. `environment.json` and the Dockerfile are the only paths under `.cursor/`. The install
   * script lives outside that directory so local rules and MCP stay untracked.
@@ -47,19 +49,31 @@ object CursorEnv:
 
   def render(env: AgentEnv): Either[String, AgentFiles] =
     installScript(env).map { install =>
-      AgentFiles(environmentJson(env.docker), dockerfile(env), install)
+      AgentFiles(environmentJson(env), dockerfile(env), install)
     }
 
-  def environmentJson(docker: Boolean): String =
-    val fields = List(
+  def environmentJson(env: AgentEnv): String =
+    val image = env.toolchain.filter(_ => !env.docker).map(ref => s"""  "image": "$ref"""")
+    val build = Option.when(image.isEmpty)(
       """  "build": {
     "dockerfile": "Dockerfile"
-  }""",
-      s"""  "install": "bash $InstallRel"""",
-    ) ++ (if docker then List("""  "start": "sudo service docker start"""") else Nil)
+  }"""
+    )
+    val start =
+      if !env.docker then None
+      else if env.toolchain.isDefined then Some("""  "start": "service docker start"""")
+      else Some("""  "start": "sudo service docker start"""")
+    val fields = (image.toList ++ build.toList) ++ List(s"""  "install": "bash $InstallRel"""") ++ start.toList
     "{\n" + fields.mkString(",\n") + "\n}\n"
+  end environmentJson
 
-  def dockerfile(env: AgentEnv): String =
+  def dockerfile(env: AgentEnv): Option[String] =
+    env.toolchain match
+      case Some(_) if !env.docker => None
+      case Some(ref)              => Some(sbtDockerDockerfile(ref, env.pins.dockerCe))
+      case None                   => Some(ubuntuDockerfile(env))
+
+  private def ubuntuDockerfile(env: AgentEnv): String =
     val docker = if env.docker then dockerSetup(env.pins.dockerCe) else ""
     s"""${ZipxCatalog.GeneratedHeader}
        |FROM ubuntu:${UbuntuBase.Tag}@${env.pins.baseImage}
@@ -83,7 +97,15 @@ object CursorEnv:
        |USER ubuntu
        |WORKDIR /home/ubuntu
        |""".stripMargin
-  end dockerfile
+  end ubuntuDockerfile
+
+  private def sbtDockerDockerfile(base: String, version: String): String =
+    s"""${ZipxCatalog.GeneratedHeader}
+       |FROM $base
+       |${dockerSetup(version)}
+       |USER root
+       |WORKDIR /root
+       |""".stripMargin
 
   private def dockerSetup(version: String): String =
     s"""RUN install -m 0755 -d /etc/apt/keyrings \\
@@ -114,14 +136,14 @@ object CursorEnv:
       checks <- secretChecks(env.secretEnv)
       quoted <- quoteSbt(env.rehydrate.text)
     yield
+      val jdk =
+        if env.toolchain.isDefined then Nil
+        else jdkStep :: linkJdk :: linkBins
       val commands: List[Command] =
         Exec(".", Word.lit("project/zipx-ci.env")) ::
           checks :::
-          List(
-            Assign(VarName("COURSIER_TTL"), Word.lit("0s"), Assign.Scope.Export),
-            jdkStep,
-            linkJdk,
-          ) ::: linkBins ::: List(
+          List(Assign(VarName("COURSIER_TTL"), Word.lit("0s"), Assign.Scope.Export)) :::
+          jdk ::: List(
             Exec("sbt", Word.lit("--server"), Word.lit("--batch"), quoted)
           )
       val body = Script(SetOpts() :: commands).withTrailingNewline(true).render
@@ -163,7 +185,10 @@ object CursorEnv:
         toStderr(
           Exec(
             "echo",
-            Word.dquote(Word.lit("zipx: cloud agent is missing secret-backed env:"), Word.v("zipx_missing")),
+            Word.dquote(
+              Word.lit("zipx: cloud agent is missing env (set each as a Cursor Runtime Secret):"),
+              Word.v("zipx_missing"),
+            ),
           )
         ),
         Exit(ExitCode.Failure),

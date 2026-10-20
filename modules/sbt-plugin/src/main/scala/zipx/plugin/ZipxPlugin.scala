@@ -427,6 +427,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxCacheRehydrateEnv    = settingKey[Map[String, EnvValue]](ZipxSettings.cacheRehydrateEnv.description)
     val zipxEnv                  = settingKey[Map[String, EnvValue]](ZipxSettings.env.description)
     val zipxAgentEnv             = settingKey[CloudAgent](ZipxSettings.agentEnv.description)
+    val zipxSbtImage             = settingKey[Boolean](ZipxSettings.sbtImage.description)
     val zipxCancelSupersededRuns = settingKey[Boolean](ZipxSettings.cancelSupersededRuns.description)
     val zipxCheckCommandNames    = settingKey[Boolean](ZipxSettings.checkCommandNames.description)
     val zipxPinFeeds             = settingKey[Seq[PinFeed]](ZipxSettings.pinFeeds.description)
@@ -459,6 +460,7 @@ object ZipxPlugin extends AutoPlugin:
     val zipxWorkflowGenerate = taskKey[Unit](ZipxSettings.workflowGenerate.description)
     val zipxWorkflowCheck    = taskKey[Unit](ZipxSettings.workflowCheck.description)
     val zipxAgentEnvGenerate = taskKey[Unit](ZipxSettings.agentEnvGenerate.description)
+    val zipxSbtEnvGenerate   = taskKey[Unit](ZipxSettings.sbtEnvGenerate.description)
     val zipxAdvisoryCheck    = taskKey[Unit](ZipxSettings.advisoryCheck.description)
     val zipxAffectedModules  = inputKey[Unit](ZipxSettings.affectedModules.description)
     val zipxPinCheck         = taskKey[Unit](ZipxSettings.pinCheck.description)
@@ -518,6 +520,7 @@ object ZipxPlugin extends AutoPlugin:
     zipxCacheRehydrateEnv        := Map.empty,
     zipxEnv                      := Map.empty,
     zipxAgentEnv                 := zipx.core.CloudAgent.Off,
+    zipxSbtImage                 := false,
     zipxCancelSupersededRuns     := true,
     zipxCheckCommandNames        := true,
     zipxVerifyClean              := VerifyClean.None,
@@ -617,6 +620,7 @@ object ZipxPlugin extends AutoPlugin:
     },
     zipxWorkflowCheck               := checkTask.value,
     zipxAgentEnvGenerate            := Def.uncached { writeAgentEnv.value },
+    zipxSbtEnvGenerate              := Def.uncached { writeSbtEnv.value },
     zipxAdvisoryCheck               := Def.uncached { advisoryCheckTask.value },
     zipxAffectedModules             := affectedModulesTask.evaluated,
     zipxDeployPlan                  := Def.uncached { deployPlanTask.value },
@@ -924,8 +928,25 @@ object ZipxPlugin extends AutoPlugin:
       shipEpochHash = Option.when(read(zipxCacheEpoch, CacheEpoch.GitTags()) == CacheEpoch.ShipCatalog)(
         Modver.epochHash(read(zipxShips, Seq.empty))
       ),
+      sbtImage = sbtImagePlan(extracted),
     )
   }
+
+  private def sbtImagePlan(extracted: Extracted): Option[SbtImagePlan] =
+    if !readBuildSetting(extracted, zipxSbtImage, false) then None
+    else
+      val caps = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
+      Some(
+        orFail(
+          SbtImage.resolve(
+            readBuildSetting(extracted, zipxJavaVersion, PlanConfig.DefaultJdkVersion),
+            readBuildSetting(extracted, zipxPins, Seq.empty),
+            caps.flatMap(_.nodeVersion).toList,
+            readBuildSetting(extracted, zipxVersionUpdates, true),
+            caps.exists(c => c.name == Capability.DockerName || c.needsCapabilities.contains(Capability.DockerName)),
+          )
+        )
+      )
 
   /** A committed pin YAML is leftover input and always fails, even when `zipxActions` is set. */
   private def resolveActionPins(extracted: Extracted, root: File): ActionPins =
@@ -1145,6 +1166,7 @@ object ZipxPlugin extends AutoPlugin:
     writeDeployWorkflow.value
     writeReleaseWorkflow.value
     writeAgentEnv.value
+    writeSbtEnv.value
   }
 
   private def writeCiParams: Def.Initialize[Task[Unit]] = Def.task {
@@ -1157,13 +1179,70 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   private def pinFeeds(extracted: Extracted): Seq[PinFeed] =
-    ZipxAgentEnv.withFeeds(
+    val pins  = readBuildSetting(extracted, zipxPins, Seq.empty)
+    val agent = ZipxAgentEnv.withFeeds(
       readBuildSetting(extracted, zipxPinFeeds, Seq.empty),
-      readBuildSetting(extracted, zipxPins, Seq.empty),
+      pins,
       readBuildSetting(extracted, zipxAgentEnv, zipx.core.CloudAgent.Off) match
         case zipx.core.CloudAgent.Off   => false
         case zipx.core.CloudAgent.On(_) => true,
     )
+    zipx.agent.SbtImageFeeds.withUser(agent, pins, readBuildSetting(extracted, zipxSbtImage, false))
+  end pinFeeds
+
+  private def agentFiles(
+      agent: zipx.core.CloudAgent.On,
+      cfg: PlanConfig,
+      pins: Seq[Pin],
+      root: File,
+      extracted: Extracted,
+  ): Either[String, zipx.agent.AgentFiles] =
+    val repo = cfg.sbtImage.filter(_.dockerfile.isDefined).flatMap(_ => originRepository(root))
+    ZipxAgentEnv.files(
+      agent,
+      cfg.cacheRehydrateTask,
+      cfg.env ++ cfg.cacheRehydrateEnv ++ releaseLookup(extracted).env,
+      pins,
+      cfg.sbtImage,
+      repo,
+    )
+  end agentFiles
+
+  private def originRepository(root: File): Option[String] =
+    val out  = new StringBuilder
+    val code = scala.sys.process
+      .Process(Seq("git", "remote", "get-url", "origin"), root)
+      .!(scala.sys.process.ProcessLogger(line => out.append(line), _ => ()))
+    if code == 0 then SbtImage.githubRepository(out.toString) else None
+
+  private def deleteGenerated(root: File, rel: String, log: Logger): Unit =
+    val file = root / rel
+    if file.exists && IO.read(file).startsWith(ZipxCatalog.GeneratedHeader) then
+      IO.delete(file)
+      log.info(s"zipx deleted ${file.getPath}")
+
+  private def writeSbtEnv: Def.Initialize[Task[Unit]] = Def.task {
+    val root = (LocalRootProject / baseDirectory).value
+    val cfg  = planConfig.value
+    val log  = streams.value.log
+    val file = root / SbtImage.DockerfileRel
+    cfg.sbtImage.flatMap(_.dockerfile) match
+      case Some(body) =>
+        IO.createDirectory(file.getParentFile)
+        IO.write(file, body)
+        log.info(s"zipx wrote ${file.getPath}")
+      case None => deleteGenerated(root, SbtImage.DockerfileRel, log)
+  }
+
+  private def checkSbtEnv(root: File, cfg: PlanConfig, log: Logger): Unit =
+    val file     = root / SbtImage.DockerfileRel
+    val actual   = if file.exists then IO.read(file) else ""
+    val expected = cfg.sbtImage.flatMap(_.dockerfile).getOrElse("")
+    if expected.nonEmpty && actual != expected then
+      sys.error(s"${file.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result.")
+    if expected.isEmpty && actual.startsWith(ZipxCatalog.GeneratedHeader) then
+      sys.error(s"zipx: ${SbtImage.DockerfileRel} is leftover. Run 'sbt zipxWorkflowGenerate' and commit the deletion.")
+    if expected.nonEmpty then log.info(s"zipx: ${file.getPath} is up to date.")
 
   private def writeAgentEnv: Def.Initialize[Task[Unit]] = Def.task {
     val root      = (LocalRootProject / baseDirectory).value
@@ -1180,19 +1259,19 @@ object ZipxPlugin extends AutoPlugin:
         }
       case agent: zipx.core.CloudAgent.On =>
         val cfg      = planConfig.value
-        val rendered = orFail(
-          ZipxAgentEnv.files(agent, cfg.cacheRehydrateTask, cfg.env ++ cfg.cacheRehydrateEnv, pins)
-        )
-        List(
-          ZipxAgentEnv.EnvironmentRel -> rendered.environmentJson,
-          ZipxAgentEnv.DockerfileRel  -> rendered.dockerfile,
-          ZipxAgentEnv.InstallRel     -> rendered.installSh,
-        ).foreach { (rel, body) =>
+        val rendered = orFail(agentFiles(agent, cfg, pins, root, extracted))
+        val written  = List(
+          Some(ZipxAgentEnv.EnvironmentRel -> rendered.environmentJson),
+          rendered.dockerfile.map(ZipxAgentEnv.DockerfileRel -> _),
+          Some(ZipxAgentEnv.InstallRel -> rendered.installSh),
+        ).flatten
+        written.foreach { (rel, body) =>
           val file = root / rel
           IO.createDirectory(file.getParentFile)
           IO.write(file, body)
           log.info(s"zipx wrote ${file.getPath}")
         }
+        if rendered.dockerfile.isEmpty then deleteGenerated(root, ZipxAgentEnv.DockerfileRel, log)
     end match
   }
 
@@ -1208,21 +1287,26 @@ object ZipxPlugin extends AutoPlugin:
             )
         }
       case agent: zipx.core.CloudAgent.On =>
-        val rendered = orFail(
-          ZipxAgentEnv.files(agent, cfg.cacheRehydrateTask, cfg.env ++ cfg.cacheRehydrateEnv, pins)
-        )
-        List(
-          ZipxAgentEnv.EnvironmentRel -> rendered.environmentJson,
-          ZipxAgentEnv.DockerfileRel  -> rendered.dockerfile,
-          ZipxAgentEnv.InstallRel     -> rendered.installSh,
-        ).foreach { (rel, expected) =>
+        val rendered = orFail(agentFiles(agent, cfg, pins, root, extracted))
+        val expected = List(
+          Some(ZipxAgentEnv.EnvironmentRel -> rendered.environmentJson),
+          rendered.dockerfile.map(ZipxAgentEnv.DockerfileRel -> _),
+          Some(ZipxAgentEnv.InstallRel -> rendered.installSh),
+        ).flatten
+        expected.foreach { (rel, body) =>
           val file   = root / rel
           val actual = if file.exists then IO.read(file) else ""
-          if actual != expected then
+          if actual != body then
             sys.error(s"${file.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result.")
           if rel != ZipxAgentEnv.InstallRel then requireTrackedCursorFile(root, rel)
           log.info(s"zipx: ${file.getPath} is up to date.")
         }
+        if rendered.dockerfile.isEmpty then
+          val file = root / ZipxAgentEnv.DockerfileRel
+          if file.exists && generatedAgentFile(ZipxAgentEnv.DockerfileRel, IO.read(file)) then
+            sys.error(
+              s"zipx: ${ZipxAgentEnv.DockerfileRel} is leftover. Run 'sbt zipxWorkflowGenerate' and commit the deletion."
+            )
     end match
   end checkAgentEnv
 
@@ -1303,14 +1387,29 @@ object ZipxPlugin extends AutoPlugin:
       val root      = (LocalRootProject / baseDirectory).value
       val log       = streams.value.log
       val checkBody = orFail(
-        PinCheckWorkflow.render(cfg.actions, cfg.javaVersion, cfg.runnerOs, PinFeeds.hasUpdate(feeds))
+        PinCheckWorkflow.render(
+          cfg.actions,
+          cfg.javaVersion,
+          cfg.runnerOs,
+          PinFeeds.hasUpdate(feeds),
+          lookup = releaseLookup(extracted),
+          readPackages = readsGithubPackages(extracted),
+          sbtImage = cfg.sbtImage,
+        )
       )
       writeCompanion(root, PinCheckWorkflow.DefaultPath, checkBody, log)
       if PinFeeds.emitSnapshot(feeds) then
         val snapBody = orFail(
-          PinSnapshotWorkflow.render(cfg.actions, cfg.javaVersion, cfg.runnerOs, cfg.pushBranches)
+          PinSnapshotWorkflow.render(
+            cfg.actions,
+            cfg.javaVersion,
+            cfg.runnerOs,
+            cfg.pushBranches,
+            cfg.sbtImage,
+          )
         )
         writeCompanion(root, PinSnapshotWorkflow.DefaultPath, snapBody, log)
+      end if
     end if
   }
 
@@ -1318,14 +1417,29 @@ object ZipxPlugin extends AutoPlugin:
     val feeds = pinFeeds(extracted)
     if PinFeeds.emitCompanions(feeds) then
       val expectedCheck = orFail(
-        PinCheckWorkflow.render(cfg.actions, cfg.javaVersion, cfg.runnerOs, PinFeeds.hasUpdate(feeds))
+        PinCheckWorkflow.render(
+          cfg.actions,
+          cfg.javaVersion,
+          cfg.runnerOs,
+          PinFeeds.hasUpdate(feeds),
+          lookup = releaseLookup(extracted),
+          readPackages = readsGithubPackages(extracted),
+          sbtImage = cfg.sbtImage,
+        )
       )
       checkCompanion(root, PinCheckWorkflow.DefaultPath, expectedCheck, log)
       if PinFeeds.emitSnapshot(feeds) then
         val expectedSnap = orFail(
-          PinSnapshotWorkflow.render(cfg.actions, cfg.javaVersion, cfg.runnerOs, cfg.pushBranches)
+          PinSnapshotWorkflow.render(
+            cfg.actions,
+            cfg.javaVersion,
+            cfg.runnerOs,
+            cfg.pushBranches,
+            cfg.sbtImage,
+          )
         )
         checkCompanion(root, PinSnapshotWorkflow.DefaultPath, expectedSnap, log)
+      end if
     end if
   end checkPinWorkflows
 
@@ -1341,11 +1455,14 @@ object ZipxPlugin extends AutoPlugin:
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
       val extra    = readBuildSetting(extracted, zipxVersionUpdatesExtraSteps, Seq.empty).toList
       val pre      = readBuildSetting(extracted, zipxVersionUpdatesPreSteps, Seq.empty).toList
-      val body     = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre, releaseLookup(extracted)))
+      val body     = orFail(
+        VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre, releaseLookup(extracted), cfg.sbtImage)
+      )
       writeCompanion(root, rel, body, log)
     else if file.exists then
       IO.delete(file)
       log.info(s"zipx deleted ${file.getPath}")
+    end if
   }
 
   private def checkVersionUpdates(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
@@ -1356,7 +1473,9 @@ object ZipxPlugin extends AutoPlugin:
       val schedule = readBuildSetting(extracted, zipxVersionUpdatesSchedule, VersionUpdatesWorkflow.DefaultSchedule)
       val extra    = readBuildSetting(extracted, zipxVersionUpdatesExtraSteps, Seq.empty).toList
       val pre      = readBuildSetting(extracted, zipxVersionUpdatesPreSteps, Seq.empty).toList
-      val expected = orFail(VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre, releaseLookup(extracted)))
+      val expected = orFail(
+        VersionUpdatesWorkflow.render(cfg.actions, schedule, extra, pre, releaseLookup(extracted), cfg.sbtImage)
+      )
       checkCompanion(root, rel, expected, log)
     else if file.exists then
       sys.error(
@@ -2132,6 +2251,7 @@ object ZipxPlugin extends AutoPlugin:
     checkCatalog(root, extracted, streams.value.log)
     checkCiParams(root, cfg, extracted, streams.value.log)
     checkAgentEnv(root, cfg, extracted, streams.value.log)
+    checkSbtEnv(root, cfg, streams.value.log)
   }
 
   private def checkCiParams(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
@@ -3104,6 +3224,9 @@ object ZipxPlugin extends AutoPlugin:
 
   private def releaseLookup(extracted: Extracted): RegistryCredentials =
     releaseWorkflow(extracted).fold(_ => RegistryCredentials.Anonymous, _.lookupCredentials)
+
+  private def readsGithubPackages(extracted: Extracted): Boolean =
+    releaseWorkflow(extracted).fold(_ => false, _.registry.usesGithubToken)
 
   private def lastReleases(
       extracted: Extracted,
