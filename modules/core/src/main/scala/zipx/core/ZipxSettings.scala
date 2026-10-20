@@ -476,7 +476,7 @@ object ZipxSettings:
       SettingName("zipxAffectedOnPush"),
       false,
       SettingPurpose(
-        "Also restrict pushes to modules changed since this workflow's last successful push run on the branch (default false)."
+        "Also restrict pushes to modules changed since this workflow's last successful push run on the branch (default false). The job calls gh. With zipxSbtImage, Pin(\"sbt-image\", \"gh\", \"<x.y.z>\") bakes that client. Without the image the runner already has it."
       ),
       Build,
     )
@@ -572,7 +572,7 @@ object ZipxSettings:
       SettingName("zipxSbtImage"),
       false,
       SettingPurpose(
-        "Run sbt jobs in the pinned sbtscala/scala-sbt light image (default false). The cloud agent builds from that public pin and does not pull the published ghcr.io tag. The sbt-image feed moves the JDK-qualified tag and its manifest digest. Node, cs, and the Docker CLI are baked into ghcr.io/<owner>/<repo>/zipx-env when CI needs them. LocalDir actions/cache stays outside the image. Opt in after the first containerized run, which misses every cache entry saved under /home/runner."
+        "Run sbt jobs in the pinned sbtscala/scala-sbt light image (default false). The cloud agent builds from that public pin and does not pull the published ghcr.io tag. The sbt-image feed moves the JDK-qualified tag and its manifest digest. Node, cs, the Docker CLI, and gh are baked into ghcr.io/<owner>/<repo>/zipx-env when CI needs them. LocalDir actions/cache stays outside the image. Opt in after the first containerized run, which misses every cache entry saved under /home/runner."
       ),
       Build,
     )

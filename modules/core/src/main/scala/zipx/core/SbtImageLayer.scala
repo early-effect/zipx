@@ -57,7 +57,7 @@ object SbtImageLayer:
     else Right(id)
 
   private def reserved(id: String): Boolean =
-    id == SbtImage.NodeId || id == SbtImage.CsId || id == SbtImage.DockerCliId
+    id == SbtImage.NodeId || id == SbtImage.CsId || id == SbtImage.DockerCliId || id == SbtImage.GhId
 
   private def one(pins: Seq[Pin], layer: SbtImageLayer): Either[SbtImageError, LayerOut] =
     for
@@ -73,7 +73,8 @@ object SbtImageLayer:
       case Some(version)                                 => Left(SbtImageError.LayerPinNotConcrete(id, version))
 
   private def orphans(pins: Seq[Pin], layers: Seq[SbtImageLayer]): Either[SbtImageError, Unit] =
-    val known   = Set(SbtImage.ImageId, SbtImage.NodeId, SbtImage.CsId, SbtImage.DockerCliId) ++ layers.map(_.id)
+    val known = Set(SbtImage.ImageId, SbtImage.NodeId, SbtImage.CsId, SbtImage.DockerCliId, SbtImage.GhId) ++
+      layers.map(_.id)
     val unknown = pins.filter(_.feed == SbtImage.Feed).map(_.id).filterNot(known.contains)
     unknown.headOption match
       case None     => Right(())

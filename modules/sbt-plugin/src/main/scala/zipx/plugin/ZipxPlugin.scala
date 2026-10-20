@@ -953,12 +953,15 @@ object ZipxPlugin extends AutoPlugin:
     SbtImage.layersRequireImage(enabled, layers).foreach(err => sys.error(err.message))
     if !enabled then None
     else
-      val caps = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
+      val caps   = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
+      val pins   = readBuildSetting(extracted, zipxPins, Seq.empty)
+      val onPush = readBuildSetting(extracted, zipxAffectedOnPush, false)
+      SbtImage.missingPushClient(onPush, pins).foreach(err => sys.error(err.message))
       Some(
         SbtImage
           .resolve(
             readBuildSetting(extracted, zipxJavaVersion, PlanConfig.DefaultJdkVersion),
-            readBuildSetting(extracted, zipxPins, Seq.empty),
+            pins,
             caps.flatMap(_.nodeVersion).toList,
             readBuildSetting(extracted, zipxVersionUpdates, true),
             caps.exists(c => c.name == Capability.DockerName || c.needsCapabilities.contains(Capability.DockerName)),

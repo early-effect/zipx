@@ -16,6 +16,8 @@ object SbtImageFeeds:
 
   val CoursierReleases: String = "https://api.github.com/repos/coursier/coursier/releases?per_page=100"
 
+  val GhReleases: String = "https://api.github.com/repos/cli/cli/releases?per_page=100"
+
   private val TagName = """"name"\s*:\s*"(eclipse-temurin-[^"]+)"""".r
   private val Next    = """"next"\s*:\s*"([^"]+)"""".r
   private val Token   = """"token"\s*:\s*"([^"]+)"""".r
@@ -39,6 +41,7 @@ object SbtImageFeeds:
         case SbtImage.NodeId      => numbered(pin.current, NodeIndex, SbtImage.nodeVersions, "node")
         case SbtImage.CsId        => numbered(pin.current, CoursierReleases, SbtImage.releases, "cs")
         case SbtImage.DockerCliId => dockerCli(pin.current)
+        case SbtImage.GhId        => numbered(pin.current, GhReleases, SbtImage.releases, "gh")
         case other                => layerLookup(layers, pin, other)
     ,
     outdated = PinAction.Update,

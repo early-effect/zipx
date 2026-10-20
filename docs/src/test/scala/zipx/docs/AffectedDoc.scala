@@ -74,7 +74,8 @@ runs the closure's CI-relevant aggregated modules.
 ```scala
 zipxAffectedOnPR   := true   // default: test runs zipxTestAffected; `affected` is emitted when a Graph or
                              // withAffectedBy job reads it
-zipxAffectedOnPush := false  // opt-in: also scope branch pushes to changes since the last green push run
+zipxAffectedOnPush := false  // opt-in: also scope branch pushes to changes since the last green push run.
+                             // That job calls gh. With zipxSbtImage, add Pin("sbt-image", "gh", "<x.y.z>").
 ```
 """,
       exampleValue {

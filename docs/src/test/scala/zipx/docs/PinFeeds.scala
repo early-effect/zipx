@@ -192,7 +192,7 @@ GitHub holds CI. The job env is the release lookup credentials (the same ones ve
 `sbt "zipxAgentEnvGenerate; zipxSbtEnvGenerate"` so agent files and `.github/zipx-env/Dockerfile` match the new pins.
 That PR does not rewrite `.github/workflows/` (`GITHUB_TOKEN` has no `workflows` permission; do not grant the App
 that either). An `sbt-image` bump changes the digest inside `ci.yml` (and the `df-` tag when a derived image is
-baked). An id other than the base image, `node`, `cs`, and `docker-cli` is a layer. The layer's lookup moves that
+baked). An id other than the base image, `node`, `cs`, `docker-cli`, and `gh` is a layer. The layer's lookup moves that
 pin. A second `PinFeed` named `sbt-image` is a generate error. `zipxWorkflowCheck` stays red until a human runs
 `zipxWorkflowGenerate` and commits that YAML.
 Alert-only stays `contents: read` and never opens a PR. The `pin-check` capability never applies.
