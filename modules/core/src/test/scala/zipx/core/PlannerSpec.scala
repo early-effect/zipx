@@ -270,18 +270,18 @@ object PlannerSpec extends ZIOSpecDefault:
         coreStep.flatMap(_.`with`.get("cache-key-suffix")) != apiStep.flatMap(_.`with`.get("cache-key-suffix")),
       )
     },
-    test("LocalDir cache paths cover sbt tooling and target directories") {
+    test("LocalDir cache paths cover the action cache and coursier, and not target") {
       val paths = ZipxComposites
         .sbtSetup(ActionPins.Defaults, CacheEpoch.Fixed("1.2.3-SNAPSHOT"))
         .steps
-        .find(_.name.contains("Cache sbt"))
-        .map(_.`with`("path"))
-        .getOrElse("")
+        .filter(_.name.contains("Cache sbt"))
+        .flatMap(_.`with`.get("path"))
       assertTrue(
-        paths.contains("~/.sbt"),
-        paths.contains("~/.cache/sbt"),
-        paths.contains("~/.cache/coursier"),
-        paths.contains("target"),
+        paths.exists(_.contains("~/.sbt")),
+        paths.exists(_.contains("~/.cache/sbt")),
+        paths.exists(_.contains("~/.cache/coursier")),
+        paths.exists(_.contains("${{ inputs.cache-home }}/.sbt")),
+        paths.forall(path => !path.split('\n').contains("target")),
       )
     },
     test("LocalDir cache disables setup-java and sbt/setup-sbt internal caching") {

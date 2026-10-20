@@ -95,7 +95,7 @@ zipxCache := CacheBackend.BazelRemoteSidecar(RemoteCacheProof.image, RemoteCache
 zipxCache := CacheBackend.managedRemote("grpcs://cache.buildbuddy.io", "BUILDBUDDY_KEY")
 ```
 
-- **LocalDir**: persist local cache dirs and `target/` with `actions/cache` inside the generated `zipx-sbt-setup`
+- **LocalDir**: persist `~/.sbt`, `~/.cache/sbt`, and `~/.cache/coursier` with `actions/cache` inside the generated `zipx-sbt-setup`
   composite. One job owns the **build snapshot** and saves it; every other sbt job restores it and saves nothing (see
   **Who saves** below). Keys are OS + JDK + epoch + `build` + run id + job id; restore-keys prefer this run's build
   saves, then the epoch's latest build save, then (GitTags/Script) the release epoch's
@@ -202,7 +202,8 @@ about 3 GB, and a single wave of four PRs evicted the default branch's snapshot.
 are mode `0444`, and `cleanFull` deletes the directory from a writable parent. When a catalog snapshot is pinned, the
 `clean` inside `cleanFull` also clears sbt's in-memory resolution cache. A qualifier snapshot is `forceUpdatePeriod`,
 not that hook (see **Snapshots and releases**). `actions/cache` still restores `~/.sbt`, `~/.cache/coursier`,
-`~/.cache/sbt`, and `target` before sbt starts, and the save owner writes them back. Rolling `zipxCacheEpoch` does
+and `~/.cache/sbt` before sbt starts, and the save owner writes them back. `target/` is not in that snapshot: sbt
+replays products from the action cache. Rolling `zipxCacheEpoch` does
 not drop them either:
 a baked epoch's last restore-key is the OS+JDK prefix with no epoch in it, so a miss restores the newest entry under
 that prefix.
@@ -260,8 +261,9 @@ Pin(
 
 A fat tag (`<jdk>_<sbt>_<scala>`) is not the pin. It warms one Scala compiler into the image, and
 `project/build.properties` still picks sbt. The image is the toolchain: JDK, sbt, `curl`, `git`, `tar`. It does not
-contain `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, `target`, or a token. Those stay the LocalDir snapshot,
-restored into `/home/sbtuser`. Jobs set `HOME` and `-Duser.home` there, and mark every directory git-safe, because
+contain `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, or a token. Those stay the LocalDir snapshot,
+restored into `/home/sbtuser`. `target/` is not in the image and not in the snapshot. Jobs set `HOME` and
+`-Duser.home` there, and mark every directory git-safe, because
 that `HOME` is not the one `actions/checkout` configured. Actions overrides `HOME`, so a `~` path is
 not that directory and the cache paths are absolute. `setup-sbt`'s own disk cache stays off.
 
@@ -269,7 +271,9 @@ not that directory and the cache paths are absolute. `setup-sbt`'s own disk cach
 The composite still restores and saves the snapshot.
 
 When a capability sets `withNodeVersion`, version updates are on (they need `cs`), or a job publishes images (it
-needs the Docker client), zipx writes `.github/zipx-env/Dockerfile` `FROM` that pin and bakes only those tools. The
+needs the Docker client), zipx writes `.github/zipx-env/Dockerfile` `FROM` that pin and bakes only those tools. A
+tool that is not an sbt output, such as a Playwright browser, belongs in that image too, so the Dockerfile hash
+moves when the tool moves. That bake is not generated yet. The
 published tag is `ghcr.io/<owner>/<repo>/zipx-env:df-<hash of the Dockerfile>`. A `zipx-env-image` job builds and
 pushes only when the tag is missing. The hash moves when the sbt pin, the Node pin, or the `cs` pin moves. `latest`
 and `lts` are not baked: pin `Pin("sbt-image", "node", "<x.y.z>")`. Two capabilities asking for two Node versions is

@@ -139,9 +139,6 @@ object SbtImage:
 
   def contentTag(body: String): String = "df-" + sha256(body)
 
-  def cachePaths(home: String): List[String] =
-    List(s"$home/.sbt", s"$home/.cache/sbt", s"$home/.cache/coursier", "target")
-
   /** Job env so the JVM and the cache step share [[CacheHome]]. Existing keys win; a flag is appended when the value
     * does not already set `user.home`.
     */

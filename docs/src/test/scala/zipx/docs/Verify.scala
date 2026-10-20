@@ -49,7 +49,9 @@ zipxVerifyClean := VerifyClean.CleanFull   // None (default) | Clean | CleanFull
 For a one-off `cleanFull` without making it permanent, leave `zipxVerifyClean` at `None` (default) and add the
 GitHub PR label **`clean`**. Verify then runs `cleanFull; <task>` only on that PR. `cleanFull` deletes declared
 outputs, `target/out`, and the disk action cache (`~/.cache/sbt/v2` on the runner). It does not delete
-`~/.cache/coursier` or `~/.sbt`, and it does not skip the LocalDir restore of those directories or of `target`.
+`~/.cache/coursier` or `~/.sbt`, and it does not skip the LocalDir restore of those directories. `target/` is not
+part of that restore.
+
 The version-updates and pin-updates companions always add that label. Override the label name with
 `zipxVerifyCleanLabel`, or set it to `None` to disable. To skip that restore and save a fresh snapshot, use the
 **`purge`** label (see **Caching**).
@@ -276,12 +278,12 @@ direct push and running Verify again.
 With **LocalDir**, that skip would otherwise leave `main` without an `actions/cache` save (PR caches are
 branch-scoped; later PRs only warm from the default branch). So by default zipx also emits a minimal
 `cache-rehydrate` job that runs **only** when verify-gate skips Verify: same checkout / JDK / LocalDir cache
-path, then `Test/compile` (override with `zipxCacheRehydrateTask`), so the next PR's `test` job restores test classes
-as well as main ones. It is the merge push's only LocalDir save (see **Caching**, "Who saves"). No full test, no
-`verifyClean`. Set `zipxCacheRehydrateOnMerge := false` to opt out; remote backends never emit it.
+path, then `Test/compile` (override with `zipxCacheRehydrateTask`), so the next PR restores the action cache from
+that compile, including test outputs. It is the merge push's only LocalDir save (see **Caching**, "Who saves"). No
+full test, no `verifyClean`. Set `zipxCacheRehydrateOnMerge := false` to opt out; remote backends never emit it.
 
-To also warm **non-sbt** blobs that live under `target/` (e.g. Playwright browsers), opt into rehydrate-only
-`extraSteps`. Prefer build-wide **`zipxEnv`** for vars needed on Verify **and** rehydrate; use
+The snapshot does not keep files under `target/`. A browser install has to run in the job until the env image bakes
+it (see **Caching**, "Sbt image"). Prefer build-wide **`zipxEnv`** for vars needed on Verify **and** rehydrate; use
 `zipxCacheRehydrateEnv` only for merge-only overlays. Neither is copied from Verify capability `extraSteps` /
 `env`; assign the same setup function when you want step parity:
 

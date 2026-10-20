@@ -62,7 +62,7 @@ object ZipxComposites:
       case CacheEpoch.Script(_, stepId) => stepId.unwrap
       case _                            => CacheEpoch.GitTagsStepId.unwrap
 
-    val cachePaths = List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier", "target").mkString("\n")
+    val cachePaths = List("~/.sbt", "~/.cache/sbt", "~/.cache/coursier").mkString("\n")
     val prefix     = s"${input("runner-os")}-jdk${input("java-version")}-sbt-"
     val epochOut   = s"$${{ steps.$resolveId.outputs.epoch }}"
     val releaseOut = s"$${{ steps.$resolveId.outputs.release }}"
@@ -89,7 +89,6 @@ object ZipxComposites:
             "${{ inputs.cache-home }}/.sbt",
             "${{ inputs.cache-home }}/.cache/sbt",
             "${{ inputs.cache-home }}/.cache/coursier",
-            "target",
           ).mkString("\n")
         else cachePaths
       val cached = ListMap(

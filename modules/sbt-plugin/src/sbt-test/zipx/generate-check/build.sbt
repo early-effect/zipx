@@ -133,7 +133,12 @@ assertGraph := {
     ),
     "composite cache key should embed epoch + build role + run_id + job suffix",
   )
-  assert(setup.contains("target"), "cache path should include target/ for compile + sona-staging reuse")
+  assert(setup.contains("~/.cache/sbt"), "cache path should include sbt's disk action cache")
+  assert(setup.contains("~/.cache/coursier"), "cache path should include coursier")
+  assert(
+    !setup.linesIterator.map(_.trim).contains("target"),
+    "target is not part of the LocalDir snapshot",
+  )
   assert(setup.contains("inputs.purge == 'true'"), "a purged save must be its own cache step")
   assert(setup.contains("inputs.purge != 'true'"), "an ordinary restore stays when purge is false")
   assert(setup.contains("name: Save sbt cache"), "the cold save step must exist")

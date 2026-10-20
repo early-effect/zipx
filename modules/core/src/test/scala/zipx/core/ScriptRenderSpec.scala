@@ -170,7 +170,7 @@ object ScriptRenderSpec extends ZIOSpecDefault:
         key.endsWith("${{ inputs.cache-key-suffix }}"),
         restore.contains("${{ steps.cache-epoch.outputs.epoch }}-build-${{ github.run_id }}-"),
         restore.contains("${{ steps.cache-epoch.outputs.release }}-build-"),
-        cache.`with`("path") == "~/.sbt\n~/.cache/sbt\n~/.cache/coursier\ntarget",
+        cache.`with`("path") == "~/.sbt\n~/.cache/sbt\n~/.cache/coursier",
         fixed.`with`("key").contains("${{ inputs.cache-epoch }}-build-${{ github.run_id }}-"),
         fixed.`with`("restore-keys").contains("${{ inputs.cache-epoch }}-build-"),
       )
