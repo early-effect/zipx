@@ -249,92 +249,94 @@ entry. Other branches keep restoring `main` until a main-scoped save writes a ne
     ),
     section("Sbt image")(
       md"""
-`zipxSbtImage := true` runs every sbt job in one pinned image. Default off. The first run in the image misses every
-cache entry that was saved under `/home/runner`.
+Every sbt job runs in one toolchain image. Why that image is a pinned Wolfi OpenJDK, and which JDK your laptop must
+run, is **JDK trust store**. The first run misses every cache entry that was saved under
+`/home/runner`.
 
-The pin is the light `sbtscala/scala-sbt` tag for the major in `zipxJavaVersion`. The version string is the tag and
-the multi-arch manifest digest, so a JDK patch and a digest move are both updates:
+The image is public Wolfi (`cgr.dev/chainguard/wolfi-base` at a digest) plus the OpenJDK apk for `zipxJavaVersion`.
+The major is 21 or 25. A major below 21 is a generate error. So is an `openjdk` pin older than the fixed build
+(`21.0.13.0.2`, `25.0.5.0.2`). Defaults live in the plugin. A catalog pin overrides one and still has to pass that floor:
 
 ```scala
-Pin(
-  "sbt-image",
-  "sbtscala/scala-sbt",
-  "eclipse-temurin-21.0.12_8_2.x@sha256:<manifest>",
-)
+Pin("sbt-image", "wolfi-base", "sha256:<digest>")
+Pin("sbt-image", "openjdk-21", "21.0.13.0.2-r0")
+Pin("sbt-image", "bash", "5.3-r14")
+Pin("sbt-image", "git", "2.56.0-r3")
+Pin("sbt-image", "curl", "8.23.0-r2")
 ```
 
-A fat tag (`<jdk>_<sbt>_<scala>`) is not the pin. It warms one Scala compiler into the image, and
-`project/build.properties` still picks sbt. The image is the toolchain: JDK, sbt, `curl`, `git`, `tar`. It does not
-contain `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, or a token. Those stay the LocalDir snapshot,
-restored into `/home/sbtuser`. `target/` is not in the image and not in the snapshot. Jobs set `HOME` and
-`-Duser.home` there, and mark every directory git-safe, because
-that `HOME` is not the one `actions/checkout` configured. Actions overrides `HOME`, so a `~` path is
-not that directory and the cache paths are absolute. `setup-sbt`'s own disk cache stays off.
+A `sbtscala/scala-sbt` pin, or any pin that names `eclipse-temurin`, is refused. The image installs the build's sbt
+launcher from the GitHub release tarball. It does not contain `~/.sbt`, `~/.cache/sbt`, `~/.cache/coursier`, or a
+token. Those stay the LocalDir snapshot, restored into `/home/sbtuser`. `target/` is not in the image and not in the
+snapshot. Jobs set `HOME` and `-Duser.home` there, and mark every directory git-safe, because that `HOME` is not the
+one `actions/checkout` configured. Actions overrides `HOME`, so a `~` path is not that directory and the cache paths
+are absolute.
 
-`actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`, and `coursier/setup-action` are omitted on those jobs.
-The composite still restores and saves the snapshot.
+The cache composite does not run `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`, or
+`coursier/setup-action`. Those Action rows stay in the catalog. sbt jobs do not use them. The composite still
+restores and saves the snapshot.
 
-When a capability sets `withNodeVersion`, version updates are on (they need `cs`), or a job publishes images (it
-needs the Docker client), zipx writes `.github/zipx-env/Dockerfile` `FROM` that pin and bakes only those tools.
-sbt-scalajs does not fetch Node. Without `withNodeVersion` the image has none, and a `.jsPlatform` test fails
-to start `node`. The published tag is `ghcr.io/<owner>/<repo>/zipx-env:df-<hash of the Dockerfile>`. A `zipx-env-image` job builds and
-pushes only when the tag is missing. The hash moves when a baked pin moves. `latest`
-and `lts` are not baked: pin `Pin("sbt-image", "node", "<x.y.z>")`. Two capabilities asking for two Node versions is
-a generate error. `testAffected(onPush = true)` calls `gh` from the affected job, and that job runs in this image.
-The runner has the GitHub CLI. The image does not, until `Pin("sbt-image", "gh", "<x.y.z>")` bakes the official
-`cli/cli` tarball. Generate refuses the image without that pin. A build that does not diff pushes omits the pin,
-and the Dockerfile does not install the client. Every Linux job container already receives `/var/run/docker.sock` from the runner. A job that
-publishes images also sets that mount. The image has the client, not a daemon. A container that must reach the test
-JVM belongs on that test's Docker network. `inContainer` is refused while this setting is on: the shared image is
+zipx always writes `.github/zipx-env/Dockerfile`. A `zipx-env-image` job builds and pushes
+`ghcr.io/<owner>/<repo>/zipx-env:df-<hash of the Dockerfile>` when that tag is missing. sbt jobs run
+`container: $${{ needs.zipx-env-image.outputs.image }}`. `macos-*` and `windows-*` runners are refused. The default
+stays `ubuntu-latest`. Other labels, including a self-hosted Linux runner, are left alone.
+
+A concrete `withNodeVersion` (`22.11.0`) is baked. sbt-scalajs does not fetch Node. `22`, `latest`, and `lts/*` need
+`Pin("sbt-image", "node", "<x.y.z>")`. Two capabilities asking for two Node versions is a generate error. Without a
+version the image has no Node, and a `.jsPlatform` test fails to start `node`.
+
+Version updates run `cs launch` in this image, so they need `Pin("sbt-image", "cs", "<x.y.z>")`. A job that publishes
+images bakes the static Docker client (the `docker-cli` pin, or `28.5.2` when it is absent) and mounts the runner
+socket. The image has the client, not a daemon. `testAffected(onPush = true)` calls `gh`. Pin
+`Pin("sbt-image", "gh", "<x.y.z>")` or generate refuses. `inContainer` is a generate error: the toolchain image is
 already the container. A job that sets its own `permissions` also gets `packages: read`, because that block does not
 inherit the token that can pull a private env image.
 
 A tool that is not an sbt output (a browser, a codegen CLI, a C toolchain) is a `zipxSbtImageLayers` entry, not a
 file under `target/` and not a path under `/home/sbtuser`. The snapshot does not keep `target/`, and the cache mount
 hides `/home/sbtuser`. One layer is a `Pin("sbt-image", "<id>", "<x.y.z>")` plus a function of that version and the
-CPU architecture. The function returns download and `apt` steps. zipx writes every `RUN`. There is no shell hook, and
+CPU architecture. The function returns download and apk steps. zipx writes every `RUN`. There is no shell hook, and
 the URL does not have to contain the version text: a browser revision in the path is enough, as long as the function
-actually uses the version so a bump changes the Dockerfile. An `apt` step names an exact package version.
-`apt-get update` is the one line that is not a function of that text. The tag freezes the first push, so a later run
-with the same Dockerfile does not rebuild. An unpinned `apt-get install` cannot be expressed. Layer `ENV` is written
-into the published image and onto each sbt job. The cloud agent copies the plain job env into its Dockerfile when
-zipx builds one (a daemon, or a derived image). An upstream-only agent uses the public image ref and does not carry
-that map. Secrets are not `ENV`. A second `PinFeed` named `sbt-image` is a generate error. The layer carries its own
-lookup, and that lookup is what moves the pin.
+actually uses the version so a bump changes the Dockerfile. `ImageStep.Package` names an exact apk version
+(`name=version-rN`). An unpinned install cannot be expressed. Layer `ENV` is written into the published image and
+onto each sbt job. Secrets are not `ENV`. A second `PinFeed` named `sbt-image` is a generate error. The layer carries
+its own lookup, and that lookup is what moves the pin.
 """,
       exampleValue {
-        val digest  = "ab" * 32
-        val version = s"eclipse-temurin-21.0.12_8_2.x@sha256:$digest"
-        val pin     = Pin(
-          PinFeedName.unsafeMake("sbt-image"),
-          SbtImage.ImageId,
-          DepVersion.unsafeMake(version),
-          None,
-          None,
-        )
-        SbtImage.resolve(config.javaVersion, Seq(pin), Nil, coursier = false, docker = false) match
+        SbtImage.resolve(
+          JdkVersion("17"),
+          SbtImage.DefaultSbtVersion,
+          Nil,
+          Nil,
+          coursier = false,
+          docker = false,
+        ) match
+          case Left(err)   => err.message
+          case Right(plan) => plan.dockerfile
+      }.assert(text => assertTrue(text.contains("below the minimum"))),
+      exampleValue {
+        SbtImage.resolve(
+          config.javaVersion,
+          SbtImage.DefaultSbtVersion,
+          Nil,
+          Nil,
+          coursier = false,
+          docker = false,
+        ) match
           case Left(err)   => err.message
           case Right(plan) =>
             DocsRender.job("test")(Capability.test)(using libGraph, config.copy(sbtImage = Some(plan)))
       }.assert { yaml =>
         assertTrue(
-          yaml.contains("sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x@sha256:"),
-          yaml.contains("baked-toolchain: \"true\""),
+          yaml.contains("needs.zipx-env-image.outputs.image"),
           yaml.contains("cache-home: /home/sbtuser"),
           yaml.contains("HOME: /home/sbtuser"),
           !yaml.contains("actions/setup-java"),
+          !yaml.contains("eclipse-temurin"),
+          !yaml.contains("sbtscala"),
         )
       },
       exampleValue {
-        val digest  = "ab" * 32
-        val version = s"eclipse-temurin-21.0.12_8_2.x@sha256:$digest"
-        val base    = Pin(
-          PinFeedName.unsafeMake("sbt-image"),
-          SbtImage.ImageId,
-          DepVersion.unsafeMake(version),
-          None,
-          None,
-        )
         val widget = Pin(PinFeedName.unsafeMake("sbt-image"), "widgets", DepVersion.unsafeMake("1.2.3"), None, None)
         val layer  = SbtImageLayer("widgets", _ => Right(None))
           .install { (pinned, arch) =>
@@ -349,22 +351,33 @@ lookup, and that lookup is what moves the pin.
                 strip = 1,
               ),
               ImageStep.EmptyFile("/opt/widgets/READY"),
-              ImageStep.Apt("libwidgets", "1.2.3-1"),
+              ImageStep.Package("libwidgets", "1.2.3-1"),
             )
           }
           .withEnv("WIDGET_PATH" -> "/opt/widgets")
-        SbtImage.resolve(config.javaVersion, Seq(base, widget), Nil, coursier = false, docker = false, Seq(layer)) match
+        SbtImage.resolve(
+          config.javaVersion,
+          SbtImage.DefaultSbtVersion,
+          Seq(widget),
+          Nil,
+          coursier = false,
+          docker = false,
+          Seq(layer),
+        ) match
           case Left(err)   => err.message
           case Right(plan) =>
-            plan.dockerfile.getOrElse("") + "\n" +
+            plan.dockerfile + "\n" +
               DocsRender.job("test")(Capability.test)(using libGraph, config.copy(sbtImage = Some(plan)))
+        end match
       }.assert { text =>
         assertTrue(
           text.contains("https://example.test/widgets/1.2.3/widgets-x86_64.tar.gz"),
           text.contains("https://example.test/widgets/1.2.3/widgets-aarch64.tar.gz"),
           text.contains("/opt/widgets"),
           text.contains("libwidgets=1.2.3-1"),
-          text.contains("rm -rf /var/lib/apt/lists/*"),
+          text.contains("apk add --no-cache"),
+          text.contains("FROM cgr.dev/chainguard/wolfi-base@sha256:"),
+          !text.contains("apt-get"),
           text.contains("WIDGET_PATH"),
           !text.contains("nodejs.org"),
         )

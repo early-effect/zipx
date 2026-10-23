@@ -1,6 +1,6 @@
 package zipx.agent
 
-import zipx.core.Pin
+import zipx.core.{Pin, WolfiToolchain}
 import zio.test.*
 
 object AgentPinSpec extends ZIOSpecDefault:
@@ -102,39 +102,36 @@ object AgentPinSpec extends ZIOSpecDefault:
         DebianVersion.compare("1.13-1", "1.14-1build2") < 0,
         DebianVersion.compare("1.8.10-3ubuntu2", "1.8.11-2ubuntu3") < 0,
         DebianVersion.compare("1:1.0", "2.0") > 0,
-        DebianVersion.compare(AgentDaemon.DefaultFuse, AgentDaemon.DefaultFuse) == 0,
+        DebianVersion.compare("1.14-1build2", "1.14-1build2") == 0,
       )
     },
-    test("an apt pin matches the package name and both architectures") {
+    test("an apk index keeps the named package and newest wins") {
       val body =
-        """Package: fuse-overlayfs
-          |Version: 1.13-1
+        """P: fuse-overlayfs
+          |V: 1.13-r0
           |
-          |Package: fuse-overlayfs-dbgsym
-          |Version: 9.9.9
+          |P: fuse-overlayfs-dbgsym
+          |V: 9.9.9-r0
           |
-          |Package: fuse-overlayfs
-          |Version: 1.14-1build2
+          |P: fuse-overlayfs
+          |V: 1.18-r1
           |""".stripMargin
-      val older =
-        """Package: fuse-overlayfs
-          |Version: 1.13-1
-          |""".stripMargin
+      val older = List("1.13-r0")
       assertTrue(
-        AgentDaemon.versions(body, "fuse-overlayfs") == List("1.13-1", "1.14-1build2"),
-        AgentDaemon.newest("1.13-1", body, body, "fuse-overlayfs") == Right(Some("1.14-1build2")),
-        AgentDaemon.newest("1.14-1build2", body, body, "fuse-overlayfs") == Right(None),
-        AgentDaemon.newest("1.13-1", body, older, "fuse-overlayfs") == Right(None),
+        ApkIndex.versionsOf(body, "fuse-overlayfs") == List("1.13-r0", "1.18-r1"),
+        WolfiToolchain.newestApk("1.13-r0", List("1.13-r0", "1.18-r1")) == Right(Some("1.18-r1")),
+        WolfiToolchain.newestApk("1.18-r1", List("1.13-r0", "1.18-r1")) == Right(None),
+        WolfiToolchain.newestApk("1.13-r0", older) == Right(None),
       )
     },
-    test("the sbt-image daemon names its own pins and does not accept a slash in an apt version") {
-      val missing = AgentDaemon.resolve(Seq(Pin("sbt-image", "docker-cli", "28.5.2")))
-      val bad     = AgentDaemon.validateApt("1.14-1 build2")
+    test("the sbt-image daemon defaults apk pins and rejects a broken version") {
+      val resolved = AgentDaemon.resolve(Seq(Pin("sbt-image", "docker-cli", "28.5.2")))
+      val bad      = AgentDaemon.validateApk("1.14-1 build2")
+      val suite    = AgentDaemon.feed.lookup(Pin("agent-daemon", "ubuntu-suite", "resolute"))
       assertTrue(
-        missing.left.exists(_.contains("fuse-overlayfs")),
-        missing.left.exists(_.contains("ubuntu-suite")),
+        resolved == Right(DaemonPins("28.5.2", AgentDaemon.DefaultFuse, AgentDaemon.DefaultIptables)),
         bad.isLeft,
-        AgentDaemon.validateSuite("Resolute").isLeft,
+        suite == Right(None),
         AgentDaemon.validateCli("28.5").isLeft,
       )
     },

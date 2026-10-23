@@ -1,4 +1,5 @@
 MyVersions.settings
+zipxPins += Pin("sbt-image", "cs", "2.1.26")
 organization        := "com.example.zipx.release"
 zipxCacheEpoch      := CacheEpoch.ShipCatalog
 zipxVerify          := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))

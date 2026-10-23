@@ -38,8 +38,8 @@ object ActionPinsSpec extends ZIOSpecDefault:
       assertTrue(
         job.steps.exists(_.uses.contains(ActionRef("actions/checkout@deadbeef"))),
         job.steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
-        setup.steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@feedface"))),
-        setup.steps.exists(_.uses.contains(ActionRef("actions/setup-java@cafebabe"))),
+        !setup.steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@feedface"))),
+        !setup.steps.exists(_.uses.contains(ActionRef("actions/setup-java@cafebabe"))),
         setup.steps.exists(_.uses.contains(ActionRef("actions/cache@00ff00ff"))),
         !setup.steps.exists(_.uses.exists(_.unwrap.contains("checkout"))),
       )
@@ -59,7 +59,7 @@ object ActionPinsSpec extends ZIOSpecDefault:
       assertTrue(
         steps.exists(_.uses.contains(ActionRef("actions/checkout@aabbccdd"))),
         steps.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
-        setup.steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@11223344"))),
+        !setup.steps.exists(_.uses.contains(ActionRef("sbt/setup-sbt@11223344"))),
       )
     },
     test("checkout precedes every local zipx-sbt-setup uses (GHA cannot resolve local actions otherwise)") {

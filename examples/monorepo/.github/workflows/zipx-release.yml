@@ -18,17 +18,52 @@ concurrency:
   group: zipx-release
   cancel-in-progress: false
 jobs:
+  zipx-env-image:
+    name: Publish zipx env image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    outputs:
+      image: ${{ steps.zipx-env.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Publish zipx env image
+        id: zipx-env
+        run: |
+          repo=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${repo}/zipx-env:df-fbf68d13c3e4bb6b3f35c932222c20218e0add947507d74bfe444f761c23ae06"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "zipx-env $image is already published"
+            exit 0
+          fi
+          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -f .github/zipx-env/Dockerfile -t "$image" .
+          docker push "$image"
+
   release:
     name: release
     runs-on: ubuntu-latest
+    needs:
+      - zipx-env-image
     if: github.event_name == 'push' || github.ref_name == github.event.repository.default_branch
     environment: zipx-release
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
       PGP_KEY_HEX: ${{ secrets.PGP_KEY_HEX }}
       PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
       SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,11 +75,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: release
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: Tag is on the default branch
         if: github.event_name == 'push'
         run: |

@@ -26,7 +26,7 @@ object RunnerOs extends Subtype[String]:
     else if input.matches(PlanText.KeySegment) then true
     else s"invalid runner label '$input': allowed characters are letters, digits and . _ -"
 
-/** A `setup-java` `java-version`, build number and `temurin@` forms included. Also a cache-key segment.
+/** A JDK major used as a cache-key segment. Build numbers and vendor tags are still accepted text.
   *
   * Not `JavaVersion`: the plugin re-exports this into `build.sbt`, where `sbt.JavaVersion` would make it ambiguous.
   */
@@ -133,7 +133,7 @@ final case class PlanConfig(
     defaultMatrixCollapse: MatrixCollapse = MatrixCollapse.Auto,
     /** SHA-256 prefix baked into LocalDir keys when [[cacheEpoch]] is [[CacheEpoch.ShipCatalog]]. */
     shipEpochHash: Option[String] = None,
-    /** Set when `zipxSbtImage` is on. Jobs run in this image and skip the host JDK and sbt installers. */
+    /** Toolchain image for sbt jobs. The plugin always sets this. `None` emits the cache composite and no JDK. */
     sbtImage: Option[SbtImagePlan] = None,
 )
 

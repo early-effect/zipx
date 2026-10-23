@@ -66,7 +66,7 @@ object CoverageWorkflow:
             runsOn = List(config.runnerOs),
             `if` = labelGate(labels).map(_.unwrapped),
             env = EnvValue.renderAll(config.env),
-            steps = Planner.checkoutThenSbtSetup(config, jobId, nodeVersion = None, cacheMode) ++ List(
+            steps = Planner.checkoutThenSbtSetup(config, jobId, cacheMode) ++ List(
               Step.run(Script(coverage.command.render)).named(Coverage.Name).build,
               Coverage.uploadStep(config.actions, Coverage.DefaultArtifact),
             ),

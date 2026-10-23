@@ -1,5 +1,6 @@
 package zipx.core
 
+import neotype.unwrap
 import zipx.workflow.*
 import zio.*
 import zio.test.*
@@ -7,22 +8,9 @@ import zio.test.*
 object SbtImageSpec extends ZIOSpecDefault:
 
   private val digest = "a" * 64
-  private val newer  = "b" * 64
-  private val tag21  = "eclipse-temurin-21.0.12_8_2.x"
-  private val older  = "eclipse-temurin-21.0.11_10_2.x"
-  private val pin    = s"$tag21@sha256:$digest"
-
-  private val tags = List(
-    older,
-    tag21,
-    "eclipse-temurin-21_2.x",
-    "eclipse-temurin-21.0.12_8_1.11.7_3.3.6",
-    "eclipse-temurin-25.0.3_9_2.x",
-    "eclipse-temurin-25.0.4_7_2.x",
-  )
 
   private def imagePin(version: String): Pin =
-    Pin(PinFeedName.unsafeMake("sbt-image"), SbtImage.ImageId, DepVersion.unsafeMake(version), None, None)
+    Pin(PinFeedName.unsafeMake("sbt-image"), SbtImage.BaseId, DepVersion.unsafeMake(version), None, None)
 
   private val noLookup: PinLookup = _ => Right(None)
 
@@ -41,7 +29,7 @@ object SbtImageSpec extends ZIOSpecDefault:
         strip = 1,
       ),
       ImageStep.EmptyFile("/opt/widgets/READY"),
-      ImageStep.Apt("libwidgets", "1.2.3-1"),
+      ImageStep.Package("libwidgets", "1.2.3-1"),
     )
   end widgetSteps
 
@@ -78,27 +66,73 @@ object SbtImageSpec extends ZIOSpecDefault:
       (process.waitFor(), output)
     }
 
-  private def resolve(extra: List[Pin], layers: Seq[SbtImageLayer]): Either[SbtImageError, SbtImagePlan] =
-    SbtImage.resolve(JdkVersion("21"), imagePin(pin) :: extra, Nil, coursier = false, docker = false, layers)
+  private def resolve(extra: List[Pin], layers: Seq[SbtImageLayer] = Nil): Either[SbtImageError, SbtImagePlan] =
+    SbtImage.resolve(
+      JdkVersion("21"),
+      SbtImage.DefaultSbtVersion,
+      extra,
+      Nil,
+      coursier = false,
+      docker = false,
+      layers,
+    )
+
+  private def image(
+      java: String,
+      pins: Seq[Pin] = Nil,
+      nodes: List[NodeVersion] = Nil,
+      coursier: Boolean = false,
+      docker: Boolean = false,
+  ): Either[SbtImageError, SbtImagePlan] =
+    SbtImage.resolve(JdkVersion.unsafeMake(java), SbtImage.DefaultSbtVersion, pins, nodes, coursier, docker)
 
   def spec = suite("Sbt image")(
-    test("a light tag pins the manifest digest in the version") {
-      val parsed = SbtImage.parse(pin)
+    test("a JDK below 21 is refused before the vendor check") {
       assertTrue(
-        parsed.map(_.reference) == Right(s"sbtscala/scala-sbt:$pin"),
-        parsed.map(_.major) == Right(21),
-        SbtImage.parse(tag21).isLeft,
-        SbtImage.parse(s"$tag21@sha256:${"a" * 63}").isLeft,
+        image("17") == Left(SbtImageError.JdkBelowMinimum(17)),
+        image("11") == Left(SbtImageError.JdkBelowMinimum(11)),
+        image("8") == Left(SbtImageError.JdkBelowMinimum(8)),
+        image("20").left.exists(_.message.contains("below the minimum")),
       )
     },
-    test("the newest JDK patch wins, and fat or floating tags do not") {
+    test("an openjdk pin below the fixed build is refused, and a later major with no package is refused") {
       assertTrue(
-        SbtImage.select(21, tags) == Right(tag21),
-        SbtImage.select(25, tags) == Right("eclipse-temurin-25.0.4_7_2.x"),
-        SbtImage.select(17, tags).isLeft,
-        SbtImage.candidate(pin, tags, s"sha256:$digest") == Right(None),
-        SbtImage.candidate(pin, tags, s"sha256:$newer") == Right(Some(s"$tag21@sha256:$newer")),
-        SbtImage.candidate(s"$older@sha256:$digest", tags, s"sha256:$digest") == Right(Some(pin)),
+        image("21", Seq(toolPin("openjdk-21", "21.0.13-r0"))) == Left(
+          SbtImageError.JdkVulnerable("21.0.13-r0", "21.0.13.0.2")
+        ),
+        image("25", Seq(toolPin("openjdk-25", "25.0.5-r1"))) == Left(
+          SbtImageError.JdkVulnerable("25.0.5-r1", "25.0.5.0.2")
+        ),
+        image("22") == Left(SbtImageError.JdkUnsupported(22)),
+        image("27") == Left(SbtImageError.JdkUnsupported(27)),
+        image("25", Seq(toolPin("openjdk-25", "21.0.13.0.2-r0"))) == Left(SbtImageError.JdkMismatch(21, "25")),
+        image("21", Seq(toolPin("sbtscala/scala-sbt", "1"))) == Left(
+          SbtImageError.RetiredTemurinPin("sbtscala/scala-sbt=1")
+        ),
+      )
+    },
+    test("the default image is Wolfi, a pinned OpenJDK, and the build's sbt") {
+      val plan = image("21")
+      val body = plan.map(_.dockerfile).getOrElse("")
+      assertTrue(
+        plan.map(_.upstream) == Right(WolfiToolchain.reference(WolfiToolchain.BaseDigest)),
+        body.contains(s"FROM ${WolfiToolchain.reference(WolfiToolchain.BaseDigest)}"),
+        body.contains("apk add --no-cache"),
+        body.contains(s"openjdk-21=${WolfiToolchain.Jdk21.version}"),
+        body.contains(s"openjdk-21-default-jdk=${WolfiToolchain.Jdk21.version}"),
+        body.contains(SbtImage.envLine("JAVA_HOME", WolfiToolchain.JavaHome)),
+        body.contains(s"sbt-${SbtImage.DefaultSbtVersion}.tgz"),
+        body.contains("USER sbtuser"),
+        !body.contains("eclipse-temurin"),
+        !body.contains("setup-java"),
+        !body.contains("apt-get"),
+        !body.contains("dpkg"),
+        plan.exists(_.derivedTag.startsWith("df-")),
+        WolfiToolchain.parseApk(WolfiToolchain.Jdk21.version).map(_.upstream).contains("21.0.13.0.2"),
+        image("21", Seq(imagePin(s"sha256:$digest"))).map(_.upstream) == Right(
+          WolfiToolchain.reference(s"sha256:$digest")
+        ),
+        image("21", Seq(imagePin("latest"))) == Left(SbtImageError.BadBasePin("latest")),
       )
     },
     test("a numbered release stays on its major") {
@@ -110,25 +144,27 @@ object SbtImageSpec extends ZIOSpecDefault:
       )
     },
     test("a gh pin bakes the official client, and a push without the pin is refused") {
-      val baked = resolve(List(toolPin(SbtImage.GhId, "2.102.0")), Nil)
-      val body  = baked.toOption.flatMap(_.dockerfile).getOrElse("")
-      val plain = resolve(Nil, Nil)
+      val baked = resolve(List(toolPin(SbtImage.GhId, "2.102.0")))
+      val body  = baked.map(_.dockerfile).getOrElse("")
+      val plain = resolve(Nil).map(_.dockerfile).getOrElse("")
       assertTrue(
         body.contains("https://github.com/cli/cli/releases/download/v2.102.0/gh_2.102.0_linux_${gh_arch}.tar.gz"),
         body.contains("""mv "/tmp/gh_2.102.0_linux_${gh_arch}/bin/gh" /usr/local/bin/gh"""),
-        body.contains("dpkg --print-architecture"),
+        body.contains("uname -m"),
+        body.contains("gh_arch=amd64"),
         !body.contains("$${"),
+        !body.contains("dpkg"),
         baked.map(_.dockerSocket) == Right(false),
-        baked.exists(_.derivedTag.exists(_.startsWith("df-"))),
-        plain.map(_.dockerfile) == Right(None),
-        resolve(List(toolPin(SbtImage.GhId, "latest")), Nil) == Left(
+        baked.exists(_.derivedTag.startsWith("df-")),
+        !plain.contains("cli/cli"),
+        resolve(List(toolPin(SbtImage.GhId, "latest"))) == Left(
           SbtImageError.ToolPinNotConcrete(SbtImage.GhId, "latest")
         ),
-        SbtImage.missingPushClient(onPush = true, Seq(imagePin(pin))) == Some(
+        SbtImage.missingPushClient(onPush = true, Nil) == Some(
           SbtImageError.MissingToolPin(SbtImage.GhId, "testAffected(onPush = true)")
         ),
-        SbtImage.missingPushClient(onPush = false, Seq(imagePin(pin))) == None,
-        SbtImage.missingPushClient(onPush = true, Seq(imagePin(pin), toolPin(SbtImage.GhId, "2.102.0"))) == None,
+        SbtImage.missingPushClient(onPush = false, Nil) == None,
+        SbtImage.missingPushClient(onPush = true, Seq(toolPin(SbtImage.GhId, "2.102.0"))) == None,
         SbtImage.missingPushClient(onPush = true, Seq(toolPin(SbtImage.GhId, "latest"))) == None,
         resolve(
           List(toolPin(SbtImage.GhId, "2.102.0")),
@@ -136,69 +172,42 @@ object SbtImageSpec extends ZIOSpecDefault:
         ) == Left(SbtImageError.ReservedLayerId(SbtImage.GhId)),
       )
     },
-    test("the upstream image is used when no extra tool is declared") {
-      val plan = SbtImage.resolve(JdkVersion("21"), Seq(imagePin(pin)), Nil, coursier = false, docker = false)
-      assertTrue(
-        plan.map(_.upstream) == Right(s"sbtscala/scala-sbt:$pin"),
-        plan.map(_.dockerfile) == Right(None),
-        plan.map(_.dockerSocket) == Right(false),
-      )
-    },
     test("node, cs, and the docker client are baked, and the tag is the Dockerfile hash") {
-      val pins = Seq(imagePin(pin), Pin("sbt-image", "cs", "2.1.24"), Pin("sbt-image", "docker-cli", "28.5.2"))
-      val plan = SbtImage.resolve(
-        JdkVersion("21"),
-        pins,
-        List(NodeVersion("22.14.0")),
-        coursier = true,
-        docker = true,
-      )
-      val body = plan.toOption.flatMap(_.dockerfile).getOrElse("")
+      val pins = Seq(Pin("sbt-image", "cs", "2.1.24"), Pin("sbt-image", "docker-cli", "28.5.2"))
+      val plan = image("21", pins, List(NodeVersion("22.14.0")), coursier = true, docker = true)
+      val body = plan.map(_.dockerfile).getOrElse("")
       assertTrue(
-        plan.exists(_.derivedTag.exists(_.startsWith("df-"))),
-        body.contains(s"FROM sbtscala/scala-sbt:$pin"),
+        plan.exists(_.derivedTag.startsWith("df-")),
+        body.contains(s"FROM ${WolfiToolchain.reference(WolfiToolchain.BaseDigest)}"),
         body.contains("node-v22.14.0-linux-"),
+        body.contains("node_arch=x64"),
         body.contains("node.tar.gz"),
         !body.contains("tar.xz"),
         body.contains("coursier/releases/download/v2.1.24/cs-"),
         body.contains("docker-28.5.2.tgz"),
         !body.contains("TOKEN"),
         !body.contains(".cache"),
-        plan.exists(image => image.derivedTag.contains(SbtImage.contentTag(body))),
+        plan.exists(image => image.derivedTag == SbtImage.contentTag(body)),
         plan.exists(_.dockerSocket),
+        !body.contains("dpkg"),
       )
     },
-    test("two node versions, an alias without a pin, and a JDK major mismatch are refused") {
-      val pins = Seq(imagePin(pin))
+    test("two node versions and an alias without a pin are refused, and an unpinned docker client uses the default") {
       assertTrue(
-        SbtImage
-          .resolve(JdkVersion("21"), pins, List(NodeVersion("20.11.0"), NodeVersion("22.14.0")), false, false)
-          .left
+        image("21", nodes = List(NodeVersion("20.11.0"), NodeVersion("22.14.0"))).left
           .exists(_.message.contains("one Node version")),
-        SbtImage.resolve(JdkVersion("21"), pins, List(NodeVersion("lts")), false, false) == Left(
-          SbtImageError.NodeAliasUnpinned("lts")
-        ),
-        SbtImage.resolve(JdkVersion("25"), pins, Nil, false, false) == Left(
-          SbtImageError.JdkMismatch(21, "25")
-        ),
-        SbtImage.resolve(JdkVersion("21"), pins, Nil, coursier = true, docker = false) == Left(
-          SbtImageError.MissingToolPin(SbtImage.CsId, "version updates")
-        ),
-        SbtImage.resolve(JdkVersion("21"), pins, Nil, coursier = false, docker = true) == Left(
-          SbtImageError.MissingToolPin(SbtImage.DockerCliId, "image publishes")
-        ),
+        image("21", nodes = List(NodeVersion("lts"))) == Left(SbtImageError.NodeAliasUnpinned("lts")),
+        image("21", coursier = true) == Left(SbtImageError.MissingToolPin(SbtImage.CsId, "version updates")),
+        image("21", docker = true).exists(_.dockerfile.contains(s"docker-${SbtImage.DefaultDockerCli}.tgz")),
       )
     },
     test("an alias bakes the concrete node pin") {
-      val pins = Seq(imagePin(pin), Pin("sbt-image", "node", "22.14.0"))
-      val plan = SbtImage.resolve(JdkVersion("21"), pins, List(NodeVersion("lts")), false, false)
-      assertTrue(plan.toOption.flatMap(_.dockerfile).exists(_.contains("node-v22.14.0-linux-")))
+      val plan = image("21", Seq(Pin("sbt-image", "node", "22.14.0")), List(NodeVersion("lts")))
+      assertTrue(plan.exists(_.dockerfile.contains("node-v22.14.0-linux-")))
     },
-    test("jobs use the upstream image and keep the LocalDir snapshot off the runner home") {
-      val plan = SbtImage
-        .resolve(JdkVersion("21"), Seq(imagePin(pin)), Nil, coursier = false, docker = false)
-        .fold(err => throw AssertionError(err), identity)
-      val wf = Planner.plan(
+    test("sbt jobs publish the image and keep the LocalDir snapshot off the runner home") {
+      val plan = image("21").fold(err => throw AssertionError(err), identity)
+      val wf   = Planner.plan(
         GraphFixture(List(ModuleNode(ModuleId("core")))),
         List(Capability.test),
         PlanConfig(sbtImage = Some(plan), skipMergedPrPush = false, verifyCleanLabel = None),
@@ -206,23 +215,37 @@ object SbtImageSpec extends ZIOSpecDefault:
       val test  = wf.jobs("test")
       val setup = test.steps.find(_.uses.contains(ZipxComposites.SbtSetupRef))
       assertTrue(
-        !wf.jobs.contains(SbtImageWorkflow.EnvImageJob),
-        test.container.contains(plan.upstream),
+        wf.jobs.contains(SbtImageWorkflow.EnvImageJob),
+        test.container.exists(_.contains("needs.zipx-env-image.outputs.image")),
         test.containerOptions.isEmpty,
         test.env.get("HOME").contains(SbtImage.CacheHome),
         test.env.get("JAVA_OPTS").exists(_.contains(s"-Duser.home=${SbtImage.CacheHome}")),
         test.env.get("GIT_CONFIG_VALUE_0").contains("*"),
         test.permissions.isEmpty,
-        setup.exists(_.`with`.get("baked-toolchain").contains("true")),
         setup.exists(_.`with`.get("cache-home").contains(SbtImage.CacheHome)),
-        setup.exists(_.`with`.get("node-version").contains("")),
+        !setup.exists(_.`with`.contains("baked-toolchain")),
+        !setup.exists(_.`with`.contains("node-version")),
+        !test.steps.exists(_.uses.exists(_.unwrap.startsWith("actions/setup-java@"))),
+      )
+    },
+    test("macos and windows runners are refused for an sbt job") {
+      val plan                                   = image("21").fold(err => throw AssertionError(err), identity)
+      def refused(label: String): Option[String] =
+        try
+          Planner.plan(
+            GraphFixture(List(ModuleNode(ModuleId("core")))),
+            List(Capability.test),
+            PlanConfig(sbtImage = Some(plan), runnerOs = RunnerOs.unsafeMake(label)),
+          )
+          None
+        catch case e: RuntimeException => Some(e.getMessage)
+      assertTrue(
+        refused("macos-latest").exists(_.contains("macos-latest")),
+        refused("windows-latest").exists(_.contains("windows-latest")),
       )
     },
     test("a derived image is published once and docker jobs mount the runner socket") {
-      val pins = Seq(imagePin(pin), Pin("sbt-image", "docker-cli", "28.5.2"))
-      val plan = SbtImage
-        .resolve(JdkVersion("21"), pins, Nil, coursier = false, docker = true)
-        .fold(err => throw AssertionError(err), identity)
+      val plan   = image("21", docker = true).fold(err => throw AssertionError(err), identity)
       val docker = Capability(
         name = Capability.DockerName,
         phase = Phase.Publish,
@@ -260,11 +283,8 @@ object SbtImageSpec extends ZIOSpecDefault:
       )
     },
     test("an sbt Docker task mounts the runner socket") {
-      val pins = Seq(imagePin(pin), Pin("sbt-image", "docker-cli", "28.5.2"))
-      val plan = SbtImage
-        .resolve(JdkVersion("21"), pins, Nil, coursier = false, docker = true)
-        .fold(err => throw AssertionError(err), identity)
-      val image = Capability.once(
+      val plan    = image("21", docker = true).fold(err => throw AssertionError(err), identity)
+      val publish = Capability.once(
         name = CapabilityName("image"),
         command = SbtCommand.unsafeTask("svcA/Docker/publishLocal"),
         phase = Phase.Verify,
@@ -272,7 +292,7 @@ object SbtImageSpec extends ZIOSpecDefault:
       )
       val wf = Planner.plan(
         GraphFixture(List(ModuleNode(ModuleId("svc"), docker = true))),
-        List(Capability.test, image),
+        List(Capability.test, publish),
         PlanConfig(
           sbtImage = Some(plan),
           skipMergedPrPush = false,
@@ -286,9 +306,7 @@ object SbtImageSpec extends ZIOSpecDefault:
       )
     },
     test("a permissions block gains packages read so it can pull the env image") {
-      val pins = Seq(imagePin(pin), Pin("sbt-image", "cs", "2.1.26"))
-      val plan = SbtImage
-        .resolve(JdkVersion("21"), pins, Nil, coursier = true, docker = false)
+      val plan = image("21", Seq(Pin("sbt-image", "cs", "2.1.26")), coursier = true)
         .fold(err => throw AssertionError(err), identity)
       val wf = Planner.plan(
         GraphFixture(List(ModuleNode(ModuleId("core")))),
@@ -306,9 +324,7 @@ object SbtImageSpec extends ZIOSpecDefault:
       )
     },
     test("inContainer is refused while the shared image is on") {
-      val plan = SbtImage
-        .resolve(JdkVersion("21"), Seq(imagePin(pin)), Nil, false, false)
-        .fold(err => throw AssertionError(err), identity)
+      val plan   = image("21").fold(err => throw AssertionError(err), identity)
       val failed =
         try
           Planner.plan(
@@ -330,24 +346,23 @@ object SbtImageSpec extends ZIOSpecDefault:
     test("a layer forces a derived image, and the hash follows the rendered text") {
       val body = resolve(List(toolPin("widgets", "1.2.3")), List(widgets(widgetSteps))).toOption
       val next = resolve(List(toolPin("widgets", "1.2.4")), List(widgets(widgetSteps))).toOption
-      val text = body.flatMap(_.dockerfile).getOrElse("")
-      val apt  = text.split("apt-get update", -1)
+      val text = body.map(_.dockerfile).getOrElse("")
+      val pkg  = text.linesIterator.find(_.contains("libwidgets=1.2.3-1")).getOrElse("")
       assertTrue(
-        body.flatMap(_.dockerfile).isDefined,
-        body.flatMap(_.derivedTag).contains(SbtImage.contentTag(text)),
-        text.contains(s"FROM sbtscala/scala-sbt:$pin"),
+        body.map(_.dockerfile).nonEmpty,
+        body.map(_.derivedTag).contains(SbtImage.contentTag(text)),
+        text.contains(s"FROM ${WolfiToolchain.reference(WolfiToolchain.BaseDigest)}"),
         text.contains("https://example.test/widgets/1.2.3/widgets-x86_64.tar.gz"),
         text.contains("https://example.test/widgets/1.2.3/widgets-aarch64.tar.gz"),
         text.contains("uname -m"),
         text.contains(": > '/opt/widgets/READY'"),
-        apt.length == 2,
-        !apt(1).contains("uname"),
-        apt(1).contains("'libwidgets=1.2.3-1'"),
-        apt(1).contains("rm -rf /var/lib/apt/lists/*"),
+        pkg.contains("apk add --no-cache"),
+        pkg.contains("'libwidgets=1.2.3-1'"),
+        !pkg.contains("uname"),
+        !text.contains("apt-get"),
         text.contains("""ENV WIDGET_PATH="/opt/widgets""""),
         !text.contains("nodejs.org"),
-        !text.contains("apt-get install -y libwidgets"),
-        next.flatMap(_.derivedTag) != body.flatMap(_.derivedTag),
+        next.map(_.derivedTag) != body.map(_.derivedTag),
       )
     },
     test("arch-specific apt versions are one install, split by the shell") {
@@ -356,16 +371,16 @@ object SbtImageSpec extends ZIOSpecDefault:
           case CpuArch.Amd64 => "1.0-amd64"
           case CpuArch.Arm64 => "1.0-arm64"
         List(
-          ImageStep.Apt("libwidgets", deb),
-          ImageStep.Apt("libother", deb),
+          ImageStep.Package("libwidgets", deb),
+          ImageStep.Package("libother", deb),
           ImageStep.EmptyFile(s"/opt/widgets/$version/READY"),
         )
       }
-      val text = resolve(List(toolPin("widgets", "1.2.3")), List(layer)).toOption.flatMap(_.dockerfile).getOrElse("")
+      val text = resolve(List(toolPin("widgets", "1.2.3")), List(layer)).map(_.dockerfile).getOrElse("")
       assertTrue(
         text.contains("x86_64) pkgs='libwidgets=1.0-amd64 libother=1.0-amd64'"),
         text.contains("aarch64) pkgs='libwidgets=1.0-arm64 libother=1.0-arm64'"),
-        text.contains("apt-get install -y --no-install-recommends $pkgs"),
+        text.contains("apk add --no-cache $pkgs"),
         !text.contains("\"$pkgs\""),
         text.contains("set -f"),
       )
@@ -375,10 +390,10 @@ object SbtImageSpec extends ZIOSpecDefault:
         val deb = arch match
           case CpuArch.Amd64 => "1.0-amd64"
           case CpuArch.Arm64 => "1.0-arm64"
-        List(ImageStep.Apt("libgizmos", deb))
+        List(ImageStep.Package("libgizmos", deb))
       }
       val pins = List(toolPin("widgets", "1.2.3"), toolPin("gizmos", "1.0.0"))
-      val text = resolve(pins, List(widgets(widgetSteps), gizmos)).toOption.flatMap(_.dockerfile).getOrElse("")
+      val text = resolve(pins, List(widgets(widgetSteps), gizmos)).map(_.dockerfile).getOrElse("")
       val runs = runBodies(text)
       ZIO
         .foreach(runs)(body => shellCheck(body).map(body -> _))
@@ -402,7 +417,7 @@ object SbtImageSpec extends ZIOSpecDefault:
           )
         )
       }
-      val text = resolve(List(toolPin("widgets", "1.2.3")), List(layer)).toOption.flatMap(_.dockerfile).getOrElse("")
+      val text = resolve(List(toolPin("widgets", "1.2.3")), List(layer)).map(_.dockerfile).getOrElse("")
       assertTrue(
         text.contains("https://cdn.example.test/builds/1148/widget.zip"),
         !text.contains("1.2.3"),
@@ -468,8 +483,8 @@ object SbtImageSpec extends ZIOSpecDefault:
         ) == Left(SbtImageError.BadStrip("widgets", -1)),
         resolve(
           List(toolPin("widgets", "1.0.0")),
-          List(SbtImageLayer("widgets", noLookup).install((_, _) => List(ImageStep.Apt("libwidgets", "latest")))),
-        ) == Left(SbtImageError.BadApt("widgets", "libwidgets", "latest")),
+          List(SbtImageLayer("widgets", noLookup).install((_, _) => List(ImageStep.Package("libwidgets", "latest")))),
+        ) == Left(SbtImageError.BadPackage("widgets", "libwidgets", "latest")),
         resolve(
           List(toolPin("widgets", "1.0.0")),
           List(widgets(widgetSteps).withEnv("HOME" -> "/opt/widgets")),
@@ -482,9 +497,9 @@ object SbtImageSpec extends ZIOSpecDefault:
           List(toolPin("widgets", "1.0.0"), toolPin("gadgets", "1.0.0")),
           List(widgets(widgetSteps), gadgets),
         ) == Left(SbtImageError.DuplicateEnvKey("WIDGET_PATH", "widgets", "gadgets")),
-        SbtImage.layersRequireImage(false, List(widgets(widgetSteps))).contains(SbtImageError.LayersWhileImageOff),
-        SbtImage.shadowedFeed(Seq(PinFeed(SbtImage.Feed, VersionStrategy.exact, _ => Right(None))), Nil, true) ==
+        SbtImage.shadowedFeed(Seq(PinFeed(SbtImage.Feed, VersionStrategy.exact, _ => Right(None)))) ==
           Some(SbtImageError.FeedShadowed),
+        SbtImage.shadowedFeed(Nil) == None,
       )
     },
     test("a layer lookup stays on the pin's major") {
@@ -523,7 +538,7 @@ object SbtImageSpec extends ZIOSpecDefault:
         wf.jobs.contains(SbtImageWorkflow.EnvImageJob),
         wf.jobs("test").env.get("WIDGET_PATH").contains("/opt/widgets"),
         wf.jobs("test").env.get("HOME").contains(SbtImage.CacheHome),
-        plan.derivedTag.exists(_.startsWith("df-")),
+        plan.derivedTag.startsWith("df-"),
         clashed.exists(_.contains("WIDGET_PATH")),
       )
     },

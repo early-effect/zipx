@@ -379,7 +379,8 @@ object PinFeedSpec extends ZIOSpecDefault:
           yaml.contains("contents: write") || yaml.contains("contents:write"),
           checkoutAt >= 0,
           sbtAt > checkoutAt,
-          !yaml.contains("pull_request"),
+          yaml.contains("push:"),
+          !yaml.contains("pull_request:"),
         )
       },
     ),

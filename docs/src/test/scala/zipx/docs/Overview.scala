@@ -128,12 +128,13 @@ lazy val service = project.settings(MyVersions.service)
 
 Generated CI is meant to be reviewed, not only executed. Two defaults keep the file short:
 
-- **In-repo composites** under `.github/actions/zipx-*` hold JDK / sbt / cache setup (and AWS login when you use those
-  packs). Jobs call `uses: ./.github/actions/…`. You do not copy bootstrap steps into every job.
+- **In-repo composites** under `.github/actions/zipx-*` hold the sbt cache (and AWS login when you use those packs).
+  The JDK is the toolchain image, not a setup step. See **JDK trust store**. Jobs call `uses: ./.github/actions/…`.
+  You do not copy bootstrap steps into every job.
 - **`MatrixCollapse.Auto`** folds look-alike jobs into one GitHub matrix when that is safe. Stay on Aggregate and you
   may never notice this; see **Matrix collapse** if Graph makes the Actions UI noisy.
 
-This repository's dogfood `ci.yml` is about **266** lines; the `examples/monorepo` sample is about **406**. Both stay
+This repository's dogfood `ci.yml` is about **550** lines; the `examples/monorepo` sample is about **620**. Both stay
 reviewable because setup lives in composites and look-alike Graph jobs collapse under Auto.
 """
     ),
@@ -172,7 +173,7 @@ lazy val root = (project in file("."))
     zipxWorkflowDispatch := true,
   )
 
-// Then: sbt zipxWorkflowGenerate && git add .github/workflows/ci.yml .github/actions/
+// Then: sbt zipxWorkflowGenerate && git add .github/workflows/ci.yml .github/actions/ .github/zipx-env/
 // CI runs zipxWorkflowCheck so a graph change without regenerating fails the PR.
 ```
 """

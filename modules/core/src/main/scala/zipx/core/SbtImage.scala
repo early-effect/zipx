@@ -3,44 +3,39 @@ package zipx.core
 import java.security.MessageDigest
 import java.nio.charset.StandardCharsets
 
-/** The pinned `sbtscala/scala-sbt` light image, and the Dockerfile zipx bakes when the build needs a tool that image
-  * does not ship.
+/** The toolchain image every sbt job runs in: public Wolfi, a pinned OpenJDK, and the build's sbt launcher.
   *
-  * The catalog version is `eclipse-temurin-<jdk>_<build>_2.x@sha256:<manifest>`. [[VersionStrategy.exact]] treats any
-  * other string as a bump, so a rebuilt tag is an update. A `sha256` field alone is not: [[PinEngine]] ignores a
-  * checksum change when the version string is equal.
-  *
-  * Caches and tokens stay out of the image. Jobs restore `actions/cache` into [[CacheHome]], which is the image user's
-  * home, and set `user.home` there. `~` is not that directory once Actions overrides `HOME`.
+  * The published tag is the Dockerfile hash. Caches and tokens stay out of the image. Jobs restore `actions/cache` into
+  * [[CacheHome]], which is the image user's home, and set `user.home` there. `~` is not that directory once Actions
+  * overrides `HOME`.
   */
 object SbtImage:
 
   val Feed: PinFeedName = PinFeedName("sbt-image")
 
-  val ImageId: String     = "sbtscala/scala-sbt"
+  val BaseId: String      = "wolfi-base"
+  val ImageId: String     = BaseId
+  val BashId: String      = "bash"
+  val GitId: String       = "git"
+  val CurlId: String      = "curl"
   val NodeId: String      = "node"
   val CsId: String        = "cs"
   val DockerCliId: String = "docker-cli"
   val GhId: String        = "gh"
 
-  val DockerfileRel: String = ".github/zipx-env/Dockerfile"
-  val CacheHome: String     = "/home/sbtuser"
-  val SocketOptions: String = "-v /var/run/docker.sock:/var/run/docker.sock"
+  val DockerfileRel: String     = ".github/zipx-env/Dockerfile"
+  val CacheHome: String         = "/home/sbtuser"
+  val SocketOptions: String     = "-v /var/run/docker.sock:/var/run/docker.sock"
+  val DefaultSbtVersion: String = "2.1.0"
 
-  private val LightRaw = """eclipse-temurin-(\d+)\.(\d+)\.(\d+)_(\d+)_2\.x"""
+  /** Static docker client baked when a job publishes images and the catalog has no `docker-cli` pin. */
+  val DefaultDockerCli: String = "28.5.2"
 
-  private val Pinned = s"^($LightRaw)@sha256:([a-f0-9]{64})$$".r
-  private val Light  = s"^$LightRaw$$".r
-  private val Triple = """(\d+)\.(\d+)\.(\d+)""".r
+  private val SbtVersion = """[0-9]+\.[0-9]+\.[0-9]+(?:[.-][A-Za-z0-9]+)*""".r
+  private val Triple     = """(\d+)\.(\d+)\.(\d+)""".r
 
-  final case class Ref(tag: String, major: Int, digest: String):
-    def version: String   = s"$tag@sha256:$digest"
-    def reference: String = s"$ImageId:$tag@sha256:$digest"
-
-  final case class LightTag(major: Int, minor: Int, patch: Int, build: Int, name: String)
-
-  private given scala.math.Ordering[LightTag] =
-    scala.math.Ordering.by(tag => (tag.major, tag.minor, tag.patch, tag.build))
+  def builtinIds: Set[String] =
+    Set(BaseId, BashId, GitId, CurlId, NodeId, CsId, DockerCliId, GhId) ++ WolfiToolchain.Jdks.map(_.id)
 
   final case class Release(major: Int, minor: Int, patch: Int):
     def render: String = s"$major.$minor.$patch"
@@ -52,47 +47,10 @@ object SbtImage:
     val digits = raw.dropWhile(!_.isDigit).takeWhile(_.isDigit)
     digits.toIntOption.filter(_ > 0).toRight(s"zipx: zipxJavaVersion '$raw' has no JDK major")
 
-  def parse(raw: String): Either[String, Ref] = raw match
-    case Pinned(tag, major, _, _, _, digest) =>
-      major.toIntOption
-        .map(parsed => Ref(tag, parsed, digest))
-        .toRight(s"zipx: sbt image pin '$raw' has no JDK major")
-    case _ =>
-      Left(
-        s"zipx: sbt image pin '$raw' must be eclipse-temurin-<jdk>_<build>_2.x@sha256:<digest>"
-      )
-
-  def lightTags(names: List[String]): List[LightTag] =
-    names.flatMap { name =>
-      name match
-        case Light(major, minor, patch, build) =>
-          for
-            maj <- major.toIntOption
-            min <- minor.toIntOption
-            pat <- patch.toIntOption
-            bld <- build.toIntOption
-          yield LightTag(maj, min, pat, bld, name)
-        case _ => None
-    }
-
-  /** Newest light tag for `major`. Fat tags and the floating `eclipse-temurin-<major>_2.x` name are ignored. */
-  def select(major: Int, names: List[String]): Either[String, String] =
-    lightTags(names)
-      .filter(_.major == major)
-      .maxOption
-      .map(_.name)
-      .toRight(
-        s"zipx: no eclipse-temurin-$major.*_*_2.x tag on $ImageId"
-      )
-
-  def candidate(current: String, names: List[String], digest: String): Either[String, Option[String]] =
-    for
-      ref <- parse(current)
-      tag <- select(ref.major, names)
-    yield
-      val hex  = digest.stripPrefix("sha256:")
-      val next = s"$tag@sha256:$hex"
-      Option.when(next != current)(next)
+  /** A Linux runner label that cannot run a container job. Other labels are left alone. */
+  def hostedRunner(label: String): Boolean =
+    val name = label.toLowerCase
+    name.startsWith("macos") || name.startsWith("windows")
 
   def isConcrete(raw: String): Boolean = parseRelease(raw).isDefined
 
@@ -114,11 +72,14 @@ object SbtImage:
   /** Newest x.y.z on the major of `current`. */
   def numberedCandidate(current: String, available: List[String]): Either[String, Option[String]] =
     parseRelease(current) match
-      case None      => Left(s"zipx: pin '$current' is not a concrete x.y.z")
+      case None =>
+        Left(s"zipx: pin '$current' is not a concrete x.y.z")
       case Some(cur) =>
         available.flatMap(parseRelease).filter(_.major == cur.major).maxOption match
-          case None       => Left(s"zipx: no ${cur.major}.x.y release is published")
-          case Some(best) => Right(Option.when(best.render != current)(best.render))
+          case None =>
+            Left(s"zipx: no ${cur.major}.x.y release is published")
+          case Some(best) =>
+            Right(Option.when(best.render != current)(best.render))
 
   def githubRepository(remote: String): Option[String] =
     val https = """https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$""".r
@@ -179,6 +140,7 @@ object SbtImage:
 
   def resolve(
       javaVersion: JdkVersion,
+      sbtVersion: String,
       pins: Seq[Pin],
       nodeVersions: List[NodeVersion],
       coursier: Boolean,
@@ -186,25 +148,26 @@ object SbtImage:
       layers: Seq[SbtImageLayer] = Nil,
   ): Either[SbtImageError, SbtImagePlan] =
     for
-      major <- javaMajor(javaVersion).left.map(_ => SbtImageError.BadJavaVersion(javaVersion))
-      raw   <- imagePin(pins)
-      ref   <- parse(raw).left.map(_ => SbtImageError.BadImagePin(raw))
-      _     <- Either.cond(ref.major == major, (), SbtImageError.JdkMismatch(ref.major, javaVersion))
-      node  <- oneNode(nodeVersions.map(version => version: String), pinVersion(pins, NodeId))
-      cs    <- toolPin(coursier, pinVersion(pins, CsId), CsId, "version updates")
-      cli   <- toolPin(docker, pinVersion(pins, DockerCliId), DockerCliId, "image publishes")
-      gh    <- optionalTool(pinVersion(pins, GhId), GhId)
-      baked <- SbtImageLayer.assemble(pins, layers)
-    yield planOf(ref, node, cs, cli, gh, baked)
-
-  /** Layers are the derived image. An empty list while the setting is off is the default. */
-  def layersRequireImage(enabled: Boolean, layers: Seq[SbtImageLayer]): Option[SbtImageError] =
-    Option.when(!enabled && layers.nonEmpty)(SbtImageError.LayersWhileImageOff)
+      _      <- refuseRetired(pins)
+      major  <- javaMajor(javaVersion).left.map(_ => SbtImageError.BadJavaVersion(javaVersion))
+      _      <- Either.cond(major >= JdkFloor.MinimumFeature, (), SbtImageError.JdkBelowMinimum(major))
+      jdk    <- WolfiToolchain.jdk(major).toRight(SbtImageError.JdkUnsupported(major))
+      digest <- baseDigest(pins)
+      jdkVer <- jdkPin(pins, jdk)
+      bash   <- apkPin(pins, BashId, WolfiToolchain.Bash)
+      git    <- apkPin(pins, GitId, WolfiToolchain.Git)
+      curl   <- apkPin(pins, CurlId, WolfiToolchain.Curl)
+      sbt    <- checkSbt(sbtVersion)
+      node   <- oneNode(nodeVersions.map(version => version: String), pinVersion(pins, NodeId))
+      cs     <- toolPin(coursier, pinVersion(pins, CsId), CsId, "version updates")
+      cli    <- dockerPin(docker, pinVersion(pins, DockerCliId))
+      gh     <- optionalTool(pinVersion(pins, GhId), GhId)
+      baked  <- SbtImageLayer.assemble(pins, layers)
+    yield planOf(digest, jdk, jdkVer, bash, git, curl, sbt, node, cs, cli, gh, baked)
 
   /** zipx owns the `sbt-image` feed. A caller-supplied feed of that name would drop layer lookup. */
-  def shadowedFeed(feeds: Seq[PinFeed], pins: Seq[Pin], enabled: Boolean): Option[SbtImageError] =
-    val active = enabled || pins.exists(_.feed == Feed)
-    Option.when(active && feeds.exists(_.name == Feed))(SbtImageError.FeedShadowed)
+  def shadowedFeed(feeds: Seq[PinFeed]): Option[SbtImageError] =
+    Option.when(feeds.exists(_.name == Feed))(SbtImageError.FeedShadowed)
 
   /** Same-major concrete `x.y.z`, or a refusal. `None` means the candidate is not newer. */
   def layerCandidate(id: String, current: String, proposed: String): Either[SbtImageError, Option[String]] =
@@ -231,18 +194,43 @@ object SbtImage:
       }
     }
 
+  /** The push affected script calls `gh`. The image does not have that client unless the pin bakes it. */
+  def missingPushClient(onPush: Boolean, pins: Seq[Pin]): Option[SbtImageError] =
+    val pinned = pins.exists(pin => pin.feed == Feed && pin.id == GhId)
+    Option.when(onPush && !pinned)(SbtImageError.MissingToolPin(GhId, "testAffected(onPush = true)"))
+
   private def planOf(
-      ref: Ref,
+      digest: String,
+      jdk: WolfiToolchain.Jdk,
+      jdkVersion: String,
+      bash: String,
+      git: String,
+      curl: String,
+      sbtVersion: String,
       node: Option[String],
       cs: Option[String],
       cli: Option[String],
       gh: Option[String],
       baked: SbtImageLayer.Rendered,
   ): SbtImagePlan =
-    val body = renderDockerfile(ref.reference, node, cs, cli, gh.toList.map(ghInstall) ++ baked.runs, baked.env)
+    val reference = WolfiToolchain.reference(digest)
+    val body      = renderDockerfile(
+      digest,
+      jdk,
+      jdkVersion,
+      bash,
+      git,
+      curl,
+      sbtVersion,
+      node,
+      cs,
+      cli,
+      gh.toList.map(ghInstall) ++ baked.runs,
+      baked.env,
+    )
     SbtImagePlan(
-      upstream = ref.reference,
-      derivedTag = body.map(contentTag),
+      upstream = reference,
+      derivedTag = contentTag(body),
       dockerfile = body,
       dockerSocket = cli.isDefined,
       cacheHome = CacheHome,
@@ -250,15 +238,94 @@ object SbtImage:
     )
   end planOf
 
-  private def imagePin(pins: Seq[Pin]): Either[SbtImageError, String] =
-    pinVersion(pins, ImageId).toRight(SbtImageError.MissingImagePin)
+  private def renderDockerfile(
+      digest: String,
+      jdk: WolfiToolchain.Jdk,
+      jdkVersion: String,
+      bash: String,
+      git: String,
+      curl: String,
+      sbtVersion: String,
+      node: Option[String],
+      cs: Option[String],
+      dockerCli: Option[String],
+      layerRuns: List[String],
+      layerEnv: Map[String, String],
+  ): String =
+    val packages = List(
+      s"${jdk.runtime}=$jdkVersion",
+      s"${jdk.defaultJdk}=$jdkVersion",
+      s"bash=$bash",
+      s"git=$git",
+      s"curl=$curl",
+    )
+    val installs =
+      node.toList.map(nodeInstall) ++ cs.toList.map(csInstall) ++ dockerCli.toList.map(dockerInstall) ++ layerRuns
+    val envLines = layerEnv.toList.sortBy(_._1).map((key, value) => SbtImageLayer.envLine(key, value))
+    (List(
+      ZipxCatalog.GeneratedHeader,
+      s"FROM ${WolfiToolchain.reference(digest)}",
+      "RUN apk add --no-cache " + packages.mkString(" "),
+      SbtImageLayer.envLine("JAVA_HOME", WolfiToolchain.JavaHome),
+      sbtInstall(sbtVersion),
+    ) ++ installs ++ envLines ++ List(
+      "RUN adduser -D -h /home/sbtuser -s /bin/bash sbtuser",
+      "USER sbtuser",
+      s"WORKDIR $CacheHome",
+    )).mkString("\n") + "\n"
+  end renderDockerfile
+
+  private def refuseRetired(pins: Seq[Pin]): Either[SbtImageError, Unit] =
+    pins.find(pin => pin.feed == Feed && retired(pin)) match
+      case Some(pin) => Left(SbtImageError.RetiredTemurinPin(s"${pin.id}=${pin.current}"))
+      case None      => Right(())
+
+  private def retired(pin: Pin): Boolean =
+    pin.id == "sbtscala/scala-sbt" || pin.current.contains("eclipse-temurin") || pin.current.contains(
+      "sbtscala/scala-sbt"
+    )
+
+  private def baseDigest(pins: Seq[Pin]): Either[SbtImageError, String] =
+    pinVersion(pins, BaseId) match
+      case None =>
+        Right(WolfiToolchain.BaseDigest)
+      case Some(raw) =>
+        WolfiToolchain.parseDigest(raw).toRight(SbtImageError.BadBasePin(raw))
+
+  private def jdkPin(pins: Seq[Pin], jdk: WolfiToolchain.Jdk): Either[SbtImageError, String] =
+    val raw = pinVersion(pins, jdk.id).getOrElse(jdk.version)
+    for
+      apk      <- WolfiToolchain.parseApk(raw).toRight(SbtImageError.BadApkPin(jdk.id, raw))
+      upstream <- WolfiToolchain.jdkUpstream(raw).toRight(SbtImageError.BadApkPin(jdk.id, raw))
+      release  <- JdkFloor.parse(upstream).left.map(_ => SbtImageError.BadApkPin(jdk.id, raw))
+      feature  <- release.feature.toRight(SbtImageError.BadApkPin(jdk.id, raw))
+      _        <- Either.cond(feature == jdk.major, (), SbtImageError.JdkMismatch(feature, jdk.major.toString))
+      _        <- JdkFloor.assess(JdkFloor.Vendor.OpenJdk, release) match
+        case JdkFloor.Verdict.Safe =>
+          Right(())
+        case JdkFloor.Verdict.BelowMinimum(got) =>
+          Left(SbtImageError.JdkBelowMinimum(got))
+        case _ =>
+          val required = JdkFloor.fixedOpenJdk(jdk.major).getOrElse(jdk.version)
+          Left(SbtImageError.JdkVulnerable(raw, required))
+    yield apk.raw
+    end for
+  end jdkPin
+
+  private def apkPin(pins: Seq[Pin], id: String, default: String): Either[SbtImageError, String] =
+    val raw = pinVersion(pins, id).getOrElse(default)
+    WolfiToolchain.parseApk(raw).map(_.raw).toRight(SbtImageError.BadApkPin(id, raw))
+
+  private def checkSbt(raw: String): Either[SbtImageError, String] =
+    if SbtVersion.matches(raw) then Right(raw) else Left(SbtImageError.BadSbtVersion(raw))
 
   private def pinVersion(pins: Seq[Pin], id: String): Option[String] =
     pins.find(pin => pin.feed == Feed && pin.id == id).map(_.current)
 
   private def oneNode(asked: List[String], pinned: Option[String]): Either[SbtImageError, Option[String]] =
     asked.distinct match
-      case Nil        => Right(None)
+      case Nil =>
+        Right(None)
       case one :: Nil =>
         if isConcrete(one) then
           pinned match
@@ -271,6 +338,13 @@ object SbtImage:
             case None                         => Left(SbtImageError.NodeAliasUnpinned(one))
       case many =>
         Left(SbtImageError.ManyNodeVersions(many))
+
+  private def dockerPin(wanted: Boolean, pinned: Option[String]): Either[SbtImageError, Option[String]] =
+    if !wanted then Right(None)
+    else
+      val raw = pinned.getOrElse(DefaultDockerCli)
+      if isConcrete(raw) then Right(Some(raw))
+      else Left(SbtImageError.ToolPinNotConcrete(DockerCliId, raw))
 
   private def toolPin(
       wanted: Boolean,
@@ -292,39 +366,19 @@ object SbtImage:
       case Some(pin) if isConcrete(pin) => Right(Some(pin))
       case Some(pin)                    => Left(SbtImageError.ToolPinNotConcrete(id, pin))
 
-  /** The push affected script calls `gh`. The runner image has that client. This image does not, unless the pin bakes
-    * it. Absence is fine when that push branch is off.
-    */
-  def missingPushClient(onPush: Boolean, pins: Seq[Pin]): Option[SbtImageError] =
-    val pinned = pins.exists(pin => pin.feed == Feed && pin.id == GhId)
-    Option.when(onPush && !pinned)(SbtImageError.MissingToolPin(GhId, "testAffected(onPush = true)"))
-
-  /** None when the upstream image already has every tool. The hash of this text is the published tag. */
-  def renderDockerfile(
-      base: String,
-      node: Option[String],
-      cs: Option[String],
-      dockerCli: Option[String],
-      layerRuns: List[String] = Nil,
-      layerEnv: Map[String, String] = Map.empty,
-  ): Option[String] =
-    if node.isEmpty && cs.isEmpty && dockerCli.isEmpty && layerRuns.isEmpty && layerEnv.isEmpty then None
-    else
-      val installs =
-        node.toList.map(nodeInstall) ++ cs.toList.map(csInstall) ++ dockerCli.toList.map(dockerInstall) ++ layerRuns
-      val envLines = layerEnv.toList.sortBy(_._1).map((key, value) => SbtImageLayer.envLine(key, value))
-      Some(
-        (List(ZipxCatalog.GeneratedHeader, s"FROM $base", "USER root") ++ installs ++ envLines ++ List("WORKDIR /root"))
-          .mkString("\n") + "\n"
-      )
+  private def sbtInstall(version: String): String =
+    s"""RUN set -eux; \\
+       |    curl -fsSL -o /tmp/sbt.tgz "https://github.com/sbt/sbt/releases/download/v$version/sbt-$version.tgz"; \\
+       |    tar -xzf /tmp/sbt.tgz -C /usr/local; \\
+       |    ln -sfn /usr/local/sbt/bin/sbt /usr/local/bin/sbt; \\
+       |    rm /tmp/sbt.tgz""".stripMargin
 
   private def nodeInstall(version: String): String =
     s"""RUN set -eux; \\
-       |    arch="$$(dpkg --print-architecture)"; \\
-       |    case "$$arch" in \\
-       |      amd64) node_arch=x64 ;; \\
-       |      arm64) node_arch=arm64 ;; \\
-       |      *) echo "zipx: unsupported architecture $$arch" >&2; exit 1 ;; \\
+       |    case "$$(uname -m)" in \\
+       |      x86_64) node_arch=x64 ;; \\
+       |      aarch64) node_arch=arm64 ;; \\
+       |      *) echo "zipx: unsupported architecture $$(uname -m)" >&2; exit 1 ;; \\
        |    esac; \\
        |    curl -fsSL -o /tmp/node.tar.gz "https://nodejs.org/dist/v$version/node-v$version-linux-$${node_arch}.tar.gz"; \\
        |    tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1; \\
@@ -352,13 +406,12 @@ object SbtImage:
        |    mv /tmp/docker/docker /usr/local/bin/docker; \\
        |    rm -rf /tmp/docker /tmp/docker.tgz""".stripMargin
 
-  /** Official `cli/cli` tarball. Asset names use dpkg's `amd64` and `arm64`, not `uname -m`. */
   private def ghInstall(version: String): String =
     s"""RUN set -eux; \\
-       |    arch="$$(dpkg --print-architecture)"; \\
-       |    case "$$arch" in \\
-       |      amd64|arm64) gh_arch="$$arch" ;; \\
-       |      *) echo "zipx: unsupported architecture $$arch" >&2; exit 1 ;; \\
+       |    case "$$(uname -m)" in \\
+       |      x86_64) gh_arch=amd64 ;; \\
+       |      aarch64) gh_arch=arm64 ;; \\
+       |      *) echo "zipx: unsupported architecture $$(uname -m)" >&2; exit 1 ;; \\
        |    esac; \\
        |    curl -fsSL -o /tmp/gh.tgz "https://github.com/cli/cli/releases/download/v$version/gh_${version}_linux_$${gh_arch}.tar.gz"; \\
        |    tar -xzf /tmp/gh.tgz -C /tmp; \\
@@ -367,13 +420,13 @@ object SbtImage:
 
 end SbtImage
 
-/** What jobs run in once `zipxSbtImage` is on. The derived tag is the Dockerfile hash, not a registry digest: the
-  * digest does not exist until the push.
+/** What sbt jobs run in. The derived tag is the Dockerfile hash, not a registry digest: the digest does not exist until
+  * the push.
   */
 final case class SbtImagePlan(
     upstream: String,
-    derivedTag: Option[String],
-    dockerfile: Option[String],
+    derivedTag: String,
+    dockerfile: String,
     dockerSocket: Boolean,
     cacheHome: String,
     layerEnv: Map[String, String] = Map.empty,

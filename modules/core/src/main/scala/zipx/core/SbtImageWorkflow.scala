@@ -3,7 +3,7 @@ package zipx.core
 import zipx.workflow.*
 import scala.collection.immutable.ListMap
 
-/** Puts sbt jobs into [[SbtImagePlan]] and, when tools were baked, publishes that image once per workflow. */
+/** Puts sbt jobs into [[SbtImagePlan]] and publishes that image once per workflow. */
 object SbtImageWorkflow:
 
   val EnvImageJob: String  = "zipx-env-image"
@@ -13,18 +13,23 @@ object SbtImageWorkflow:
     plan match
       case None        => workflow
       case Some(image) =>
+        val sbtJobs = workflow.jobs.filter { (id, job) => id != EnvImageJob && runsSbt(job) }
+        val hosted  = (runnerOs :: sbtJobs.values.flatMap(_.runsOn).toList).filter(SbtImage.hostedRunner).distinct
+        if sbtJobs.nonEmpty && hosted.nonEmpty then
+          sys.error(
+            s"zipx: sbt jobs run in the toolchain image, so these runners cannot host them: ${hosted.mkString(", ")}"
+          )
         val decorated = workflow.jobs.map { (id, job) =>
           if id == EnvImageJob || !runsSbt(job) then id -> job
           else id                                       -> decorate(job, image)
         }
-        val jobs = image.derivedTag match
-          case Some(tag)
-              if decorated.values.exists(_.needs.contains(EnvImageJob)) && !decorated.contains(EnvImageJob) =>
-            ListMap(EnvImageJob -> envImageJob(tag, checkout, runnerOs)) ++ decorated
-          case _ => decorated
+        val jobs =
+          if decorated.values.exists(_.needs.contains(EnvImageJob)) && !decorated.contains(EnvImageJob) then
+            ListMap(EnvImageJob -> envImageJob(image.derivedTag, checkout, runnerOs)) ++ decorated
+          else decorated
         workflow.copy(jobs = jobs)
 
-  /** Host setup, or the local composite with the toolchain steps skipped. */
+  /** Cache composite. JDK and sbt are already in the toolchain image. */
   def toolchain(
       pins: ActionPins,
       javaVersion: String,
@@ -32,17 +37,7 @@ object SbtImageWorkflow:
       suffix: String,
       plan: Option[SbtImagePlan],
   ): List[Step] =
-    plan match
-      case None =>
-        List(
-          Step(
-            name = Some("Setup JDK"),
-            uses = Some(pins.setupJava),
-            `with` = ListMap("distribution" -> "temurin", "java-version" -> javaVersion),
-          ),
-          Step(uses = Some(pins.setupSbt)),
-        )
-      case Some(_) => List(bakedSetup(pins, javaVersion, runnerOs, suffix, plan))
+    List(bakedSetup(pins, javaVersion, runnerOs, suffix, plan))
 
   private def bakedSetup(
       pins: ActionPins,
@@ -57,7 +52,6 @@ object SbtImageWorkflow:
     ZipxComposites.sbtSetupStep(
       PlanConfig(javaVersion = jdk, runnerOs = os, actions = pins, sbtImage = plan),
       id,
-      None,
       LocalCacheMode.Restore,
     )
   end bakedSetup
@@ -71,18 +65,14 @@ object SbtImageWorkflow:
     script.contains("sbt ") || script.contains("\nsbt ") || script.endsWith("sbt")
 
   private def decorate(job: Job, plan: SbtImagePlan): Job =
-    val image =
-      if plan.dockerfile.isDefined then s"$${{ needs.$EnvImageJob.outputs.image }}"
-      else plan.upstream
+    val image  = s"$${{ needs.$EnvImageJob.outputs.image }}"
     val socket = plan.dockerSocket && publishesImages(job)
-    val needs  =
-      if plan.dockerfile.isDefined && !job.needs.contains(EnvImageJob) then EnvImageJob :: job.needs
-      else job.needs
+    val needs  = if job.needs.contains(EnvImageJob) then job.needs else EnvImageJob :: job.needs
     job.copy(
       container = job.container.orElse(Some(image)),
       containerOptions = job.containerOptions.orElse(Option.when(socket)(SbtImage.SocketOptions)),
       needs = needs,
-      permissions = pullPermissions(job.permissions, plan.dockerfile.isDefined),
+      permissions = pullPermissions(job.permissions, derived = true),
       env = SbtImage.homeEnv(
         SbtImage.overlayEnv(job.env, plan.layerEnv).fold(err => sys.error(err.message), identity),
         plan.cacheHome,

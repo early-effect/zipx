@@ -66,7 +66,7 @@ object CursorEnvSpec extends ZIOSpecDefault:
       )
     },
     test("an upstream sbt image is the image field, and a baked file is built without a daemon") {
-      val upstream = "sbtscala/scala-sbt:eclipse-temurin-21.0.12_8_2.x@sha256:" + ("ab" * 32)
+      val upstream = "cgr.dev/chainguard/wolfi-base@sha256:" + ("ab" * 32)
       val baked    =
         s"${zipx.core.ZipxCatalog.GeneratedHeader}\nFROM $upstream\nUSER root\nENV WIDGET_PATH=\"/opt/widgets\"\nWORKDIR /root\n"
       val plain = CursorEnv.render(
@@ -114,7 +114,7 @@ object CursorEnvSpec extends ZIOSpecDefault:
       )
     },
     test("sbt-image docker installs static dockerd from the public base") {
-      val upstream = "sbtscala/scala-sbt:eclipse-temurin-25.0.4_7_2.x@sha256:" + ("ab" * 32)
+      val upstream = "cgr.dev/chainguard/wolfi-base@sha256:" + ("ab" * 32)
       val baked    =
         s"${zipx.core.ZipxCatalog.GeneratedHeader}\nFROM $upstream\nUSER root\nRUN echo cs\nWORKDIR /root\n"
       val rendered = CursorEnv.render(
@@ -145,8 +145,10 @@ object CursorEnvSpec extends ZIOSpecDefault:
           val docker = files.dockerfile.getOrElse("")
           docker.contains(s"FROM $upstream") &&
           docker.contains("RUN echo cs") &&
-          docker.contains("fuse-overlayfs=1.14-1build2") &&
-          docker.contains("iptables=1.8.11-2ubuntu3") &&
+          docker.contains(s"fuse-overlayfs=${AgentDaemon.DefaultFuse}") &&
+          docker.contains(s"iptables=${AgentDaemon.DefaultIptables}") &&
+          docker.contains(s"iptables-legacy=${AgentDaemon.DefaultIptables}") &&
+          docker.contains("apk add --no-cache") &&
           docker.contains("docker-28.5.2.tgz") &&
           docker.contains("/usr/local/bin/zipx-dockerd") &&
           docker.contains("setsid dockerd") &&
@@ -199,70 +201,74 @@ object CursorEnvSpec extends ZIOSpecDefault:
       val names = ZipxAgentEnv.secretNames(Map("not-a-name" -> secret"NOT_A_NAME"))
       assertTrue(names.left.exists(_.contains("not-a-name")))
     },
-    test("sbt image files ignore leftover Ubuntu pins and still require the daemon pins") {
+    test("sbt image files ignore leftover Ubuntu pins and default the daemon apk pins") {
       val digest   = "ab" * 32
-      val version  = s"eclipse-temurin-21.0.12_8_2.x@sha256:$digest"
-      val image    = pin("sbt-image", "sbtscala/scala-sbt", version)
+      val base     = pin("sbt-image", "wolfi-base", s"sha256:$digest")
       val cli      = pin("sbt-image", "docker-cli", "28.5.2")
       val cs       = pin("sbt-image", "cs", "2.1.26")
-      val fuse     = pin("agent-daemon", "fuse-overlayfs", AgentDaemon.DefaultFuse)
-      val ipt      = pin("agent-daemon", "iptables", AgentDaemon.DefaultIptables)
-      val suite    = pin("agent-daemon", "ubuntu-suite", AgentDaemon.DefaultSuite)
+      val badFuse  = pin("agent-daemon", "fuse-overlayfs", "not-an-apk")
       val leftover = pin("agent-base", "ubuntu", AgentPins.DefaultBase)
       val plan     = SbtImage
-        .resolve(JdkVersion("21"), Seq(image, cli, cs), Nil, coursier = true, docker = true)
+        .resolve(
+          JdkVersion("21"),
+          SbtImage.DefaultSbtVersion,
+          Seq(base, cli, cs),
+          Nil,
+          coursier = true,
+          docker = true,
+        )
         .left
         .map(_.message)
       val env = Map(
         "COURSIER_TTL" -> EnvValue.plain("0s"),
         "GITHUB_TOKEN" -> EnvValue.githubToken,
       )
-      val missing = plan.flatMap { resolved =>
-        ZipxAgentEnv.files(
-          CloudAgent.On(true),
-          SbtCommand.unsafeTask("Test/compile"),
-          env,
-          Seq(image, cli, cs, leftover),
-          Some(resolved),
-        )
-      }
       val rendered = plan.flatMap { resolved =>
         ZipxAgentEnv.files(
           CloudAgent.On(true),
           SbtCommand.unsafeTask("Test/compile"),
           env,
-          Seq(image, cli, cs, fuse, ipt, suite, leftover),
+          Seq(base, cli, cs, leftover),
           Some(resolved),
         )
       }
-      val upstreamOnly = SbtImage
-        .resolve(JdkVersion("21"), Seq(image), Nil, coursier = false, docker = false)
-        .left
-        .map(_.message)
-        .flatMap { resolved =>
-          ZipxAgentEnv.files(
-            CloudAgent.On(false),
-            SbtCommand.unsafeTask("Test/compile"),
-            env,
-            Seq(leftover),
-            Some(resolved),
-          )
-        }
+      val refused = plan.flatMap { resolved =>
+        ZipxAgentEnv.files(
+          CloudAgent.On(true),
+          SbtCommand.unsafeTask("Test/compile"),
+          env,
+          Seq(badFuse),
+          Some(resolved),
+        )
+      }
+      val quiet = plan.flatMap { resolved =>
+        ZipxAgentEnv.files(
+          CloudAgent.On(false),
+          SbtCommand.unsafeTask("Test/compile"),
+          env,
+          Seq(leftover),
+          Some(resolved),
+        )
+      }
       assertTrue(
-        missing.left.exists(_.contains("fuse-overlayfs")),
+        refused.left.exists(_.contains("apk pin")),
         rendered.exists { files =>
           val docker = files.dockerfile.getOrElse("")
           docker.startsWith("# Generated by zipx.") &&
-          docker.contains(s"FROM sbtscala/scala-sbt:$version") &&
+          docker.contains(s"FROM cgr.dev/chainguard/wolfi-base@sha256:$digest") &&
           docker.contains("docker-28.5.2.tgz") &&
+          docker.contains(s"fuse-overlayfs=${AgentDaemon.DefaultFuse}") &&
           docker.contains("/usr/local/bin/zipx-dockerd") &&
-          !docker.contains("ghcr.io") &&
+          !docker.contains("sbtscala") &&
+          !docker.toLowerCase.contains("temurin") &&
+          !docker.contains("apt-get") &&
           files.installSh.contains("GITHUB_TOKEN") &&
           !files.installSh.contains("export COURSIER_TTL")
         },
-        upstreamOnly.exists { files =>
-          files.environmentJson.contains(s""""image": "sbtscala/scala-sbt:$version"""") &&
-          files.dockerfile.isEmpty
+        quiet.exists { files =>
+          files.dockerfile.exists(_.contains("FROM cgr.dev/chainguard/wolfi-base@sha256:")) &&
+          !files.environmentJson.contains("\"image\"") &&
+          !files.environmentJson.contains("start")
         },
         AgentPins.unusedWhileSbtImage(Seq(leftover, cli)).exists(_.contains("agent-base")),
       )

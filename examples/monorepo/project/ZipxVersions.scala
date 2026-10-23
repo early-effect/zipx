@@ -20,6 +20,7 @@ object MyVersions extends ZipxVersions:
 
   val nativePackager = Plugin("com.github.sbt", "sbt-native-packager", "1.11.7")
   val scalafmt       = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
+  val cs             = Pin("sbt-image", "cs", "2.1.26")
 
   val libs   = ShipGroup("libs", "1.4.2")("models", "coreLib")
   val client = Ship("client", "0.3.0")

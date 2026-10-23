@@ -43,7 +43,9 @@ object ZipxSettings:
     SettingDef.setting(
       SettingName("zipxJavaVersion"),
       PlanConfig.DefaultJdkVersion,
-      SettingPurpose("JDK major version for the CI matrix and cache key."),
+      SettingPurpose(
+        "JDK major baked into the toolchain image and the cache key. Minimum 21. The plugin refuses to load on an unfixed JDK."
+      ),
       Build,
     )
 
@@ -476,7 +478,7 @@ object ZipxSettings:
       SettingName("zipxAffectedOnPush"),
       false,
       SettingPurpose(
-        "Also restrict pushes to modules changed since this workflow's last successful push run on the branch (default false). The job calls gh. With zipxSbtImage, Pin(\"sbt-image\", \"gh\", \"<x.y.z>\") bakes that client. Without the image the runner already has it."
+        "Also restrict pushes to modules changed since this workflow's last successful push run on the branch (default false). The job calls gh, so Pin(\"sbt-image\", \"gh\", \"<x.y.z>\") bakes that client into the toolchain image."
       ),
       Build,
     )
@@ -562,17 +564,7 @@ object ZipxSettings:
       SettingName("zipxAgentEnv"),
       CloudAgent.Off,
       SettingPurpose(
-        "Render a Cursor cloud agent environment from this build (default off). ZipxAgentEnv.cursor(docker = true) installs and starts Docker. Writes .cursor/environment.json, .cursor/Dockerfile, and .github/zipx-agent/install.sh. With zipxSbtImage the Dockerfile is the public sbt image plus a static dockerd, and the Ubuntu agent pins are unused. Without it the Dockerfile is Ubuntu and Docker CE comes from apt. Secret checks are Cursor Runtime Secrets: a Build Secret is not visible to sbt."
-      ),
-      Build,
-    )
-
-  val sbtImage: SettingDef[Boolean] =
-    SettingDef.setting(
-      SettingName("zipxSbtImage"),
-      false,
-      SettingPurpose(
-        "Run sbt jobs in the pinned sbtscala/scala-sbt light image (default false). The cloud agent builds from that public pin and does not pull the published ghcr.io tag. The sbt-image feed moves the JDK-qualified tag and its manifest digest. Node, cs, the Docker CLI, and gh are baked into ghcr.io/<owner>/<repo>/zipx-env when CI needs them. LocalDir actions/cache stays outside the image. Opt in after the first containerized run, which misses every cache entry saved under /home/runner."
+        "Render a Cursor cloud agent environment from this build (default off). ZipxAgentEnv.cursor(docker = true) installs and starts Docker. Writes .cursor/environment.json, .cursor/Dockerfile, and .github/zipx-agent/install.sh. The Dockerfile is the toolchain image plus a static dockerd, and the Ubuntu agent pins are unused. Secret checks are Cursor Runtime Secrets: a Build Secret is not visible to sbt."
       ),
       Build,
     )
@@ -582,7 +574,7 @@ object ZipxSettings:
       SettingName("zipxSbtImageLayers"),
       Seq.empty[SbtImageLayer],
       SettingPurpose(
-        "Steps and ENV appended to the derived sbt image (default empty). Each entry is a Pin(\"sbt-image\", id, \"x.y.z\") plus a pure install function of that version and the CPU architecture. Paths stay off /home/sbtuser. zipx does not bake a tool it has not been given. Refused while zipxSbtImage is false."
+        "Steps and ENV appended to the toolchain image (default empty). Each entry is a Pin(\"sbt-image\", id, \"x.y.z\") plus a pure install function of that version and the CPU architecture. Paths stay off /home/sbtuser. zipx does not bake a tool it has not been given."
       ),
       Build,
     )
@@ -756,7 +748,7 @@ object ZipxSettings:
     SettingDef.task(
       SettingName("zipxSbtEnvGenerate"),
       SettingPurpose(
-        "Write .github/zipx-env/Dockerfile when zipxSbtImage bakes tools, or delete a generated Dockerfile when the upstream image is enough. zipxWorkflowGenerate does this too. The pin companions run it after applying pins. ci.yml still needs a human zipxWorkflowGenerate: the companion does not push repo-root workflow YAML."
+        "Write .github/zipx-env/Dockerfile for the toolchain image. zipxWorkflowGenerate does this too. The pin companions run it after applying pins. ci.yml still needs a human zipxWorkflowGenerate: the companion does not push repo-root workflow YAML."
       ),
     )
 
@@ -899,7 +891,6 @@ object ZipxSettings:
     cacheRehydrateEnv,
     env,
     agentEnv,
-    sbtImage,
     sbtImageLayers,
     cancelSupersededRuns,
     checkCommandNames,

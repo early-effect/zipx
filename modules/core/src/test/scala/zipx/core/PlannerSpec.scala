@@ -284,13 +284,12 @@ object PlannerSpec extends ZIOSpecDefault:
         paths.forall(path => !path.split('\n').contains("target")),
       )
     },
-    test("LocalDir cache disables setup-java and sbt/setup-sbt internal caching") {
+    test("LocalDir cache does not install a host JDK") {
       val setup = ZipxComposites.sbtSetup(ActionPins.Defaults, CacheEpoch.Fixed("1.2.3-SNAPSHOT"))
-      val java  = setup.steps.find(_.uses.exists(_.unwrap.startsWith("actions/setup-java@")))
-      val sbt   = setup.steps.find(_.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@")))
       assertTrue(
-        !java.exists(_.`with`.contains("cache")),
-        sbt.exists(_.`with`.get("disk-cache").contains("${{ inputs.sbt-disk-cache }}")),
+        !setup.steps.exists(_.uses.exists(_.unwrap.startsWith("actions/setup-java@"))),
+        !setup.steps.exists(_.uses.exists(_.unwrap.startsWith("sbt/setup-sbt@"))),
+        !setup.steps.exists(_.`with`.contains("sbt-disk-cache")),
       )
     },
     test("LocalDir restore-keys bridge a -SNAPSHOT epoch to the prior release epoch") {
@@ -298,7 +297,6 @@ object PlannerSpec extends ZIOSpecDefault:
       val step   = ZipxComposites.sbtSetupStep(
         PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.2.3-SNAPSHOT")),
         zipx.workflow.JobId("test"),
-        None,
         cacheMode = LocalCacheMode.Save,
       )
       assertTrue(
@@ -324,7 +322,6 @@ object PlannerSpec extends ZIOSpecDefault:
       val steps = Planner.checkoutThenSbtSetup(
         PlanConfig(cacheEpoch = CacheEpoch.GitTags()),
         zipx.workflow.JobId("test"),
-        None,
         cacheMode = LocalCacheMode.Save,
       )
       val checkout = steps.find(_.uses.exists(_.unwrap.contains("checkout")))
@@ -486,9 +483,7 @@ object PlannerSpec extends ZIOSpecDefault:
         job.steps.exists(s =>
           s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("cache-mode").contains("restore")
         ),
-        job.steps.exists(s =>
-          s.uses.contains(ZipxComposites.SbtSetupRef) && s.`with`.get("sbt-disk-cache").contains("false")
-        ),
+        !job.steps.exists(_.`with`.contains("sbt-disk-cache")),
       )
     },
     test("BazelRemoteSidecar backend emits a service sidecar and the remote-cache env, no actions/cache") {

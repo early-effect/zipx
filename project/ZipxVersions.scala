@@ -12,11 +12,11 @@ object ZipxVersions extends zipx.ZipxVersions:
   val zipx: ShipGroup =
     ShipGroup("zipx", "0.22.2")("shell", "workflow", "core", "syntax", "cli", "central", "aws", "agent", "plugin")
 
-  val zio: Lib            = Lib("dev.zio", "zio", "2.1.26")
-  val zioTest: Lib        = zio.mod("zio-test").test
-  val zioTestSbt: Lib     = zio.mod("zio-test-sbt").test
-  val zioJson: Lib        = Lib("dev.zio", "zio-json", "1.1.0")
-  val mimaCore: Lib       = Lib("com.typesafe", "mima-core", "1.1.5")
+  val zio: Lib        = Lib("dev.zio", "zio", "2.1.26")
+  val zioTest: Lib    = zio.mod("zio-test").test
+  val zioTestSbt: Lib = zio.mod("zio-test-sbt").test
+  val zioJson: Lib    = Lib("dev.zio", "zio-json", "1.1.0")
+  val mimaCore: Lib   = Lib("com.typesafe", "mima-core", "1.1.5")
   // sbt bundles a shaded copy whose TASTy still names coursier.*, so the plugin compiles against its own. The plexus
   // archive stack is cache extraction, which resolution never uses; sbt drops it too.
   val coursier: Lib = Lib("io.get-coursier", "coursier", "2.1.26").excluding(
@@ -67,9 +67,11 @@ object ZipxVersions extends zipx.ZipxVersions:
   val setupCoursier: Action =
     Action("coursier/setup-action", "v3.0.2", sha = "9b7939bf01fd1185ce2babe16135168361bf2c62")
 
-  val ubuntu: Pin   = Pin("agent-base", "ubuntu", "sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac")
-  val dockerCe: Pin = Pin("agent-docker", "docker-ce", "5:28.5.2-1~ubuntu.24.04~noble")
+  val ubuntu: Pin =
+    Pin("agent-base", "ubuntu", "sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac")
+  val dockerCe: Pin  = Pin("agent-docker", "docker-ce", "5:28.5.2-1~ubuntu.24.04~noble")
   val sbtRunner: Pin = Pin("agent-sbt", "sbt-runner", "2.0.7")
+  val cs: Pin        = Pin("sbt-image", "cs", "2.1.26")
 
   val commonScalacOptions: Seq[String] = Seq(
     "-deprecation",

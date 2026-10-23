@@ -1,8 +1,9 @@
 // MyVersions.settings sets the project-level scalaVersion. Do not also set ThisBuild / scalaVersion.
 MyVersions.settings
+zipxPins += Pin("sbt-image", "cs", "2.1.26")
 version        := "1.0.0-SNAPSHOT"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
-zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 
 libraryDependencies ++= MyVersions.deps(MyVersions.zio)
 

@@ -9,12 +9,47 @@ permissions:
   pull-requests: write
   issues: write
 jobs:
+  zipx-env-image:
+    name: Publish zipx env image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    outputs:
+      image: ${{ steps.zipx-env.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Publish zipx env image
+        id: zipx-env
+        run: |
+          repo=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${repo}/zipx-env:df-9062eca01ae611ce6868f7b3de4bd1ed565d14459703c860846dfde9336dd168"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "zipx-env $image is already published"
+            exit 0
+          fi
+          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -f .github/zipx-env/Dockerfile -t "$image" .
+          docker push "$image"
+
   version-updates:
     name: Catalog version updates
     runs-on: ubuntu-latest
+    needs:
+      - zipx-env-image
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - name: Detect GitHub App credentials
         id: zipx-app
@@ -64,10 +99,8 @@ jobs:
           java-version: ${{ steps.zipx-ci.outputs.java-version }}
           runner-os: ${{ steps.zipx-ci.outputs.runner-os }}
           cache-key-suffix: version-updates
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
-          coursier: "true"
+          cache-home: /home/sbtuser
       - name: Publish zipx-cli locally
         run: |
           set -euo pipefail

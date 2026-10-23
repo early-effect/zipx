@@ -134,49 +134,41 @@ In Scala, `zipxActions := ActionPins.Defaults.copy(...)` / `.withExtra` is the o
         )
       ),
     ),
-    section("`setupNode`: a typed field zipx emits only on request")(
+    section("`setupNode`: a typed field the cache composite does not install")(
       md"""
-`setupNode` is a typed field, like `checkout`, because zipx writes the step itself. Unlike the others it appears in a
-workflow only when a capability asks for a Node version:
+`setupNode` stays a typed Action field, like `checkout`, so a catalog row can still name the action. sbt jobs do not
+emit it. Node is baked into the toolchain image when a capability asks for a version:
 
 ```scala
-zipxCapabilities += Capability.testGraph.withNodeVersion(NodeVersion("22"))
+zipxCapabilities += Capability.testGraph.withNodeVersion(NodeVersion("22.11.0"))
 ```
 
-Off by default. A GitHub-hosted runner already has Node, so a Scala.js suite passes there without this.
-sbt-scalajs does not download Node. `zipxSbtImage` skips setup-node, so a `.jsPlatform` test in that image
-fails with `failed to start node` until the capability that runs it asks for a version and
-`Pin("sbt-image", "node", "<x.y.z>")` bakes that version in. Ask for a version on the host runner too when
-the suite needs a specific Node, or a step runs `npm ci`.
-
-The version is a `NodeVersion` newtype, so every form `setup-node` accepts (`22`, `22.11.0`, `latest`, `lts/jod`,
-`lts/*`) is checked while your `build.sbt` compiles, and a value that would break the YAML is a compile error rather
-than a workflow GitHub rejects.
+sbt-scalajs does not download Node. A `.jsPlatform` test fails with `failed to start node` until the capability that
+runs it asks for a concrete version, or `Pin("sbt-image", "node", "<x.y.z>")` supplies one for an alias (`22`,
+`latest`, `lts/jod`, `lts/*`). The newtype checks those forms while `build.sbt` compiles.
 
 Per-capability rather than build-wide, which is the difference from `zipxJavaVersion`: a Node toolchain belongs to one
-test suite, so asking for it must not put a Node tool on every publish job in the build. The version is an input on
-`zipx-sbt-setup` (after checkout), so a `jsEnv` and an `npm ci` both see it before any cache restore or `extraSteps`.
+test suite. Two versions in one build is a generate error. The cache composite has no `node-version` input.
 """,
       exampleValue {
-        DocsRender.job("test-schema")(Capability.testGraph.withNodeVersion(NodeVersion("22")))
-      }.assert(yaml =>
+        val plan = SbtImage
+          .resolve(
+            JdkVersion("21"),
+            SbtImage.DefaultSbtVersion,
+            Nil,
+            List(NodeVersion("22.11.0")),
+            coursier = false,
+            docker = false,
+          )
+          .fold(_.message, _.dockerfile)
+        val yaml = DocsRender.job("test-schema")(Capability.testGraph.withNodeVersion(NodeVersion("22.11.0")))
+        plan + "\n" + yaml
+      }.assert(text =>
         assertTrue(
-          yaml.contains("uses: ./.github/actions/zipx-sbt-setup"),
-          yaml.contains("node-version: \"22\""),
-          !yaml.contains("actions/setup-node@"),
-        )
-      ),
-      md"""
-Without `withNodeVersion` the same job passes an empty `node-version` input (the composite skips setup-node), so
-adopting this changes only the capability that asked:
-""",
-      exampleValue {
-        DocsRender.job("test-schema")(Capability.testGraph)
-      }.assert(yaml =>
-        assertTrue(
-          yaml.contains("uses: ./.github/actions/zipx-sbt-setup"),
-          yaml.contains("node-version: \"\""),
-          !yaml.contains("actions/setup-node@"),
+          text.contains("node-v22.11.0"),
+          text.contains("uses: ./.github/actions/zipx-sbt-setup"),
+          !text.contains("node-version:"),
+          !text.contains("actions/setup-node@"),
         )
       ),
     ),
@@ -252,7 +244,8 @@ A `github-actions` Dependabot ecosystem is leftover, not the ladder.
 | `zipxCatalogGenerate` | write composites, `plugins.sbt`, `zipx-ci.env` (not workflow YAML) |
 | `zipxWorkflowGenerate` / `zipxWorkflowCheck` | write / verify `ci.yml` |
 
-Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`,
+Pinned actions today: `actions/checkout`, `actions/setup-java`, `sbt/setup-sbt`, `actions/setup-node`
+(kept so an Action row does not churn; sbt jobs do not run them; see **JDK trust store**),
 `actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, plus ZipxAws extras
 `aws-actions/configure-aws-credentials` and `aws-actions/amazon-ecr-login`. Anything else your steps use is an extra
 `Action` val.

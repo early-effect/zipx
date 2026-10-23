@@ -290,7 +290,8 @@ Snapshot never runs on a PR.
         assertTrue(
           yaml.contains("sbt zipxPinSubmit"),
           yaml.contains("pin-snapshot"),
-          !yaml.contains("pull_request"),
+          yaml.contains("push:"),
+          !yaml.contains("pull_request:"),
           yaml.indexOf(ActionPins.Defaults.checkout.unwrap) < yaml.indexOf("sbt zipxPinSubmit"),
         )
       ),

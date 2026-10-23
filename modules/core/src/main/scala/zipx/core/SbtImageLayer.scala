@@ -57,7 +57,7 @@ object SbtImageLayer:
     else Right(id)
 
   private def reserved(id: String): Boolean =
-    id == SbtImage.NodeId || id == SbtImage.CsId || id == SbtImage.DockerCliId || id == SbtImage.GhId
+    SbtImage.builtinIds.contains(id)
 
   private def one(pins: Seq[Pin], layer: SbtImageLayer): Either[SbtImageError, LayerOut] =
     for
@@ -73,8 +73,7 @@ object SbtImageLayer:
       case Some(version)                                 => Left(SbtImageError.LayerPinNotConcrete(id, version))
 
   private def orphans(pins: Seq[Pin], layers: Seq[SbtImageLayer]): Either[SbtImageError, Unit] =
-    val known = Set(SbtImage.ImageId, SbtImage.NodeId, SbtImage.CsId, SbtImage.DockerCliId, SbtImage.GhId) ++
-      layers.map(_.id)
+    val known   = SbtImage.builtinIds ++ layers.map(_.id)
     val unknown = pins.filter(_.feed == SbtImage.Feed).map(_.id).filterNot(known.contains)
     unknown.headOption match
       case None     => Right(())
@@ -90,7 +89,7 @@ object SbtImageLayer:
       }
     }
 
-  private val Owned = Set("HOME", "JAVA_OPTS", "SBT_OPTS", "COURSIER_TTL", "GITHUB_TOKEN")
+  private val Owned = Set("HOME", "JAVA_HOME", "JAVA_OPTS", "SBT_OPTS", "COURSIER_TTL", "GITHUB_TOKEN")
 
   private def owned(key: String): Boolean =
     Owned.contains(key) || key.startsWith("GIT_CONFIG_") || key.startsWith("GITHUB_")
@@ -137,26 +136,26 @@ object SbtImageLayer:
         yield StepPair.Extract(urlL, urlR, dest, format, strip)
       case (ImageStep.EmptyFile(dest), ImageStep.EmptyFile(destR)) if dest == destR =>
         destOf(id, dest).map(_ => StepPair.Marker(dest))
-      case (ImageStep.Apt(name, verL), ImageStep.Apt(nameR, verR)) if name == nameR =>
+      case (ImageStep.Package(name, verL), ImageStep.Package(nameR, verR)) if name == nameR =>
         for
-          _ <- apt(id, name, verL)
-          _ <- apt(id, name, verR)
+          _ <- pkg(id, name, verL)
+          _ <- pkg(id, name, verR)
         yield StepPair.Package(name, verL, verR)
       case _ =>
         Left(SbtImageError.ArchMismatch(id, s"step $index differs by arch in more than the URL or package version"))
 
   private def stitch(id: String, steps: List[StepPair]): Either[SbtImageError, List[String]] =
     val packages = steps.collect { case pkg: StepPair.Package => pkg }
-    val aptRun   = Option.when(packages.nonEmpty)(aptScript(packages))
-    def loop(rest: List[StepPair], aptDone: Boolean, acc: List[String]): List[String] =
+    val apkRun   = Option.when(packages.nonEmpty)(packageScript(packages))
+    def loop(rest: List[StepPair], apkDone: Boolean, acc: List[String]): List[String] =
       rest match
         case Nil                           => acc.reverse
         case (_: StepPair.Package) :: tail =>
-          aptRun match
-            case Some(run) if !aptDone => loop(tail, true, run :: acc)
+          apkRun match
+            case Some(run) if !apkDone => loop(tail, true, run :: acc)
             case _                     => loop(tail, true, acc)
-        case other :: tail => loop(tail, aptDone, script(other) :: acc)
-    val runs = loop(steps, false, Nil)
+        case other :: tail => loop(tail, apkDone, script(other) :: acc)
+    val runs = loop(steps, apkDone = false, Nil)
     if runs.isEmpty then Left(SbtImageError.EmptyLayer(id)) else Right(runs)
   end stitch
 
@@ -200,10 +199,10 @@ object SbtImageLayer:
 
   private val AptVersion = "[A-Za-z0-9.+:~-]+"
 
-  private def apt(id: String, name: String, version: String): Either[SbtImageError, Unit] =
+  private def pkg(id: String, name: String, version: String): Either[SbtImageError, Unit] =
     val bad =
       !name.matches(AptName) || !version.matches(AptVersion) || version.equalsIgnoreCase("latest")
-    Either.cond(!bad, (), SbtImageError.BadApt(id, name, version))
+    Either.cond(!bad, (), SbtImageError.BadPackage(id, name, version))
 
   private def mergeEnv(parts: List[LayerOut]): Either[SbtImageError, Map[String, String]] =
     parts
@@ -239,12 +238,10 @@ object SbtImageLayer:
       case StepPair.Extract(amd, arm, dest, format, strip) => extract(amd, arm, dest, format, strip)
       case StepPair.Marker(dest)                           =>
         run(List(s"mkdir -p -- ${q(parent(dest))}", s": > ${q(dest)}"))
-      case pkg: StepPair.Package => aptScript(List(pkg))
+      case pkg: StepPair.Package => packageScript(List(pkg))
 
-  /** `apt-get update` is not a function of this text. The published tag is the text hash, and the push is skipped when
-    * that tag already exists, so the first build is the one that sticks.
-    */
-  private def aptScript(packages: List[StepPair.Package]): String =
+  /** Every package is `name=version`. That text is the pin: the published tag is its hash. */
+  private def packageScript(packages: List[StepPair.Package]): String =
     val same    = packages.forall(pkg => pkg.amd == pkg.arm)
     val install =
       if same then packages.map(pkg => q(s"${pkg.name}=${pkg.amd}")).mkString(" ")
@@ -255,16 +252,8 @@ object SbtImageLayer:
         val amd = packages.map(pkg => s"${pkg.name}=${pkg.amd}").mkString(" ")
         val arm = packages.map(pkg => s"${pkg.name}=${pkg.arm}").mkString(" ")
         List(archCase("pkgs", amd, arm))
-    run(
-      choose ++ List(
-        "set -f",
-        "apt-get update",
-        s"apt-get install -y --no-install-recommends $install",
-        "set +f",
-        "rm -rf /var/lib/apt/lists/*",
-      )
-    )
-  end aptScript
+    run(choose ++ List("set -f", s"apk add --no-cache $install", "set +f"))
+  end packageScript
 
   private def fetch(amd: String, arm: String, dest: String, source: FileSource, mode: FileMode): String =
     val (choose, url) = archUrl(amd, arm)
@@ -380,16 +369,20 @@ enum ImageStep:
   /** An empty file. Some tool layouts treat a marker as part of the install. */
   case EmptyFile(dest: String)
 
-  /** A distro package at an exact version. zipx writes the only `apt-get` line. There is no unpinned install. */
-  case Apt(name: String, version: String)
+  /** A distro package at an exact version. zipx writes the only `apk add` line. There is no unpinned install. */
+  case Package(name: String, version: String)
 end ImageStep
 
 enum SbtImageError:
-  case LayersWhileImageOff
   case FeedShadowed
   case BadJavaVersion(raw: String)
-  case MissingImagePin
-  case BadImagePin(raw: String)
+  case JdkBelowMinimum(feature: Int)
+  case JdkUnsupported(feature: Int)
+  case JdkVulnerable(version: String, required: String)
+  case RetiredTemurinPin(raw: String)
+  case BadBasePin(raw: String)
+  case BadApkPin(id: String, version: String)
+  case BadSbtVersion(raw: String)
   case JdkMismatch(imageMajor: Int, javaVersion: String)
   case NodeMismatch(pin: String, asked: String)
   case NodePinNotConcrete(pin: String)
@@ -408,7 +401,7 @@ enum SbtImageError:
   case BadDest(id: String, dest: String)
   case ArchMismatch(id: String, detail: String)
   case BadStrip(id: String, strip: Int)
-  case BadApt(id: String, name: String, version: String)
+  case BadPackage(id: String, name: String, version: String)
   case BadMember(id: String, path: String)
   case OwnedEnvKey(id: String, key: String)
   case BadEnvKey(id: String, key: String)
@@ -419,18 +412,26 @@ enum SbtImageError:
   case CandidateMajor(id: String, version: String, major: Int)
 
   def message: String = this match
-    case LayersWhileImageOff =>
-      "zipx: zipxSbtImageLayers is set and zipxSbtImage is false"
     case FeedShadowed =>
       "zipx: a PinFeed named sbt-image would replace the image and layer lookups. Drop it. A layer carries its own lookup."
     case BadJavaVersion(raw) =>
       s"zipx: zipxJavaVersion '$raw' has no JDK major"
-    case MissingImagePin =>
-      s"""zipx: zipxSbtImage needs Pin("${SbtImage.Feed: String}", "${SbtImage.ImageId}", "eclipse-temurin-<jdk>_<build>_2.x@sha256:<digest>")"""
-    case BadImagePin(raw) =>
-      s"zipx: sbt image pin '$raw' must be eclipse-temurin-<jdk>_<build>_2.x@sha256:<digest>"
+    case JdkBelowMinimum(feature) =>
+      s"zipx: JDK $feature is below the minimum ${JdkFloor.MinimumFeature}"
+    case JdkUnsupported(feature) =>
+      s"zipx: JDK $feature has no pinned Wolfi package"
+    case JdkVulnerable(version, required) =>
+      s"zipx: openjdk pin '$version' is below the fixed build $required"
+    case RetiredTemurinPin(raw) =>
+      s"zipx: Temurin image pin '$raw' is retired. The toolchain image is Wolfi."
+    case BadBasePin(raw) =>
+      s"zipx: wolfi-base pin '$raw' must be sha256:<digest>"
+    case BadApkPin(id, version) =>
+      s"zipx: $id pin '$version' must be an apk version name=version-rN"
+    case BadSbtVersion(raw) =>
+      s"zipx: sbt version '$raw' cannot be installed into the toolchain image"
     case JdkMismatch(imageMajor, javaVersion) =>
-      s"zipx: sbt image pin is Temurin $imageMajor and zipxJavaVersion is $javaVersion"
+      s"zipx: openjdk pin is major $imageMajor and zipxJavaVersion is $javaVersion"
     case NodeMismatch(pin, asked) =>
       s"zipx: Node pin is $pin and a capability asks for $asked"
     case NodePinNotConcrete(pin) =>
@@ -438,11 +439,11 @@ enum SbtImageError:
     case NodeAliasUnpinned(asked) =>
       s"""zipx: Node version '$asked' is not a concrete x.y.z. Pin("${SbtImage.Feed: String}", "${SbtImage.NodeId}", "<x.y.z>") so the pin companion can move it"""
     case ManyNodeVersions(versions) =>
-      s"zipx: zipxSbtImage needs one Node version; capabilities asked for ${versions.mkString(", ")}"
+      s"zipx: the toolchain image needs one Node version; capabilities asked for ${versions.mkString(", ")}"
     case ToolPinNotConcrete(id, pin) =>
       s"zipx: $id pin '$pin' is not a concrete x.y.z"
     case MissingToolPin(id, why) =>
-      s"""zipx: zipxSbtImage with $why needs Pin("${SbtImage.Feed: String}", "$id", "<x.y.z>")"""
+      s"""zipx: the toolchain image with $why needs Pin("${SbtImage.Feed: String}", "$id", "<x.y.z>")"""
     case BadLayerId(id) =>
       s"zipx: layer id '$id' must start with a letter and contain only letters, digits, '.', '_', or '-'"
     case ReservedLayerId(id) =>
@@ -462,11 +463,11 @@ enum SbtImageError:
     case BadDest(id, dest) =>
       s"zipx: layer $id path '$dest' must be absolute and outside /home/sbtuser, /root, and /tmp"
     case ArchMismatch(id, detail) =>
-      s"zipx: layer $id arches disagree ($detail). Only the URL or apt version may differ."
+      s"zipx: layer $id arches disagree ($detail). Only the URL or package version may differ."
     case BadStrip(id, strip) =>
       s"zipx: layer $id strip $strip is not valid for that archive"
-    case BadApt(id, name, version) =>
-      s"zipx: layer $id apt package '$name=$version' needs a Debian name and an exact version"
+    case BadPackage(id, name, version) =>
+      s"zipx: layer $id package '$name=$version' needs an apk name and an exact version"
     case BadMember(id, path) =>
       s"zipx: layer $id archive member '$path' must be a relative path"
     case OwnedEnvKey(id, key) =>

@@ -53,13 +53,8 @@ object VersionUpdatesWorkflow:
           "java-version"     -> "${{ steps.zipx-ci.outputs.java-version }}",
           "runner-os"        -> "${{ steps.zipx-ci.outputs.runner-os }}",
           "cache-key-suffix" -> "version-updates",
-          "node-version"     -> "",
-          "sbt-disk-cache"   -> "false",
           "cache-mode"       -> LocalCacheMode.Restore.input,
-          "coursier"         -> (if sbtImage.isDefined then "false" else "true"),
-        ) ++ sbtImage.fold(ListMap.empty[String, String]) { plan =>
-          ListMap("baked-toolchain" -> "true", "cache-home" -> plan.cacheHome)
-        }
+        ) ++ sbtImage.fold(ListMap.empty[String, String])(plan => ListMap("cache-home" -> plan.cacheHome))
       )
       .build
     val apply = Step

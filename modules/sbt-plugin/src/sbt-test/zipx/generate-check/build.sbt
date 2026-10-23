@@ -4,6 +4,7 @@ version      := "1.0.0-SNAPSHOT"
 // Fixed so the asserts can name a literal epoch.
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+zipxPins += Pin("sbt-image", "cs", "2.1.26")
 // The asserts name per-module jobs, so collapse is off; core's MatrixCollapseSpec covers Auto.
 zipxMatrixCollapse := Map(
   Capability.TestName                 -> MatrixCollapse.Off,
@@ -123,7 +124,9 @@ assertGraph := {
     content.contains("contains(github.event.pull_request.labels.*.name, 'purge')"),
     "the purge label should gate LocalDir restore",
   )
-  assert(content.contains("sbt-disk-cache: \"false\""), "LocalDir must disable setup-sbt hashFiles disk-cache")
+  assert(content.contains("zipx-env-image:"), "sbt jobs publish the toolchain image")
+  assert(!content.contains("sbt-disk-cache"), "the cache composite has no setup-sbt disk-cache input")
+  assert(!content.contains("actions/setup-java"), "sbt jobs do not install a host JDK")
   assert(!content.contains("cache: sbt"), "LocalDir must not enable setup-java cache:sbt")
   val setup =
     IO.read((LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-sbt-setup" / "action.yml")

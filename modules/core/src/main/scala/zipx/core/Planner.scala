@@ -160,11 +160,11 @@ object Planner:
         case Nil => ()
         case bad =>
           sys.error(
-            s"zipx: zipxSbtImage is on, so these capabilities cannot also call inContainer: " +
+            s"zipx: sbt jobs run in the toolchain image, so these capabilities cannot also call inContainer: " +
               bad.map(_.name).mkString(", ")
           )
     }
-    if config.sbtImage.exists(_.dockerfile.isDefined) then
+    if config.sbtImage.isDefined then
       capabilities.filter(c => (c.name: String) == SbtImageWorkflow.EnvImageJob) match
         case Nil => ()
         case _   =>
@@ -613,7 +613,7 @@ object Planner:
         ).unwrapped
       ),
       env = EnvValue.renderAll(config.env) ++ EnvValue.renderAll(config.cacheRehydrateEnv),
-      steps = checkoutThenSbtSetup(config, cacheRehydrateJobId, nodeVersion = None, LocalCacheMode.Save) ++
+      steps = checkoutThenSbtSetup(config, cacheRehydrateJobId, LocalCacheMode.Save) ++
         config.cacheRehydrateExtraSteps(ctx) ++ List(
           Step.run(Script(config.cacheRehydrateTask.render)).named(cacheRehydrateJobId).build
         ),
@@ -693,7 +693,7 @@ object Planner:
         if config.affectedOnPush then ListMap("actions" -> "read", "contents" -> "read") else ListMap.empty,
       env = EnvValue.renderAll(config.env),
       outputs = ListMap("modules" -> Expr.stepOutput("compute", "modules").render),
-      steps = checkoutThenSbtSetup(config, affectedJobId, nodeVersion = None, LocalCacheMode.Off) ++ List(
+      steps = checkoutThenSbtSetup(config, affectedJobId, LocalCacheMode.Off) ++ List(
         (if config.affectedOnPush then compute.withEnv("GH_TOKEN", Expr.githubToken) else compute).build
       ),
     )
@@ -1824,7 +1824,7 @@ object Planner:
             List(DeployWorkflow.imageTagCheck(module), andStepIf(commandStep, Some(DeployWorkflow.imageMissing)))
           case _ => List(commandStep)
         // Local composites need the workspace on disk before `uses: ./.github/actions/…` can resolve.
-        checkout :: ZipxComposites.sbtSetupStep(config, jobSuffix, capability.nodeVersion, cacheMode) ::
+        checkout :: ZipxComposites.sbtSetupStep(config, jobSuffix, cacheMode) ::
           cache.steps ++ capability.extraSteps(ctx) ++ publish ++ capability.postSteps(ctx)
     end match
   end stepsFor
@@ -1833,12 +1833,11 @@ object Planner:
   private[core] def checkoutThenSbtSetup(
       config: PlanConfig,
       jobSuffix: JobId,
-      nodeVersion: Option[NodeVersion],
       cacheMode: LocalCacheMode,
   ): List[Step] =
     List(
       checkoutStep(config),
-      ZipxComposites.sbtSetupStep(config, jobSuffix, nodeVersion, cacheMode),
+      ZipxComposites.sbtSetupStep(config, jobSuffix, cacheMode),
     )
 
   private def checkoutStep(config: PlanConfig, pipeline: Pipeline = Pipeline.Ci): Step =

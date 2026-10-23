@@ -8,6 +8,7 @@ zipxPins       := Seq(
   Pin("agent-base", "ubuntu", "sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac"),
   Pin("agent-docker", "docker-ce", "5:28.5.2-1~ubuntu.24.04~noble"),
   Pin("agent-sbt", "sbt-runner", "2.0.7"),
+  Pin("sbt-image", "cs", "2.1.26"),
 )
 
 lazy val root = (project in file("."))
@@ -20,15 +21,20 @@ assertAgentEnv := {
   val docker  = IO.read(base / ".cursor" / "Dockerfile")
   val install = IO.read(base / ".github" / "zipx-agent" / "install.sh")
   assert(!json.contains("\"context\""), json)
-  assert(json.contains("sudo service docker start"), json)
+  assert(json.contains(""""start": "/usr/local/bin/zipx-dockerd""""), json)
+  assert(!json.contains("sudo service docker start"), json)
   assert(json.contains("bash .github/zipx-agent/install.sh"), json)
+  assert(docker.contains("FROM cgr.dev/chainguard/wolfi-base@sha256:"), docker)
+  assert(docker.contains("apk add --no-cache"), docker)
   assert(docker.contains("fuse-overlayfs"), docker)
-  assert(docker.contains("5:28.5.2-1~ubuntu.24.04~noble"), docker)
-  assert(!docker.contains("x86_64"), docker)
+  assert(docker.contains("docker-28.5.2.tgz"), docker)
+  assert(docker.contains("x86_64"), docker)
+  assert(!docker.contains("apt-get"), docker)
   assert(!docker.toLowerCase.contains("temurin"), docker)
+  assert(docker.contains("""ENV COURSIER_TTL="0s""""), docker)
   assert(install.contains("REGISTRY_TOKEN"), install)
   assert(install.contains("sbt --server --batch"), install)
   assert(install.contains(". project/zipx-ci.env"), install)
-  assert(install.contains("COURSIER_TTL"), install)
+  assert(!install.contains("export COURSIER_TTL"), install)
   assert(!install.contains("x86_64"), install)
 }

@@ -55,7 +55,7 @@ object ReleaseWorkflow:
       `if` = Some((tagPushed || onDefaultRef).unwrapped),
       environment = release.environment.map(JobEnvironment(_)),
       env = EnvValue.renderAll(config.env ++ release.env ++ release.credentials.env),
-      steps = Planner.checkoutThenSbtSetup(config, jobId, nodeVersion = None, cacheMode) ++
+      steps = Planner.checkoutThenSbtSetup(config, jobId, cacheMode) ++
         List(onDefaultBranchStep) ++
         release.steps(buildContext.copy(actions = config.actions)) ++
         List(bindRefStep, releaseStep, githubReleasesStep, openCycleStep, bumpPrStep),

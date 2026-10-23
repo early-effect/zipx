@@ -1,6 +1,7 @@
 MyVersions.settings
+zipxPins += Pin("sbt-image", "cs", "2.1.26")
 organization := "com.example.zipx.modver"
-zipxVerify          := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+zipxVerify   := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 // A file: registry this fixture never publishes to. The rows stay unreleased without calling Maven Central.
 zipxReleaseWorkflow := Some(ReleaseWorkflow(ArtifactRegistry.Url(file("released").getAbsoluteFile.toURI.toString)))
 
@@ -83,7 +84,8 @@ assertBumpedClient := {
   assert(src.contains("""ShipGroup("libs", "1.4.2")("models", "coreLib")"""), src)
 }
 
-val assertModverWorkflow = taskKey[Unit]("ci.yml checks bumps on PRs and publishes nothing; releases are zipx-release.yml")
+val assertModverWorkflow =
+  taskKey[Unit]("ci.yml checks bumps on PRs and publishes nothing; releases are zipx-release.yml")
 assertModverWorkflow := {
   val content = IO.read((LocalRootProject / baseDirectory).value / ".github" / "workflows" / "ci.yml")
   assert(content.contains("modver-check:"), "missing injected modver-check")

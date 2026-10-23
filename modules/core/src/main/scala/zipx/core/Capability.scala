@@ -201,15 +201,14 @@ end Target
   * @param postSteps
   *   steps after the command step.
   * @param container
-  *   one job's image. `actions/setup-java` and `sbt/setup-sbt` then install into it, so an image without `tar`, `curl`
-  *   or `git` fails in setup. A shared sbt image is `zipxSbtImage`, not this. Prefer [[services]] unless the toolchain
-  *   itself must differ.
+  *   one job's image. Refused when the plan carries a toolchain image, because sbt jobs already run there. Prefer
+  *   [[services]] unless that one job's image must differ.
   * @param services
   *   reachable at `localhost:<mapped port>` (or the service id, under [[container]]). GitHub gives no readiness signal
   *   beyond a `--health-cmd` in `options`.
   * @param nodeVersion
-  *   adds an `actions/setup-node` step after the JDK. Off by default because sbt-scalajs downloads its own Node for
-  *   `jsEnv`; set it for a specific Node or a step running `npm ci`.
+  *   bakes that Node into the toolchain image. A concrete `x.y.z` is installed as written. An alias needs
+  *   `Pin("sbt-image", "node", "<x.y.z>")`. Off by default because sbt-scalajs downloads its own Node for `jsEnv`.
   * @param workflowCall
   *   emits a reusable-workflow job instead of sbt steps. Rejected with [[container]] or [[services]], which GitHub does
   *   not accept alongside `uses:`.

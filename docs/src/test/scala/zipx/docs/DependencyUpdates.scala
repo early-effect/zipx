@@ -39,7 +39,7 @@ flowchart LR
       md"""
 Default `zipxVersionUpdates := true` writes `.github/workflows/zipx-version-updates.yml` (schedule plus
 `workflow_dispatch`). The default schedule is Sunday 00:00 UTC; set `zipxVersionUpdatesSchedule` to change it
-(`Cron.daily`, `Cron.weekly`, `Cron.raw`). The job installs `cs` via `zipx-sbt-setup` (`coursier: true`), runs
+(`Cron.daily`, `Cron.weekly`, `Cron.raw`). The toolchain image supplies `cs` (`Pin("sbt-image", "cs", "<x.y.z>")`, or generate refuses). The cache composite does not install it. The job runs
 `cs launch --ttl Inf --repository m2Local --repository ivy2Local --repository central rocks.earlyeffect:zipx-cli_3:${'$'}ZIPX_CLI_VERSION -- catalog update --yes --verify-load`
 (a release writes `ZIPX_CLI_VERSION` to `project/zipx-ci.env`; in-dev dogfood exports it from `zipxVersionUpdatesPreSteps`). `--repository ivy2Local` is how zipx dogfood resolves a just-`publishLocal`'d `-SNAPSHOT` CLI (sbt 2's `publishLocal` writes the Ivy local repository, which default `cs` does not search). Empty local repositories on a consumer runner are a no-op. Then
 `zipxPinUpdate yes`, `zipxAgentEnvGenerate`, `zipxSbtEnvGenerate`, `zipxCatalogGenerate`, and `zipxSnapshotAdvance`, and opens a PR as `github-actions[bot]` unless App secrets are set (below). The branch is
@@ -134,7 +134,8 @@ secrets or neither; exactly one fails the job. Grant the App contents + pull-req
           yaml.contains("--body-file"),
           yaml.contains("sbt zipxWorkflowGenerate"),
           yaml.contains("git push origin zipx/version-updates-${GITHUB_RUN_ID}"),
-          yaml.contains("coursier: \"true\"") || yaml.contains("coursier: true"),
+          !yaml.contains("coursier:"),
+          !yaml.contains("coursier/setup-action"),
           yaml.contains("--repository m2Local"),
           yaml.contains("--repository ivy2Local"),
           yaml.contains("--repository central"),

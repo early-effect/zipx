@@ -6,6 +6,7 @@ zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
 zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 // Empty catalog: generate must still succeed though the JS row injects Scala.js toolchain jars that are not Lib rows.
 zipxCheckDeps := true
+zipxPins += Pin("sbt-image", "cs", "2.1.26")
 
 lazy val shared = (projectMatrix in file("shared"))
   .jvmPlatform(scalaVersions = Seq("3.9.0"))
@@ -19,8 +20,8 @@ lazy val root = (project in file("."))
   .aggregate((shared.projectRefs ++ Seq[ProjectReference](consumer)) *)
   .settings(publish / skip := true)
 
-// withNodeVersion also proves the NodeVersion newtype and the setupNode pin reach a real build.sbt.
-zipxCapabilities += Capability.testGraph.withNodeVersion(NodeVersion("22"))
+// A concrete NodeVersion is baked into the toolchain image. An alias needs a node pin.
+zipxCapabilities += Capability.testGraph.withNodeVersion(NodeVersion("22.11.0"))
 
 val assertBothRowsGetJobs = taskKey[Unit]("each platform row gets its own gated test job")
 assertBothRowsGetJobs := {
@@ -34,13 +35,14 @@ assertBothRowsGetJobs := {
     "the JS row must gate on its own module id",
   )
   assert(content.contains("uses: ./.github/actions/zipx-sbt-setup"), "expected zipx-sbt-setup composite")
-  assert(content.contains("node-version: \"22\""), "expected the node-version input on the composite")
+  assert(!content.contains("node-version:"), "the cache composite has no node-version input")
   assert(!content.contains("actions/setup-node@"), "setup-node must not be inlined in the workflow")
-  assert(!content.contains("Setup Node 22"), "Setup Node step name lives in the composite")
   val setup =
     IO.read((LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-sbt-setup" / "action.yml")
-  assert(setup.contains("actions/setup-node@"), "composite must SHA-pin setup-node")
-  assert(setup.contains("Setup Node"), "composite must name the Setup Node step")
+  assert(!setup.contains("actions/setup-node@"), "composite must not install node")
+  assert(!setup.contains("Setup Node"), "composite must not name a Setup Node step")
+  val image = IO.read((LocalRootProject / baseDirectory).value / ".github" / "zipx-env" / "Dockerfile")
+  assert(image.contains("node-v22.11.0"), "the toolchain image bakes the concrete node version")
   val awsLogin = (LocalRootProject / baseDirectory).value / ".github" / "actions" / "zipx-aws-login"
   assert(!awsLogin.exists, "non-AWS consumer must not get zipx-aws-login")
 }

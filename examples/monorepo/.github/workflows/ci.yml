@@ -11,6 +11,32 @@ concurrency:
   group: CI-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
+  zipx-env-image:
+    name: Publish zipx env image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    outputs:
+      image: ${{ steps.zipx-env.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Publish zipx env image
+        id: zipx-env
+        run: |
+          repo=$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${repo}/zipx-env:df-fbf68d13c3e4bb6b3f35c932222c20218e0add947507d74bfe444f761c23ae06"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "zipx-env $image is already published"
+            exit 0
+          fi
+          printf '%s' "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -f .github/zipx-env/Dockerfile -t "$image" .
+          docker push "$image"
+
   verify-gate:
     name: verify-gate
     runs-on: ubuntu-latest
@@ -58,10 +84,18 @@ jobs:
     name: cache-rehydrate
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - verify-gate
     if: needs.verify-gate.result == 'success' && needs.verify-gate.outputs.run == 'false'
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,21 +107,28 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: cache-rehydrate
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: save
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: cache-rehydrate
         run: sbt 'Test/compile'
   test-L0:
     name: test L0
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -99,11 +140,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: test-L0
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: save
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -117,9 +157,17 @@ jobs:
     name: test L1
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - test-L0
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -131,11 +179,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: test-L1
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: save
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -149,9 +196,17 @@ jobs:
     name: test L2
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - test-L1
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -163,11 +218,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: test-L2
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: save
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -181,10 +235,18 @@ jobs:
     name: fmt
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -196,11 +258,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: fmt
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: fmt
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -214,10 +275,18 @@ jobs:
     name: workflow-check
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -229,11 +298,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: workflow-check
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: workflow-check
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -247,10 +315,18 @@ jobs:
     name: advisories
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - verify-gate
     if: "!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))"
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -262,11 +338,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: advisories
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: advisories
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -280,14 +355,23 @@ jobs:
     name: modver-suggest
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - verify-gate
     if: (!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))) && (github.event_name == 'pull_request')
     permissions:
       contents: read
       pull-requests: write
+      packages: read
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
       ZIPX_MODVER_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -299,11 +383,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: modver-suggest
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
       - name: modver-suggest
@@ -319,13 +402,22 @@ jobs:
     name: modver-check
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - verify-gate
     if: (!cancelled() && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'workflow_dispatch' && ((needs.verify-gate.result != 'success') || (needs.verify-gate.outputs.run == 'true'))) && (github.event_name == 'pull_request')
     permissions:
       contents: read
+      packages: read
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
       ZIPX_MODVER_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -337,11 +429,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: modver-check
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
       - name: modver-check
@@ -373,10 +464,16 @@ jobs:
   docker:
     name: docker
     runs-on: ubuntu-latest
+    needs:
+      - zipx-env-image
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       id-token: write
       contents: read
+      packages: read
+    container:
+      image: ${{ needs.zipx-env-image.outputs.image }}
+      options: -v /var/run/docker.sock:/var/run/docker.sock
     env:
       COURSIER_TTL: "0s"
       ZIPX_EU_AWS_ACCOUNT_ID: "444455556666"
@@ -387,6 +484,12 @@ jobs:
       ZIPX_US_AWS_ECR_REGISTRY: "111122223333.dkr.ecr.us-east-1.amazonaws.com"
       ZIPX_US_AWS_REGION: us-east-1
       ZIPX_US_AWS_ROLE_TO_ASSUME: ${{ secrets.US_REGISTRY_ROLE }}
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -398,11 +501,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: docker
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: zipx AWS login (eu)
         uses: ./.github/actions/zipx-aws-login
         with:
@@ -425,13 +527,21 @@ jobs:
     name: snapshots
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - cache-rehydrate
       - verify
     if: (!cancelled() && needs.cache-rehydrate.result != 'failure' && needs.verify.result != 'failure') && ((((github.event_name == 'push') && ((github.ref == 'refs/heads/main'))) || (github.event_name == 'workflow_dispatch')))
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
       SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
       SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -443,23 +553,24 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: snapshots
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: snapshots
         run: sbt 'zipxSnapshotPublish'
   deploy:
     name: deploy
     runs-on: ubuntu-latest
     needs:
+      - zipx-env-image
       - docker
     if: startsWith(github.ref, 'refs/tags/v')
     environment: ${{ matrix.environment }}
     permissions:
       id-token: write
       contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix:
@@ -473,11 +584,18 @@ jobs:
             AWS_REGION: us-west-2
             AWS_ROLE_TO_ASSUME: ${{ secrets.STAGING_DEPLOY_ROLE }}
             TIER: staging
+    container: ${{ needs.zipx-env-image.outputs.image }}
     env:
       COURSIER_TTL: "0s"
       AWS_REGION: ${{ matrix.AWS_REGION }}
       AWS_ROLE_TO_ASSUME: ${{ matrix.AWS_ROLE_TO_ASSUME }}
       TIER: ${{ matrix.TIER }}
+      HOME: /home/sbtuser
+      JAVA_OPTS: -Duser.home=/home/sbtuser
+      SBT_OPTS: -Duser.home=/home/sbtuser
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -489,11 +607,10 @@ jobs:
           java-version: "21"
           runner-os: ubuntu-latest
           cache-key-suffix: deploy
-          node-version: ""
-          sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "8f2e77a00c7c0f58"
+          cache-home: /home/sbtuser
       - name: zipx AWS login
         uses: ./.github/actions/zipx-aws-login
         with:

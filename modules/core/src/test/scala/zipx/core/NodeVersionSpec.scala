@@ -17,51 +17,21 @@ object NodeVersionSpec extends ZIOSpecDefault:
 
   def spec = suite("NodeVersion")(
     suite("the step")(
-      test("sbt-setup composite receives node-version so a jsEnv sees the pinned Node") {
-        val step = plan(Capability.testJoined.withNodeVersion(NodeVersion("22")))
+      test("the cache composite does not install Node") {
+        val asked = plan(Capability.testJoined.withNodeVersion(NodeVersion("22.11.0")))
           .jobs("test")
           .steps
           .find(_.uses.contains(ZipxComposites.SbtSetupRef))
+        val rendered = ZipxComposites.renderSbtSetup(config.actions)
+        val yaml     = rendered.fold(identity, identity)
         assertTrue(
-          step.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
-          step.exists(_.`with`.get("node-version").contains("22")),
+          rendered.isRight,
+          asked.exists(_.uses.contains(ZipxComposites.SbtSetupRef)),
+          !asked.exists(_.`with`.contains("node-version")),
+          !yaml.contains("actions/setup-node"),
+          !yaml.contains(config.actions.setupNode.unwrap),
         )
-      },
-      test("carries node-version into the composite inputs") {
-        val step = plan(Capability.testJoined.withNodeVersion(NodeVersion("22.11.0")))
-          .jobs("test")
-          .steps
-          .find(_.uses.contains(ZipxComposites.SbtSetupRef))
-        assertTrue(
-          step.exists(_.`with`.get("node-version").contains("22.11.0")),
-          ZipxComposites.renderSbtSetup(config.actions).toOption.get.contains(config.actions.setupNode.unwrap),
-        )
-      },
-      test("absent by default, so no existing workflow gains a node-version input") {
-        val step = plan(Capability.testJoined)
-          .jobs("test")
-          .steps
-          .find(_.uses.contains(ZipxComposites.SbtSetupRef))
-        assertTrue(step.exists(_.`with`.get("node-version").contains("")))
-      },
-      test("only the capability that asked for it, not the affected or cache-rehydrate jobs") {
-        val cfg = config.copy(affected = AffectedMode.AffectedOnPR, cacheRehydrateOnMerge = true)
-        val wf  = Planner.plan(
-          sampleGraph,
-          List(Capability.testGraph.withNodeVersion(NodeVersion("22")).withMatrixCollapse(MatrixCollapse.Off)),
-          cfg,
-        )
-        def nodeVer(id: String) =
-          wf.jobs
-            .get(id)
-            .flatMap(_.steps.find(_.uses.contains(ZipxComposites.SbtSetupRef)))
-            .flatMap(_.`with`.get("node-version"))
-        assertTrue(
-          nodeVer("test-core").contains("22"),
-          !nodeVer("affected").contains("22"),
-          !nodeVer("cache-rehydrate").contains("22"),
-        )
-      },
+      }
     ),
     suite("the newtype")(
       test("accepts the forms setup-node takes") {
@@ -91,13 +61,18 @@ object NodeVersionSpec extends ZIOSpecDefault:
           pins.version(ActionPins.Field.SetupNode).isDefined,
         )
       },
-      test("an overridden pin reaches the generated composite") {
+      test("an overridden setup-node pin stays out of the cache composite") {
         val pins = ActionPins.Defaults.withField(
           ActionPins.Field.SetupNode,
           zipx.workflow.ActionRef("actions/setup-node@abc123"),
         )
-        val yaml = ZipxComposites.renderSbtSetup(pins).toOption.get
-        assertTrue(yaml.contains("actions/setup-node@abc123"))
+        val rendered = ZipxComposites.renderSbtSetup(pins)
+        val yaml     = rendered.fold(identity, identity)
+        assertTrue(
+          rendered.isRight,
+          !yaml.contains("actions/setup-node"),
+          !yaml.contains("actions/setup-node@abc123"),
+        )
       },
     ),
   )

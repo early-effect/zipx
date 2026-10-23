@@ -174,17 +174,10 @@ The service id (`postgres`) is the hostname. Ports are `<host>:<container>`, so 
 `localhost:5432`. `withService` adds one and keeps the rest; `withServices` replaces the whole set. Both work on any
 scope, so a `Capability.once` integration job and a per-module `Capability.testGraph` declare a sidecar the same way.
 
-`inContainer` is the other half, `Job.container`: every step runs inside the image instead of on the runner.
-
-```scala
-zipxCapabilities += Capability.testGraph.inContainer("ghcr.io/acme/build-base:1")
-```
-
-Reach for it only when one capability's toolchain has to differ from the rest. The shared toolchain is
-`zipxSbtImage` (see **Caching**): every sbt job uses that image, and `inContainer` is a generate error while it is
-on. Inside a one-off container the runner's own tooling is gone: `actions/setup-java` and `sbt/setup-sbt` install
-into the container, so an image without `tar`, `curl` or `git` fails during setup rather than during your build. A
-sidecar plus the default runner covers almost every case.
+`inContainer` used to put one capability in its own image. sbt jobs already run in the toolchain image (see
+**Caching**), so `inContainer` is a generate error on any capability while that image is planned. A sidecar plus the
+toolchain image covers the database case. A job that publishes images mounts the runner socket. It does not start a
+daemon inside the toolchain image.
 """,
       exampleValue {
         DocsRender.job("test-service")(

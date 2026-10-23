@@ -51,7 +51,7 @@ object ShellWorkflow:
               name = Some(spec.name),
               runsOn = List(config.runnerOs),
               env = EnvValue.renderAll(config.env ++ spec.env),
-              steps = Planner.checkoutThenSbtSetup(config, id, None, cacheMode) ++ spec.steps(config.actions),
+              steps = Planner.checkoutThenSbtSetup(config, id, cacheMode) ++ spec.steps(config.actions),
             )
           ),
         ),

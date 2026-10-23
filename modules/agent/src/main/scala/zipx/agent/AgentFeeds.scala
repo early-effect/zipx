@@ -16,8 +16,8 @@ object AgentFeeds:
 
   def all: Seq[PinFeed] = Seq(base, docker, sbtRunner)
 
-  /** Ubuntu feeds stay off while `zipxSbtImage` is on, even if those pins are still in the catalog. The daemon feed is
-    * the sbt-image agent's apt pins.
+  /** Ubuntu feeds stay off while sbt jobs use the toolchain image, even if those pins are still in the catalog. The
+    * daemon feed moves the apk pins that image's dockerd needs.
     */
   def withUser(user: Seq[PinFeed], pins: Seq[Pin], agent: CloudAgent, sbtImage: Boolean): Seq[PinFeed] =
     val enabled = agent match
@@ -34,7 +34,7 @@ object AgentFeeds:
       case _                   => false
     val wantDaemon = sbtImage && (docker || pins.exists(_.feed == AgentDaemon.Feed))
     if !wantDaemon || ubuntu.exists(_.name == AgentDaemon.Feed) then ubuntu
-    else ubuntu :+ AgentDaemon.feed(pins)
+    else ubuntu :+ AgentDaemon.feed
   end withUser
 
   val base: PinFeed = PinFeed(

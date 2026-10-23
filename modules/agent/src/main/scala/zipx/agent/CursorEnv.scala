@@ -133,8 +133,8 @@ object CursorEnv:
         fuse     <- required(image.fuseOverlayfs, "fuse-overlayfs")
         iptables <- required(image.iptables, "iptables")
         _        <- AgentDaemon.validateCli(cli)
-        _        <- AgentDaemon.validateApt(fuse)
-        _        <- AgentDaemon.validateApt(iptables)
+        _        <- AgentDaemon.validateApk(fuse)
+        _        <- AgentDaemon.validateApk(iptables)
         base = image.baked.getOrElse(stub(image.upstream))
         body <- appendEnv(appendRun(base, daemonRun(cli, fuse, iptables)), image.env)
       yield Some(body)
@@ -198,14 +198,13 @@ object CursorEnv:
       "exit 1",
     )
     val quoted = script.map(line => "'" + line.replace("'", "'\\''") + "'").mkString(" \\\n    ")
-    s"""RUN set -eux; \\
-       |    apt-get update; \\
-       |    apt-get install -y --no-install-recommends fuse-overlayfs=$fuse iptables=$iptables; \\
-       |    rm -rf /var/lib/apt/lists/*; \\
+    s"""USER root
+       |RUN set -eux; \\
+       |    apk add --no-cache fuse-overlayfs=$fuse iptables=$iptables iptables-legacy=$iptables; \\
+       |    ln -sfn /usr/sbin/iptables-legacy /usr/sbin/iptables; \\
+       |    ln -sfn /usr/sbin/ip6tables-legacy /usr/sbin/ip6tables; \\
        |    mkdir -p /etc/docker; \\
        |    printf '%s\\n' '{' '  "storage-driver": "fuse-overlayfs"' '}' > /etc/docker/daemon.json; \\
-       |    update-alternatives --set iptables /usr/sbin/iptables-legacy; \\
-       |    update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy; \\
        |    case "$$(uname -m)" in \\
        |      x86_64) docker_arch=x86_64 ;; \\
        |      aarch64) docker_arch=aarch64 ;; \\
@@ -219,6 +218,7 @@ object CursorEnv:
        |    $quoted \\
        |    > /usr/local/bin/zipx-dockerd; \\
        |    chmod 0755 /usr/local/bin/zipx-dockerd
+       |USER sbtuser
        |""".stripMargin
   end daemonRun
 

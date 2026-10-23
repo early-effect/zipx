@@ -1,8 +1,9 @@
 MyVersions.settings
+zipxPins += Pin("sbt-image", "cs", "2.1.26")
 organization := "com.example.zipx.pins"
 // A qualifier snapshot stays changing. `<line>-SNAPSHOT` is the pointer, and update refuses it.
-version      := "1.0.0-RC1-SNAPSHOT"
-zipxVerify   := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+version    := "1.0.0-RC1-SNAPSHOT"
+zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 
 lazy val helper   = project
 lazy val upstream = project.settings(

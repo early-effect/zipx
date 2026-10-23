@@ -380,7 +380,7 @@ object DeployWorkflow:
       permissions = ListMap("contents" -> "read", "deployments" -> "read") ++ readsPrs,
       env = EnvValue.renderAll(config.env),
       outputs = ListMap(fromPlan(Sha), fromPlan(Images), fromPlan(Targets)),
-      steps = Planner.checkoutThenSbtSetup(config, ResolveJobId, nodeVersion = None, cacheMode(config)) :+ resolve,
+      steps = Planner.checkoutThenSbtSetup(config, ResolveJobId, cacheMode(config)) :+ resolve,
     )
   end resolveJob
 

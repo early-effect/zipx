@@ -1,9 +1,10 @@
 scalaVersion   := "3.9.0"
 version        := "1.0.0-SNAPSHOT"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
+zipxPins += Pin("sbt-image", "cs", "2.1.26")
 
-zipxVersions  := Seq(Lib("dev.zio", "zio", "2.1.26"))
-zipxCheckDeps := true
+zipxVersions                      := Seq(Lib("dev.zio", "zio", "2.1.26"))
+zipxCheckDeps                     := true
 libraryDependencies += "org.slf4j" % "slf4j-simple" % "2.0.18"
 
 lazy val root = (project in file("."))

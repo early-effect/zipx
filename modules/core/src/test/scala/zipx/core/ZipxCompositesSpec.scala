@@ -23,7 +23,9 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
         // Local composites cannot checkout themselves: GHA resolves `uses: ./…` before the composite runs.
         !yaml.contains("actions/checkout"),
         !yaml.contains("uses: actions/checkout"),
-        yaml.contains("actions/setup-java@") || yaml.contains(pins.setupJava.unwrap),
+        !yaml.contains("actions/setup-java"),
+        !yaml.contains("sbt/setup-sbt"),
+        !yaml.contains("actions/setup-node"),
         yaml.contains("shell: bash"),
         yaml.contains("java-version:"),
       )
@@ -62,7 +64,6 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
       val setup   = ZipxComposites.sbtSetupStep(
         PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.0.0")),
         JobId("test"),
-        None,
         cacheMode = LocalCacheMode.Save,
       )
       val without = workflowWith(List(setup))
@@ -80,7 +81,6 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
       val step = ZipxComposites.sbtSetupStep(
         PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.0.0")),
         JobId("test"),
-        None,
         cacheMode = LocalCacheMode.Save,
       )
       assertTrue(
@@ -128,7 +128,6 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
         ZipxComposites.sbtSetupStep(
           PlanConfig(cacheEpoch = CacheEpoch.Fixed("1.0.0"), cachePurgeLabel = label),
           JobId("test"),
-          None,
           cacheMode = mode,
         )
       val save     = step(LocalCacheMode.Save)

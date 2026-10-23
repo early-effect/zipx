@@ -440,7 +440,6 @@ object ZipxPlugin extends AutoPlugin:
     val zipxCacheRehydrateEnv    = settingKey[Map[String, EnvValue]](ZipxSettings.cacheRehydrateEnv.description)
     val zipxEnv                  = settingKey[Map[String, EnvValue]](ZipxSettings.env.description)
     val zipxAgentEnv             = settingKey[CloudAgent](ZipxSettings.agentEnv.description)
-    val zipxSbtImage             = settingKey[Boolean](ZipxSettings.sbtImage.description)
     val zipxSbtImageLayers       = settingKey[Seq[SbtImageLayer]](ZipxSettings.sbtImageLayers.description)
     val zipxCancelSupersededRuns = settingKey[Boolean](ZipxSettings.cancelSupersededRuns.description)
     val zipxCheckCommandNames    = settingKey[Boolean](ZipxSettings.checkCommandNames.description)
@@ -509,6 +508,15 @@ object ZipxPlugin extends AutoPlugin:
     taskKey[Unit]("Fail when versionScheme is empty or not a scheme sbt accepts.")
 
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
+    // Laptop sbt is not the toolchain image. Refuse an unfixed JDK before any task.
+    onLoad := {
+      val previous = onLoad.value
+      state =>
+        val verdict = JdkFloor.running(sys.props.getOrElse("java.vendor", ""), java.lang.Runtime.version())
+        verdict match
+          case JdkFloor.Verdict.Safe => previous(state)
+          case other                 => sys.error(other.message)
+    },
     onUnload := onUnload.value.andThen(
       ResolutionCache.forgetOnUnload(s => readBuildSetting(Project.extract(s), zipxVersions, Seq.empty))
     ),
@@ -534,7 +542,6 @@ object ZipxPlugin extends AutoPlugin:
     zipxCacheRehydrateEnv        := Map.empty,
     zipxEnv                      := Map.empty,
     zipxAgentEnv                 := zipx.core.CloudAgent.Off,
-    zipxSbtImage                 := false,
     zipxSbtImageLayers           := Seq.empty[SbtImageLayer],
     zipxCancelSupersededRuns     := true,
     zipxCheckCommandNames        := true,
@@ -948,28 +955,27 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   private def sbtImagePlan(extracted: Extracted): Option[SbtImagePlan] =
-    val layers  = readBuildSetting(extracted, zipxSbtImageLayers, Seq.empty[SbtImageLayer])
-    val enabled = readBuildSetting(extracted, zipxSbtImage, false)
-    SbtImage.layersRequireImage(enabled, layers).foreach(err => sys.error(err.message))
-    if !enabled then None
-    else
-      val caps   = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
-      val pins   = readBuildSetting(extracted, zipxPins, Seq.empty)
-      val onPush = readBuildSetting(extracted, zipxAffectedOnPush, false)
-      SbtImage.missingPushClient(onPush, pins).foreach(err => sys.error(err.message))
-      Some(
-        SbtImage
-          .resolve(
-            readBuildSetting(extracted, zipxJavaVersion, PlanConfig.DefaultJdkVersion),
-            pins,
-            caps.flatMap(_.nodeVersion).toList,
-            readBuildSetting(extracted, zipxVersionUpdates, true),
-            caps.exists(c => c.name == Capability.DockerName || c.needsCapabilities.contains(Capability.DockerName)),
-            layers,
-          )
-          .fold(err => sys.error(err.message), identity)
-      )
-    end if
+    val layers = readBuildSetting(extracted, zipxSbtImageLayers, Seq.empty[SbtImageLayer])
+    val caps   = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
+    val pins   = readBuildSetting(extracted, zipxPins, Seq.empty)
+    val onPush = readBuildSetting(extracted, zipxAffectedOnPush, false)
+    SbtImage.missingPushClient(onPush, pins).foreach(err => sys.error(err.message))
+    val sbtVersion = extracted.getOpt(rootRef(extracted.structure) / sbt.Keys.sbtVersion) match
+      case Some(version) => version
+      case None          => sys.error("zipx: sbtVersion is not set, so the toolchain image cannot install sbt")
+    Some(
+      SbtImage
+        .resolve(
+          readBuildSetting(extracted, zipxJavaVersion, PlanConfig.DefaultJdkVersion),
+          sbtVersion,
+          pins,
+          caps.flatMap(_.nodeVersion).toList,
+          readBuildSetting(extracted, zipxVersionUpdates, true),
+          caps.exists(c => c.name == Capability.DockerName || c.needsCapabilities.contains(Capability.DockerName)),
+          layers,
+        )
+        .fold(err => sys.error(err.message), identity)
+    )
   end sbtImagePlan
 
   /** A committed pin YAML is leftover input and always fails, even when `zipxActions` is set. */
@@ -1203,18 +1209,17 @@ object ZipxPlugin extends AutoPlugin:
   }
 
   private def pinFeeds(extracted: Extracted): Seq[PinFeed] =
-    val pins    = readBuildSetting(extracted, zipxPins, Seq.empty)
-    val user    = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
-    val enabled = readBuildSetting(extracted, zipxSbtImage, false)
-    val layers  = readBuildSetting(extracted, zipxSbtImageLayers, Seq.empty[SbtImageLayer])
-    SbtImage.shadowedFeed(user, pins, enabled).foreach(err => sys.error(err.message))
+    val pins   = readBuildSetting(extracted, zipxPins, Seq.empty)
+    val user   = readBuildSetting(extracted, zipxPinFeeds, Seq.empty)
+    val layers = readBuildSetting(extracted, zipxSbtImageLayers, Seq.empty[SbtImageLayer])
+    SbtImage.shadowedFeed(user).foreach(err => sys.error(err.message))
     val agent = ZipxAgentEnv.withFeeds(
       user,
       pins,
       readBuildSetting(extracted, zipxAgentEnv, zipx.core.CloudAgent.Off),
-      enabled,
+      sbtImage = true,
     )
-    zipx.agent.SbtImageFeeds.withUser(agent, pins, enabled, layers)
+    zipx.agent.SbtImageFeeds.withUser(agent, pins, enabled = true, layers)
   end pinFeeds
 
   private def agentFiles(
@@ -1242,7 +1247,7 @@ object ZipxPlugin extends AutoPlugin:
     val cfg  = planConfig.value
     val log  = streams.value.log
     val file = root / SbtImage.DockerfileRel
-    cfg.sbtImage.flatMap(_.dockerfile) match
+    cfg.sbtImage.map(_.dockerfile) match
       case Some(body) =>
         IO.createDirectory(file.getParentFile)
         IO.write(file, body)
@@ -1253,7 +1258,7 @@ object ZipxPlugin extends AutoPlugin:
   private def checkSbtEnv(root: File, cfg: PlanConfig, log: Logger): Unit =
     val file     = root / SbtImage.DockerfileRel
     val actual   = if file.exists then IO.read(file) else ""
-    val expected = cfg.sbtImage.flatMap(_.dockerfile).getOrElse("")
+    val expected = cfg.sbtImage.map(_.dockerfile).getOrElse("")
     if expected.nonEmpty && actual != expected then
       sys.error(s"${file.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result.")
     if expected.isEmpty && actual.startsWith(ZipxCatalog.GeneratedHeader) then
@@ -1331,7 +1336,7 @@ object ZipxPlugin extends AutoPlugin:
   private def warnUnusedAgentPins(sbtImage: Boolean, pins: Seq[Pin], log: Logger): Unit =
     if sbtImage then
       zipx.agent.AgentPins.unusedWhileSbtImage(pins).foreach { shown =>
-        log.warn(s"zipx: $shown is unused while zipxSbtImage is on. Delete it.")
+        log.warn(s"zipx: $shown is unused while sbt jobs run in the toolchain image. Delete it.")
       }
 
   private def generatedAgentFile(rel: String, body: String): Boolean =
@@ -2297,7 +2302,9 @@ object ZipxPlugin extends AutoPlugin:
 
   private def validateCatalog(extracted: Extracted, graph: ModuleGraph, log: Logger): Unit =
     val pins = readBuildSetting(extracted, zipxPins, Seq.empty)
-    ZipxCatalog.unknownPinFeeds(pinFeeds(extracted), pins).foreach(sys.error)
+    // Ubuntu agent feeds stay unregistered while the toolchain image is on. Those pins warn at agent render.
+    val checked = pins.filterNot(pin => zipx.agent.AgentPins.feedNames.contains(pin.feed))
+    ZipxCatalog.unknownPinFeeds(pinFeeds(extracted), checked).foreach(sys.error)
     val coords = readBuildSetting(extracted, zipxVersions, Seq.empty)
     val ships  = readBuildSetting(extracted, zipxShips, Seq.empty)
     val check  = readBuildSetting(extracted, zipxCheckDeps, false)

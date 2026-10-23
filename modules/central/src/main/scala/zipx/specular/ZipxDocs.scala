@@ -29,7 +29,8 @@ object ZipxDocs:
   /** @param sbtProject
     *   the sbt project defining `specularSite`.
     * @param javaVersion
-    *   Temurin JDK major; omit to take the reusable workflow's own default.
+    *   JDK major forwarded to the reusable workflow. That workflow chooses its own JDK. The toolchain image does not
+    *   wrap a `workflow_call`. Omit to take the called workflow's default.
     */
   def pages(sbtProject: String = "docs", javaVersion: Option[JdkVersion] = None): Capability =
     val inputs =

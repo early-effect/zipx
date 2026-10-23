@@ -52,7 +52,7 @@ object ZipxAgentEnv:
       merged <- SbtImage.overlayEnv(plainEnv(env), plan.layerEnv).left.map(_.message)
     yield AgentImage(
       upstream = plan.upstream,
-      baked = plan.dockerfile,
+      baked = Some(plan.dockerfile),
       dockerCli = daemon.map(_.dockerCli),
       fuseOverlayfs = daemon.map(_.fuseOverlayfs),
       iptables = daemon.map(_.iptables),

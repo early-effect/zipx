@@ -41,11 +41,14 @@ Generate and commit:
 
 ```
 sbt zipxWorkflowGenerate
-git add .github/workflows/ci.yml .github/actions/
+git add .github/workflows/ci.yml .github/actions/ .github/zipx-env/
 git commit -m "ci: generate with zipx"
 ```
 
 You do not need a pin file or a `github-actions` Dependabot ecosystem.
+
+The JDK that loads the plugin, and the JDK inside CI, have to be a fixed build of the trust store. An unfixed JDK
+stops sbt at load. Generate writes the CI image under `.github/zipx-env/`. See **JDK trust store**.
 
 `sbt zipxGraph` and `sbt zipxPublishOrder` print what zipx saw, if you want to inspect.
 """

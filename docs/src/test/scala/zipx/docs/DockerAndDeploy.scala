@@ -51,6 +51,9 @@ lazy val service = project
   )
 ```
 
+`dockerBaseImage` is the image the service runs in. It is separate from the JDK that compiles the build. See
+**JDK trust store**.
+
 zipx detects `DockerPlugin` and emits a release-gated Aggregate `docker` job joining `…/Docker/publish` (or use
 `dockerGraph`). Pushing one image to several registries stays **one** job; see *Registries are destinations, targets are
 environments* below. For PR-label stage ECR (before merge), see **Job conditions**. `Ship` / `ShipGroup` rows
