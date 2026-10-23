@@ -5,6 +5,7 @@ ENV JAVA_HOME="/usr/lib/jvm/default-jvm"
 RUN set -eux; \
     curl -fsSL -o /tmp/sbt.tgz "https://github.com/sbt/sbt/releases/download/v2.1.0-RC1/sbt-2.1.0-RC1.tgz"; \
     tar -xzf /tmp/sbt.tgz -C /usr/local; \
+    mkdir -p /usr/local/bin; \
     ln -sfn /usr/local/sbt/bin/sbt /usr/local/bin/sbt; \
     rm /tmp/sbt.tgz
 RUN set -eux; \

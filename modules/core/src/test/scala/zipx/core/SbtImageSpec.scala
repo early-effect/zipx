@@ -121,7 +121,11 @@ object SbtImageSpec extends ZIOSpecDefault:
         body.contains(s"openjdk-21=${WolfiToolchain.Jdk21.version}"),
         body.contains(s"openjdk-21-default-jdk=${WolfiToolchain.Jdk21.version}"),
         body.contains(SbtImage.envLine("JAVA_HOME", WolfiToolchain.JavaHome)),
-        body.contains(s"sbt-${SbtImage.DefaultSbtVersion}.tgz"),
+        body.contains(s"sbt-${SbtImage.DefaultSbtVersion}.tgz"), {
+          val made   = body.indexOf("mkdir -p /usr/local/bin")
+          val linked = body.indexOf("ln -sfn /usr/local/sbt/bin/sbt /usr/local/bin/sbt")
+          made >= 0 && made < linked
+        },
         body.contains("USER sbtuser"),
         !body.contains("eclipse-temurin"),
         !body.contains("setup-java"),

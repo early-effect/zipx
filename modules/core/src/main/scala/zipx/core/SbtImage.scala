@@ -370,6 +370,7 @@ object SbtImage:
     s"""RUN set -eux; \\
        |    curl -fsSL -o /tmp/sbt.tgz "https://github.com/sbt/sbt/releases/download/v$version/sbt-$version.tgz"; \\
        |    tar -xzf /tmp/sbt.tgz -C /usr/local; \\
+       |    mkdir -p /usr/local/bin; \\
        |    ln -sfn /usr/local/sbt/bin/sbt /usr/local/bin/sbt; \\
        |    rm /tmp/sbt.tgz""".stripMargin
 
