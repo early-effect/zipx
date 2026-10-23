@@ -254,13 +254,7 @@ object SbtImageLayer:
       else
         val amd = packages.map(pkg => s"${pkg.name}=${pkg.amd}").mkString(" ")
         val arm = packages.map(pkg => s"${pkg.name}=${pkg.arm}").mkString(" ")
-        List(
-          """case "$(uname -m)" in""",
-          s"  x86_64) pkgs=${q(amd)} ;;",
-          s"  aarch64) pkgs=${q(arm)} ;;",
-          """  *) echo "zipx: unsupported architecture $(uname -m)" >&2; exit 1 ;;""",
-          "esac",
-        )
+        List(archCase("pkgs", amd, arm))
     run(
       choose ++ List(
         "set -f",
@@ -328,17 +322,19 @@ object SbtImageLayer:
   /** Lines that set `url`, and the shell word that expands to it. One word when both arches share a URL. */
   private def archUrl(amd: String, arm: String): (List[String], String) =
     if amd == arm then (Nil, q(amd))
-    else
-      (
-        List(
-          """case "$(uname -m)" in""",
-          s"  x86_64) url=${q(amd)} ;;",
-          s"  aarch64) url=${q(arm)} ;;",
-          """  *) echo "zipx: unsupported architecture $(uname -m)" >&2; exit 1 ;;""",
-          "esac",
-        ),
-        "\"$url\"",
-      )
+    else (List(archCase("url", amd, arm)), "\"$url\"")
+
+  /** A `case` on `uname -m` that sets `name`. It is one statement to [[run]]: a `;` after `in` or after `;;` is a sh
+    * syntax error, so the arms join on a bare continuation.
+    */
+  private def archCase(name: String, amd: String, arm: String): String =
+    List(
+      """case "$(uname -m)" in""",
+      s"  x86_64) $name=${q(amd)} ;;",
+      s"  aarch64) $name=${q(arm)} ;;",
+      """  *) echo "zipx: unsupported architecture $(uname -m)" >&2; exit 1 ;;""",
+      "esac",
+    ).mkString(" \\\n    ")
 
   private def run(lines: List[String]): String =
     "RUN set -eux; \\\n    " + lines.mkString("; \\\n    ")

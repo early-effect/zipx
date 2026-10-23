@@ -1,6 +1,7 @@
 package zipx.core
 
 import zipx.workflow.*
+import zio.*
 import zio.test.*
 
 object SbtImageSpec extends ZIOSpecDefault:
@@ -60,6 +61,22 @@ object SbtImageSpec extends ZIOSpecDefault:
         )
       }
       .withEnv("WIDGET_PATH" -> "/usr/local/bin/gadget")
+
+  /** Each `RUN` command as the shell receives it: Docker drops every backslash-newline continuation. */
+  private def runBodies(dockerfile: String): List[String] =
+    dockerfile
+      .replace("\\\n", "")
+      .linesIterator
+      .collect { case line if line.startsWith("RUN ") => line.stripPrefix("RUN ") }
+      .toList
+
+  /** `sh -n` parses without running. Exit status and diagnostics are data for the assertion. */
+  private def shellCheck(script: String): Task[(Int, String)] =
+    ZIO.attemptBlocking {
+      val process = new ProcessBuilder("sh", "-n", "-c", script).redirectErrorStream(true).start()
+      val output  = String(process.getInputStream.readAllBytes())
+      (process.waitFor(), output)
+    }
 
   private def resolve(extra: List[Pin], layers: Seq[SbtImageLayer]): Either[SbtImageError, SbtImagePlan] =
     SbtImage.resolve(JdkVersion("21"), imagePin(pin) :: extra, Nil, coursier = false, docker = false, layers)
@@ -352,6 +369,23 @@ object SbtImageSpec extends ZIOSpecDefault:
         !text.contains("\"$pkgs\""),
         text.contains("set -f"),
       )
+    },
+    test("every RUN parses as sh when layer URLs and apt versions differ by arch") {
+      val gizmos = SbtImageLayer("gizmos", noLookup).install { (_, arch) =>
+        val deb = arch match
+          case CpuArch.Amd64 => "1.0-amd64"
+          case CpuArch.Arm64 => "1.0-arm64"
+        List(ImageStep.Apt("libgizmos", deb))
+      }
+      val pins = List(toolPin("widgets", "1.2.3"), toolPin("gizmos", "1.0.0"))
+      val text = resolve(pins, List(widgets(widgetSteps), gizmos)).toOption.flatMap(_.dockerfile).getOrElse("")
+      val runs = runBodies(text)
+      ZIO
+        .foreach(runs)(body => shellCheck(body).map(body -> _))
+        .map { checked =>
+          val broken = checked.collect { case (body, (exit, out)) if exit != 0 => s"$out\n$body" }
+          assertTrue(runs.exists(_.contains("uname -m")), broken.isEmpty) ?? broken.mkString("\n\n")
+        }
     },
     test("a download URL does not have to contain the pin text") {
       val layer = SbtImageLayer("widgets", noLookup).install { (version, arch) =>
