@@ -10,7 +10,7 @@ lazy val demo = (projectMatrix in file("demo"))
   .jsPlatform(scalaVersions = Seq("3.9.0"))
 
 lazy val root = (project in file("."))
-  .aggregate(demo.projectRefs*)
+  .aggregate(demo.projectRefs *)
   .settings(publish / skip := true)
 
 val assertDemoSelects = inputKey[Unit]("the demo resolves <artifact> at a release or a recorded commit")

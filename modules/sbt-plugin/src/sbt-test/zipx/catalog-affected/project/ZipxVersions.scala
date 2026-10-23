@@ -5,4 +5,3 @@ object MyVersions extends ZipxVersions:
   val scala: ScalaVersion = ScalaVersion("3.9.0")
   val fansi               = Lib("com.lihaoyi", "fansi", "0.5.1")
   val upickle             = Lib("com.lihaoyi", "upickle", "4.4.2")
-end MyVersions

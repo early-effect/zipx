@@ -12,7 +12,7 @@
 // zipx derives everything (module set, needs edges, publish order, matrix) from this.
 
 MyVersions.settings
-organization := "com.example"
+organization        := "com.example"
 zipxReleaseWorkflow := Some(ZipxCentral.releases)
 zipxDriftGate       := DriftGate.Fail
 

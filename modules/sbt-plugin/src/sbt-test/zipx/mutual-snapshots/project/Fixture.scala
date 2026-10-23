@@ -2,7 +2,16 @@ import sbt.*
 import sbt.Keys.*
 import sbt.complete.DefaultParsers.*
 import sbt.complete.Parser
-import zipx.core.{ArtifactRegistry, GitSha, Lib, PinRewrite, ReleaseVersion, ReleaseWorkflow, SnapshotRevision, ZipxCoord}
+import zipx.core.{
+  ArtifactRegistry,
+  GitSha,
+  Lib,
+  PinRewrite,
+  ReleaseVersion,
+  ReleaseWorkflow,
+  SnapshotRevision,
+  ZipxCoord,
+}
 import zipx.plugin.ZipxPlugin.autoImport.zipxVersions
 
 object Fixture:
@@ -24,13 +33,14 @@ object Fixture:
         Wanted.Commit(line, name)
       }
 
-  val recordSha          = inputKey[Unit]("recordSha <name>: write HEAD's sha to shas/<name>")
-  val pinCommit          = inputKey[Unit]("pinCommit <artifact> <line> <name>: pin a recorded commit as the registry stores it")
-  val pinBare            = inputKey[Unit]("pinBare <artifact> <line> <name>: pin a recorded commit without -SNAPSHOT")
-  val assertPin          = inputKey[Unit]("assertPin <artifact> <line> <name>: the catalog pins that commit, stored form")
-  val assertPointerNames = inputKey[Unit]("assertPointerNames <artifact> <line> <name>: the line's pointer names that sha")
-  val assertInRegistry   = inputKey[Unit]("assertInRegistry <artifact> release <v> | commit <line> <name>")
-  val pinVersion         = inputKey[Unit]("pinVersion <artifact> <version>: set a release row the way zipxDepUpdate would")
+  val recordSha = inputKey[Unit]("recordSha <name>: write HEAD's sha to shas/<name>")
+  val pinCommit = inputKey[Unit]("pinCommit <artifact> <line> <name>: pin a recorded commit as the registry stores it")
+  val pinBare   = inputKey[Unit]("pinBare <artifact> <line> <name>: pin a recorded commit without -SNAPSHOT")
+  val assertPin = inputKey[Unit]("assertPin <artifact> <line> <name>: the catalog pins that commit, stored form")
+  val assertPointerNames =
+    inputKey[Unit]("assertPointerNames <artifact> <line> <name>: the line's pointer names that sha")
+  val assertInRegistry = inputKey[Unit]("assertInRegistry <artifact> release <v> | commit <line> <name>")
+  val pinVersion = inputKey[Unit]("pinVersion <artifact> <version>: set a release row the way zipxDepUpdate would")
   val writeDocsFramework =
     inputKey[Unit]("writeDocsFramework <version> release <v> | commit <line> <name>: publish a docs framework POM")
 
@@ -49,7 +59,7 @@ object Fixture:
     assertInRegistry / aggregate   := false,
     pinVersion / aggregate         := false,
     writeDocsFramework / aggregate := false,
-    pinVersion := {
+    pinVersion                     := {
       val (artifact, version) = ((Space ~> StringBasic) ~ (Space ~> StringBasic)).parsed
       val root                = (LocalRootProject / baseDirectory).value
       rewritePin(root, zipxVersions.value, artifact, Right(version))
@@ -131,7 +141,7 @@ object Fixture:
     */
   def inRepoWins(key: InputKey[Unit], consumer: ProjectReference, module: ProjectReference): Seq[Setting[?]] = Seq(
     key / aggregate := false,
-    key := {
+    key             := {
       val want     = wanted.parsed
       val root     = (LocalRootProject / baseDirectory).value
       val report   = (consumer / updateFull).value
@@ -159,7 +169,7 @@ object Fixture:
     */
   def selects(key: InputKey[Unit], consumer: ProjectReference): Seq[Setting[?]] = Seq(
     key / aggregate := false,
-    key := {
+    key             := {
       val (artifact, want) = ((Space ~> StringBasic) ~ wanted).parsed
       val root             = (LocalRootProject / baseDirectory).value
       val selected         = (consumer / updateFull).value.configurations
@@ -180,7 +190,7 @@ object Fixture:
   /** The library's published POM, at the commit recorded under `<name>`, names `dependency` at the wanted revision. */
   def pomNames(key: InputKey[Unit], artifact: String, line: String, dependency: String): Seq[Setting[?]] = Seq(
     key / aggregate := false,
-    key := {
+    key             := {
       val (name, want) = ((Space ~> StringBasic) ~ wanted).parsed
       val root         = (LocalRootProject / baseDirectory).value
       val checked      =
@@ -193,7 +203,10 @@ object Fixture:
             .map(d => (d \ "version").text)
             .toRight(s"$artifact $own does not depend on $dependency")
         yield (named, dep)
-      checked.fold(sys.error, { case (named, dep) => assert(named == dep, s"$artifact names $dependency $named, not $dep") })
+      checked.fold(
+        sys.error,
+        { case (named, dep) => assert(named == dep, s"$artifact names $dependency $named, not $dep") },
+      )
     },
   )
 
@@ -202,7 +215,7 @@ object Fixture:
     */
   def pomExcludes(key: InputKey[Unit], artifact: String, line: String, dependency: String): Seq[Setting[?]] = Seq(
     key / aggregate := false,
-    key := {
+    key             := {
       val (name, expected) = ((Space ~> StringBasic) ~ (Space ~> StringBasic).*).parsed
       val root             = (LocalRootProject / baseDirectory).value
       val checked          =

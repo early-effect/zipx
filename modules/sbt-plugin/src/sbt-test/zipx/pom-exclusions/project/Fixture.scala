@@ -10,7 +10,7 @@ object Fixture:
     */
   def excludes(key: InputKey[Unit], project: ProjectReference): Seq[Setting[?]] = Seq(
     key / aggregate := false,
-    key := {
+    key             := {
       val (artifact, expected) = names.parsed match
         case head +: tail => (head, tail.toSet)
         case _            => sys.error("excludes <artifact> <excluded>...")

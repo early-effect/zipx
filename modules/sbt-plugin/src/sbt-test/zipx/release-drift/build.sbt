@@ -25,7 +25,8 @@ assertDrift := Def.uncached {
   assert(drift == Seq("""ShipGroup("libs") 1.0.0 since libs/v1.0.0"""), drift.toString)
 }
 
-val assertOpenRowPublished = taskKey[Unit]("an unreleased sibling publishes its commit id, and the released row publishes nothing")
+val assertOpenRowPublished =
+  taskKey[Unit]("an unreleased sibling publishes its commit id, and the released row publishes nothing")
 assertOpenRowPublished := Def.uncached {
   val abbrev  = headSha((LocalRootProject / baseDirectory).value).take(12)
   val sideJar = ivyLocalRepo / "side_3" / s"0.2.0-$abbrev-SNAPSHOT" / "jars" / "side_3.jar"
@@ -53,11 +54,12 @@ assertOpened := Def.uncached {
   val prefix = s"1.0.1-$abbrev"
   val models = ivyLocalRepo / "models_3"
   val names  = Option(models.list).map(_.toList).getOrElse(Nil)
-  names.filter(_.startsWith(prefix)) match
+  names.filter(_.startsWith(prefix)) match {
     case only :: Nil =>
       assert((models / only / "jars" / "models_3.jar").isFile, s"no opened snapshot at $only")
     case other =>
       assert(false, s"opened snapshots under $prefix: $other from $names")
+  }
 }
 
 val assertNoDrift = taskKey[Unit]("A row released at its number with no changes since its tag is not reported")
@@ -68,7 +70,8 @@ assertNoDrift := Def.uncached {
 
 val assertMeasuredFromRelease = taskKey[Unit]("modver-check measured the grown group from its real last release")
 assertMeasuredFromRelease := Def.uncached {
-  val report = IO.read((LocalRootProject / baseDirectory).value / "target" / "zipx-modver-report.json").filterNot(_.isWhitespace)
+  val report =
+    IO.read((LocalRootProject / baseDirectory).value / "target" / "zipx-modver-report.json").filterNot(_.isWhitespace)
   assert(report.contains("\"from\":\"1.0.0\""), report)
   assert(report.contains("\"written\":\"1.1.0\""), report)
 }

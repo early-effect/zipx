@@ -1,4 +1,6 @@
-import ZipxVersions as V
+import _root_.ZipxVersions
+
+val V = ZipxVersions
 
 V.settings
 ThisBuild / organization         := "rocks.earlyeffect"
@@ -75,12 +77,12 @@ lazy val root = (project in file("."))
         zipxTasks.once(CapabilityName("scripted"), LocalProject("plugin") / scripted),
       )
     },
-    zipxJavaVersion                := JdkVersion("25"),
-    zipxAgentEnv                   := ZipxAgentEnv.cursor(docker = true),
-    zipxWorkflowDispatch           := true,
-    zipxEmitSelf                   := false,
-    zipxVersionUpdatesPreSteps     := zipx.ExampleCheck.companionPreSteps,
-    zipxVersionUpdatesExtraSteps   := zipx.ExampleCheck.companionSteps,
+    zipxJavaVersion              := JdkVersion("25"),
+    zipxAgentEnv                 := ZipxAgentEnv.cursor(docker = true),
+    zipxWorkflowDispatch         := true,
+    zipxEmitSelf                 := false,
+    zipxVersionUpdatesPreSteps   := zipx.ExampleCheck.companionPreSteps,
+    zipxVersionUpdatesExtraSteps := zipx.ExampleCheck.companionSteps,
   )
 
 // No zipx concepts and no zio-blocks, so it stands alone.
@@ -136,8 +138,8 @@ lazy val cli = (project in file("modules/cli"))
   .dependsOn(syntax, core % "compile->compile;test->test")
   .settings(commonSettings)
   .settings(
-    name        := "zipx-cli",
-    description := "zipx catalog CLI: apply and generate without loading the target sbt session",
+    name                := "zipx-cli",
+    description         := "zipx catalog CLI: apply and generate without loading the target sbt session",
     Compile / mainClass := Some("zipx.cli.Main"),
   )
 
@@ -245,20 +247,20 @@ lazy val docs = project
       V.specularTheme,
     ) ++ V.zioDeps,
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
-    specularBuildMain      := "zipx.docs.BuildSite",
-    specularMetaProject    := Some(LocalProject("plugin")),
-    specularArtifactKind   := "plugin",
-    specularSiteDirectory  := (ThisBuild / baseDirectory).value / "target" / "site",
-    specularJsProject      := Some(LocalProject("docsJS")),
-    specularJsLink         := Def.uncached {
+    specularBuildMain     := "zipx.docs.BuildSite",
+    specularMetaProject   := Some(LocalProject("plugin")),
+    specularArtifactKind  := "plugin",
+    specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
+    specularJsProject     := Some(LocalProject("docsJS")),
+    specularJsLink        := Def.uncached {
       (docsJS / Compile / fastLinkJS).value
       val outDir = (docsJS / Compile / fastLinkJSOutput).value
       val mainJs = outDir / "main.js"
-      if (!mainJs.exists) then
-      sys.error(
-        s"Expected $mainJs after fastLinkJS; directory contains: " +
-          Option(outDir.list).toSeq.flatten.mkString(", ")
-      )
+      if (!mainJs.exists)
+        sys.error(
+          s"Expected $mainJs after fastLinkJS; directory contains: " +
+            Option(outDir.list).toSeq.flatten.mkString(", ")
+        )
       val marker = (ThisBuild / baseDirectory).value / "target" / "specular-client-js.path"
       IO.write(marker, mainJs.getAbsolutePath)
     },

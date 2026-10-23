@@ -2,8 +2,8 @@ import zipx.core.*
 import zipx.shell.*
 import zipx.workflow.Step
 
-/** Pre-pulls the images core's live remote-cache suite uses, as `extraSteps` on Aggregate `test`, so Docker Hub
-  * latency and retries sit outside the test JVM. Ryuk stays enabled.
+/** Pre-pulls the images core's live remote-cache suite uses, as `extraSteps` on Aggregate `test`, so Docker Hub latency
+  * and retries sit outside the test JVM. Ryuk stays enabled.
   */
 object RemoteCacheItSteps:
 

@@ -1,10 +1,10 @@
 // The registry is static POMs, so nothing is downloaded.
 MyVersions.settings
-zipxVerify                 := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
-ThisBuild / organization   := "com.example.pe"
-ThisBuild / version        := "0.1.0"
-ThisBuild / versionScheme  := Some("early-semver")
-ThisBuild / resolvers      += "pom-exclusions" at file("registry").getAbsoluteFile.toURI.toString
+zipxVerify                := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+ThisBuild / organization  := "com.example.pe"
+ThisBuild / version       := "0.1.0"
+ThisBuild / versionScheme := Some("early-semver")
+ThisBuild / resolvers += "pom-exclusions" at file("registry").getAbsoluteFile.toURI.toString
 
 lazy val a = project
 lazy val b = project.dependsOn(a)

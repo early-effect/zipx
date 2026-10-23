@@ -10,14 +10,14 @@ lazy val models = project.settings(crossScalaVersions := Seq("3.9.0", "2.13.16")
 lazy val app = project
   .dependsOn(models)
   .settings(
-    scalaVersion := "3.9.0",
+    scalaVersion                            := "3.9.0",
     libraryDependencies += "com.example.sw" %% "lib" % "1.0.0",
   )
 
 lazy val legacy = project
   .dependsOn(models)
   .settings(
-    scalaVersion := "2.13.16",
+    scalaVersion                            := "2.13.16",
     libraryDependencies += "com.example.sw" %% "lib" % "1.0.0",
   )
 

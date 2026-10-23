@@ -1,7 +1,7 @@
 MyVersions.settings
 version        := "1.0.0-SNAPSHOT"
 zipxCacheEpoch := CacheEpoch.Fixed("1.0.0-SNAPSHOT")
-zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+zipxVerify     := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
 
 lazy val root = (project in file("."))
   .settings(publish / skip := true)

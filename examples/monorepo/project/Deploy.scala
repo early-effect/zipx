@@ -57,3 +57,4 @@ object Registry:
   /** The shape `ZipxAws.dockerPublishAll` takes: one destination per registry, sharing a single publish job. */
   val destinations: List[(TargetName, EcrRegistry, EnvValue)] =
     all.map(r => (r.name, r.registry, r.roleSecret))
+end Registry

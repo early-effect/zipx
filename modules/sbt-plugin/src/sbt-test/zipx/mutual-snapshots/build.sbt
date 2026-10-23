@@ -2,9 +2,9 @@
 // zipx adds it for the commit pin.
 MyVersions.settings
 Fixture.settings
-organization                           := Fixture.Organization
-zipxVerify                             := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
-ThisBuild / versionScheme              := Some("early-semver")
+organization              := Fixture.Organization
+zipxVerify                := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+ThisBuild / versionScheme := Some("early-semver")
 LocalRootProject / zipxReleaseWorkflow := Some(Fixture.releaseWorkflow)
 
 val scala3 = "3.9.0"
@@ -53,7 +53,7 @@ Fixture.pomExcludes(assertAppExcludes, "ascent-mcp-app_sjs1_3", "0.10.0", "heddl
 
 val assertZipxResolver = taskKey[Unit]("a commit pin in the catalog brings the registry's snapshot repository")
 assertZipxResolver / aggregate := false
-assertZipxResolver := Def.uncached {
+assertZipxResolver             := Def.uncached {
   val expected = zipx.core.SnapshotPins.resolverName(Fixture.releaseWorkflow.registry)
   val names    = (LocalProject("mcpAppJS") / resolvers).value.map(_.name)
   assert(names.contains(expected), s"no $expected in $names")

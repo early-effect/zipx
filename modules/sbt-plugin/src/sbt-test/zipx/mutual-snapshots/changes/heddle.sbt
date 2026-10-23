@@ -1,9 +1,9 @@
 // Heddle: a server library built against ascent's facade, plus an MCP apps module ascent's app depends on.
 MyVersions.settings
 Fixture.settings
-organization                           := Fixture.Organization
-zipxVerify                             := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
-ThisBuild / versionScheme              := Some("early-semver")
+organization              := Fixture.Organization
+zipxVerify                := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has no sbt-scalafmt"))
+ThisBuild / versionScheme := Some("early-semver")
 LocalRootProject / zipxReleaseWorkflow := Some(Fixture.releaseWorkflow)
 
 val scala3 = "3.9.0"

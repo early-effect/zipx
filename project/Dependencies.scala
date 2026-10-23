@@ -25,9 +25,9 @@ object Dependencies:
     "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
   )
 
-  val zioJson: ModuleID  = "dev.zio"      %% "zio-json"  % zioJsonVersion
-  val mimaCore: ModuleID = "com.typesafe" %% "mima-core" % "1.1.5"
-  val coursier: ModuleID = ("io.get-coursier" %% "coursier" % "2.1.26")
+  val zioJson: ModuleID  = "dev.zio"          %% "zio-json"  % zioJsonVersion
+  val mimaCore: ModuleID = "com.typesafe"     %% "mima-core" % "1.1.5"
+  val coursier: ModuleID = ("io.get-coursier" %% "coursier"  % "2.1.26")
     .exclude("org.codehaus.plexus" % "plexus-archiver")
     .exclude("org.codehaus.plexus" % "plexus-container-default")
 

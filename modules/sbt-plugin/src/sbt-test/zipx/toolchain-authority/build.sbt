@@ -9,12 +9,12 @@ lazy val app = (projectMatrix in file("app"))
   .nativePlatform(scalaVersions = Seq("3.9.0"))
 
 lazy val root = (project in file("."))
-  .aggregate(app.projectRefs*)
+  .aggregate(app.projectRefs *)
   .settings(publish / skip := true)
 
 val assertNativeRuntime = taskKey[Unit]("the Native test runtime is the one sbt-scala-native injects")
 assertNativeRuntime / aggregate := false
-assertNativeRuntime := Def.uncached {
+assertNativeRuntime             := Def.uncached {
   val selected = (LocalProject("appNative") / updateFull).value.configurations
     .filter(_.configuration.name == Test.name)
     .flatMap(_.details)

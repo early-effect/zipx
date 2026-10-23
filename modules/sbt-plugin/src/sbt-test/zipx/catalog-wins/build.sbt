@@ -4,12 +4,12 @@ zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("scripted fixture has 
 ThisBuild / resolvers += "catalog-wins" at file("registry").getAbsoluteFile.toURI.toString
 
 lazy val app = (projectMatrix in file("app"))
-  .settings(libraryDependencies ++= MyVersions.deps(MyVersions.clients*))
+  .settings(libraryDependencies ++= MyVersions.deps(MyVersions.clients *))
   .jvmPlatform(scalaVersions = Seq("3.9.0"))
   .jsPlatform(scalaVersions = Seq("3.9.0"))
 
 lazy val root = (project in file("."))
-  .aggregate(app.projectRefs*)
+  .aggregate(app.projectRefs *)
   .settings(publish / skip := true)
 
 val assertJvm = inputKey[Unit]("the JVM row selects <artifact> at <revision>")
