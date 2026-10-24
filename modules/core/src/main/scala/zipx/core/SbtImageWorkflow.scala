@@ -38,7 +38,7 @@ object SbtImageWorkflow:
           Step(
             name = Some("Setup JDK"),
             uses = Some(pins.setupJava),
-            `with` = ListMap("distribution" -> "temurin", "java-version" -> javaVersion),
+            `with` = ListMap("distribution" -> ZipxComposites.JdkDistribution, "java-version" -> javaVersion),
           ),
           Step(uses = Some(pins.setupSbt)),
         )

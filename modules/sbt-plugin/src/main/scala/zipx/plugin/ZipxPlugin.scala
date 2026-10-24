@@ -509,6 +509,14 @@ object ZipxPlugin extends AutoPlugin:
     taskKey[Unit]("Fail when versionScheme is empty or not a scheme sbt accepts.")
 
   override def globalSettings: Seq[Setting[?]] = remoteCacheWiring ++ Seq(
+    onLoad := {
+      val previous = onLoad.value
+      state =>
+        val verdict = JdkFloor.running(sys.props.getOrElse("java.vendor", ""), java.lang.Runtime.version())
+        verdict match
+          case JdkFloor.Verdict.Safe => previous(state)
+          case other                 => sys.error(other.message)
+    },
     onUnload := onUnload.value.andThen(
       ResolutionCache.forgetOnUnload(s => readBuildSetting(Project.extract(s), zipxVersions, Seq.empty))
     ),

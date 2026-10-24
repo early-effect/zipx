@@ -26,6 +26,9 @@ object ZipxCompositesSpec extends ZIOSpecDefault:
         yaml.contains("actions/setup-java@") || yaml.contains(pins.setupJava.unwrap),
         yaml.contains("shell: bash"),
         yaml.contains("java-version:"),
+        yaml.contains(s"distribution: ${ZipxComposites.JdkDistribution}"),
+        yaml.contains("Zulu JDK major"),
+        !yaml.contains("distribution: temurin"),
       )
     },
     test("input required flags are YAML booleans, which is what the action metadata schema accepts") {
