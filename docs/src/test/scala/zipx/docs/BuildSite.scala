@@ -27,6 +27,7 @@ object BuildSite extends DocsSite:
     Verify.doc,
     AffectedDoc.doc,
     Caching.doc,
+    JdkTrustStore.doc,
     RemoteCacheForTeams.doc,
     FromBazel.doc,
     ActionPinsDoc.doc,
@@ -61,7 +62,7 @@ already maintain painful CI YAML, **Why zipx** is the recovery story.
 
 Guide: Why zipx → Quick start → Versions → Independent versions → Snapshots and releases → Extending Versions → Execution modes → CI for a busy
 monorepo → Matrix collapse
-→ Capabilities → Custom capabilities → Composing sbt commands → Shell and steps → Verify → Affected → Caching → Remote
+→ Capabilities → Custom capabilities → Composing sbt commands → Shell and steps → Verify → Affected → Caching → JDK trust store → Remote
 cache for teams → From Bazel → Action pins → Dependency updates → Pin feeds → Docker and deploy → Job conditions →
 Validation → Packs → Settings.
 """

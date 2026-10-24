@@ -234,6 +234,7 @@ A map of later pages. On day one you can ignore everything except Aggregate Veri
 | **Affected** | On a PR, `test` runs only the suites the diff can have broken; Graph jobs skip whole modules |
 | **CI for a busy monorepo** | Coverage off the required path, deploys by dispatch, one cache save per run: what a large repo turns on |
 | **Caching** | Restore sbt's cache on the runner so test does not start from zero |
+| **JDK trust store** | CI installs Zulu. The plugin refuses a JDK that is not a fixed build |
 | **Action pins** | Exact Action commits in the generated YAML; catalog rows when you want to bump without a zipx release |
 | **Pin feeds** | Pins that are not Maven and not Actions; see **Pin feeds** |
 | **Versions** | `Lib` / `Plugin` / `Pin` / `Action` vals on a `ZipxVersions` object; `MyVersions.settings`; bump locally |

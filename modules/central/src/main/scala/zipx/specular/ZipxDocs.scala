@@ -29,7 +29,7 @@ object ZipxDocs:
   /** @param sbtProject
     *   the sbt project defining `specularSite`.
     * @param javaVersion
-    *   Temurin JDK major; omit to take the reusable workflow's own default.
+    *   Zulu JDK major; omit to take the reusable workflow's own default.
     */
   def pages(sbtProject: String = "docs", javaVersion: Option[JdkVersion] = None): Capability =
     val inputs =
