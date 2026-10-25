@@ -35,6 +35,7 @@ private[core] object Satisfiable:
 
     /** `startsWith(github.ref, '<prefix>')`. */
     case RefPrefix(prefix: String)
+  end Claim
 
   /** `!(a || b)` is a conjunction by De Morgan; `!(a && b)` is a disjunction, so it stops here and contributes nothing.
     */

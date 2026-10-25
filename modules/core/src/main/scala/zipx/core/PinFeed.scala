@@ -12,7 +12,6 @@ object PinFeedName extends Subtype[String]:
     else if input.matches(Names.ActionsId) then true
     else
       s"invalid pin feed name '$input': it becomes a snapshot manifest key, so it must start with an ASCII letter or _ and contain only ASCII letters, digits, - or _"
-end PinFeedName
 
 /** What zipx does when a signal fires for a pin. */
 enum PinAction:
@@ -29,6 +28,7 @@ enum PreRelease:
   case Skip, Include
 
   def allows(kind: BumpKind): Boolean = this != Skip || kind != BumpKind.PreRelease
+end PreRelease
 
 /** A Package URL. Pins without one skip OSV and snapshot submit. */
 type Purl = Purl.Type

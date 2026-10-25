@@ -33,8 +33,6 @@ object ShipBumpRequest:
         if identities.contains(id) then kindOf(kind).map(One(id, _))
         else Left(ShipBumpError.UnknownIdentity(id, identities.toList))
       case more => Left(ShipBumpError.Extra(more))
-    end match
-  end parse
 end ShipBumpRequest
 
 enum ShipBumpError:

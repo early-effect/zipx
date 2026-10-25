@@ -28,7 +28,6 @@ object DocDiff:
     val kids: Seq[Arg[Any]] =
       (prefix ++ body.toList).map(ui => Arg.ChildArg(ui))
     E.div(Styles.Panel, kids)
-  end panel
 
   /** Several file hunks as one pull request. */
   def stack(panels: UI[Any]*): UI[Any] =

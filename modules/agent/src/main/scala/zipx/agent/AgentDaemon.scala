@@ -67,7 +67,6 @@ object AgentDaemon:
         iptables <- one(pins, Feed, IptablesId).flatMap(validateApt)
         suite    <- one(pins, Feed, SuiteId).flatMap(validateSuite)
       yield DaemonPins(cli, fuse, iptables, suite)
-  end resolve
 
   def versions(body: String, packageName: String): List[String] =
     body.split("\n\n", -1).toList.flatMap { stanza =>

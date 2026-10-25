@@ -102,6 +102,4 @@ object CatalogConflict:
         s"Update the catalog: sbt zipxDepUpdate, or pin ${wanted.render}"
       case _ =>
         s"Pin ${wanted.render} in the catalog."
-    end match
-  end fix
 end CatalogConflict

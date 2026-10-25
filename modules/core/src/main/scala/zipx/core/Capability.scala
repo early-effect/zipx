@@ -59,7 +59,6 @@ object TargetGroup extends Subtype[String]:
     else
       s"invalid target group '$input': it is a dispatch choice beside target names, so it must start with an ASCII " +
         "letter or _ and contain only ASCII letters, digits, - or _"
-end TargetGroup
 
 /** What a capability's `extraSteps` / `postSteps` see. `target` is populated only when the capability fans out
   * job-per-target.

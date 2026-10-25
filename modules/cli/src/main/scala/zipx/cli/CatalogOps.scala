@@ -41,8 +41,6 @@ object CatalogOps:
       rendered = ZipxCatalog.renderPlugins(merged)
       props    = after.sbt.map(ZipxCatalog.renderBuildProperties)
     yield UpdatePlan(deps, acts, holds ++ updates.held.map(_.message), next2, rendered, props)
-    end for
-  end planUpdate
 
   private def crossingOf(parsed: CatalogConstructors): Either[String, CatalogCrossing] =
     (parsed.scala, parsed.sbt) match
@@ -76,7 +74,6 @@ object CatalogOps:
       expected = ZipxCatalog.mergePlugins(parsed.plugins, plugins)
       _ <- ZipxCatalog.checkPlugins(path.toString, Right(got), expected)
     yield ()
-  end check
 
   def formatPlan(plan: UpdatePlan): String =
     val deps  = ZipxCatalog.formatBumps(plan.depBumps)

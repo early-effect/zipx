@@ -85,8 +85,6 @@ object HttpLookup:
             Map.empty,
           )
     else HttpLookupResult(404, "", Map.empty)
-    end if
-  end readFile
 
   /** sbt writes no `maven-metadata.xml` into a `file:` repository, so a version is a directory holding a POM. */
   private def publishedVersions(artifactDir: java.nio.file.Path): List[String] =
@@ -130,7 +128,6 @@ object HttpLookup:
               val bare = headers.filter((name, _) => !name.equalsIgnoreCase("Authorization"))
               fetchGet(next, bare, timeout, None, send, retry, Duration.Zero, None, passRedirects = false)
       }
-  end getZio
 
   private def fetchGet(
       url: String,
@@ -147,7 +144,6 @@ object HttpLookup:
     val inm          = ifNoneMatch.orElse(revalidating.flatMap(_.etag)).filter(_.nonEmpty)
     val req          = request(url, headers, timeout, body = None, ifNoneMatch = inm)
     execute(url, req, send, retry, firstJitter, cache, revalidating, passRedirects)
-  end fetchGet
 
   private[core] def postZio(
       url: String,
@@ -160,7 +156,6 @@ object HttpLookup:
   ): IO[String, HttpLookupResult] =
     val req = request(url, headers, timeout, body = Some(body), ifNoneMatch = None)
     execute(url, req, send, retry, firstJitter, cache = None, revalidating = None, passRedirects = false)
-  end postZio
 
   private[core] def jdkSend(req: HttpRequest): Task[HttpLookupResult] =
     ZIO.attemptBlocking {
@@ -197,7 +192,6 @@ object HttpLookup:
         case LookupFailure.Retryable(msg, _) => msg
         case LookupFailure.Fatal(msg)        => msg
       }
-  end execute
 
   private def classify(
       result: HttpLookupResult,
@@ -276,7 +270,6 @@ object HttpLookup:
     body match
       case Some(bytes) => builder.POST(HttpRequest.BodyPublishers.ofString(bytes)).build()
       case None        => builder.GET().build()
-  end request
 
   private def runEither[A](effect: IO[String, A]): Either[String, A] =
     try

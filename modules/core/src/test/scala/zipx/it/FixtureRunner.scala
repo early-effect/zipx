@@ -91,7 +91,6 @@ object FixtureRunner:
     finally
       try c.stop()
       catch case _: Throwable => ()
-    end try
   end runSbt
 
   def deleteTree(p: Path): Unit =
@@ -102,7 +101,6 @@ object FixtureRunner:
           catch case _: Exception => ()
         }
       catch case _: Exception => ()
-  end deleteTree
 
   private def copyResourceTree(resourceRoot: String, dest: Path): Unit =
     val cl = Thread.currentThread().getContextClassLoader
@@ -133,11 +131,8 @@ object FixtureRunner:
               Files.copy(p, out, StandardCopyOption.REPLACE_EXISTING)
           }
         finally fs.close()
-        end try
       case Some(url) =>
         sys.error(s"Unsupported resource URL: $url")
-    end match
-  end copyResourceTree
 
   def writeUtf8(path: Path, content: String): Unit =
     Files.createDirectories(path.getParent)

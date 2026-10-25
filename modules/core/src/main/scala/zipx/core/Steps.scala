@@ -119,7 +119,6 @@ object Steps:
       s"$w. zipx validates it as text that cannot corrupt the generated file, but not as sbt syntax, so a typo is a " +
         "failing job rather than a compile error"
     )
-  end commandWarnings
 
   /** `unwrapped`, not `render`: in an `if:`, `${{ a }} && ${{ b }}` is a template string, not the conjunction. */
   private def gate(step: Step, condition: JobCondition): Step =

@@ -40,7 +40,6 @@ final case class BazelRemoteTestContainer(
         .withStartupTimeout(Duration.ofMinutes(2))
     )
     c
-  end container
 
   def start: BazelRemoteTestContainer =
     try container.start()

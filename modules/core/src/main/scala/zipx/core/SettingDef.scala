@@ -38,7 +38,6 @@ object TypeLabel extends Subtype[String]:
       .replace("zipx.core.", "")
       .replace("zipx.workflow.", "")
     functionArrow(stripped)
-  end shorten
 
   /** `Function1[A, B]` → `A => B` for the docs type column. */
   private def functionArrow(shown: String): String =
@@ -52,7 +51,6 @@ object TypeLabel extends Subtype[String]:
         case Some((a, b, endExclusive)) =>
           val pretty = s"${a.trim} => ${b.trim}"
           functionArrow(shown.substring(0, idx) + pretty + shown.substring(endExclusive))
-  end functionArrow
 
   /** (left, right, index after the closing `]`), split at the top-level comma. */
   private def splitFunctionArgs(shown: String, from: Int): Option[(String, String, Int)] =
@@ -69,9 +67,7 @@ object TypeLabel extends Subtype[String]:
         case ',' if depth == 0 && comma < 0 => comma = i
         case _                              => ()
       i += 1
-    end while
     None
-  end splitFunctionArgs
 end TypeLabel
 
 /** Purpose / `settingKey` description prose shared by the plugin and docs. */

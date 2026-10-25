@@ -73,7 +73,6 @@ object PinCheckWorkflow:
       pins.checkout,
       runnerOs,
     )
-  end plan
 
   def render(
       pins: ActionPins,

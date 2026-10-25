@@ -8,6 +8,7 @@ enum PomScope:
   def inherited: Boolean = this match
     case Compile | Runtime                 => true
     case Provided | Optional | Test | Tool => false
+end PomScope
 
 /** A dependency of one in-repo project on another. */
 final case class PomEdge(scope: PomScope, to: ResolvedModule)
@@ -39,7 +40,6 @@ object PomExclusions:
             case Some(_) => Left(DuplicateModule(module))
             case None    => loop(tail, acc.updated(module, next))
     loop(edges, Map.empty)
-  end graph
 
   def of(
       project: ResolvedModule,
@@ -65,5 +65,4 @@ object PomExclusions:
             .distinct
           walk(fresh ++ rest, seen ++ fresh)
     walk(List(project), Set.empty).toList
-  end reached
 end PomExclusions

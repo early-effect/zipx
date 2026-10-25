@@ -126,7 +126,6 @@ object ZipxCatalog:
               }
           CatalogUpdates(updates.bumps ++ bump, updates.held ++ held)
     }
-  end outdated
 
   /** Catalog order, each family's literal first. */
   private def familiesOf(coords: Seq[ZipxCoord]): List[(ZipxCoord, List[ZipxCoord])] =
@@ -142,7 +141,6 @@ object ZipxCatalog:
       }
       literal.orElse(members.headOption).map(lit => lit -> (lit :: members.filterNot(_ == lit)))
     }
-  end familiesOf
 
   def latest(
       versions: List[String],
@@ -333,7 +331,6 @@ object ZipxCatalog:
         val actions = actionsOfImpl[a](catalog)
         val ships   = shipsOfImpl[a](catalog)
         '{ zipx.CatalogContents(() => zipx.CatalogContents.Rows($coords, $pins, $actions, $ships)) }
-  end contentsImpl
 
   private def coordsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[ZipxCoord]] =
     import quotes.reflect.*
@@ -346,7 +343,6 @@ object ZipxCatalog:
           }
     }
     if parts.isEmpty then '{ Seq.empty[ZipxCoord] } else '{ ${ Expr.ofList(parts) }.flatten }
-  end coordsOfImpl
 
   private def pinsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[Pin]] =
     import quotes.reflect.*
@@ -359,7 +355,6 @@ object ZipxCatalog:
           }
     }
     if parts.isEmpty then '{ Seq.empty[Pin] } else '{ ${ Expr.ofList(parts) }.flatten }
-  end pinsOfImpl
 
   private def actionsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[Action]] =
     import quotes.reflect.*
@@ -372,7 +367,6 @@ object ZipxCatalog:
           }
     }
     if parts.isEmpty then '{ Seq.empty[Action] } else '{ ${ Expr.ofList(parts) }.flatten }
-  end actionsOfImpl
 
   private def shipsOfImpl[A: Type](catalog: Expr[A])(using Quotes): Expr[Seq[PublishedRow]] =
     import quotes.reflect.*
@@ -385,7 +379,6 @@ object ZipxCatalog:
           }
     }
     if parts.isEmpty then '{ Seq.empty[PublishedRow] } else '{ ${ Expr.ofList(parts) }.flatten }
-  end shipsOfImpl
 
   private def catalogValParts[A: Type](using Quotes): List[(quotes.reflect.Symbol, quotes.reflect.TypeRepr)] =
     import quotes.reflect.*
@@ -411,7 +404,6 @@ object ZipxCatalog:
             case _ => None
         catch case _: Exception => None
       fromTree.getOrElse(cls.declaredFields.filterNot(_.flags.is(Flags.Synthetic)))
-    end valsInSourceOrder
 
     val tpe = TypeRepr.of[A].dealias
     tpe.baseClasses.filterNot(skipClass).reverse.flatMap(valsInSourceOrder).distinct.map { sym =>

@@ -30,7 +30,6 @@ object RemoteCacheFromEnv extends AutoPlugin:
                     sys.props.getOrElse("java.specification.version", "unknown"),
                     sys.props.getOrElse("os.name", "unknown").toLowerCase.split(' ').head,
                   )
-            end if
           },
         )
 

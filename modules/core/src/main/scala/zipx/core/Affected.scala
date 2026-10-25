@@ -28,7 +28,6 @@ object Affected:
     val readSeeds           = readFiles.map(byPath)
     if others.exists(isBuildFile) || readSeeds.exists(_.isEmpty) then graph.ids.toSet
     else graph.affectedClosure(readSeeds.flatten.flatten.toSet ++ others.flatMap(owningModules(graph, _)))
-  end affectedModules
 
   /** `None` means the diff failed (bad base ref, no git), which fails open to [[AllSentinel]]: an empty list would skip
     * every Verify job and report green untested. `Some(Nil)` is a successful empty diff and stays empty.
@@ -54,7 +53,6 @@ object Affected:
     else
       val best = ranked.map(_._2).max
       ranked.collect { case (id, len) if len == best => id }.toSet
-  end owningModules
 
   private def underBase(path: String, base: String): Boolean =
     val normalized = if base.endsWith("/") then base.dropRight(1) else base

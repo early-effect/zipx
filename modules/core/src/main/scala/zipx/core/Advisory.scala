@@ -8,6 +8,7 @@ enum AdvisorySeverity:
   case Low, Moderate, High, Critical
 
   def rank: Int = ordinal
+end AdvisorySeverity
 
 object AdvisorySeverity:
   def parse(raw: String): AdvisorySeverity =
@@ -37,7 +38,6 @@ final class OsvAdvisorySource(
       case Left(err)                       => Left(s"osv: $err")
       case Right(res) if res.status == 200 => OsvAdvisorySource.parseResponse(res.body)
       case Right(res)                      => Left(s"osv: HTTP ${res.status}")
-  end advisories
 end OsvAdvisorySource
 
 object OsvAdvisorySource:

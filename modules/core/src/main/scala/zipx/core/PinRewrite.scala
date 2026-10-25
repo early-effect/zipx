@@ -23,7 +23,6 @@ object PinRewrite:
         Left(s"$current is the snapshot pointer, not a pin. Run sbt zipxSnapshotStatus.")
       case DepRevision.Release(_) | DepRevision.Changing(_) | DepRevision.Other(_) =>
         Left(SnapshotRevisionError.NotCommitPin(current).message)
-  end advance
 
   /** The only way a pin changes lines ([[advance]] stays on its own). A release row becomes a commit pin of `line`. */
   def moveTo(current: String, line: ReleaseVersion, pointerSha: GitSha): Either[String, Option[String]] =

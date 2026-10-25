@@ -35,7 +35,6 @@ object PinSnapshotWorkflow:
       pins.checkout,
       runnerOs,
     )
-  end plan
 
   def render(
       pins: ActionPins,

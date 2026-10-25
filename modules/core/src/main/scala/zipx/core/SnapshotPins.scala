@@ -67,7 +67,6 @@ object SnapshotPins:
     }
     val trimmed = collapsed.stripPrefix("-").stripSuffix("-")
     if trimmed.isEmpty then "repo" else trimmed.take(80)
-  end slug
 
   def annotation(pins: ::[ZipxCoord]): Either[String, Steps] =
     Word

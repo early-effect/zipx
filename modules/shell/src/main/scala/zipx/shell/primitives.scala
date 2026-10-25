@@ -107,6 +107,7 @@ object ExitCode extends Newtype[Int]:
 
   val Success: ExitCode = ExitCode(0)
   val Failure: ExitCode = ExitCode(1)
+end ExitCode
 
 /** Only single digits are portable: `10>` is a valid fd in bash but ambiguous with `1` followed by `0>` in POSIX sh. */
 type FileDescriptor = FileDescriptor.Type
@@ -119,6 +120,7 @@ object FileDescriptor extends Newtype[Int]:
   val Stdin: FileDescriptor  = FileDescriptor(0)
   val Stdout: FileDescriptor = FileDescriptor(1)
   val Stderr: FileDescriptor = FileDescriptor(2)
+end FileDescriptor
 
 // Literal Strings, not Regex values: `validate` is inlined and a compiled Regex is not comptime-evaluable.
 object Patterns:
@@ -129,3 +131,4 @@ object Patterns:
 
   inline val NoWhitespaceOrQuotes = "[^\\s'\"\\\\\\x00-\\x1F\\x7F]+"
   inline val ProgramName          = "[A-Za-z0-9_./+-]+"
+end Patterns

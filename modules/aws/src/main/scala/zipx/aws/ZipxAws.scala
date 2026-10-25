@@ -128,7 +128,6 @@ object ZipxAws:
       extraSteps = ecrLoginSteps,
       condition = condition,
     )
-  end dockerPublish
 
   /** [[dockerPublish]] over several registries in one job. One build is pushed, so the registries hold identical bytes.
     * Build `dockerAliases` with [[EcrImage.taggedAll]] from the same [[EcrRegistry]] values so the two sides cannot
@@ -152,6 +151,5 @@ object ZipxAws:
         condition = condition,
       )
       .withSharedTargets(registryTargets(registries))
-  end dockerPublishAll
 
 end ZipxAws

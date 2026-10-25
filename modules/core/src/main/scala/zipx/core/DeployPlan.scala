@@ -55,6 +55,7 @@ final case class DeployPlan(sha: GitSha, images: List[ModuleId], targets: ListMa
     val nonEmpty: Map[String, List[String]] =
       ListMap.from(targets.collect { case (t, ms) if ms.nonEmpty => (t: String) -> ms.map(id => id: String) })
     nonEmpty.toJson
+end DeployPlan
 
 object DeployPlan:
 

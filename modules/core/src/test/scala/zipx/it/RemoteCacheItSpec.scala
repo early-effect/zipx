@@ -27,7 +27,6 @@ object RemoteCacheItSpec extends ZIOSpecDefault:
     finally
       if stream != null then stream.close()
       conn.disconnect()
-  end httpGet
 
   private def runFixture(
       bazel: BazelRemoteTestContainer,

@@ -54,7 +54,6 @@ object AgentPins:
         docker <- one(pins, DockerFeed, DockerId).flatMap(validateDocker)
         runner <- one(pins, SbtFeed, SbtId).flatMap(validateRunner)
       yield AgentPins(base, docker, runner)
-  end resolve
 
   private def one(pins: Seq[Pin], feed: PinFeedName, id: String): Either[String, String] =
     pins.collectFirst { case pin if pin.feed == feed && pin.id == id => pin.current } match

@@ -60,7 +60,6 @@ object SbtImageWorkflow:
       None,
       LocalCacheMode.Restore,
     )
-  end bakedSetup
 
   private def runsSbt(job: Job): Boolean =
     job.uses.isEmpty && job.steps.exists { step =>
@@ -88,7 +87,6 @@ object SbtImageWorkflow:
         plan.cacheHome,
       ),
     )
-  end decorate
 
   /** A job that already sets permissions does not inherit the repo token, so a private env image is denied. A job with
     * no permissions block keeps inheriting that token.

@@ -93,6 +93,7 @@ final case class EcrRegistry(accountId: AwsAccountId, region: AwsRegion):
   def host: String = s"$accountId.dkr.ecr.$region.amazonaws.com"
 
   def image(repository: EcrRepository): EcrImage = EcrImage(this, repository)
+end EcrRegistry
 
 final case class EcrImage(registry: EcrRegistry, repository: EcrRepository):
 

@@ -152,7 +152,6 @@ final case class ModuleGraph private (nodes: List[ModuleNode], topologicalLayers
         acc + (id -> (if ancestors.isEmpty then 0 else ancestors.map(acc).max + 1))
       }
     depths.groupBy(_._2).toList.sortBy(_._1).map((_, group) => group.keys.toList.sorted)
-  end subsetLayers
 
   private def nearestAncestors(id: String, included: Set[String]): Set[String] =
     def go(frontier: List[String], found: Set[String], seen: Set[String]): Set[String] =
@@ -204,6 +203,5 @@ object ModuleGraph:
       ready.foreach(remainingDeps.remove)
       remainingDeps.mapValuesInPlace((_, deps) => deps -- ready.toSet)
     Right(layers.toList)
-  end layersOrCycle
 
 end ModuleGraph

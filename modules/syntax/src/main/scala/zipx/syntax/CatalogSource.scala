@@ -16,7 +16,6 @@ final case class CatalogConstructors(
     scala: Option[ScalaVersion],
 ):
   def coords: List[ZipxCoord] = libs ++ plugins
-end CatalogConstructors
 
 object CatalogSource:
 
@@ -147,7 +146,6 @@ object CatalogSource:
       byName.get("version").orElse(pos.lift(1)),
       byName.get("sha").orElse(pos.lift(2)),
     )
-  end named
 
   private def mkLib(g: String, a: String, v: String): Option[Lib] =
     for

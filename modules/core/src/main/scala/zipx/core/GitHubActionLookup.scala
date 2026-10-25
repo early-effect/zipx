@@ -21,7 +21,6 @@ final class GitHubActionLookup(
           }
       }
     }
-  end latest
 
   private def peel(repo: String, rel: GitHubActionMeta.Release): Either[String, Option[GitHubActionMeta.Release]] =
     rel.sha.filter(s => GitSha.make(s).isRight) match
@@ -53,5 +52,4 @@ object GitHubActionLookup:
       case Right(res) if res.status == 200 => Right(Option(res.body).getOrElse(""))
       case Right(res) if res.status == 404 => Right("[]")
       case Right(res)                      => Left(s"GitHub $url: HTTP ${res.status}")
-  end httpGet
 end GitHubActionLookup

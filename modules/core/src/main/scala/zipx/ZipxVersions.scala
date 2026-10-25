@@ -10,6 +10,7 @@ object CatalogContents:
   final case class Rows(coords: Seq[ZipxCoord], pins: Seq[Pin], actions: Seq[Action], ships: Seq[PublishedRow])
 
   inline given CatalogContents = ${ zipx.core.ZipxCatalog.contentsImpl }
+end CatalogContents
 
 /** No sbt types, so the CLI compiles a catalog without the target build. Catalogs extend the plugin's `ZipxVersions`.
   */

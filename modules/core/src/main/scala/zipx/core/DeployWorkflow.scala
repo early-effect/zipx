@@ -16,6 +16,7 @@ enum DeployStage:
 
   /** Also every merge under [[DeployTrigger.Staged]], and every push to a PR carrying its deploy label. */
   case PreProduction
+end DeployStage
 
 /** Where image pushes and deploys run. */
 enum DeployTrigger:
@@ -180,7 +181,6 @@ object DeployWorkflow:
       case _ => Nil
     (perCapability ++ unrecorded ++ clashes ++ reserved ++ mixedStages ++ staged)
       .map(s"zipx: ${triggerName(trigger)}: " + _)
-  end problems
 
   private def triggerName(trigger: DeployTrigger): String = trigger match
     case DeployTrigger.OnMerge         => "DeployTrigger.OnMerge"
@@ -212,7 +212,6 @@ object DeployWorkflow:
       case ((t, env), rows) => TargetModules(t, env, rows.map(_._3).distinct.sorted)
     }
     DeployScope(imagesEnvironment, images, targets)
-  end scope
 
   def targetChoices(graph: ModuleGraph, deploy: List[Capability]): List[String] =
     val targets = deploy.flatMap(c => graph.nodes.filter(c.participates).flatMap(c.targets))
@@ -292,7 +291,6 @@ object DeployWorkflow:
       config.actions.checkout,
       config.runnerOs,
     )
-  end plan
 
   def render(
       graph: ModuleGraph,
@@ -382,7 +380,6 @@ object DeployWorkflow:
       outputs = ListMap(fromPlan(Sha), fromPlan(Images), fromPlan(Targets)),
       steps = Planner.checkoutThenSbtSetup(config, ResolveJobId, nodeVersion = None, cacheMode(config)) :+ resolve,
     )
-  end resolveJob
 
   /** `unsafeMake` because every caller passes one of the relative-path constants above. */
   private def path(file: String): Word = Word.Lit(ShText.unsafeMake(file))

@@ -46,6 +46,5 @@ object ZipxDocs:
         workflowCall = Some(WorkflowCall(uses = ReusableWorkflow, withInputs = inputs)),
         condition = Some(deployWhen),
       )
-  end pages
 
 end ZipxDocs

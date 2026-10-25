@@ -39,7 +39,6 @@ object Args:
         case "--file" :: Nil                   => Left("zipx: --file needs a path")
         case unknown :: _                      => Left(s"zipx: unknown flag '$unknown'.\n$usage")
     loop(args, Flags(yes = false, dryRun = false, verifyLoad = false, file = DefaultFile))
-  end flags
 
   val usage: String =
     """usage:

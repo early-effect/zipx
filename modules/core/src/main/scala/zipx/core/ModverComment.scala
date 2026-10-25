@@ -30,5 +30,4 @@ object ModverComment:
        |$table
        |$fence
        |""".stripMargin
-  end body
 end ModverComment

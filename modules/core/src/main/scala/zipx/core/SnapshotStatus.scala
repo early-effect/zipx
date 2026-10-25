@@ -10,6 +10,7 @@ enum PointerRead:
 
   /** A plain publish wrote the pointer POM without `zipx.snapshot.sha`. */
   case Unnamed
+end PointerRead
 
 object PointerRead:
   def of(pom: Option[String]): PointerRead =
@@ -26,7 +27,6 @@ object PointerRead:
           case Unnamed          => loop(Unnamed)
           case Absent           => loop(seen)
     loop(Absent)
-  end first
 end PointerRead
 
 /** What `zipxSnapshotStatus` prints. The pointer names the latest sha. The command does not rewrite the pin. */

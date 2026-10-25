@@ -107,7 +107,6 @@ object SbtImageFeeds:
               case Some(more) => go(more.group(1), left - 1, seen + url, acc ++ names)
         }
     go(s"$Tags" + s"eclipse-temurin-$major", 10, Set.empty, Nil)
-  end tagNames
 
   private def manifestDigest(tag: String): Either[String, String] =
     for

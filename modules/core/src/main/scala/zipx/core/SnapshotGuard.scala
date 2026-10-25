@@ -48,7 +48,6 @@ object SnapshotGuard:
               case ReleasedDrift.Unreadable(detail) => gate.place(unreadable(row, detail), refusals, warnings, hints)
         }
     SnapshotVerdict(refusals, warnings, hints)
-  end decide
 
   extension (gate: DriftGate)
     private def place(
@@ -60,5 +59,4 @@ object SnapshotGuard:
       gate match
         case DriftGate.Fail => (refusals :+ sentence, warnings, hints)
         case DriftGate.Warn => (refusals, warnings :+ sentence, hints)
-  end extension
 end SnapshotGuard

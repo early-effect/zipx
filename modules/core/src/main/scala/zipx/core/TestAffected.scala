@@ -20,6 +20,7 @@ object TestAffected:
     case Modules(command: SbtCommand, modules: ::[ModuleId])
 
     case Nothing
+  end Run
 
   /** @param affected
     *   [[Affected.outputModules]]' answer, where [[Affected.AllSentinel]] means everything.

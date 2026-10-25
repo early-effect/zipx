@@ -25,7 +25,6 @@ object ZipxDeps:
     val withCfg = lib.config.fold(mid)(cfg => mid % cfg)
     val withEx  = lib.excludes.foldLeft(withCfg)(applyExclude)
     lib.alignTo.fold(withEx)(src => withEx.withExtraAttributes(Map(FromGraphAttr -> (src: String))))
-  end moduleID
 
   def moduleID(plugin: ZipxPluginCoord): ModuleID =
     val mid = (plugin.group: String) % (plugin.artifact: String) % (plugin.version: String)

@@ -91,7 +91,6 @@ object VersionUpdatesWorkflow:
       checkout,
       "ubuntu-latest",
     )
-  end plan
 
   def render(
       pins: ActionPins,

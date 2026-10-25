@@ -70,7 +70,6 @@ object Render:
         Seq("jobs" -> jobsYaml(wf.jobs))
     )
     Yaml.Mapping(entries.map((k, v) => (Yaml.Scalar(k), v)))
-  end workflowYaml
 
   private def concurrencyYaml(c: Concurrency): Yaml =
     val cancel = c.cancelInProgress match
@@ -101,7 +100,6 @@ object Render:
         t.workflowDispatch.map(d => "workflow_dispatch" -> dispatchYaml(d)) ++
         (if t.workflowCall then Seq("workflow_call" -> Yaml.NullValue) else Nil)
     Yaml.Mapping.fromStringKeys(entries*)
-  end triggersYaml
 
   private def dispatchYaml(dispatch: WorkflowDispatch): Yaml =
     if dispatch.inputs.isEmpty then Yaml.NullValue
@@ -214,11 +212,9 @@ object Render:
                 if sawMatrix then nested
                 else nested ++ Chunk(Yaml.Scalar("matrix") -> Yaml.Mapping(Chunk(Yaml.Scalar("include") -> include)))
               (k, Yaml.Mapping(withMatrix))
-          end match
         case other => other
       })
     case other => other
-  end nestMatrixInclude
 
   /** The file as written to `.github/actions/<name>/action.yml`, header included. */
   def renderComposite(action: CompositeAction): Either[String, String] =
@@ -249,7 +245,6 @@ object Render:
          else Seq("outputs" -> Yaml.Mapping(Chunk.from(outputEntries)))) ++
         Seq("runs" -> runs)
     Yaml.Mapping.fromStringKeys(entries*)
-  end compositeYaml
 
   /** GitHub's convention for a single runner label is a scalar; the derived codec always emits a sequence. */
   private def collapseSingletonRunsOn(job: Yaml): Yaml = job match

@@ -55,8 +55,6 @@ object BuildSbtDiff:
         // An aggregator names what it aggregates without reading it, and runs nothing of its own.
         val readers = h.named.collect { case (n, s) if modulesOf(n).nonEmpty && s.refs.exists(names) => n }
         Some((projects ++ readers).flatMap(modulesOf).filter(_.ciRelevant).map(n => n.id: String))
-    end if
-  end compare
 
   /** Wrapped as an object body so bare settings parse. */
   private def parse(source: String): Option[Stats] =
@@ -78,7 +76,6 @@ object BuildSbtDiff:
       }
       Stats(byName.toMap, bare)
     }
-  end parse
 
   private def bodyOf(tree: Tree)(using Context): Option[List[Tree]] =
     tree match

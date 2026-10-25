@@ -15,3 +15,4 @@ object VerifyClean:
 
   /** A command, not a task, so generate checks the name. */
   private val CleanFullCommand: SbtCommand = SbtCommand.unsafeCommand("cleanFull")
+end VerifyClean

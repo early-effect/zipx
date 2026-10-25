@@ -156,7 +156,6 @@ object RawExpr extends Newtype[String]:
     else if input.split("\\$\\{\\{", -1).length != input.split("\\}\\}", -1).length then
       s"unbalanced \\$${{ }} in raw expression '$input'"
     else true
-end RawExpr
 
 /** UTC: GitHub runs schedules in UTC and offers no timezone field. */
 type CronHour = CronHour.Type
@@ -166,6 +165,7 @@ object CronHour extends Newtype[Int]:
     else true
 
   val Midnight: CronHour = CronHour(0)
+end CronHour
 
 type CronMinute = CronMinute.Type
 object CronMinute extends Newtype[Int]:
@@ -174,6 +174,7 @@ object CronMinute extends Newtype[Int]:
     else true
 
   val Zero: CronMinute = CronMinute(0)
+end CronMinute
 
 /** **Escape hatch** for [[Cron.Raw]]. Field contents are unvalidated: a step value, a `1-5` range and `MON` are what
   * the typed variants cannot say. Untrimmed input is rejected rather than trimmed, so what renders is what was written.

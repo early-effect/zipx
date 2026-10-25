@@ -48,8 +48,6 @@ final case class DepCleanupReport(
               s"  ${a.selected.valName}  (${a.selected.group}:${a.selected.artifact}; family ${a.familyArtifact} ${a.familyRevision})"
             )
       (List(header) ++ drop ++ align).mkString("\n")
-    end if
-  end render
 end DepCleanupReport
 
 object DepCleanup:
@@ -76,7 +74,6 @@ object DepCleanup:
           if seen.add(dep) then q.enqueue(dep)
         }
       seen.toSet
-    end closure
 
     val tentative = selected.filter { s =>
       closure(selected.filterNot(o => k(o) == k(s))).contains(k(s))
@@ -123,5 +120,4 @@ object DepCleanup:
           )
       }
       .flatten
-  end familyCandidate
 end DepCleanup

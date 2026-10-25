@@ -112,7 +112,6 @@ object ZipxComposites:
           if purge then cached
           else cached + ("restore-keys" -> (s"$build$runId-" :: build :: older).mkString("\n")),
       )
-    end cacheStep
 
     val hostToolchain = "inputs.baked-toolchain != 'true'"
     val cacheModes    = List(false, true).flatMap { home =>
@@ -240,7 +239,6 @@ object ZipxComposites:
         ),
       ),
     )
-  end awsLogin
 
   // Pin keys mirrored from zipx-aws so core does not depend on that module. Keep the strings identical.
   val CredentialsPinKey: String   = "aws-actions/configure-aws-credentials"
@@ -291,7 +289,6 @@ object ZipxComposites:
         }
       )
       .build
-  end sbtSetupStep
 
   /** Omitted when this job has no LocalDir restore to skip. */
   private def cachePurgeInput(config: PlanConfig, cacheMode: LocalCacheMode): Option[String] =
@@ -324,6 +321,5 @@ object ZipxComposites:
         )
       )
       .build
-  end awsLoginStep
 
 end ZipxComposites

@@ -57,7 +57,6 @@ private[plugin] object CatalogResolution:
       else CatalogConflict.unpinned(module, revisions.map(DepRevision.of))
     }
     stale ++ unpinned
-  end conflicts
 
   /** Forced modules have no evictions here; [[CatalogProbe]] reads theirs. */
   private def revisionsOf(report: UpdateReport): Map[ResolvedModule, List[String]] =

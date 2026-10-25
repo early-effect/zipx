@@ -107,7 +107,6 @@ object CapabilityTasks:
     all match
       case h :: t => SbtCommand.session(h, t*)
       case Nil    => sys.error("zipx: session requires at least one command")
-  end session
 
   /** One command per project ref running `task` (e.g. `matrix.projectRefs` from sbt-projectmatrix). */
   def rows(refs: Seq[ProjectRef], task: RunnableKey): List[SbtCommand] =
@@ -166,7 +165,6 @@ object CapabilityTasks:
       sys.error("""zipx: cmd"…" produced an empty sbt command""")
     // Safe: every literal piece is ShText, ids and key labels add only safe characters, and the result is non-empty.
     n => SbtCommand.unsafeBuilt(interleave(parts, splices.map(renderSplice(_, n))))
-  end commandFrom
 
   private def interleave(parts: List[String], splices: List[String]): String =
     val sb = new StringBuilder
@@ -210,7 +208,6 @@ object CapabilityTasks:
     }
     // Checking lives in `commandFrom`, plain Scala that can be tested; the macro only hands off.
     '{ CapabilityTasks.commandFrom(${ sc }.parts.toList, ${ Varargs(spliceExprs) }.toList) }
-  end cmdMacro
 
   /** [[zipx.core.Capability.deploy]] (Aggregate-by-target) with the deploy command given as a task key. */
   def deploy(
