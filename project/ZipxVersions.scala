@@ -67,9 +67,9 @@ object ZipxVersions extends zipx.ZipxVersions:
   val setupCoursier: Action =
     Action("coursier/setup-action", "v3.0.2", sha = "9b7939bf01fd1185ce2babe16135168361bf2c62")
 
-  val ubuntu: Pin   = Pin("agent-base", "ubuntu", "sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac")
+  val ubuntu: Pin   = Pin("agent-base", "ubuntu", "sha256:a2d43bffc46670d7108bb3c0468c67c5557c4c92e83e1e34cbff1322ad1b94dc")
   val dockerCe: Pin = Pin("agent-docker", "docker-ce", "5:28.5.2-1~ubuntu.24.04~noble")
-  val sbtRunner: Pin = Pin("agent-sbt", "sbt-runner", "2.0.7")
+  val sbtRunner: Pin = Pin("agent-sbt", "sbt-runner", "2.0.11")
 
   val commonScalacOptions: Seq[String] = Seq(
     "-deprecation",
