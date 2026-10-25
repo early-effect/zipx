@@ -29,7 +29,6 @@ object PublishedNames:
             ScalaPlatform.values.toList.map(p => s"${lib.artifact}_${p.infix}${crossing.scalaBinary}")
           case Cross.Full => ScalaPlatform.values.toList.map(p => s"${lib.artifact}_${p.infix}${crossing.scala}")
       case plugin: Plugin => List(s"${plugin.artifact}_sbt${crossing.sbtBinary}_${crossing.scalaBinary}")
-end PublishedNames
 
 final case class CatalogUpdates(bumps: List[DepBump], held: List[FamilyHold])
 

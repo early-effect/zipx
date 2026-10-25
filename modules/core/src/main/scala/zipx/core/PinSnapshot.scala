@@ -53,7 +53,6 @@ object PinSnapshot:
       scanned = scanned,
       manifests = manifests,
     ).toJson
-  end render
 
   def submit(
       token: String,

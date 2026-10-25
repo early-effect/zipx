@@ -27,4 +27,3 @@ object RemoteCacheSmokeSpec extends ZIOSpecDefault:
       )
     },
   )
-end RemoteCacheSmokeSpec

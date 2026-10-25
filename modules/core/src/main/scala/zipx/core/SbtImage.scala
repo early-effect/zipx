@@ -162,7 +162,6 @@ object SbtImage:
         "GIT_CONFIG_KEY_0"   -> "safe.directory",
         "GIT_CONFIG_VALUE_0" -> "*",
       )
-  end homeEnv
 
   def envImageScript(tag: String): String =
     s"""repo=$$(printf '%s' "$$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
@@ -248,7 +247,6 @@ object SbtImage:
       cacheHome = CacheHome,
       layerEnv = baked.env,
     )
-  end planOf
 
   private def imagePin(pins: Seq[Pin]): Either[SbtImageError, String] =
     pinVersion(pins, ImageId).toRight(SbtImageError.MissingImagePin)

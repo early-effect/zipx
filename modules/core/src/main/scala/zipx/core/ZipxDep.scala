@@ -40,6 +40,7 @@ enum Cross:
 
   /** `%%%` (Scala.js full). */
   case Full
+end Cross
 
 /** `excludeAll(ExclusionRule(...))` on a plugin or library ModuleID. */
 final case class ZipxExclude(organization: GroupId, artifact: Option[ArtifactId] = None)
@@ -50,6 +51,7 @@ object ZipxExclude:
 
   inline def org(inline organization: String, inline artifact: String): ZipxExclude =
     ZipxExclude(GroupId(organization), Some(ArtifactId(artifact)))
+end ZipxExclude
 
 /** One row in `zipxVersions`: a library (`Lib`) or an sbt plugin (`Plugin`). */
 sealed trait ZipxCoord:
@@ -65,6 +67,7 @@ object AsCoords:
   def apply[A](using ev: AsCoords[A]): AsCoords[A] = ev
 
   given ofCoord[A <: ZipxCoord]: AsCoords[A] = a => Seq(a)
+end AsCoords
 
 trait AsPins[A]:
   def pins(value: A): Seq[Pin]
@@ -73,6 +76,7 @@ object AsPins:
   def apply[A](using ev: AsPins[A]): AsPins[A] = ev
 
   given ofPin: AsPins[Pin] = p => Seq(p)
+end AsPins
 
 trait AsActions[A]:
   def actions(value: A): Seq[Action]
@@ -81,6 +85,7 @@ object AsActions:
   def apply[A](using ev: AsActions[A]): AsActions[A] = ev
 
   given ofAction: AsActions[Action] = a => Seq(a)
+end AsActions
 
 trait AsShips[A]:
   def ships(value: A): Seq[PublishedRow]
@@ -89,6 +94,7 @@ object AsShips:
   def apply[A](using ev: AsShips[A]): AsShips[A] = ev
 
   given ofRow[A <: PublishedRow]: AsShips[A] = a => Seq(a)
+end AsShips
 
 type ShipGroupName = ShipGroupName.Type
 object ShipGroupName extends Subtype[String]:
@@ -125,6 +131,7 @@ object ReleaseVersion extends Subtype[String]:
         case ReleaseBump.Major => s"${p.major + 1}.0.0")
 
     def isInitialDevelopment: Boolean = parts(version).major == 0
+  end extension
 end ReleaseVersion
 
 enum ReleaseBump:
@@ -210,6 +217,7 @@ object GitSha extends Subtype[String]:
   override inline def validate(input: String): Boolean | String =
     if input.matches(Hex40) then true
     else s"a git SHA must be 40 hex characters, got '$input'"
+end GitSha
 
 final case class Lib(
     group: GroupId,
@@ -232,7 +240,6 @@ final case class Lib(
   def fromGraph: Lib                   = copy(alignTo = Some(family.getOrElse(artifact)))
   def isAligned: Boolean               = alignTo.nonEmpty
   def coordinate: LibCoordinate        = LibCoordinate(group, artifact)
-end Lib
 
 /** A library as `libraryDependencies` names it: group and base artifact, before any cross suffix. */
 final case class LibCoordinate(group: GroupId, artifact: ArtifactId)
@@ -340,7 +347,6 @@ object Action:
         gsha <- GitSha.make(sha)
         _    <- zipx.workflow.ActionRef.make(s"$trimmed@$sha")
       yield new Action(trimmed, ver, gsha)
-  end make
 end Action
 
 final case class ActionBump(action: Action, bump: BumpKind, toVersion: String, toSha: String)

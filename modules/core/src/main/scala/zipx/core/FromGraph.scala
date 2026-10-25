@@ -40,11 +40,8 @@ object FromGraph:
               Left(
                 s"zipx: fromGraph '${req.lib.artifact}' found multiple revisions of ${req.lib.group}:$srcName (${many.mkString(", ")})"
               )
-          end match
         }
       }
-    end if
-  end revisions
 
   /** Strips the Scala cross suffix (`_<scala>` or `_sjs<n>_<scala>`). */
   def artifactFamily(resolvedName: String): String =

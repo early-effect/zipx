@@ -23,6 +23,7 @@ object VersionStrategy:
       candidates.lastOption
 
     def isPreRelease(version: String): Boolean = false
+  end ExactStrategy
 
   private final case class SemVer(major: Int, minor: Int, patch: Int, pre: Option[String]):
     def isPre: Boolean                 = pre.isDefined
@@ -60,6 +61,5 @@ object VersionStrategy:
           minor <- parts(1).toIntOption
           patch <- parts(2).toIntOption
         yield SemVer(major, minor, patch, pre.filter(_.nonEmpty))
-    end parse
   end SemverStrategy
 end VersionStrategy

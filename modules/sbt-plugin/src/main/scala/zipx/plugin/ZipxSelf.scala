@@ -9,3 +9,4 @@ object ZipxSelf:
 
   def emit(group: String, artifact: String, from: Class[?], version: Option[String] = None): Plugin =
     zipx.core.ZipxSelf.plugin(group, artifact, from, version).fold(msg => sys.error(msg), identity)
+end ZipxSelf

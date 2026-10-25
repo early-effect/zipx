@@ -45,6 +45,7 @@ object JdkFloor:
     def render: String =
       val body = if numbers.isEmpty then "?" else numbers.mkString(".")
       build.fold(body)(n => s"$body+$n")
+  end Release
 
   /** `vulnerableUpdate` is the affected update. A later update is safe. The same update is safe with OpenJDK extra
     * component `openJdkExtra`, or, for Zulu only, a `+build` at least `zuluBuild`.

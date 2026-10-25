@@ -86,7 +86,6 @@ object CursorEnv:
           case None    => Some("""  "start": "sudo service docker start"""")
     val fields = (image.toList ++ build.toList) ++ List(s"""  "install": "bash $InstallRel"""") ++ start.toList
     "{\n" + fields.mkString(",\n") + "\n}\n"
-  end environmentJson
 
   def dockerfile(env: AgentEnv): Either[String, Option[String]] =
     env.toolchain match
@@ -120,7 +119,6 @@ object CursorEnv:
        |USER ubuntu
        |WORKDIR /home/ubuntu
        |""".stripMargin
-  end ubuntuDockerfile
 
   private def sbtDockerfile(image: AgentImage, docker: Boolean): Either[String, Option[String]] =
     if !docker then
@@ -220,7 +218,6 @@ object CursorEnv:
        |    > /usr/local/bin/zipx-dockerd; \\
        |    chmod 0755 /usr/local/bin/zipx-dockerd
        |""".stripMargin
-  end daemonRun
 
   private def dockerSetup(version: String): String =
     s"""RUN set -eux; \\

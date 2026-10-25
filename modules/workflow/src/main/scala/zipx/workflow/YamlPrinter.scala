@@ -106,7 +106,6 @@ object YamlPrinter:
               firstEntry = false
             }
           case _ => writeNode(sb, elem, indent + 2, isTopLevel = false)
-        end match
         first = false
       }
 
@@ -123,7 +122,6 @@ object YamlPrinter:
       if line.nonEmpty then appendIndent(sb, contentIndent)
       sb.append(line)
     }
-  end writeBlockScalar
 
   private def writeScalarKey(sb: java.lang.StringBuilder, key: Yaml): Unit = key match
     case Yaml.Scalar(value, tag) => writeScalar(sb, value, tag)
@@ -146,7 +144,6 @@ object YamlPrinter:
           case c if c < 0x20 => sb.append("\\u").append(String.format("%04x", Int.box(c.toInt)))
           case c             => sb.append(c)
         idx += 1
-      end while
       sb.append('"')
     else sb.append(value)
 
@@ -170,7 +167,6 @@ object YamlPrinter:
       if c == '#' && idx > 0 && value.charAt(idx - 1) == ' ' then return true
       idx += 1
     false
-  end needsQuoting
 
   private def isSpecialValue(value: String): Boolean = value match
     case "null" | "~" | "Null" | "NULL"                         => true
@@ -192,7 +188,6 @@ object YamlPrinter:
       val c1 = value.charAt(1)
       if c1 >= '0' && c1 <= '9' then return true
     false
-  end looksNumeric
 
   private def appendIndent(sb: java.lang.StringBuilder, indent: Int): Unit =
     var idx = 0

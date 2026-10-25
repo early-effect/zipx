@@ -124,7 +124,6 @@ object HttpLookupSpec extends ZIOSpecDefault:
         !second.isMiss,
         seen.get("conditional") == "\"abc\"",
       )
-      end for
     },
     test("a caller's own If-None-Match gets the server's 304 back") {
       val send: HttpLookup.Send = req =>
@@ -173,7 +172,6 @@ object HttpLookupSpec extends ZIOSpecDefault:
         blocked == Left("HTTP 401"),
         plain == Left("HTTP 302"),
       )
-      end for
     },
     test("a pre-signed hop that is missing is a miss, not an unreachable registry") {
       val signed                = "https://signed.example/missing"

@@ -33,6 +33,4 @@ object ZipxSelf:
         Left(
           s"zipx: cannot emit $group % $artifact: Implementation-Version is missing. Pass version, or set it on $origin."
         )
-    end match
-  end fromVersion
 end ZipxSelf

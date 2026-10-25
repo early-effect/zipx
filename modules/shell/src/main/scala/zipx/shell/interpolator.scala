@@ -38,4 +38,3 @@ private def shMacro(sc: Expr[StringContext], args: Expr[Seq[Word]])(using Quotes
       .zipAll(splices.map(Some(_)), None, None)
       .flatMap((part, splice) => part.toList ++ splice.toList)
   '{ Word.Cat(${ Expr.ofList(words.toList) }) }
-end shMacro

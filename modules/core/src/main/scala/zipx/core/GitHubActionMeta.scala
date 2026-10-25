@@ -25,7 +25,6 @@ object GitHubActionMeta:
           .map(_.tag_name)
           .filterNot(isPrereleaseTag)
         Right(VersionStrategy.npm.latestStable(tags).orElse(tags.headOption).map(tag => Release(tag, None)))
-  end pickLatestRelease
 
   def pickLatestTag(json: String): Either[String, Option[Release]] =
     val wrapped = if json.trim.startsWith("[") then json else s"[$json]"
@@ -41,8 +40,6 @@ object GitHubActionMeta:
             .orElse(tags.headOption.map(_._1))
             .flatMap(latest => tags.find(_._1 == latest).map { case (tag, sha) => Release(tag, sha) })
         )
-    end match
-  end pickLatestTag
 
   def peelSha(refJson: String, tagObjectJson: Option[String] = None): Either[String, String] =
     gitObject(refJson).flatMap { obj =>
@@ -62,7 +59,6 @@ object GitHubActionMeta:
         case (Some(s), _)                           => Left(s"git ref is not a 40-hex SHA: $s")
         case _                                      => Left("git ref JSON has no object.sha")
     }
-  end peelSha
 
   private def gitObject(json: String): Either[String, GhGitObject] =
     json.fromJson[GhGitRef] match

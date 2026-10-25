@@ -114,8 +114,6 @@ object SbtImageLayer:
         }
         runs <- stitch(layer.id, pairs)
       yield runs
-    end if
-  end runsOf
 
   private def pair(id: String, index: Int, left: ImageStep, right: ImageStep): Either[SbtImageError, StepPair] =
     (left, right) match
@@ -158,7 +156,6 @@ object SbtImageLayer:
         case other :: tail => loop(tail, aptDone, script(other) :: acc)
     val runs = loop(steps, false, Nil)
     if runs.isEmpty then Left(SbtImageError.EmptyLayer(id)) else Right(runs)
-  end stitch
 
   private def https(id: String, url: String): Either[SbtImageError, Unit] =
     val bad =
@@ -264,7 +261,6 @@ object SbtImageLayer:
         "rm -rf /var/lib/apt/lists/*",
       )
     )
-  end aptScript
 
   private def fetch(amd: String, arm: String, dest: String, source: FileSource, mode: FileMode): String =
     val (choose, url) = archUrl(amd, arm)
@@ -300,7 +296,6 @@ object SbtImageLayer:
           s"rm -rf $file $file.d",
         )
     run(choose ++ place)
-  end fetch
 
   private def extract(amd: String, arm: String, dest: String, format: ArchiveFormat, strip: Int): String =
     val (choose, url) = archUrl(amd, arm)
@@ -317,7 +312,6 @@ object SbtImageLayer:
         s"rm -f $file",
       )
     )
-  end extract
 
   /** Lines that set `url`, and the shell word that expands to it. One word when both arches share a URL. */
   private def archUrl(amd: String, arm: String): (List[String], String) =
@@ -359,6 +353,7 @@ enum FileMode:
   def bits: String = this match
     case Executable => "0755"
     case Readable   => "0644"
+end FileMode
 
 enum ArchiveFormat:
   case TarGz, TarXz, Zip

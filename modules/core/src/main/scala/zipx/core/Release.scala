@@ -97,6 +97,7 @@ enum ReleaseRequest:
 
   /** Catalog identities, in the order the dispatch named them. Unreleased in-repo upstreams still ride along. */
   case Ships(identities: ::[String])
+end ReleaseRequest
 
 object ReleaseRequest:
 
@@ -162,6 +163,7 @@ final case class ReleasePlan(entries: ::[ReleaseEntry]):
     graph.topologicalSort.flatMap(graph.get).collect {
       case node if node.publishes && catalog.rowFor(node.matrixRoot).exists(rows.contains) => node.id
     }
+end ReleasePlan
 
 object ReleasePlan:
 
@@ -194,8 +196,6 @@ object ReleasePlan:
         case head :: tail => Right(::(head, tail))
         case Nil          => Left(ReleaseError.NothingToRelease)
     yield ReleasePlan(entries)
-    end for
-  end plan
 
   private def inBuildOrder(catalog: ShipIndex, graph: ModuleGraph): List[PublishedRow] =
     val byOrder = graph.topologicalSort.flatMap(graph.get).flatMap(n => catalog.rowFor(n.matrixRoot)).distinct
@@ -246,8 +246,6 @@ object ReleasePlan:
                 case RowStatus.Partial(missing) => Left(ReleaseError.PartiallyReleased(row, missing))
             }
           }
-    end match
-  end selected
 
   private def unreleased(
       rows: List[PublishedRow],

@@ -13,12 +13,14 @@ enum CoverageTrigger:
 
   /** A PR carrying `label`: when that label is added, and on each push or reopen while it stays. */
   case PrLabel(label: ExprLiteral)
+end CoverageTrigger
 
 object CoverageTrigger:
 
   inline def prLabel(inline label: String): CoverageTrigger = PrLabel(ExprLiteral(label.trim))
 
   def prLabelMake(label: String): Either[String, CoverageTrigger] = ExprLiteral.make(label.trim).map(PrLabel(_))
+end CoverageTrigger
 
 /** scoverage in `zipx-coverage.yml`, so `ci.yml`'s required checks never compile instrumented classes.
   *
@@ -77,7 +79,6 @@ object CoverageWorkflow:
       config.actions.checkout,
       config.runnerOs,
     )
-  end plan
 
   def render(coverage: CoverageWorkflow, config: PlanConfig): Either[String, String] =
     Render.render(plan(coverage, config)).map(ActionPinFile.annotateUses(_, config.actions))

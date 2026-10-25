@@ -28,6 +28,7 @@ enum DeploySelection:
 
   /** Nothing, for a reason the resolve job logs. Not a failure: a `no-deploy` merge is supposed to deploy nothing. */
   case Skip(reason: String)
+end DeploySelection
 
 object DeployRequest:
 
@@ -87,8 +88,6 @@ object DeployRequest:
         )
       case (DeployTrigger.Manual(_), _) =>
         Left("zipx: DeployTrigger.Manual deploys only from a dispatch; a push or PR event never runs zipx-deploy.yml")
-    end match
-  end select
 
   /** The PR's labels, as the resolve job receives them from `toJSON(github.event.pull_request.labels.*.name)`. */
   def labelsFromJson(json: String): Either[String, Set[String]] =

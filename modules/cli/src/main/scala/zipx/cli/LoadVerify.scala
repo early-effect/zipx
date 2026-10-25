@@ -25,7 +25,6 @@ object LoadVerify:
     snap.props match
       case Some(body) => write(props, body)
       case None       => Files.deleteIfExists(props)
-  end restore
 
   def probe(root: Path, run: Path => Either[String, Unit] = defaultProbe): Either[String, Unit] =
     run(root)
@@ -47,7 +46,6 @@ object LoadVerify:
             restore(versionsFile, snap)
             Right(Some(err))
     }
-  end applyWrite
 
   private def defaultProbe(root: Path): Either[String, Unit] =
     try

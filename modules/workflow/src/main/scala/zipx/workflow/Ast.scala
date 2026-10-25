@@ -61,6 +61,7 @@ enum DayOfWeek:
   case Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday
 
   def cronValue: Int = ordinal
+end DayOfWeek
 
 /** Ranges live in [[CronHour]] / [[CronMinute]] rather than a render-time check, so `Cron.daily(hour = 24)` is a
   * compile error and [[render]] is total. [[Cron.Raw]] covers the step-value and range forms the variants cannot say.
@@ -204,8 +205,6 @@ object Step:
             s"(keys: ${step.`with`.keys.toList.sorted.mkString(", ")})"
         )
       case _ => None
-    end match
-  end problem
 
   def validate(step: Step): Either[String, Step] =
     problem(step).toLeft(step)

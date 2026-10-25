@@ -38,7 +38,6 @@ object DebianVersion:
       if dig != 0 then dig
       else if lNext >= left.length && rNext >= right.length then 0
       else compareAt(left, right, lNext, rNext)
-  end compareAt
 
   /** Non-digit run. `~` sorts before the end of the part. Letters sort before other characters. */
   private def nonDigits(left: String, right: String, li: Int, ri: Int): (Int, Int, Int) =
@@ -51,7 +50,6 @@ object DebianVersion:
       val cmp = Integer.compare(weight(lc), weight(rc))
       if cmp != 0 then (li, ri, cmp)
       else nonDigits(left, right, li + step(lc), ri + step(rc))
-  end nonDigits
 
   private def digits(raw: String, from: Int): (String, Int) =
     def end(i: Int): Int =

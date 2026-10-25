@@ -223,6 +223,5 @@ object ZipxAwsSpec extends ZIOSpecDefault:
       (TargetName("dev"), EcrRegistry(AwsAccountId("555566667777"), AwsRegion("us-east-2")), secret"DEV_ROLE"),
       (TargetName("mirror"), EcrRegistry(AwsAccountId("888899990000"), AwsRegion("eu-central-1")), secret"MIRROR_ROLE"),
     )
-  end sixRegistries
 
 end ZipxAwsSpec

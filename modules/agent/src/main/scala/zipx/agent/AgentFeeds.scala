@@ -35,7 +35,6 @@ object AgentFeeds:
     val wantDaemon = sbtImage && (docker || pins.exists(_.feed == AgentDaemon.Feed))
     if !wantDaemon || ubuntu.exists(_.name == AgentDaemon.Feed) then ubuntu
     else ubuntu :+ AgentDaemon.feed(pins)
-  end withUser
 
   val base: PinFeed = PinFeed(
     name = AgentPins.BaseFeed,

@@ -16,7 +16,6 @@ object PrimitivesSpec extends ZIOSpecDefault:
     val UnitSeparator: Char = 0x1f.toChar
     val Space: Char         = ' '
     val Delete: Char        = 0x7f.toChar
-  end Ascii
 
   private def surroundedBy(c: Char): String = s"a${c}b"
 

@@ -89,7 +89,6 @@ object CompanionPr:
       ),
       trailingNewline = true,
     )
-  end open
 
   /** The heredoc is unquoted so `GITHUB_RUN_ID` expands. No backticks: they would run as command substitution. */
   private inline def workflowRegenLines(inline prefix: String): List[ScriptLine] =
@@ -116,7 +115,6 @@ object CompanionPr:
       ScriptLine.empty,
       ScriptLine("The PR branch is " + prefix + "-${GITHUB_RUN_ID}."),
     )
-  end workflowRegenLines
 
   private inline def runBranch(inline prefix: String): Word.Dquote =
     Word.dquote(Word.lit(prefix + "-"), Word.vBraced("GITHUB_RUN_ID"))

@@ -17,4 +17,3 @@ object SbtCommandText extends Subtype[String]:
     else if !input.matches(Patterns.NoControlChars) then
       "an sbt command must not contain control characters: YAML would quote-escape the whole script"
     else true
-end SbtCommandText

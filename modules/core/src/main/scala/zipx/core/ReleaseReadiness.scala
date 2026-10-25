@@ -46,8 +46,6 @@ object ReleaseReadiness:
         val refuses =
           if selected.isEmpty then s"\n\nall refuses, because ${included(blocked.map(_.identity))}." else ""
         s"Not ready.\n\n$blocks$rest$refuses"
-    end if
-  end render
 
   /** The paragraph the release job writes after a deployment. */
   def shadowSentences(lines: List[ReleaseVersion]): String =
@@ -79,7 +77,6 @@ object ReleaseReadiness:
       if everything then Nil
       else unreleased.filterNot(ship => ready.exists(_.identity == ship.identity)).map(_.identity)
     s"$titles\n${rideLines(companions)}  gh workflow run zipx-release.yml --ref $branch -f ships=$target\n  That is one registry deployment.${stays(leftOut)}"
-  end clearBody
 
   private def readyWhileBlocked(ready: List[ShipGate], chosen: List[ShipGate], branch: String): String =
     if ready.isEmpty then ""

@@ -24,7 +24,6 @@ object ModverSpec extends ZIOSpecDefault:
       sourcePaths = sources,
       matrixRootOpt = Option.when(matrixRoot != id)(mid(matrixRoot)),
     )
-  end node
 
   private val graph = GraphFixture(
     List(
@@ -497,7 +496,6 @@ object ModverSpec extends ZIOSpecDefault:
               libs.exists(r => r.kind == BumpKind.Minor && Modver.checkFails(r.status)),
               client.exists(r => Modver.checkFails(r.status)),
             )
-        end match
       },
       test("None floors do not seed reverse-deps") {
         val seed = BumpSet(Map(ShipRef.Group(ShipGroupName("libs")) -> BumpKind.None))

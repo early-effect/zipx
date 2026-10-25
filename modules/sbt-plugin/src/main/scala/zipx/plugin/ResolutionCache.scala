@@ -14,3 +14,4 @@ private[plugin] object ResolutionCache:
   def forgetOnUnload(pinned: State => Seq[ZipxCoord]): State => State = s =>
     forgetIfPinned(pinned(s))
     s
+end ResolutionCache

@@ -146,7 +146,6 @@ object Modver:
               case None => m
           }
     }
-  end contractedDependents
 
   private[core] def propagate(
       bumps: BumpSet,
@@ -158,7 +157,6 @@ object Modver:
     val seed       = bumps.asMap
     val start      = seed.iterator.collect { case (ref, kind) if isMinBump(kind) => ref }.toList
     BumpSet(walk(seed, start, dependents, inheritTrigger))
-  end propagate
 
   private def isMinBump(kind: BumpKind): Boolean =
     kind == BumpKind.Patch || kind == BumpKind.Minor || kind == BumpKind.Major
@@ -182,7 +180,6 @@ object Modver:
               case _                                            => (m.updated(dep, proposed), dep :: acc)
           }
         walk(next, qs ++ extra, dependents, inheritTrigger)
-  end walk
 
   /** An empty file list is an empty set, not all, and `.sbt` / `project/` changes do not expand. */
   def dirtyRoots(graph: ModuleGraph, changedFiles: List[String]): Set[ModuleId] =
@@ -269,7 +266,6 @@ object Modver:
       }
       .headOption
     missing.toLeft(())
-  end uncoveredError
 
   def isJsOnly(graph: ModuleGraph, root: ModuleId): Boolean =
     val rows = graph.nodes.filter(n => n.matrixRoot == root && n.publishes)
@@ -335,7 +331,6 @@ object Modver:
               .map(ks => kinds + (ref -> maxKind(ks)))
       }
     }
-  end minBumps
 
   def report(
       current: ShipIndex,
@@ -374,5 +369,4 @@ object Modver:
         }
       }
       .map(ModverReport(_))
-  end report
 end Modver

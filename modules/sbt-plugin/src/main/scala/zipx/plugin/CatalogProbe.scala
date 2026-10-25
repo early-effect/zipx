@@ -30,6 +30,7 @@ private[plugin] object CatalogProbe:
     def message: String = this match
       case Unresolved(config, reason) =>
         s"could not read what the $config graph asks of the catalog rows, so staleness is unchecked: $reason"
+  end ProbeError
 
   private final case class Graph(
       selected: Map[ResolvedModule, String],
@@ -57,7 +58,6 @@ private[plugin] object CatalogProbe:
         found.flatMap(sofar => conflictsOf(config, graph, forced, seen, conf).map(sofar ++ _))
       }
       .map(_.distinct.groupMap((module, _) => module)((_, want) => want))
-  end wanted
 
   private def graphOf(config: ConfigurationReport): Graph =
     val modules = config.modules.toList.filterNot(_.evicted)
@@ -69,7 +69,6 @@ private[plugin] object CatalogProbe:
         )
         .toMap,
     )
-  end graphOf
 
   /** In-repo modules are left out because no registry holds them. A conflict counts only on an edge the real graph has,
     * or on one to a module zipx excluded, so an exclusion the probe does not repeat cannot invent one.
@@ -118,7 +117,6 @@ private[plugin] object CatalogProbe:
           .map(raw => module -> Wanted(DepRevision.of(raw), by))
       }
     }
-  end conflictsOf
 
   private def wantedOf(constraint: VersionConstraint): Option[String] =
     constraint.preferred.orElse(constraint.interval.from).map(_.asString)
@@ -149,7 +147,6 @@ private[plugin] object CatalogProbe:
         )
       else Nil
     )
-  end mirrors
 
   private def ivyProperties(ivyHome: Option[File]): Map[String, String] =
     val home = sys.props
@@ -185,7 +182,6 @@ private[plugin] object CatalogProbe:
               dropInfoAttributes = true,
             )
             .toOption
-        end if
       case _ => None
 
   private def fileUri(path: String): String =

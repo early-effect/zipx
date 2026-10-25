@@ -76,7 +76,6 @@ object ReleaseWorkflow:
       config.actions.checkout,
       config.runnerOs,
     )
-  end plan
 
   def render(
       release: ReleaseWorkflow,
@@ -112,7 +111,6 @@ object ReleaseWorkflow:
       .when(tagPushed)
       .withEnv("ZIPX_DEFAULT_BRANCH", defaultBranch)
       .build
-  end onDefaultBranchStep
 
   /** Shell, not an expression: an empty string is falsy, so `inputs.ships || github.ref` would turn a cleared field
     * into the branch ref and release everything. `zipxRelease` refuses the empty string instead.
@@ -134,7 +132,6 @@ object ReleaseWorkflow:
       .named("Release request")
       .withEnv("ZIPX_SHIPS", Expr.input("ships"))
       .build
-  end bindRefStep
 
   private val shipsDispatch: WorkflowDispatch =
     WorkflowDispatch(
@@ -196,7 +193,6 @@ object ReleaseWorkflow:
       )
       .named("Open the next snapshot")
       .build
-  end openCycleStep
 
   private val bumpPrStep: Step =
     val opened = CompanionPr.open(
@@ -216,7 +212,6 @@ object ReleaseWorkflow:
       .named("Open the bump pull request")
       .withEnv("GH_TOKEN", Expr.github("token"))
       .build
-  end bumpPrStep
 
   private def docsJob(docs: Capability, tags: TagScheme): Option[(String, Job)] =
     val unseenByCi = tags match
@@ -233,5 +228,4 @@ object ReleaseWorkflow:
         `with` = ListMap.from(call.withInputs),
       )
     }
-  end docsJob
 end ReleaseWorkflow

@@ -59,8 +59,6 @@ object Planner:
           .sorted
         if collapsesGraph(mode, capability, graph) then List(capability.name.asJobId)
         else expanded
-    end match
-  end allJobIds
 
   /** Same predicate the Graph emitter uses before calling [[graphMatrixJobs]]. */
   private def collapsesGraph(mode: MatrixCollapse, capability: Capability, graph: ModuleGraph): Boolean =
@@ -133,7 +131,6 @@ object Planner:
             "Gate.Always (Verify capabilities are affected-gated automatically, Publish and Deploy ones under " +
             "zipxAffectedPublish / zipxAffectedDeploy) or Gate.OnReleaseTag."
         )
-    end match
     // `ModuleGraph.cycle` rather than `make`: these are capabilities, so the error has to name them as such.
     ModuleGraph
       .cycle(capabilities.map(c => c.name -> c.needsCapabilities).toMap)
@@ -182,7 +179,6 @@ object Planner:
         s"zipx: capability '${capability.name}' withAffectedBy matches no module, so it would run only when the diff " +
           "cannot narrow anything; name the modules whose changes it tests"
       )
-  end validateAffectedBy
 
   private def validateCoverage(capability: Capability): Unit =
     if capability.name == Capability.TestName then
@@ -198,7 +194,6 @@ object Planner:
           "that test and image jobs restore would hold instrumented classes. Coverage restores the snapshot and " +
           "never saves it: drop .withLocalCache(LocalCacheMode.Save)."
       )
-  end validateCoverage
 
   /** Two owners race each other's entries, and an owner spanning several jobs writes one entry per job: the eviction
     * [[LocalCacheMode]] exists to stop.
@@ -225,7 +220,6 @@ object Planner:
         )
       )
     }
-  end validateLocalCacheOwner
 
   private def validateSessionTail(capability: Capability): Unit =
     capability.sessionTail.foreach { tail =>
@@ -252,9 +246,7 @@ object Planner:
             "Use Aggregate / Once",
           )
         case CapabilityScope.Aggregate | CapabilityScope.Once => ()
-      end match
     }
-  end validateSessionTail
 
   /** Rejects an Aggregate or Layer capability that needs an affected-gated Graph one: `tolerateSkips` would run it
     * beside a skipped producer, and a joined session cannot drop one module's command. A Graph consumer skips with its
@@ -289,7 +281,6 @@ object Planner:
           s"'${consumer.name}' CapabilityScope.Graph so it skips with its own '$producer' job; make its command " +
           s"resolve a moving tag that a skipped '$producer' cannot invalidate; or turn $flag off."
       )
-    end for
   end validateSkipConsumers
 
   private def validateWorkflowCall(capability: Capability): Unit =
@@ -322,8 +313,6 @@ object Planner:
         if target.condition.isDefined then refuse(target, "a condition")
         if target.environment.isDefined then refuse(target, "an environment")
       }
-    end if
-  end validateSharedTargets
 
   /** Checked per (capability, target): the gate, capability condition and target condition come from different files,
     * and only their conjunction is never-true.
@@ -439,7 +428,6 @@ object Planner:
               affectedGatedNames,
               Pipeline.Ci,
             )
-        end match
       }
 
     val leading =
@@ -585,7 +573,6 @@ object Planner:
         elseDo = Some(Block(setOutput("run", Word.lit("true")))),
       ),
     )
-  end verifyGateScript
 
   private inline def setOutput(inline name: String, value: Word.Quotable): Command =
     Exec("echo", Word.dquote(Word.lit(name + "="), value)).appendTo(Word.vq("GITHUB_OUTPUT"))
@@ -618,7 +605,6 @@ object Planner:
           Step.run(Script(config.cacheRehydrateTask.render)).named(cacheRehydrateJobId).build
         ),
     )
-  end cacheRehydrateJob
 
   /** One check a ruleset can require. GitHub counts a skipped required check as passing, so this runs under
     * `!cancelled()` and fails only when a need failed or was cancelled.
@@ -675,7 +661,6 @@ object Planner:
             Expr.group(verifyGateRuns === Expr.quoted("true"))
         )
         (gatedNeeds, andConditions(Some(gateCond.unwrapped), cond))
-      end if
 
   private def affectedSetupJob(config: PlanConfig, usesVerifyGate: Boolean, runsWhenVerifySkips: Boolean): Job =
     val (needs, cond) =
@@ -697,7 +682,6 @@ object Planner:
         (if config.affectedOnPush then compute.withEnv("GH_TOKEN", Expr.githubToken) else compute).build
       ),
     )
-  end affectedSetupJob
 
   private def affectedScript(affectedOnPush: Boolean): Script =
     // Read from a file, not stdout: sbt prints server banners that `modules=$(sbt …)` would put in GITHUB_OUTPUT.
@@ -794,7 +778,6 @@ object Planner:
       pullRequest = Some(PullRequestTrigger()),
       workflowDispatch = Option.when(config.workflowDispatch)(WorkflowDispatch()),
     )
-  end triggersFor
 
   private def mentionsTagRef(condition: JobCondition): Boolean = condition match
     case JobCondition.RefStartsWith(prefix) => prefix.unwrap.startsWith("refs/tags/")
@@ -881,8 +864,6 @@ object Planner:
             jobSuffix = capability.name.asJobId,
           ),
         )
-    end match
-  end onceJob
 
   private val syntheticNode = ModuleNode(id = ModuleId("_build"))
 
@@ -1075,8 +1056,6 @@ object Planner:
                   ),
                 )
               }
-          end match
-      end match
     end if
   end aggregateJobs
 
@@ -1165,7 +1144,6 @@ object Planner:
               matrixAxes = matrixAxes,
             ),
           )
-        end waveJob
 
         fanned match
           case Nil =>
@@ -1236,7 +1214,6 @@ object Planner:
                     prev,
                   )
                 }
-        end match
       }
     end if
   end layerJobs
@@ -1287,8 +1264,6 @@ object Planner:
           collapse,
           pipeline,
         )
-    end match
-  end graphCapabilityJobs
 
   private def graphMatrixJobs(
       capability: Capability,
@@ -1520,7 +1495,6 @@ object Planner:
       // Deploy reads it.
       val gated = applyVerifyGate(rawNeeds, base, capability.phase, usesVerifyGate)._2
       andConditions(gated, JobCondition.renderOpt(capability.condition))
-    end condFor
     val runner = capability.runsOn.getOrElse(List(config.runnerOs))
     val module = lit(node.id)
 
@@ -1559,7 +1533,6 @@ object Planner:
           module = module,
         ),
       )
-    end baseJob
 
     fannedTargets(capability, node) match
       case Nil =>
@@ -1584,7 +1557,6 @@ object Planner:
             target.env,
           )
         }
-    end match
   end graphJobsFor
 
   /** Prefixed per destination so two registries' `AWS_ROLE_TO_ASSUME` coexist instead of `++` keeping the last. Steps
@@ -1699,6 +1671,7 @@ object Planner:
 
     /** `resolve` selects the images and each target's modules, and jobs check out and record its `sha`. */
     case Deploy(imagesEnvironment: String)
+  end Pipeline
 
   private def selectionJobId(pipeline: Pipeline): JobId = pipeline match
     case Pipeline.Ci        => affectedJobId
@@ -1777,7 +1750,6 @@ object Planner:
             deps.partition(d => graph.get(d).exists(capability.participates))
           go(passthrough ++ t, found ++ participating, seen ++ deps)
     go(List(node.id), Set.empty, Set.empty).toList.sorted
-  end nearestParticipatingAncestors
 
   /** `nodeVersion` is the capability's, not the config's: a Node toolchain is per-suite, so a Scala.js test capability
     * can ask for one without putting it on every publish job in the build.
@@ -1826,8 +1798,6 @@ object Planner:
         // Local composites need the workspace on disk before `uses: ./.github/actions/…` can resolve.
         checkout :: ZipxComposites.sbtSetupStep(config, jobSuffix, capability.nodeVersion, cacheMode) ::
           cache.steps ++ capability.extraSteps(ctx) ++ publish ++ capability.postSteps(ctx)
-    end match
-  end stepsFor
 
   /** Full-history checkout, then [[ZipxComposites.sbtSetupStep]]. Order is load-bearing for local composites. */
   private[core] def checkoutThenSbtSetup(
@@ -1878,8 +1848,6 @@ object Planner:
             Step.run(Script(sbtStep(command))).named(name).build
       case mode =>
         Step.run(Script(sbtStep(mode.prefixCommand(command)))).named(name).build
-    end match
-  end verifyCommandStep
 
   /** `test` → `++${{ matrix.scala }}; test`, so a matrixed job's one leg runs under its own Scala version. */
   private def underMatrixScala(command: SbtCommand): SbtCommand =

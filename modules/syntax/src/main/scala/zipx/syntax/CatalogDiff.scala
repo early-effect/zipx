@@ -49,8 +49,6 @@ object CatalogDiff:
           movedLibs.map(l => CatalogChange.LibMoved(l.coordinate)) ++ movedActions.map(a =>
             CatalogChange.ActionMoved(a.name)
           )
-    end match
-  end changes
 
   private def restoreLib(text: String, moved: Lib, base: Lib): String =
     text.replace(

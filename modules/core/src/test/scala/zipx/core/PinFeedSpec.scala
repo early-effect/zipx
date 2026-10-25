@@ -156,7 +156,6 @@ object PinFeedSpec extends ZIOSpecDefault:
                 i.findings.forall(_.pin.purl.isDefined),
               )
             case _ => assertTrue(false)
-          end match
         }
       },
       test("Off and empty feeds omit the builtin") {
@@ -441,7 +440,6 @@ object PinFeedSpec extends ZIOSpecDefault:
                 chosen.size == 1,
                 materialized.size == 1,
               )
-          end match
         }
       },
       test("materialize is Left when the feed is not in the list") {

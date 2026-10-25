@@ -85,7 +85,6 @@ object ActionPinFile:
             case Right(_) if !namesAction(ref, field) =>
               refuse(s"pin '$key' must name ${field.prefix}, but this ref is '$ref'")
             case Right(actionRef) => Right(Entry.FieldPin(field, actionRef, Option(ver).filter(_.nonEmpty)))
-    end fieldPin
 
     if isIgnorable(line) then Right(Entry.Nothing)
     else
@@ -97,7 +96,6 @@ object ActionPinFile:
           refuse(s"indented, but no '${ActionPins.ExtraPrefix}:' block is open above it")
         case _ =>
           refuse("not a pin, a # comment, or a blank line; expected 'key: owner/action@ref # vX.Y.Z'")
-    end if
   end parseLine
 
   private final case class Parsed(

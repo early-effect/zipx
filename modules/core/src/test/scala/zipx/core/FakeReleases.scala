@@ -9,3 +9,4 @@ object FakeReleases:
   val crossing: CatalogCrossing = CatalogCrossing("3.9.0", "3", "2")
 
   def of(published: (String, List[String])*): FakeReleases = FakeReleases(published.toMap)
+end FakeReleases

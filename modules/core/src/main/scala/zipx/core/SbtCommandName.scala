@@ -14,4 +14,3 @@ object SbtCommandName extends Subtype[String]:
     else
       "invalid sbt command name: must start with a letter and contain only letters, digits, - or _ " +
         "(operator commands use SbtCommand.unsafeBuilt)"
-end SbtCommandName

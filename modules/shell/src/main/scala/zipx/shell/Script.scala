@@ -58,4 +58,5 @@ object Script:
     val IndentWidth = 2
 
     val root: Ctx = Ctx(0)
+  end Ctx
 end Script

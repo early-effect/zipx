@@ -110,7 +110,6 @@ sbt zipxWorkflowGenerate""",
         )
       ),
     )
-  end site
 
   override def layers: ZLayer[Any, Nothing, SiteBuilder] =
     EarlyEffectTheme.layers
@@ -162,8 +161,6 @@ sbt zipxWorkflowGenerate""",
           .findFirst()
         if found.isPresent then Some(found.get.nn) else None
       finally stream.close()
-    end if
-  end walkTargetOut
 
   private def repoRoot: Path =
     Iterator

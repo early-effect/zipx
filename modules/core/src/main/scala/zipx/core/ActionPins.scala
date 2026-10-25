@@ -111,7 +111,6 @@ object ActionPins:
       rows.foldLeft[Either[String, ActionPins]](Right(base)) { (accE, action) =>
         accE.flatMap(pins => overlayOne(pins, action))
       }
-  end overlay
 
   private def overlayOne(pins: ActionPins, action: Action): Either[String, ActionPins] =
     action.toRef.flatMap { ref =>

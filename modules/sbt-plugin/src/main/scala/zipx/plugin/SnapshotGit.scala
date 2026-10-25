@@ -31,8 +31,6 @@ object SnapshotGit:
                 Left(SnapshotRevisionError.NotCommitPin(s"git abbrev $short is not 12 unique hex"))
               case None =>
                 Right(Tree.Missing(stamp))
-    end if
-  end describe
 
   def porcelain(root: File): String =
     git(root, "status", "--porcelain").getOrElse("")

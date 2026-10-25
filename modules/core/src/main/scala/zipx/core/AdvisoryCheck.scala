@@ -31,7 +31,6 @@ object AdvisoryCheck:
       githubPurl(name, ver).map(p => (name, ver, p))
     }
     fields ++ extras
-  end actionQueries
 
   def findingMessage(
       kind: String,

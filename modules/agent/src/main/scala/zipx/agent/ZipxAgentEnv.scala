@@ -80,5 +80,4 @@ object ZipxAgentEnv:
         else Left(s"zipx: secret-backed env name '$name' is not a shell identifier")
       }
     }
-  end secretNames
 end ZipxAgentEnv

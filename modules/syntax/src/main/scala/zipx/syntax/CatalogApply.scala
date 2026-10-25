@@ -79,7 +79,6 @@ object CatalogApply:
         }
         .toRight(s"zipx: catalog has no Ship / ShipGroup constructor for '${bump.identity}' ${bump.from}")
     }
-  end applyOneShipBump
 
   private def findShipVersionLit(tree: Tree, identity: String)(using Context): Option[Tree] =
     var found: Option[Tree] = None
@@ -115,7 +114,6 @@ object CatalogApply:
           case _                => ()
     go(tree)
     found
-  end findShipVersionLit
 
   private def versionLit(args: List[Tree]): Option[Tree] =
     val stringArgs = args.collect {
@@ -154,7 +152,6 @@ object CatalogApply:
           case _                => ()
     go(tree)
     found
-  end findCtor
 
   private def isCtor(tree: Tree, ctor: String): Boolean =
     tree match

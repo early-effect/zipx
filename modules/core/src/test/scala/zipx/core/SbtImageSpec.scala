@@ -43,7 +43,6 @@ object SbtImageSpec extends ZIOSpecDefault:
       ImageStep.EmptyFile("/opt/widgets/READY"),
       ImageStep.Apt("libwidgets", "1.2.3-1"),
     )
-  end widgetSteps
 
   private def widgets(steps: (String, CpuArch) => List[ImageStep]): SbtImageLayer =
     SbtImageLayer("widgets", noLookup).install(steps).withEnv("WIDGET_PATH" -> "/opt/widgets")

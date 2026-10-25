@@ -132,7 +132,6 @@ object ZipxVersions:
             ),
         )
     catalog ++ versions
-  end applySettings
 
   /** The pointer POM records the full sha beside the `<line>-SNAPSHOT` coordinate. One `<properties>` element. */
   private[zipx] def withSnapshotSha(node: Node, sha: String): Node =

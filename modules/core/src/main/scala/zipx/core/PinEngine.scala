@@ -17,6 +17,7 @@ final case class PinBump(pin: Pin, bump: BumpKind, candidate: PinCandidate):
   def to: String        = candidate.version
 
   def applied: AppliedPin = AppliedPin(pin, candidate)
+end PinBump
 
 final case class PinReport(
     scanned: Int,
@@ -79,7 +80,6 @@ object PinEngine:
             feed.materialize(item.pin, item.candidate).map(_ => acc :+ item)
       }
     }
-  end materialize
 
   def formatBumps(bumps: List[PinBump]): String =
     if bumps.isEmpty then "no outdated pins"
@@ -110,7 +110,6 @@ applied: ${report.applied.size}
 
 $findingLines
 """
-  end summary
 
   private final case class Accum(
       scanned: Int,
@@ -251,6 +250,5 @@ $findingLines
                           Right(Some(AppliedPin(pin, to)))
                         case _ => Right(None)
                     yield applied.fold(scanned)(a => scanned.copy(applied = scanned.applied :+ a))
-            end if
           }
 end PinEngine

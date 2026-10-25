@@ -44,7 +44,6 @@ object SnapshotCommands:
           SnapshotStatus.report(family.literal, family.version, pointer, present)
       log.info(report.fold(err => sys.error(s"zipx: $err"), SnapshotStatus.render))
     }
-  end status
 
   /** Returns the rewritten catalog, or the same text when every selected pin is already current. `<row> <line>` moves
     * the row to that line's latest commit; with no line, each pin stays on its own.
@@ -79,8 +78,6 @@ object SnapshotCommands:
             case Right(Some(next)) => rewrite(src, family, next, log)
         }
       case None => advanceInPlace(row, coords, source, registry, names, cache, headers, log)
-    end match
-  end advance
 
   private def advanceInPlace(
       row: Option[String],
@@ -114,9 +111,7 @@ object SnapshotCommands:
         case Some(SnapshotHold.Pointer(line)) => onLine(line)
         case Some(SnapshotHold.Commit(line))  => onLine(line)
         case None                             => src
-      end match
     }
-  end advanceInPlace
 
   private inline val AdvanceUsage =
     "zipxSnapshotAdvance takes a row and, optionally, a line: sbt 'zipxSnapshotAdvance widgets 1.5.0'"
@@ -155,7 +150,6 @@ object SnapshotCommands:
           s"zipx: the $pointer pointer for ${family.literal} names no commit (no ${SnapshotPointer.ShaElement}). " +
             "Publish the line with sbt zipxSnapshotPublish, or pin a commit by its stored id."
         )
-  end pointerOf
 
   def pinRelease(
       arg: String,
@@ -179,9 +173,7 @@ object SnapshotCommands:
           val rewritten = PinRewrite.replace(src, family.written, next).fold(err => sys.error(s"zipx: $err"), identity)
           log.info(s"zipx: ${family.literal} ${family.version} -> $next")
           rewritten
-      end match
     }
-  end pinRelease
 
   /** One constructor in the catalog source, and every row that shares its version through `.mod`. */
   private final case class Family(written: ZipxCoord, members: ::[ZipxCoord]):
@@ -201,7 +193,6 @@ object SnapshotCommands:
             case head :: tail => Some(Family(head.copy(artifact = literalOf(head), family = None), ::(head, tail)))
             case Nil          => None
     selected.flatMap(familyOf).distinctBy(_.written)
-  end families
 
   def defaultBranch(root: File): String =
     gitLine(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
@@ -281,7 +272,6 @@ object SnapshotCommands:
       case DepRevision.Commit(pin)         => present(pin)
       case DepRevision.UnstoredCommit(pin) => present(pin)
       case _                               => false
-  end artifactPresent
 
   /** A POM under `version`: the plain file, or sbt's unique snapshot named by that directory's metadata. `base` is the
     * version without `-SNAPSHOT`, which the timestamp replaces in the file name.
@@ -301,7 +291,6 @@ object SnapshotCommands:
         .flatMap(body => SnapshotPointer.timestampedVersion(base, body))
         .flatMap(stamped => get(SnapshotPointer.uniquePomRelative(organization, artifact, version, stamped)))
     }
-  end pomUnder
 
   private def fetch(root: String, relative: String, cache: File, headers: Map[String, String]): Option[String] =
     val url = s"${root.stripSuffix("/")}/$relative"
@@ -335,8 +324,6 @@ object SnapshotCommands:
     finally
       held.release()
       channel.close()
-    end try
-  end locked
 
   private def clean(cache: File, force: Boolean = false): Unit =
     val xml  = new File(cache, "maven-metadata.xml")
@@ -352,7 +339,6 @@ object SnapshotCommands:
       IO.delete(xml)
       IO.delete(new File(cache, "maven-metadata.xml.sha1"))
       IO.delete(new File(cache, "maven-metadata.xml.md5"))
-  end clean
 
   private def sidecar(file: File): Option[String] =
     if file.isFile then IO.read(file).trim.split("\\s+").headOption.filter(_.nonEmpty) else None

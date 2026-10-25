@@ -70,6 +70,7 @@ final case class Exec(program: Word, args: List[Word]) extends InlineCommand:
   def inlineLines: ShLines = Word.spaceJoined(program :: args)
 
   override def rawFragments: List[String] = (program :: args).flatMap(_.rawFragments)
+end Exec
 
 object Exec:
 
@@ -101,7 +102,6 @@ final case class Continued(program: Word, argLines: List[List[Word]], continuati
     val emitted = first :: rest
     val joined  = emitted.dropRight(1).map(_ + " \\") :+ emitted.last
     ShLines.stack(joined.head, joined.tail)
-  end inlineLines
 
   override def rawFragments: List[String] = (program :: argLines.flatten).flatMap(_.rawFragments)
 end Continued
@@ -110,6 +110,7 @@ object Continued:
 
   inline def apply(inline program: String, argLines: List[List[Word]]): Continued =
     Continued(Word.Lit(ShText.unsafeMake(ProgramName(program).unwrap)), argLines)
+end Continued
 
 // The three list operators join onto the left side's *last* line, so `Continued(…) | wc -l` puts the pipe after the
 // final continuation rather than after the first line.
@@ -134,6 +135,7 @@ final case class Redirect(command: InlineCommand, target: Word, append: Boolean,
     command.inlineLines ++ ShLines.composed(s" $fd$arrow ") ++ target.lines(Quoting.Unquoted)
 
   override def rawFragments: List[String] = command.rawFragments ++ target.rawFragments
+end Redirect
 
 final case class RedirectFd(command: InlineCommand, from: FileDescriptor, to: FileDescriptor) extends InlineCommand:
   def inlineLines: ShLines                = command.inlineLines ++ ShLines.composed(s" ${from.unwrap}>&${to.unwrap}")
@@ -164,6 +166,7 @@ object Assign:
     case Plain, Local, Export, ReadOnly
 
   inline def apply(inline name: String, value: Word): Assign = Assign(VarName(name), value)
+end Assign
 
 final case class If(
     cond: ShTest,
@@ -192,12 +195,14 @@ final case class ForIn(name: VarName, words: List[Word], body: Block) extends Co
       body.lines(ctx.nested) ::: ctx.line("done")
 
   override def rawFragments: List[String] = words.flatMap(_.rawFragments) ++ body.rawFragments
+end ForIn
 
 final case class While(cond: ShTest, body: Block) extends Command:
   def lines(ctx: Script.Ctx): List[ScriptLine] =
     ctx.emit(ShLines.of("while ") ++ cond.lines + "; do") ::: body.lines(ctx.nested) ::: ctx.line("done")
 
   override def rawFragments: List[String] = cond.rawFragments ++ body.rawFragments
+end While
 
 /** @param quoted
   *   `<<'TAG'`, so the body is not expanded. On by default: an unexpanded body cannot have its `$` interpreted.
@@ -254,6 +259,7 @@ object Raw:
     bad match
       case Some(err) => Left(err)
       case None      => Right(Raw(split.map(ScriptLine.unsafeMake)))
+end Raw
 
 /** **Escape hatch.** [[Raw]] for a single-command position: a list cannot promise one line, so this holds exactly one.
   */
@@ -268,3 +274,4 @@ object RawLine:
   inline def apply(inline text: String): RawLine = RawLine(ScriptLine(text))
 
   def make(text: String): Either[String, RawLine] = ScriptLine.make(text).map(RawLine(_))
+end RawLine

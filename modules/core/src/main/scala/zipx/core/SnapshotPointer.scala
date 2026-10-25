@@ -27,7 +27,6 @@ object SnapshotPointer:
       val until = xml.indexOf(end, from)
       if until < 0 then Left(s"pointer POM has no </$ShaElement>")
       else GitSha.make(xml.substring(from, until).trim).left.map(err => s"pointer POM sha: $err")
-  end shaFromPom
 
   /** Maven unique-snapshot metadata: `<timestamp>` and `<buildNumber>` under `<snapshot>`. */
   def timestampedVersion(line: String, metadata: String): Option[String] =

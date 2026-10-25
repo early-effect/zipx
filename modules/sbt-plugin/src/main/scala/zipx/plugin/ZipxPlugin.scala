@@ -287,7 +287,6 @@ object ZipxPlugin extends AutoPlugin:
       def pagesPermissions = zipx.specular.ZipxDocs.pagesPermissions
       def deployWhen       = zipx.specular.ZipxDocs.deployWhen
       def DocsName         = zipx.specular.ZipxDocs.DocsName
-    end ZipxDocs
 
     val ZipxAgentEnv = zipx.agent.ZipxAgentEnv
     type CloudAgent = zipx.core.CloudAgent
@@ -327,7 +326,6 @@ object ZipxPlugin extends AutoPlugin:
       def packagesPermissions = zipx.github.ZipxGitHubPackages.packagesPermissions
       def DefaultName         = zipx.github.ZipxGitHubPackages.DefaultName
       def PublishFlagEnv      = zipx.github.ZipxGitHubPackages.PublishFlagEnv
-    end ZipxGitHubPackages
 
     object ZipxMaven:
       def releases(
@@ -343,7 +341,6 @@ object ZipxPlugin extends AutoPlugin:
           token: EnvValue,
       ): ReleaseWorkflow =
         zipx.maven.ZipxMaven.releases(snapshots, releases, token)
-    end ZipxMaven
 
     /** scoverage, via `zipxCoverageWorkflow` or `zipxCapabilities += Coverage.once()`. In core, not a pack, because it
       * guards against `test` being `testQuick`.
@@ -902,7 +899,6 @@ object ZipxPlugin extends AutoPlugin:
       .distinct
       .sorted
       .toList
-  end sourcePathsFor
 
   /** sbt's output tree, or a `projectMatrix` row's synthetic base under `.sbt/`. */
   private def isGeneratedPath(path: String): Boolean =
@@ -977,8 +973,6 @@ object ZipxPlugin extends AutoPlugin:
           )
           .fold(err => sys.error(err.message), identity)
       )
-    end if
-  end sbtImagePlan
 
   /** A committed pin YAML is leftover input and always fails, even when `zipxActions` is set. */
   private def resolveActionPins(extracted: Extracted, root: File): ActionPins =
@@ -991,7 +985,6 @@ object ZipxPlugin extends AutoPlugin:
     else
       val rows = readBuildSetting(extracted, zipxActionRows, Seq.empty)
       orFail(ActionPins.overlay(ActionPins.Defaults, rows))
-  end resolveActionPins
 
   private def builtinCapabilities(
       graph: ModuleGraph,
@@ -1022,7 +1015,6 @@ object ZipxPlugin extends AutoPlugin:
     )
     val base = List(test, fmt, wfCheck, adv, Capability.publish)
     if graph.nodes.exists(_.docker) then base :+ Capability.docker else base
-  end builtinCapabilities
 
   private def verifyGate(opt: VerifyOpt, name: CapabilityName, gate: String, command: SbtCommand): Capability =
     opt match
@@ -1058,7 +1050,6 @@ object ZipxPlugin extends AutoPlugin:
             """zipx: zipxVerify.fmt is On but ZipxVersions has no Plugin("org.scalameta", "sbt-scalafmt", "…"). """ +
               """Add that row, or zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("reason")), then sbt zipxWorkflowGenerate."""
           )
-  end checkFmtPlugin
 
   private def checkCommandNames(
       declared: List[SbtCommandName],
@@ -1089,8 +1080,6 @@ object ZipxPlugin extends AutoPlugin:
                  """Missing scalafmtCheckAll: add Plugin("org.scalameta", "sbt-scalafmt", "…") to ZipxVersions (or zipxVerify := ZipxVerify.Strict.copy(fmt = VerifyOpt.Skip("reason"))), then sbt zipxWorkflowGenerate."""
                else "Or set zipxCheckCommandNames := false")
           )
-        end if
-      end if
 
   private def distance(a: String, b: String): Int =
     val m  = a.length
@@ -1102,7 +1091,6 @@ object ZipxPlugin extends AutoPlugin:
       val cost = if a(i - 1) == b(j - 1) then 0 else 1
       dp(i)(j) = (dp(i - 1)(j) + 1).min(dp(i)(j - 1) + 1).min(dp(i - 1)(j - 1) + cost)
     dp(m)(n)
-  end distance
 
   private def capabilitiesOf(extracted: Extracted, graph: ModuleGraph): List[Capability] =
     val userCaps   = readBuildSetting(extracted, zipxCapabilities, Seq.empty)
@@ -1139,7 +1127,6 @@ object ZipxPlugin extends AutoPlugin:
       case head :: tail =>
         val note = orFail(SnapshotPins.annotation(::(head, tail)))
         combined.map(c => if c.name == Capability.TestName then c.plusExtraSteps(note) else c)
-  end capabilitiesOf
 
   /** The images-and-deploys half that `zipx-deploy.yml` runs, refused when it could not run as declared. `None` under
     * `DeployTrigger.OnMerge`.
@@ -1223,7 +1210,6 @@ object ZipxPlugin extends AutoPlugin:
       enabled,
     )
     zipx.agent.SbtImageFeeds.withUser(agent, pins, enabled, layers)
-  end pinFeeds
 
   private def agentFiles(
       agent: zipx.core.CloudAgent.On,
@@ -1297,7 +1283,6 @@ object ZipxPlugin extends AutoPlugin:
           log.info(s"zipx wrote ${file.getPath}")
         }
         if rendered.dockerfile.isEmpty then deleteGenerated(root, ZipxAgentEnv.DockerfileRel, log)
-    end match
   }
 
   private def checkAgentEnv(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
@@ -1333,8 +1318,6 @@ object ZipxPlugin extends AutoPlugin:
             sys.error(
               s"zipx: ${ZipxAgentEnv.DockerfileRel} is leftover. Run 'sbt zipxWorkflowGenerate' and commit the deletion."
             )
-    end match
-  end checkAgentEnv
 
   private def warnUnusedAgentPins(sbtImage: Boolean, pins: Seq[Pin], log: Logger): Unit =
     if sbtImage then
@@ -1409,7 +1392,6 @@ object ZipxPlugin extends AutoPlugin:
           sys.error(s"zipx: ${LeftoverOpt.leftoverMessage(found, None)}")
         case LeftoverOpt.Warn(reason) =>
           log.warn(s"zipx: ${LeftoverOpt.leftoverMessage(found, Some(reason))}")
-  end checkLeftoverSteward
 
   private def writePinWorkflowsIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
@@ -1441,8 +1423,6 @@ object ZipxPlugin extends AutoPlugin:
           )
         )
         writeCompanion(root, PinSnapshotWorkflow.DefaultPath, snapBody, log)
-      end if
-    end if
   }
 
   private def checkPinWorkflows(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
@@ -1471,9 +1451,6 @@ object ZipxPlugin extends AutoPlugin:
           )
         )
         checkCompanion(root, PinSnapshotWorkflow.DefaultPath, expectedSnap, log)
-      end if
-    end if
-  end checkPinWorkflows
 
   private def writeVersionUpdatesIfEnabled: Def.Initialize[Task[Unit]] = Def.task {
     val extracted = Project.extract(state.value)
@@ -1494,7 +1471,6 @@ object ZipxPlugin extends AutoPlugin:
     else if file.exists then
       IO.delete(file)
       log.info(s"zipx deleted ${file.getPath}")
-    end if
   }
 
   private def checkVersionUpdates(root: File, cfg: PlanConfig, extracted: Extracted, log: Logger): Unit =
@@ -1513,8 +1489,6 @@ object ZipxPlugin extends AutoPlugin:
       sys.error(
         s"zipx: $rel is leftover. Set zipxVersionUpdates := true or delete $rel, then sbt zipxWorkflowGenerate."
       )
-    end if
-  end checkVersionUpdates
 
   /** Checks command names itself: this task runs beside `renderWorkflow`, so that one failing does not stop the write.
     */
@@ -1566,7 +1540,6 @@ object ZipxPlugin extends AutoPlugin:
       val expected = orFail(ShellWorkflow.render(spec, cfg))
       checkCompanion(root, spec.path, expected, log)
     }
-  end checkShellWorkflows
 
   private def deployYaml(st: State, graph: ModuleGraph, cfg: PlanConfig): Option[String] =
     val extracted = Project.extract(st)
@@ -1609,7 +1582,6 @@ object ZipxPlugin extends AutoPlugin:
           cap.name == zipx.specular.ZipxDocs.DocsName && cap.workflowCall.isDefined
         }
         Some(orFail(ReleaseWorkflow.render(release, cfg, TagScheme.of(ShipIndex.from(ships)), docs)))
-  end releaseYaml
 
   private def writeReleaseWorkflow: Def.Initialize[Task[Unit]] = Def.task {
     val root = (LocalRootProject / baseDirectory).value
@@ -1738,7 +1710,6 @@ object ZipxPlugin extends AutoPlugin:
               sys.error(
                 s"zipx: $id is a local build. Commit the tree, or publish it with zipxSnapshotPublish local.$extra"
               )
-          end match
           installSnapshotProps(tree, local)
           val (task, destination) = target match
             case SnapshotTarget.Local    => (publishLocal, "the local ivy repository")
@@ -1768,7 +1739,6 @@ object ZipxPlugin extends AutoPlugin:
               back :+ "zipxSnapshotRefuse"
             else back
           ("reload" :: publishes.map(c => c.text: String) ::: pointer ::: restoreCommands).foldRight(next)(_ :: _)
-      end match
     }
 
   private def snapshotId(row: PublishedRow, tree: SnapshotGit.Tree): String =
@@ -1788,7 +1758,6 @@ object ZipxPlugin extends AutoPlugin:
         sys.props(SnapshotPublishRevision.DirtyProperty) = at.value
       case SnapshotGit.Tree.Missing(at) =>
         sys.props(SnapshotPublishRevision.DirtyProperty) = at.value
-  end installSnapshotProps
 
   private def clearSnapshotProps(): Unit =
     sys.props -= SnapshotPublishRevision.PointerProperty
@@ -1832,7 +1801,6 @@ object ZipxPlugin extends AutoPlugin:
     val drift = releasedDrift(extracted, graph, catalog, binaries, release)
       .fold(err => sys.error(s"zipx: ${err.message}"), identity)
     SnapshotGuard.decide(drift, gate)
-  end publishVerdict
 
   private def reportVerdict(st: State, verdict: SnapshotVerdict): Unit =
     verdict.hints.foreach(line => st.log.info(s"zipx: $line"))
@@ -1844,7 +1812,6 @@ object ZipxPlugin extends AutoPlugin:
       st.log.error(s"zipx: $line")
       annotate("error", "zipx shadowed snapshot", line)
     }
-  end reportVerdict
 
   private def annotate(kind: String, title: String, text: String): Unit =
     if sys.env.contains("GITHUB_ACTIONS") then println(s"::$kind title=$title::$text")
@@ -1870,7 +1837,6 @@ object ZipxPlugin extends AutoPlugin:
             case Right(_) => Right(found)
         }
       }
-  end releasedDrift
 
   private def releaseDriftTask: Def.Initialize[Task[Seq[String]]] = Def.task {
     val st        = state.value
@@ -1931,8 +1897,6 @@ object ZipxPlugin extends AutoPlugin:
             case DriftGate.Fail =>
               log.error(located)
               sys.error(s"zipx: $text")
-      end match
-    end if
   }
 
   private def rowDrift(
@@ -1974,7 +1938,6 @@ object ZipxPlugin extends AutoPlugin:
           else s"Set ${named.mkString(" and ")}, or add a credentials file for $host."
         sys.error(s"zipx: no credentials for $host. $hint")
     }
-  end requireCredentials
 
   /** Present only when the registry's env vars are set; a credentials file the build already has stays ahead. */
   private def directCredentials(release: ReleaseWorkflow): List[Credentials] =
@@ -1992,7 +1955,6 @@ object ZipxPlugin extends AutoPlugin:
         case RegistryCredentials.Bearer(token) =>
           RegistryCredentials.read(token, sys.env).toList.map(value => Credentials(realm, host, "token", value))
     }
-  end directCredentials
 
   private def snapshotRegistriesOf(
       release: Option[ReleaseWorkflow],
@@ -2017,7 +1979,6 @@ object ZipxPlugin extends AutoPlugin:
         }
       }
       .map(RowStatus.of)
-  end rowStatus
 
   private def writeCompanion(root: File, rel: String, body: String, log: Logger): Unit =
     val file = root / rel
@@ -2102,7 +2063,6 @@ object ZipxPlugin extends AutoPlugin:
           orFail(PinEngine.materialize(feeds, applied))
           log.info(s"zipx: applied ${applied.size} pin update(s)")
         else log.info("zipx: no pin updates applied")
-      end if
     }
 
   private def writePinCatalog(
@@ -2117,7 +2077,6 @@ object ZipxPlugin extends AutoPlugin:
     val next = orFail(ZipxCatalog.applyAppliedPins(IO.read(file), items))
     IO.write(file, next)
     log.info(s"zipx: wrote ${file.getPath}")
-  end writePinCatalog
 
   /** `Some(true)` if the operator confirmed, `Some(false)` if they declined, `None` if there is no console to ask. */
   private def confirmUpdates(n: Int, what: String): Option[Boolean] =
@@ -2141,7 +2100,6 @@ object ZipxPlugin extends AutoPlugin:
       val body  = PinSnapshot.render(feeds, pins, sha, ref, jobId, java.time.Instant.now.toString, "zipx")
       orFail(PinSnapshot.submit(token, repo, body))
       streams.value.log.info("zipx: submitted pin snapshot")
-    end if
   }
 
   private def inventoryAtBase(root: File, sha: String, log: Logger): Map[PinFeedName, List[PinnedDep]] =
@@ -2157,7 +2115,6 @@ object ZipxPlugin extends AutoPlugin:
     val jsonFile = work / PinInventory.RelPath
     if !jsonFile.exists then sys.error(s"zipx: missing ${jsonFile.getPath}")
     orFail(PinInventory.parse(IO.read(jsonFile)))
-  end inventoryAtBase
 
   /** A user capability replaces the built-in of the same name, so a custom `docker` yields no duplicate jobs. */
   private def combineCapabilities(builtins: List[Capability], user: List[Capability]): List[Capability] =
@@ -2326,7 +2283,6 @@ object ZipxPlugin extends AutoPlugin:
         sys.error(
           "zipx: Ship rows cannot share version with sbt-dynver-ci. Remove Plugin(\"rocks.earlyeffect\", \"sbt-dynver-ci\", …) and the dynver plugin; zipx assigns version from Ship rows."
         )
-  end validateCatalog
 
   private def dynverPresent(extracted: Extracted, coords: Seq[ZipxCoord]): Boolean =
     ZipxCatalog.plugins(coords).exists(p => (p.artifact: String) == "sbt-dynver-ci") ||
@@ -2385,8 +2341,6 @@ object ZipxPlugin extends AutoPlugin:
             s"zipx: ${file.getPath} pins a snapshot plugin but lacks the snapshot resolver. Run 'sbt zipxWorkflowGenerate'."
           )
         log.info(s"zipx: ${file.getPath} plugin list is up to date.")
-      end if
-    end if
     sbtVer.foreach { ver =>
       val expected = ZipxCatalog.renderBuildProperties(ver)
       val file     = root / ZipxCatalog.BuildPropertiesPath
@@ -2399,7 +2353,6 @@ object ZipxPlugin extends AutoPlugin:
           sys.error(s"${file.getPath} is out of date. Run 'sbt zipxWorkflowGenerate' and commit the result.")
         log.info(s"zipx: ${file.getPath} is up to date.")
     }
-  end syncCatalogFiles
 
   /** Every snapshot CI resolves: catalog rows, and a snapshot sbt-zipx that `plugins.sbt` loads. */
   private def ciPins(extracted: Extracted): List[ZipxCoord] =
@@ -2525,7 +2478,6 @@ object ZipxPlugin extends AutoPlugin:
               case head :: _ => sys.error(s"zipx: ${ReleaseError.UnknownShip(head, known.toList.sorted).message}")
               case Nil       => Some(wanted)
         log.info(ReleaseReadiness.render(gates, SnapshotCommands.defaultBranch(root), names))
-      end if
     }
 
   private final case class SnapshotCtx(
@@ -2595,7 +2547,6 @@ object ZipxPlugin extends AutoPlugin:
     used.distinct match
       case Nil   => List(crossed(module, rootScala))
       case names => names
-  end libNames
 
   private def releaseGates(st: State, extracted: Extracted, own: Set[ModuleID]): List[ShipGate] =
     val ships = readBuildSetting(extracted, zipxShips, Seq.empty).toList
@@ -2638,8 +2589,6 @@ object ZipxPlugin extends AutoPlugin:
               .distinct
             List(ShipGate(row.identity, row.version, blockers, rides))
       }
-    end if
-  end releaseGates
 
   /** Both names come from sbt's own cross function, so a `%%` dependency matches the project it names on any platform.
     */
@@ -2701,8 +2650,6 @@ object ZipxPlugin extends AutoPlugin:
             IO.write(file, next)
             log.info(s"zipx: wrote ${file.getPath}")
           else log.info("zipx: no catalog updates applied")
-        end if
-      end if
     }
 
   private def modverBumpTask: Def.Initialize[InputTask[Unit]] =
@@ -2739,8 +2686,6 @@ object ZipxPlugin extends AutoPlugin:
             )
             IO.write(file, next)
             log.info(s"zipx: wrote ${file.getPath}")
-        end match
-      end if
     }
 
   /** `One` skips the registry, so an explicit bump runs offline. Under `Released`, a partial row or an unreachable
@@ -2826,8 +2771,6 @@ object ZipxPlugin extends AutoPlugin:
             IO.write(file, next)
             log.info(s"zipx: wrote ${file.getPath}. reload, then sbt zipxWorkflowGenerate.")
           else log.info("zipx: no Action updates applied")
-        end if
-      end if
     }
 
   private def advisoryCheckTask: Def.Initialize[Task[Unit]] = Def.task {
@@ -2876,7 +2819,6 @@ object ZipxPlugin extends AutoPlugin:
       val report = orFail(PinEngine.prGate(feeds, pinRows, osv, if base.isEmpty then PinPrGate.All else gate, base))
       log.info(PinEngine.summary(report))
       if report.failsJob then findings += "zipx: pin advisory findings. Run sbt \"zipxPinUpdate yes\"."
-    end if
     val listed = findings.result()
     listed.foreach(msg => log.error(msg))
     if listed.nonEmpty then sys.error(listed.head)
@@ -2934,7 +2876,6 @@ object ZipxPlugin extends AutoPlugin:
       case TestAffected.Run.Nothing =>
         log.info(s"zipx: nothing the root aggregate tests is affected since ${base.getOrElse("")}")
         next
-    end match
   }
 
   /** `zipx-deploy.yml`'s resolve step: env in, plan out as files, for the reason [[affectedModulesTask]] writes one. */
@@ -3106,7 +3047,6 @@ object ZipxPlugin extends AutoPlugin:
         r     <- buildFileReadings(root, extracted, graph, from, "HEAD", files, log)
       yield r
     Affected.outputModules(graph, changed, readings)
-  end affectedSinceMergeBase
 
   /** A catalog unreadable at either commit counts as build-wide. */
   private def catalogEdit(
@@ -3125,7 +3065,6 @@ object ZipxPlugin extends AutoPlugin:
         case _ => List(CatalogChange.BuildWide(s"$rel is unreadable at $from or $to"))
       CatalogEdit(rel, changes)
     }
-  end catalogEdit
 
   private def describeCatalog(edit: CatalogEdit): String =
     val readings = edit.changes.map {
@@ -3160,7 +3099,6 @@ object ZipxPlugin extends AutoPlugin:
       reading
     }
     catalog.toList ++ buildSbt.toList
-  end buildFileReadings
 
   /** `None` means the diff failed, `Some(Nil)` that it found nothing. `Affected.outputModules` fails open on `None`, so
     * a bad base ref cannot skip every Verify job.
@@ -3191,7 +3129,6 @@ object ZipxPlugin extends AutoPlugin:
       IO.write(file, ModverReport.render(report) + "\n")
       log.info(s"zipx: wrote ${file.getPath}")
       report
-    end if
   }
 
   private def modverCheckTask: Def.Initialize[Task[Unit]] = Def.task {
@@ -3245,8 +3182,6 @@ object ZipxPlugin extends AutoPlugin:
       bumps  = Modver.expand(BumpSet(kinds), graph, index, policy)
       report <- Modver.report(index, released, bumps.asMap, mimaRan)
     yield report
-    end for
-  end writeModverReport
 
   private val NoReleaseWorkflow =
     "Ship rows release from zipx-release.yml: set zipxReleaseWorkflow (ZipxCentral.releases, ZipxGitHubPackages.releases, or ZipxMaven.releases)"
@@ -3286,7 +3221,6 @@ object ZipxPlugin extends AutoPlugin:
         }
         .map(ShipIndex.from)
     }
-  end lastReleases
 
   /** Central's public repo and a `file:` registry need no auth. A declared token missing from the environment fails: an
     * anonymous GET that a registry answers with 404 must not read as "not released".
@@ -3306,7 +3240,6 @@ object ZipxPlugin extends AutoPlugin:
               .encodeToString(s"$u:$p".getBytes(java.nio.charset.StandardCharsets.UTF_8))
             Right(Map("Authorization" -> s"Basic $raw"))
           case _ => Left(missingCredentials(release))
-  end registryHeaders
 
   private def missingCredentials(release: ReleaseWorkflow): String =
     val host  = release.registry.publishHosts.mkString(", ")
@@ -3346,7 +3279,6 @@ object ZipxPlugin extends AutoPlugin:
         }
       }
       .groupMap(_._1)(_._2)
-  end liveBinaries
 
   private def versionSchemeOf(extracted: Extracted, id: ModuleId): Either[String, LibraryVersionScheme] =
     val ref = extracted.structure.allProjectRefs.find(_.project == (id: String))
@@ -3386,7 +3318,6 @@ object ZipxPlugin extends AutoPlugin:
                 val lib = new com.typesafe.tools.mima.lib.MiMaLib(Nil)
                 if lib.collectProblems(old, classes, Nil).isEmpty then MemberProbe.Clean else MemberProbe.BinaryBreak
             }
-  end probeMember
 
   private def releasedJar(
       extracted: Extracted,
@@ -3405,7 +3336,6 @@ object ZipxPlugin extends AutoPlugin:
       extracted.get(LocalRootProject / baseDirectory) / "target" / "zipx-mima" / s"${gav.artifact}-$version.jar"
     dest.getParentFile.mkdirs()
     registryHeaders(release).flatMap(headers => download(release.registry.jarUrl(gav), headers, dest))
-  end releasedJar
 
   /** `Right(None)` when the registry answers that the artifact is not there: a member absent from that release. */
   private def download(url: String, headers: Map[String, String], dest: File): Either[String, Option[File]] =
@@ -3440,7 +3370,6 @@ object ZipxPlugin extends AutoPlugin:
               java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
             ),
           )
-        end fetch
         val first    = fetch(url, sendHeaders = true)
         val raw      = first.headers().firstValue("location")
         val location = if raw.isEmpty then None else Some(raw.orElse(""))
@@ -3479,12 +3408,9 @@ object ZipxPlugin extends AutoPlugin:
                 Some(payload),
               )
               log.info("zipx: posted sticky comment")
-          end match
         catch
           case scala.util.control.NonFatal(e) =>
             log.warn(s"zipx: sticky comment failed (${e.getMessage}); continuing")
-    end match
-  end postModverComment
 
   private final case class GhComment(id: Long, body: String) derives JsonDecoder
   private final case class GhEvent(number: Option[Int], pull_request: Option[GhPr]) derives JsonDecoder
@@ -3508,6 +3434,5 @@ object ZipxPlugin extends AutoPlugin:
         proc #< new java.io.ByteArrayInputStream(body.getBytes(java.nio.charset.StandardCharsets.UTF_8))
     val code = piped.!(scala.sys.process.ProcessLogger(out.append, err.append))
     if code == 0 then Right(out.toString) else Left(err.toString)
-  end osProcess
 
 end ZipxPlugin

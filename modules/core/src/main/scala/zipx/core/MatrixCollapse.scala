@@ -60,7 +60,6 @@ object MatrixCollapse:
       else
         val targets = nodes.headOption.toList.flatMap(capability.targets)
         targetsCompatible(targets).isRight && isomorphicMatrixCommands(capability, nodes).isRight
-  end graphCollapseFeasible
 
   private def nearestParticipatingAncestors(
       node: ModuleNode,
@@ -80,7 +79,6 @@ object MatrixCollapse:
             seen ++ deps,
           )
     go(List(node.id), Nil, Set.empty)
-  end nearestParticipatingAncestors
 
   def underMatrixModule(node: ModuleNode, command: SbtCommand): Either[String, SbtCommand] =
     val id      = node.id
@@ -97,7 +95,6 @@ object MatrixCollapse:
         s"command '${command.text}' is not parametric in module '$id' " +
           s"(expected a Task scoped to that module)"
       )
-  end underMatrixModule
 
   def isomorphicMatrixCommands(capability: Capability, nodes: List[ModuleNode]): Either[String, SbtCommand] =
     nodes
@@ -190,7 +187,5 @@ object MatrixCollapse:
       t.environment.foreach(e => base += "environment" -> e)
       t.env.foreach { (k, v) => base += k -> v.render }
       base.result()
-    end for
-  end includeRows
 
 end MatrixCollapse

@@ -66,7 +66,6 @@ object ZipxGitHubPackages:
       condition = condition,
       extraEnv = extras,
     )
-  end sharedRegistry
 
   private def publishCap(
       name: CapabilityName,
@@ -95,6 +94,5 @@ object ZipxGitHubPackages:
       ) ++ extraEnv,
       condition = condition,
     )
-  end publishCap
 
 end ZipxGitHubPackages
